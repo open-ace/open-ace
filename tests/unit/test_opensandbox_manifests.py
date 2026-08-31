@@ -361,3 +361,41 @@ def test_the_server_image_is_not_a_floating_tag(tier):
     """
     container = _deployment(tier)["spec"]["template"]["spec"]["containers"][0]
     assert not container["image"].endswith(":latest"), container["image"]
+
+
+def test_the_template_uid_and_the_exec_identity_attestation_agree():
+    """If the container is pinned to a uid, the config must say so.
+
+    execd is NOT a sidecar: upstream's bootstrap.sh is PID 1 of the `sandbox`
+    container and starts execd inside it, so a container-level `runAsUser`
+    becomes execd's uid. execd then cannot switch credentials to that same
+    identity (setgroups needs CAP_SETGID) and every /command dies
+    `fork/exec ...: operation not permitted` — verified on a live gVisor
+    cluster, where it killed the repo synthesis and no run got past
+    upload_workspace.
+
+    So the template and `execd_runs_as_exec_identity` must move together: pin
+    the uid and the provider must stop sending uid/gid.
+    """
+    import json
+    import re
+
+    doc = yaml.safe_load((_DIR / "configmap-sandbox-template.yaml").read_text(encoding="utf-8"))
+    tpl = yaml.safe_load(doc["data"]["batchsandbox-template.yaml"])
+    sandbox = next(
+        c for c in tpl["spec"]["template"]["spec"]["containers"] if c["name"] == "sandbox"
+    )
+    pinned_uid = sandbox.get("securityContext", {}).get("runAsUser")
+
+    md = (_DIR.parents[2] / "docs" / "sandbox-backends.md").read_text(encoding="utf-8")
+    raw = json.loads(
+        re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
+    )
+    for tier, endpoint in raw["endpoints"].items():
+        attested = endpoint["attestations"].get("execd_runs_as_exec_identity", False)
+        if pinned_uid is not None:
+            assert attested, (
+                f"the template pins the sandbox container to uid {pinned_uid}, so execd runs "
+                f"as it and cannot drop credentials — tier {tier!r} must attest "
+                "execd_runs_as_exec_identity or every command fails EPERM"
+            )

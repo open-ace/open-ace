@@ -543,6 +543,7 @@ def build_command_request(
     wall_clock_limit: int,
     uid: int,
     gid: int,
+    drop_credentials: bool = True,
 ) -> dict:
     """Build a ``POST /command`` body for a discrete (non-agent) command.
 
@@ -553,6 +554,21 @@ def build_command_request(
     """
     if uid == 0 or gid == 0:
         raise SandboxError("refusing to exec as root inside the sandbox")
+    if not drop_credentials:
+        # execd already runs AS the exec identity (see
+        # Attestations.execd_runs_as_exec_identity), so asking it to switch to
+        # that identity fails: setgroups(2) needs CAP_SETGID, which a non-root
+        # execd does not have, and every command dies
+        # `fork/exec ...: operation not permitted`. Omitting uid/gid runs the
+        # command as execd itself — the same identity, and the one the shipped
+        # pod template pins.
+        return {
+            "command": " ".join(shlex.quote(part) for part in command),
+            "cwd": cwd,
+            "background": False,
+            "envs": dict(envs),
+            "timeout": wall_clock_limit,
+        }
     body: dict[str, Any] = {
         "command": " ".join(shlex.quote(part) for part in command),
         "cwd": cwd,

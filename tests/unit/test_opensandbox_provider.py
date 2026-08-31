@@ -968,3 +968,57 @@ def test_an_unavailable_probe_source_does_not_refuse_the_run():
     api.proc_version = None  # type: ignore[assignment]
     provider, _ = _provider(api)
     assert "gVisor" in provider._probe_kernel("sb-1")
+
+
+def test_setup_commands_omit_credentials_when_execd_is_the_exec_identity():
+    """This is the call that died on the live cluster.
+
+    _run_foreground runs the repo synthesis. With the shipped template pinning
+    the sandbox container to uid 1000, execd runs as 1000 and cannot switch to
+    1000, so a body carrying uid/gid fails
+    `fork/exec /usr/bin/bash: operation not permitted` — no run got past
+    upload_workspace. Covered separately from _exec_command because it builds
+    its body inline rather than through build_command_request.
+    """
+    cfg = _cfg(attestations={**_FULL, "execd_runs_as_exec_identity": True})
+    provider, api = _provider(cfg=cfg)
+    handle = provider.create(_spec())
+    api.command_bodies.clear()
+    provider.upload_workspace(handle, None)
+    setup = api.command_bodies[-1]
+    assert "uid" not in setup and "gid" not in setup, setup
+
+
+def test_setup_commands_send_credentials_when_execd_runs_as_root():
+    cfg = _cfg(attestations=dict(_FULL))
+    provider, api = _provider(cfg=cfg)
+    handle = provider.create(_spec())
+    api.command_bodies.clear()
+    provider.upload_workspace(handle, None)
+    setup = api.command_bodies[-1]
+    assert setup["uid"] == 1000 and setup["gid"] == 1000
+
+
+def test_foreground_exec_omits_credentials_when_execd_is_the_exec_identity():
+    """The /command branch needs the same rule as the setup commands.
+
+    Covered separately because _exec_command routes through
+    build_command_request while _run_foreground builds its body inline — the
+    two are easy to fix one at a time and leave the other broken.
+    """
+    cfg = _cfg(attestations={**_FULL, "execd_runs_as_exec_identity": True})
+    provider, api = _provider(cfg=cfg)
+    handle = provider.create(_spec())
+    api.command_bodies.clear()
+    provider.exec(handle, command=["ls"], env=None, exec_policy=None)
+    body = api.command_bodies[-1]
+    assert "uid" not in body and "gid" not in body, body
+
+
+def test_foreground_exec_sends_credentials_when_execd_runs_as_root():
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.command_bodies.clear()
+    provider.exec(handle, command=["ls"], env=None, exec_policy=None)
+    body = api.command_bodies[-1]
+    assert body["uid"] == 1000 and body["gid"] == 1000

@@ -801,6 +801,7 @@ class OpenSandboxProvider:
             wall_clock_limit=getattr(policy, "wall_clock_limit", 0) if policy else 0,
             uid=self._endpoint.exec_uid,
             gid=self._endpoint.exec_gid,
+            drop_credentials=not self._endpoint.attestations.execd_runs_as_exec_identity,
         )
         events = self._api.run_command(handle.sandbox_id, body)
         # Read only as far as the `init` event, which is the sole source of the
@@ -871,19 +872,21 @@ class OpenSandboxProvider:
         Discarding the result would let workspace setup fail silently and leave
         the agent running against a tree that was never prepared.
         """
-        events = list(
-            self._api.run_command(
-                sandbox_id,
-                {
-                    "command": command,
-                    "cwd": _WORKSPACE,
-                    "background": False,
-                    "uid": self._endpoint.exec_uid,
-                    "gid": self._endpoint.exec_gid,
-                    "envs": {},
-                },
-            )
-        )
+        body: dict[str, Any] = {
+            "command": command,
+            "cwd": _WORKSPACE,
+            "background": False,
+            "envs": {},
+        }
+        # Same rule as _exec_command: when execd already runs AS the exec
+        # identity it cannot switch credentials to it, and every setup command
+        # dies `fork/exec ...: operation not permitted`. This is the call that
+        # runs the repo synthesis, so getting it wrong means no run gets past
+        # upload_workspace.
+        if not self._endpoint.attestations.execd_runs_as_exec_identity:
+            body["uid"] = self._endpoint.exec_uid
+            body["gid"] = self._endpoint.exec_gid
+        events = list(self._api.run_command(sandbox_id, body))
         if not events:
             # A command that produced NO events is not an observed success.
             # Real execd always emits at least an `init` frame, so an empty

@@ -85,6 +85,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
         "egress_mode_dns_nft": true,
         "metadata_cidr_blocked": true,
         "execd_token_required": true,
+        "execd_runs_as_exec_identity": true,
         "secure_access_required": true,
         "nonroot_enforced": true,
         "readonly_rootfs": true,

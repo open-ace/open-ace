@@ -102,6 +102,19 @@ class Attestations:
     # reach a peer's execd. That is what #2023's
     # test_sandbox_cannot_read_host_or_peer_workspace forbids.
     secure_access_required: bool = False
+    # Whether the sandbox container ALREADY runs as exec_uid/exec_gid — i.e. the
+    # pod template pins `runAsUser` to them. execd is not a sidecar: upstream's
+    # bootstrap.sh is PID 1 of the `sandbox` container and starts execd as
+    # another process in it, so the container's uid IS execd's uid. When execd
+    # already runs as the exec identity it cannot switch credentials to that
+    # identity — setgroups(2) needs CAP_SETGID — and every /command carrying
+    # uid/gid dies `fork/exec ...: operation not permitted`.
+    #
+    # Attested: the provider omits uid/gid and lets execd run commands as
+    # itself, which IS the exec identity. Not attested: execd is assumed to run
+    # as root and drop privileges per request, so uid/gid are sent. Defaulting
+    # to False keeps the pre-existing behaviour for a root-execd deployment.
+    execd_runs_as_exec_identity: bool = False
     nonroot_enforced: bool = False
     readonly_rootfs: bool = False
     seccomp_runtime_default: bool = False

@@ -728,3 +728,54 @@ def test_one_host_matcher_serves_both_allowlists(host, pattern, expected):
 
     assert host_matches(host, pattern) is expected
     assert client_mod._host_matches(host, pattern) is expected
+
+
+def test_uid_gid_are_omitted_when_execd_already_runs_as_the_exec_identity():
+    """execd cannot switch credentials to the identity it already has.
+
+    Live on a gVisor cluster: with the shipped template pinning the sandbox
+    container to uid 1000, execd runs as 1000, and `/command` carrying
+    uid/gid 1000 fails `fork/exec /usr/bin/bash: operation not permitted`
+    (setgroups needs CAP_SETGID). Omitting them runs the command as execd
+    itself — the same identity the template pins.
+    """
+    body = build_command_request(
+        ["echo", "hi"],
+        cwd="/workspace",
+        envs={},
+        wall_clock_limit=0,
+        uid=1000,
+        gid=1000,
+        drop_credentials=False,
+    )
+    assert "uid" not in body and "gid" not in body
+    assert body["command"] == "echo hi"
+    assert body["cwd"] == "/workspace"
+
+
+def test_uid_gid_are_sent_when_execd_runs_as_root():
+    """The other deployment shape: execd root, dropping privileges per request."""
+    body = build_command_request(
+        ["echo", "hi"],
+        cwd="/workspace",
+        envs={},
+        wall_clock_limit=0,
+        uid=1000,
+        gid=1000,
+        drop_credentials=True,
+    )
+    assert body["uid"] == 1000 and body["gid"] == 1000
+
+
+def test_root_is_still_refused_in_both_shapes():
+    for drop in (True, False):
+        with pytest.raises(SandboxError, match="root"):
+            build_command_request(
+                ["x"],
+                cwd="/workspace",
+                envs={},
+                wall_clock_limit=0,
+                uid=0,
+                gid=0,
+                drop_credentials=drop,
+            )
