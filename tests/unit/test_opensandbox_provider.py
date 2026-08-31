@@ -396,6 +396,25 @@ def test_a_cni_tier_fails_closed_when_the_sandbox_can_still_reach_out(destinatio
         provider.create(_spec())
 
 
+def test_a_cni_tier_fails_closed_when_the_probe_call_itself_errors():
+    """execd refusing the command is not a pass either.
+
+    The one path that reaches this is an execd error, which the fake models by
+    raising from run_command — the same shape a 500 or a dropped connection
+    takes at the client boundary.
+    """
+
+    class Exploding(FakeOpenSandboxApi):
+        def run_command(self, sandbox_id, body):
+            if "OPENACE_METADATA=" in str(body.get("command") or ""):
+                raise SandboxError("execd said no")
+            return super().run_command(sandbox_id, body)
+
+    provider, _ = _provider(Exploding(), cfg=_cni_cfg())
+    with pytest.raises(SandboxError, match="could not run the cluster-egress check"):
+        provider.create(_spec())
+
+
 def test_a_cni_tier_fails_closed_when_dns_leaves_the_check_undecided():
     """A blocked packet and a failed lookup must not read the same.
 
