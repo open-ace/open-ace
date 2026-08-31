@@ -922,6 +922,18 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                 },
             ],
         },
+        "tenant_billing": {
+            "label": "Tenant Billing",
+            "i18n_key": "categoryTenantBilling",
+            "resource_types": ["tenant"],
+            "actions": [
+                {
+                    "value": "tenant_billing_period_reset",
+                    "label": "Tenant Billing Period Reset",
+                    "i18n_key": "actionTenantBillingPeriodReset",
+                },
+            ],
+        },
         "data": {
             "label": "Data",
             "i18n_key": "categoryData",
