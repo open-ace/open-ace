@@ -61,7 +61,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: server
-          image: opensandbox/server:latest
+          # Pinned, not :latest. The provider refuses a tag-only AGENT image
+          # (a tag can be repointed after the allowlist was reviewed), and the
+          # server that enforces every isolation guarantee deserves at least the
+          # same care. Replace the digest when you deliberately upgrade; leaving
+          # :latest here means a silent restart can change the runtime enforcing
+          # your sandboxes.
+          image: opensandbox/server:v0.2.3
           args: ["--config", "/etc/opensandbox/sandbox.toml"]
           ports:
             - name: http

@@ -49,16 +49,26 @@ data:
           terminationGracePeriodSeconds: 30
           serviceAccountName: opensandbox-sandbox
           automountServiceAccountToken: false
+          # POD level carries only what must apply to every container. The
+          # non-root identity is deliberately NOT here: this pod also runs
+          # upstream's execd (as an init/sidecar), and execd's design is to run
+          # as root and drop privileges per request — every /command carries a
+          # uid/gid, and setgroups(2) needs CAP_SETGID. Forcing execd to uid
+          # 1000 pod-wide made every command fail
+          # `fork/exec /usr/bin/bash: operation not permitted`, verified on a
+          # live gVisor cluster. Scoping runAsUser to the `sandbox` container
+          # keeps the agent non-root (which is what `nonroot_enforced` attests)
+          # without disarming execd.
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 1000
-            runAsGroup: 1000
             fsGroup: 1000
             seccompProfile:
               type: RuntimeDefault
           containers:
             - name: sandbox
               securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 capabilities:

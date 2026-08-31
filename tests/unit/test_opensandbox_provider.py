@@ -925,3 +925,46 @@ def test_the_runtime_probe_is_one_directional_for_kata():
     provider2, _ = _provider(FakeOpenSandboxApi(runtime_kernel="Linux 4.4.0 gVisor"))
     with pytest.raises(SandboxError, match="runtime"):
         provider2.create(_spec())
+
+
+def test_the_kernel_probe_reads_more_than_proc_version():
+    """Current runsc puts no gVisor marker in /proc/version.
+
+    On release-20260112 it reports a plain `Linux version 4.4.0 #1 SMP ...`, so
+    probing that file alone REFUSED a correctly-deployed gVisor tier with
+    runtime_class_mismatch — verified on a live gVisor cluster. The markers live
+    in /proc/cmdline (BOOT_IMAGE=/vmlinuz-4.4.0-gvisor) and dmesg
+    ("Starting gVisor..."), so the probe reads all three.
+    """
+    commands: list[str] = []
+
+    class _Api(FakeOpenSandboxApi):
+        def run_command(self, sandbox_id, body):
+            commands.append(str(body.get("command") or ""))
+            return iter(({"type": "init", "text": "c"}, {"type": "execution_complete"}))
+
+    api = _Api()
+    # Force the exec path rather than the proc_version shortcut.
+    api.proc_version = None  # type: ignore[assignment]
+    provider, _ = _provider(api)
+    provider._probe_kernel("sb-1")
+    joined = " ".join(commands)
+    assert "/proc/version" in joined
+    assert "/proc/cmdline" in joined, "the marker current runsc DOES emit is not read"
+    assert "dmesg" in joined
+
+
+def test_an_unavailable_probe_source_does_not_refuse_the_run():
+    """dmesg is often unavailable to an unprivileged process."""
+    from app.modules.workspace.autonomous.sandbox.provider import SandboxError as _SE
+
+    class _Api(FakeOpenSandboxApi):
+        def run_command(self, sandbox_id, body):
+            if "dmesg" in str(body.get("command") or ""):
+                raise _SE("dmesg: operation not permitted")
+            return iter(({"type": "stdout", "text": "Linux version 4.4.0 gVisor"},))
+
+    api = _Api()
+    api.proc_version = None  # type: ignore[assignment]
+    provider, _ = _provider(api)
+    assert "gVisor" in provider._probe_kernel("sb-1")

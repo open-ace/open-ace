@@ -175,11 +175,19 @@ def test_pod_hardening_attestations_are_backed_by_the_template(tier):
     doc = yaml.safe_load((_DIR / "configmap-sandbox-template.yaml").read_text())
     tpl = yaml.safe_load(doc["data"]["batchsandbox-template.yaml"])
     pod = tpl["spec"]["template"]["spec"]
-    assert pod["securityContext"]["runAsNonRoot"] is True
     assert pod["securityContext"]["seccompProfile"]["type"] == "RuntimeDefault"
     assert pod["serviceAccountName"] == "opensandbox-sandbox"
     assert pod["automountServiceAccountToken"] is False
     sandbox = next(c for c in pod["containers"] if c["name"] == "sandbox")
+    # The non-root identity belongs to the SANDBOX container, not the pod:
+    # execd shares this pod and must stay root so it can drop privileges per
+    # request (setgroups needs CAP_SETGID). Pod-level runAsUser broke every
+    # /command with EPERM on a live cluster.
+    assert sandbox["securityContext"]["runAsNonRoot"] is True
+    assert sandbox["securityContext"]["runAsUser"] == 1000
+    assert (
+        "runAsUser" not in pod["securityContext"]
+    ), "runAsUser at pod level also applies to execd, which must run as root"
     assert sandbox["securityContext"]["readOnlyRootFilesystem"] is True
     assert sandbox["securityContext"]["allowPrivilegeEscalation"] is False
 
@@ -342,3 +350,14 @@ def test_probe_claims_carry_the_one_directional_caveat():
         "paragraphs discuss the kernel probe and runtime_class without the "
         "one-directional caveat:\n" + "\n".join(offenders)
     )
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_the_server_image_is_not_a_floating_tag(tier):
+    """The provider refuses tag-only agent images; the server deserves the same.
+
+    `:latest` means a silent restart can change the runtime that enforces every
+    isolation guarantee this backend attests to.
+    """
+    container = _deployment(tier)["spec"]["template"]["spec"]["containers"][0]
+    assert not container["image"].endswith(":latest"), container["image"]

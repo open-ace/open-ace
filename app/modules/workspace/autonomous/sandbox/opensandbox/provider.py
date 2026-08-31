@@ -759,11 +759,33 @@ class OpenSandboxProvider:
         self._probes_passed = True
 
     def _probe_kernel(self, sandbox_id: str) -> str:
+        """Read every place gVisor may identify itself, not just /proc/version.
+
+        Current runsc does NOT put a marker in /proc/version — on
+        release-20260112 it reports a plain ``Linux version 4.4.0 #1 SMP ...``,
+        so probing that file alone REFUSED a correctly-deployed gVisor tier with
+        ``runtime_class_mismatch``. Verified on a live gVisor cluster. The
+        markers live in ``/proc/cmdline`` (``BOOT_IMAGE=/vmlinuz-4.4.0-gvisor``)
+        and in ``dmesg`` (``Starting gVisor...``), so all three are read and
+        concatenated; any one carrying the marker is enough.
+
+        Failures are swallowed per-source on purpose: ``dmesg`` is frequently
+        unavailable to an unprivileged process, and a missing optional source
+        must not become a refusal.
+        """
         probe = getattr(self._api, "proc_version", None)
         if callable(probe):
             return str(probe(sandbox_id))
-        events = list(self._api.run_command(sandbox_id, {"command": "cat /proc/version"}))
-        return "".join(str(e.get("text") or "") for e in events if e.get("type") == "stdout")
+        collected: list[str] = []
+        for command in ("cat /proc/version", "cat /proc/cmdline", "dmesg 2>/dev/null | head -20"):
+            try:
+                events = list(self._api.run_command(sandbox_id, {"command": command}))
+            except SandboxError:
+                continue
+            collected.append(
+                "".join(str(e.get("text") or "") for e in events if e.get("type") == "stdout")
+            )
+        return "\n".join(collected)
 
     def _exec_command(
         self, handle: SandboxHandle, command: list[str], env: dict[str, str]

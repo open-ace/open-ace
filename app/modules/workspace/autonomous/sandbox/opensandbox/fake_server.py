@@ -313,7 +313,13 @@ class FakeOpenSandboxApi:
         self._manifest = files
 
     def proc_version(self, sandbox_id: str) -> str:
-        """What ``cat /proc/version`` returns — the runtime-class probe's input."""
+        """The runtime-class probe's input — ALL sources concatenated.
+
+        Named for /proc/version historically, but the provider now also reads
+        /proc/cmdline and dmesg, because current runsc puts no marker in
+        /proc/version at all (verified on a live gVisor cluster). Tests set this
+        to whatever the combined output should look like.
+        """
         return self._runtime_kernel
 
     # ── helpers ───────────────────────────────────────────────────────

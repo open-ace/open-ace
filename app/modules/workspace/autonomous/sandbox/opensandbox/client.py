@@ -67,6 +67,20 @@ INGRESS_ROUTE_HEADER = "OpenSandbox-Ingress-To"
 # Upstream ``GET /sandboxes`` defaults to ``pageSize`` 20. A single-request
 # sweep would silently miss everything past the first page — precisely when the
 # orphan reconciler matters most.
+# Ordinary calls. Deliberately short: a hung execd must not stall a run.
+_DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# `POST /sandboxes` is SYNCHRONOUS — upstream waits for the pod to be Running
+# with an IP, bounded by `kubernetes.sandbox_create_timeout_seconds` (default
+# 60). A 30s client timeout aborts WHILE the server is still working, and the
+# sandbox then comes up with nobody holding its id: observed repeatedly on a
+# real cluster, the client raising `Read timed out (read timeout=30.0)` and the
+# server logging `state: Running` moments later. Cold starts (image pull plus
+# sidecar boot) routinely exceed 30s. Sized above upstream's own bound so the
+# SERVER's timeout fires first and answers with a structured error, rather than
+# leaving us with a dangling connection and an unattributed sandbox.
+_CREATE_TIMEOUT_SECONDS = 90.0
+
 _LIST_PAGE_SIZE = 20
 _DEFAULT_MAX_LIST_PAGES = 100
 
@@ -269,13 +283,15 @@ class HttpOpenSandboxApi:
         endpoint: EndpointConfig,
         *,
         session: Any | None = None,
-        timeout: float = 30.0,
+        timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+        create_timeout: float = _CREATE_TIMEOUT_SECONDS,
         page_size: int = _LIST_PAGE_SIZE,
         max_list_pages: int = _DEFAULT_MAX_LIST_PAGES,
     ) -> None:
         self._endpoint = endpoint
         self._session = session or requests.Session()
         self._timeout = timeout
+        self._create_timeout = create_timeout
         self._page_size = page_size
         self._max_list_pages = max_list_pages
         # sandbox_id -> (base_url, extra_headers) resolved from endpoints/{port},
@@ -286,7 +302,10 @@ class HttpOpenSandboxApi:
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     def create_sandbox(self, body: dict) -> dict:
-        return self._json(self._lifecycle("POST", "/sandboxes", json=body))
+        # Synchronous upstream; see _CREATE_TIMEOUT_SECONDS.
+        return self._json(
+            self._lifecycle("POST", "/sandboxes", json=body, timeout=self._create_timeout)
+        )
 
     def get_sandbox(self, sandbox_id: str) -> dict | None:
         response = self._lifecycle("GET", f"/sandboxes/{sandbox_id}", allow_404=True)
@@ -357,7 +376,7 @@ class HttpOpenSandboxApi:
         metadata = json.dumps(
             {
                 "path": path,
-                "mode": mode,
+                "mode": _wire_mode(mode),
                 "owner": self._endpoint.runtime_user,
                 "group": self._endpoint.runtime_group,
             }
@@ -562,6 +581,30 @@ class HttpOpenSandboxApi:
         except ValueError as exc:
             raise OpenSandboxApiError(f"expected a JSON body, got {response.text[:200]!r}") from exc
         return body if isinstance(body, dict) else {"items": body}
+
+
+def _wire_mode(mode: int) -> int:
+    """Convert a Python file mode to the integer execd expects on the wire.
+
+    execd chmods with ``strconv.ParseUint(fmt.Sprint(mode), 8, ...)``, so the
+    value it wants is the OCTAL DIGITS read as a decimal integer — ``0o644``
+    must travel as ``644``, and upstream's API examples say ``mode: 755``.
+
+    Sending Python's own integer was silently destructive and loudly broken by
+    turns, both verified against a real execd:
+
+    * ``0o644`` is 420, which ParseUint reads as ``0o420`` → ``-r---w----``.
+      The upload "succeeds" and the agent cannot edit its own workspace.
+    * ``0o755`` is 493, which has no octal reading at all → HTTP 500
+      ``strconv.ParseUint: parsing "493": invalid syntax``. That is the mode the
+      ChangeSet manifest producer is uploaded with, so ``collect_changes`` could
+      never have run.
+
+    Converting here, at the single wire boundary, keeps every caller in ordinary
+    Python modes — ``apply_changeset`` chmods the trusted worktree with the same
+    values and must keep receiving real ones.
+    """
+    return int(f"{mode:o}")
 
 
 def _decode_error(response: Any) -> tuple[str, str]:

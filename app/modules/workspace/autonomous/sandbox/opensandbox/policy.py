@@ -71,6 +71,7 @@ _DIGEST_PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
 _WORKSPACE_ROOT = "/workspace"
 _AGENT_HOME = "/home/agent"
 
+
 # The container's PID 1. It must create the HOME/TMP/XDG tree :func:`build_env`
 # points the agent at: the pod runs with a read-only rootfs and /workspace is an
 # empty emptyDir, so nothing else brings those directories into existence and
@@ -78,12 +79,31 @@ _AGENT_HOME = "/home/agent"
 #
 # This is why the create body sets `entrypoint` explicitly rather than relying on
 # the image's own — a script baked into the image would be overridden here.
-_ENTRYPOINT = [
-    "/bin/sh",
-    "-c",
-    f"mkdir -p {_AGENT_HOME}/tmp {_AGENT_HOME}/.cache {_AGENT_HOME}/.config "
-    f"{_AGENT_HOME}/.local/share {_WORKSPACE_ROOT} && exec tail -f /dev/null",
-]
+def _build_entrypoint(uid: int, gid: int) -> list[str]:
+    """Create the agent's directories AND give them to the exec identity.
+
+    The chown is not cosmetic. Files uploaded through execd land root-owned, and
+    the agent runs as ``exec_uid``; without this the repo synthesis fails with
+    ``could not lock config file /workspace/.git/config: Permission denied`` —
+    verified on a live gVisor cluster. ``chown -R`` covers both the directories
+    created here and anything execd has already written.
+
+    ``|| true`` on the chown: the entrypoint runs before uploads, so there is
+    nothing to fail on yet, and an image whose /workspace is a read-only mount
+    should surface that at write time with a real error rather than dying in an
+    entrypoint the operator cannot see.
+    """
+    dirs = (
+        f"{_AGENT_HOME}/tmp {_AGENT_HOME}/.cache {_AGENT_HOME}/.config "
+        f"{_AGENT_HOME}/.local/share {_AGENT_HOME} {_WORKSPACE_ROOT}"
+    )
+    return [
+        "/bin/sh",
+        "-c",
+        f"mkdir -p {dirs} && chown -R {uid}:{gid} {_AGENT_HOME} {_WORKSPACE_ROOT} || true; "
+        "exec tail -f /dev/null",
+    ]
+
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -572,7 +592,7 @@ def build_create_request(
     return {
         # image is an ImageSpec object, not a bare string.
         "image": {"uri": spec.runtime.image if spec.runtime else endpoint.default_image},
-        "entrypoint": _ENTRYPOINT,
+        "entrypoint": _build_entrypoint(endpoint.exec_uid, endpoint.exec_gid),
         "resourceLimits": build_resource_limits(policy, cfg, endpoint),
         "networkPolicy": build_network_policy(spec, endpoint),
         "timeout": ttl,

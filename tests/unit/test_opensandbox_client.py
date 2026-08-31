@@ -322,7 +322,7 @@ def test_upload_file_sends_metadata_part_before_file_part():
     assert names == ["metadata", "file"]
     metadata = json.loads(files[0][1][1])
     assert metadata["path"] == "/workspace/a.py"
-    assert metadata["mode"] == 0o644
+    assert metadata["mode"] == 644  # octal digits on the wire; see _wire_mode
 
 
 def test_download_file_returns_raw_bytes():
@@ -408,7 +408,12 @@ def test_upload_file_sets_owner_group_and_mode():
     )
     _api(session).upload_file("sb-1", "/workspace/a.py", b"x", mode=0o644)
     metadata = json.loads(session.calls[-1]["files"][0][1][1])
-    assert metadata["mode"] == 0o644
+    # The OCTAL DIGITS as an integer, not Python's 0o644 (= 420). execd chmods
+    # via strconv.ParseUint(fmt.Sprint(mode), 8, ...), so 420 reads back as
+    # 0o420 -> `-r---w----`: the upload "succeeds" and the agent cannot edit its
+    # own workspace. This assertion previously pinned 0o644 and so encoded the
+    # very bug it was meant to guard. Verified against a real execd.
+    assert metadata["mode"] == 644
     assert metadata["owner"] == "openace"
     assert metadata["group"] == "openace"
 
@@ -668,3 +673,37 @@ def test_corruption_mid_stream_is_still_surfaced_in_the_bare_shape():
     )
     types = [e["type"] for e in iter_sse_events(_Response(200, content=body))]
     assert types == ["stdout", "error", "execution_complete"], types
+
+
+@pytest.mark.parametrize(
+    ("python_mode", "wire"),
+    [(0o644, 644), (0o755, 755), (0o600, 600), (0o777, 777)],
+)
+def test_file_modes_travel_as_octal_digits(python_mode, wire):
+    """execd parses the mode with base 8, so the wire value is the octal digits.
+
+    Sending Python's integer was destructive in one direction and fatal in the
+    other, both verified against a real execd: 0o644 (420) chmods to 0o420
+    (`-r---w----`, agent cannot edit its own tree) while 0o755 (493) has no
+    octal reading and 500s — and 0o755 is the mode the ChangeSet manifest
+    producer is uploaded with, so collect_changes could never have run.
+    """
+    session = _Session(
+        [
+            _Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"}),
+            _Response(200, {}),
+        ]
+    )
+    _api(session).upload_file("sb-1", "/workspace/a", b"x", mode=python_mode)
+    assert json.loads(session.calls[-1]["files"][0][1][1])["mode"] == wire
+
+
+def test_create_waits_longer_than_ordinary_calls():
+    """POST /sandboxes is synchronous; upstream waits up to 60s for a pod.
+
+    A 30s client timeout aborted while the server was still working, leaving a
+    sandbox running with nobody holding its id.
+    """
+    session = _Session([_Response(200, {"id": "sb-1", "status": {"state": "Running"}})])
+    _api(session).create_sandbox({"image": {"uri": _DIGEST}})
+    assert session.calls[-1]["timeout"] > 60
