@@ -100,6 +100,10 @@ const InsightsReport = lazy(() =>
 const PersonalFiles = lazy(() =>
   import('@/components/work/PersonalFiles').then((m) => ({ default: m.PersonalFiles }))
 );
+// Issue #3223: User alerts page for regular users
+const UserAlerts = lazy(() =>
+  import('@/components/work/UserAlerts').then((m) => ({ default: m.UserAlerts }))
+);
 const AutonomousDev = lazy(() =>
   import('@/components/features/AutonomousDev').then((m) => ({ default: m.AutonomousDev }))
 );
@@ -389,6 +393,8 @@ const WorkRoutes: React.FC = () => {
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
           <Route path="files" element={<PersonalFiles />} />
+          {/* Issue #3223: User alerts page for regular users */}
+          <Route path="alerts" element={<UserAlerts />} />
           {/* Wait for config to load before deciding autonomous route */}
           {configLoaded ? (
             autonomousEnabled ? (
