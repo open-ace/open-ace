@@ -129,6 +129,12 @@ const TenantManagement = lazy(() =>
     default: m.TenantManagement,
   }))
 );
+// Issue #3197: Tenant detail page
+const TenantDetail = lazy(() =>
+  import('@/components/features/management/TenantDetail').then((m) => ({
+    default: m.TenantDetail,
+  }))
+);
 const SSOSettings = lazy(() =>
   import('@/components/features/settings/SSOSettings').then((m) => ({ default: m.SSOSettings }))
 );
@@ -443,14 +449,18 @@ const ManageRoutes: React.FC = () => {
 
           {/* Users */}
           <Route path="users" element={<UserManagement />} />
+          {/* Issue #3197: Tenant routes with detail page */}
           <Route
             path="tenants"
             element={
               <PlatformAdminGuard>
-                <TenantManagement />
+                <Outlet />
               </PlatformAdminGuard>
             }
-          />
+          >
+            <Route index element={<TenantManagement />} />
+            <Route path=":id" element={<TenantDetail />} />
+          </Route>
 
           {/* Projects */}
           <Route path="projects" element={<ProjectManagement />} />

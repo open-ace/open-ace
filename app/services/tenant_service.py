@@ -859,11 +859,13 @@ class TenantService:
         """
         Get statistics for a tenant.
 
+        Issue #3197: Added monthly usage statistics based on billing cycle.
+
         Args:
             tenant_id: Tenant ID.
 
         Returns:
-            Dict with tenant statistics.
+            Dict with tenant statistics including daily and monthly usage.
         """
         tenant = self.get_tenant(tenant_id)
         if not tenant:
@@ -874,6 +876,39 @@ class TenantService:
 
         total_tokens = sum(u.tokens_used for u in usage)
         total_requests = sum(u.requests_made for u in usage)
+
+        # Issue #3197: Calculate monthly usage based on billing cycle
+        monthly_tokens_used = 0
+        monthly_requests_used = 0
+        billing_cycle_valid = False
+
+        if tenant.billing_cycle_start and tenant.billing_cycle_end:
+            # Validate billing cycle dates
+            if tenant.billing_cycle_start > tenant.billing_cycle_end:
+                logger.warning(
+                    "Invalid billing cycle for tenant %s: start > end",
+                    tenant_id,
+                )
+                # Fallback to 30 days data
+                monthly_tokens_used = total_tokens
+                monthly_requests_used = total_requests
+            else:
+                billing_cycle_valid = True
+                # Use current_cycle_tokens (maintained by aggregation script)
+                monthly_tokens_used = tenant.current_cycle_tokens
+
+                # Calculate monthly_requests_used from tenant_usage within billing cycle
+                cycle_usage = self.tenant_repo.get_usage(
+                    tenant_id,
+                    start_date=tenant.billing_cycle_start.strftime("%Y-%m-%d"),
+                    end_date=tenant.billing_cycle_end.strftime("%Y-%m-%d"),
+                    limit=365,  # Sufficient for any billing cycle
+                )
+                monthly_requests_used = sum(u.requests_made for u in cycle_usage)
+        else:
+            # No billing cycle set, use 30 days data as fallback
+            monthly_tokens_used = total_tokens
+            monthly_requests_used = total_requests
 
         return {
             "tenant": tenant.to_dict(),
@@ -910,10 +945,37 @@ class TenantService:
                         2,
                     ),
                 },
+                # Issue #3197: Monthly usage statistics
+                "monthly_tokens": {
+                    "used": monthly_tokens_used,
+                    "limit": tenant.quota.monthly_token_limit,
+                    "percentage": round(
+                        (monthly_tokens_used / tenant.quota.monthly_token_limit * 100)
+                        if tenant.quota.monthly_token_limit > 0
+                        else 0,
+                        2,
+                    ),
+                },
+                "monthly_requests": {
+                    "used": monthly_requests_used,
+                    "limit": tenant.quota.monthly_request_limit,
+                    "percentage": round(
+                        (monthly_requests_used / tenant.quota.monthly_request_limit * 100)
+                        if tenant.quota.monthly_request_limit > 0
+                        else 0,
+                        2,
+                    ),
+                },
             },
             "users": {
                 "count": tenant.user_count,
                 "limit": tenant.quota.max_users,
+            },
+            # Issue #3197: Billing cycle status
+            "billing_cycle": {
+                "valid": billing_cycle_valid,
+                "start": str(tenant.billing_cycle_start) if tenant.billing_cycle_start else None,
+                "end": str(tenant.billing_cycle_end) if tenant.billing_cycle_end else None,
             },
         }
 
