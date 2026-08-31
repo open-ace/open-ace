@@ -14,7 +14,15 @@ enforced is the defect, and the enforcement lives in these files.
 from __future__ import annotations
 
 import pathlib
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    # tomllib is stdlib only from 3.11, and the repo carries no `tomli`
+    # backport. Rather than add a dependency for one test module, the
+    # TOML-parsing assertions skip on 3.10; CI also runs 3.11/3.12/3.14, so the
+    # manifest contract is still enforced on every push. See _server_toml.
+    tomllib = None  # type: ignore[assignment]
 
 import pytest
 import yaml
@@ -28,6 +36,8 @@ _TIERS = ("gvisor", "kata")
 
 
 def _server_toml(tier: str) -> dict:
+    if tomllib is None:  # pragma: no cover - Python 3.10 only
+        pytest.skip("tomllib is 3.11+; these assertions run on the 3.11/3.12/3.14 lanes")
     doc = yaml.safe_load((_DIR / f"configmap-{tier}.yaml").read_text(encoding="utf-8"))
     return tomllib.loads(doc["data"]["sandbox.toml"])
 
