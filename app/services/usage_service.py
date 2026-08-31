@@ -367,7 +367,7 @@ class UsageService:
             else:
                 merged[key] = {
                     "date": normalized_date,
-                    "tool_name": entry["tool_name"],
+                    "tool": entry["tool_name"],
                     "tokens": entry.get("tokens", 0),
                 }
 
@@ -379,10 +379,10 @@ class UsageService:
             else:
                 merged[key] = {
                     "date": normalized_date,
-                    "tool_name": entry["tool_name"],
+                    "tool": entry["tool_name"],
                     "tokens": entry.get("tokens", 0),
                 }
 
-        # Sort by date, then by tool_name
-        result = sorted(merged.values(), key=lambda x: (x["date"], x["tool_name"]))
+        # Sort by date, then by tool
+        result = sorted(merged.values(), key=lambda x: (x["date"], x["tool"]))
         return result
