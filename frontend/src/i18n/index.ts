@@ -1650,6 +1650,13 @@ export const translations: Record<Language, Translations> = {
     networkError: 'Network error, please retry',
     noDetails: 'No details available',
 
+    // Issue #3200: Billing period reset
+    resetBillingPeriod: 'Reset Billing Period',
+    confirmResetBillingPeriod:
+      'Are you sure you want to reset the billing period for tenant "{name}"? This will archive current period data and start a new billing cycle.',
+    billingPeriodResetSuccess: 'Billing period reset successfully',
+    billingPeriodResetFailed: 'Failed to reset billing period',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'All Statuses',
     tenantAllPlans: 'All Plans',
@@ -3917,6 +3924,13 @@ export const translations: Record<Language, Translations> = {
     networkError: '网络错误，请重试',
     noDetails: '无详细信息',
 
+    // Issue #3200: Billing period reset
+    resetBillingPeriod: '重置计费周期',
+    confirmResetBillingPeriod:
+      '确认要重置租户 "{name}" 的计费周期吗？此操作将归档当前周期数据并开始新的计费周期。',
+    billingPeriodResetSuccess: '计费周期重置成功',
+    billingPeriodResetFailed: '计费周期重置失败',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '全部状态',
     tenantAllPlans: '全部套餐',
@@ -6092,6 +6106,13 @@ export const translations: Record<Language, Translations> = {
     networkError: 'ネットワークエラー。再試行してください',
     noDetails: '詳細なし',
 
+    // Issue #3200: Billing period reset
+    resetBillingPeriod: '請求期間リセット',
+    confirmResetBillingPeriod:
+      'テナント「{name}」の請求期間をリセットしますか？現在の期間データをアーカイブし、新しい請求サイクルを開始します。',
+    billingPeriodResetSuccess: '請求期間が正常にリセットされました',
+    billingPeriodResetFailed: '請求期間のリセットに失敗しました',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'すべての状態',
     tenantAllPlans: 'すべてのプラン',
@@ -8188,6 +8209,13 @@ export const translations: Record<Language, Translations> = {
     requestTimeout: '요청 시간 초과, 다시 시도하세요',
     networkError: '네트워크 오류, 다시 시도하세요',
     noDetails: '상세 정보 없음',
+
+    // Issue #3200: Billing period reset
+    resetBillingPeriod: '청구 기간 초기화',
+    confirmResetBillingPeriod:
+      '테넌트 "{name}"의 청구 기간을 초기화하시겠습니까? 현재 기간 데이터를 보관하고 새 청구 주기를 시작합니다.',
+    billingPeriodResetSuccess: '청구 기간이 초기화되었습니다',
+    billingPeriodResetFailed: '청구 기간 초기화 실패',
 
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '모든 상태',

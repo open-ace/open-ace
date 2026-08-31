@@ -7,7 +7,7 @@ Data access layer for tenant management.
 import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
@@ -32,6 +32,30 @@ def _parse_date(value: Any) -> str:
     if hasattr(value, "isoformat"):
         return str(value.isoformat())
     return str(value)
+
+
+def _parse_date_field(value: Any) -> date | None:
+    """Parse date value from database and return date object.
+
+    Handles both PostgreSQL date objects and SQLite text (ISO format strings).
+    Returns None if value is None or empty string.
+
+    Args:
+        value: Database value (date object, string, or None).
+
+    Returns:
+        date object or None.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    # Handle datetime objects by extracting date part
+    if hasattr(value, "date"):
+        return value.date()
+    return None
 
 
 def _serialize_json_field(value: Any, is_postgresql: bool) -> Any:
@@ -758,8 +782,8 @@ class TenantRepository:
             updated_at=_parse_datetime(row.get("updated_at")),
             trial_ends_at=_parse_datetime(row.get("trial_ends_at")),
             subscription_ends_at=_parse_datetime(row.get("subscription_ends_at")),
-            billing_cycle_start=_parse_date(row.get("billing_cycle_start")) if row.get("billing_cycle_start") else None,
-            billing_cycle_end=_parse_date(row.get("billing_cycle_end")) if row.get("billing_cycle_end") else None,
+            billing_cycle_start=_parse_date_field(row.get("billing_cycle_start")),
+            billing_cycle_end=_parse_date_field(row.get("billing_cycle_end")),
             current_cycle_tokens=row.get("current_cycle_tokens", 0),
             user_count=row.get("user_count", 0),
             total_tokens_used=row.get("total_tokens_used", 0),

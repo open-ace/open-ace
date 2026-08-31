@@ -577,6 +577,41 @@ def check_tenant_quota(tenant_id: int):
     return jsonify(result)
 
 
+@tenant_bp.route("/<int:tenant_id>/reset-period", methods=["POST"])
+@platform_admin_required
+def reset_billing_period(tenant_id: int):
+    """Reset billing period for a tenant (platform admin only).
+
+    Issue #3200: 手动重置租户计费周期
+    - 仅 platform_admin 可操作
+    - 调用 TenantService.reset_billing_period()
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
+    try:
+        result = tenant_service.reset_billing_period(tenant_id, actor=actor)
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
+
+    if not result.success:
+        if result.error == "Tenant not found":
+            return jsonify({"success": False, "error": result.error}), 404
+        return jsonify({"success": False, "error": result.error}), 500
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Billing period reset successfully",
+            "tenant": result.tenant.to_dict() if result.tenant else None,
+        }
+    )
+
+
 @tenant_bp.route("/plans", methods=["GET"])
 @auth_required
 def get_plan_quotas():

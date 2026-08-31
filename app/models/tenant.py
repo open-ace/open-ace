@@ -213,7 +213,9 @@ class Tenant:
             "updated_at": ensure_utc_suffix(self.updated_at),
             "trial_ends_at": ensure_utc_suffix(self.trial_ends_at),
             "subscription_ends_at": ensure_utc_suffix(self.subscription_ends_at),
-            "billing_cycle_start": str(self.billing_cycle_start) if self.billing_cycle_start else None,
+            "billing_cycle_start": (
+                str(self.billing_cycle_start) if self.billing_cycle_start else None
+            ),
             "billing_cycle_end": str(self.billing_cycle_end) if self.billing_cycle_end else None,
             "current_cycle_tokens": self.current_cycle_tokens,
             "user_count": self.user_count,
@@ -231,14 +233,12 @@ class Tenant:
         billing_cycle_start = data.get("billing_cycle_start")
         if billing_cycle_start and isinstance(billing_cycle_start, str):
             billing_cycle_start = date.fromisoformat(billing_cycle_start)
-        elif billing_cycle_start and hasattr(billing_cycle_start, "isoformat"):
-            billing_cycle_start = billing_cycle_start
+        # If already a date object, keep it as is
 
         billing_cycle_end = data.get("billing_cycle_end")
         if billing_cycle_end and isinstance(billing_cycle_end, str):
             billing_cycle_end = date.fromisoformat(billing_cycle_end)
-        elif billing_cycle_end and hasattr(billing_cycle_end, "isoformat"):
-            billing_cycle_end = billing_cycle_end
+        # If already a date object, keep it as is
 
         return cls(
             id=data.get("id"),

@@ -208,6 +208,9 @@ export const TenantManagement: React.FC = () => {
   const { checkingTenants, checkResult, checkQuota, clearResult } = useTenantQuotaCheck();
   const [showCheckResultModal, setShowCheckResultModal] = useState(false);
 
+  // Issue #3200: Billing period reset state
+  const [resettingTenants, setResettingTenants] = useState<Set<number>>(new Set());
+
   // Dynamic options with useMemo for performance (Issue #1500)
   const statusOptions = useMemo(() => getTenantStatusOptions(language), [language]);
   const planOptions = useMemo(() => getTenantPlanOptions(language), [language]);
@@ -558,6 +561,54 @@ export const TenantManagement: React.FC = () => {
     handleOpenQuota(tenant);
   };
 
+  // Issue #3200: Handle billing period reset
+  const handleResetPeriod = async (tenant: Tenant) => {
+    const confirmMessage = t('confirmResetBillingPeriod', language).replace('{name}', tenant.name);
+    if (!(await confirm({ message: confirmMessage, variant: 'warning' }))) {
+      return;
+    }
+
+    // Prevent duplicate requests
+    let shouldProceed = false;
+    setResettingTenants((prev) => {
+      if (prev.has(tenant.id)) {
+        return prev;
+      }
+      shouldProceed = true;
+      return new Set(prev).add(tenant.id);
+    });
+
+    if (!shouldProceed) {
+      return;
+    }
+
+    try {
+      const result = await tenantApi.resetBillingPeriod(tenant.id);
+      if (result.success) {
+        toast.success(t('billingPeriodResetSuccess', language));
+        fetchTenants();
+      } else {
+        toast.error(t('billingPeriodResetFailed', language));
+      }
+    } catch (err: unknown) {
+      let errorMessage: string;
+      if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as { message: string }).message);
+      } else if (err instanceof Error) {
+        errorMessage = (err as Error).message;
+      } else {
+        errorMessage = 'Failed to reset billing period';
+      }
+      toast.error(t('billingPeriodResetFailed', language) + ': ' + errorMessage);
+    } finally {
+      setResettingTenants((prev) => {
+        const next = new Set(prev);
+        next.delete(tenant.id);
+        return next;
+      });
+    }
+  };
+
   const getStatusVariant = (status: string) => {
     switch (status) {
       case 'active':
@@ -782,6 +833,24 @@ export const TenantManagement: React.FC = () => {
                             </>
                           ) : (
                             <i className="bi bi-speedometer2" />
+                          )}
+                        </Button>
+                        {/* Issue #3200: Reset billing period button */}
+                        <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          onClick={() => handleResetPeriod(tenant)}
+                          disabled={resettingTenants.has(tenant.id)}
+                          title={t('resetBillingPeriod', language) ?? 'Reset Billing Period'}
+                        >
+                          {resettingTenants.has(tenant.id) ? (
+                            <span
+                              className="spinner-border spinner-border-sm"
+                              role="status"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <i className="bi bi-arrow-repeat" />
                           )}
                         </Button>
                         {tenant.status === 'suspended' ? (

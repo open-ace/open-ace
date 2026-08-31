@@ -14,7 +14,7 @@ Issue #2790: 租户设置修改审计日志
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.core.actor_context import ActorContext
@@ -65,6 +65,35 @@ class UpdateSettingsResult:
     new_values: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     error_type: str | None = None
+
+    def __bool__(self) -> bool:
+        """支持 `if result:` 语法，兼容现有代码。"""
+        return self.success
+
+
+@dataclass
+class ResetBillingPeriodResult:
+    """Issue #3200: 租户计费周期重置结果。
+
+    Attributes:
+        success: 是否成功
+        tenant_id: 目标租户 ID
+        tenant: 更新后的租户信息
+        old_cycle_start: 重置前的周期开始日期
+        old_cycle_end: 重置前的周期结束日期
+        new_cycle_start: 新周期开始日期
+        new_cycle_end: 新周期结束日期
+        error: 错误消息（失败时）
+    """
+
+    success: bool
+    tenant_id: int
+    tenant: Tenant | None = None
+    old_cycle_start: date | None = None
+    old_cycle_end: date | None = None
+    new_cycle_start: date | None = None
+    new_cycle_end: date | None = None
+    error: str | None = None
 
     def __bool__(self) -> bool:
         """支持 `if result:` 语法，兼容现有代码。"""
@@ -570,6 +599,115 @@ class TenantService:
             raise PermissionError(f"用户 {actor.user_id} 无权激活租户，需要 platform_admin 权限")
 
         return self.tenant_repo.update(tenant_id, {"status": "active"})
+
+    def reset_billing_period(
+        self, tenant_id: int, actor: ActorContext | None = None
+    ) -> ResetBillingPeriodResult:
+        """
+        Reset billing period for a tenant.
+
+        Issue #3200: 手动重置租户计费周期
+        - 权限验证：需要 platform_admin 权限
+        - 记录审计日志
+
+        Args:
+            tenant_id: Tenant ID.
+            actor: 操作者上下文（必须为 platform_admin）
+
+        Returns:
+            ResetBillingPeriodResult: 包含操作结果和新旧周期信息
+
+        Raises:
+            PermissionError: 权限不足
+        """
+        # 权限验证：只有 platform_admin 可以重置计费周期
+        if actor and not actor.is_platform_admin():
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权重置计费周期，需要 platform_admin 权限"
+            )
+
+        # 获取租户信息
+        tenant = self.get_tenant(tenant_id)
+        if not tenant:
+            return ResetBillingPeriodResult(
+                success=False,
+                tenant_id=tenant_id,
+                error="Tenant not found",
+            )
+
+        # 记录旧周期数据
+        old_cycle_start = tenant.billing_cycle_start
+        old_cycle_end = tenant.billing_cycle_end
+
+        # 调用计费周期重置函数
+        from scripts.shared.tenant_aggregation import reset_tenant_period
+
+        success = reset_tenant_period(tenant_id)
+
+        if not success:
+            logger.error(f"Failed to reset billing period for tenant {tenant_id}")
+            return ResetBillingPeriodResult(
+                success=False,
+                tenant_id=tenant_id,
+                error="Failed to reset billing period",
+            )
+
+        # 重新查询租户信息
+        updated_tenant = self.get_tenant(tenant_id)
+
+        # 记录审计日志
+        try:
+            from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+            audit_logger = AuditLogger()
+            audit_details = {
+                "old_cycle_start": str(old_cycle_start) if old_cycle_start else None,
+                "old_cycle_end": str(old_cycle_end) if old_cycle_end else None,
+                "new_cycle_start": (
+                    str(updated_tenant.billing_cycle_start)
+                    if updated_tenant and updated_tenant.billing_cycle_start
+                    else None
+                ),
+                "new_cycle_end": (
+                    str(updated_tenant.billing_cycle_end)
+                    if updated_tenant and updated_tenant.billing_cycle_end
+                    else None
+                ),
+            }
+
+            user_id = actor.user_id if actor else None
+            username = None
+            if hasattr(actor, "username"):
+                username = actor.username
+
+            audit_logger.log_action(
+                action=AuditAction.TENANT_BILLING_PERIOD_RESET,
+                user_id=user_id,
+                username=username,
+                resource_type="tenant",
+                resource_id=str(tenant_id),
+                tenant_id=tenant_id,
+                details=audit_details,
+                success=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to log audit for billing period reset: {e}")
+
+        logger.info(
+            f"Reset billing period for tenant {tenant_id}: "
+            f"{old_cycle_start} to {old_cycle_end} -> "
+            f"{updated_tenant.billing_cycle_start if updated_tenant else None}"
+        )
+
+        return ResetBillingPeriodResult(
+            success=True,
+            tenant_id=tenant_id,
+            tenant=updated_tenant,
+            old_cycle_start=old_cycle_start,
+            old_cycle_end=old_cycle_end,
+            new_cycle_start=updated_tenant.billing_cycle_start if updated_tenant else None,
+            new_cycle_end=updated_tenant.billing_cycle_end if updated_tenant else None,
+        )
 
     def delete_tenant(
         self, tenant_id: int, hard: bool = False, actor: ActorContext | None = None
