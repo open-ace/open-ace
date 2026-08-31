@@ -1680,15 +1680,11 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
             try:
                 UserRepository().delete_session(user_id, session_token)
             except Exception as e:
-                logger.warning(
-                    f"Failed to cleanup session on redirect validation failure: {e}"
-                )
+                logger.warning(f"Failed to cleanup session on redirect validation failure: {e}")
             try:
                 get_sso_manager().delete_sso_session(session_token)
             except Exception as e:
-                logger.warning(
-                    f"Failed to cleanup SSO session on redirect validation failure: {e}"
-                )
+                logger.warning(f"Failed to cleanup SSO session on redirect validation failure: {e}")
 
         # Log the redirect validation failure for security monitoring
         logger.warning(
@@ -1714,9 +1710,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                 success=False,
             )
         except Exception:
-            logger.warning(
-                "Failed to audit-log SSO redirect validation failure", exc_info=True
-            )
+            logger.warning("Failed to audit-log SSO redirect validation failure", exc_info=True)
 
         return (
             jsonify(

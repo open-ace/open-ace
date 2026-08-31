@@ -6,8 +6,9 @@ when redirect validation fails.
 """
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from flask import Flask
 
 # Import the SSO blueprint
