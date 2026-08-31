@@ -2838,6 +2838,16 @@ ${line}"
             fi
         done
 
+        # 【Issue #3228】检查 fetch wrapper 规则
+        # 存量部署升级场景：wrapper 已安装但 sudoers 未更新，导致 "sudo: a password is required"
+        local fetch_wrapper_path="/usr/local/bin/openace-fetch-wrapper"
+        if [ -x "$fetch_wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${fetch_wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
+           ! grep -E "Cmnd_Alias FETCH_WRAPPER.*${fetch_wrapper_path}" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing fetch wrapper rule for user '$run_user' (wrapper installed but not authorized)"
+            need_update=true
+        fi
+
         # 【安全加固 Issue #2181】检查是否存在已废弃的 OPENACE_CLI 规则
         # 如果存在，触发更新以删除这些规则
         if grep -q "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null; then
