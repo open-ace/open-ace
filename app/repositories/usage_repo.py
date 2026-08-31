@@ -2139,16 +2139,20 @@ class UsageRepository:
             pass
 
         # Fallback: agent_sessions.total_tokens with created_at date attribution.
-        # Matches quota_manager._get_usage_in_range() legacy path.
+        # Uses session_messages subquery for requests (same as aggregator) for consistency.
         session_row = self.db.fetch_one(
             """
             SELECT
-                COALESCE(SUM(total_tokens), 0) as tokens,
-                COUNT(*) as requests
-            FROM agent_sessions
-            WHERE user_id = ?
-              AND workspace_type IN ('local', 'remote', 'terminal')
-              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
+                COALESCE(SUM(as2.total_tokens), 0) as tokens,
+                COALESCE(SUM((
+                    SELECT COUNT(*) FROM session_messages sm
+                    WHERE sm.session_id = as2.session_id
+                      AND sm.role = 'assistant'
+                )), 0) as requests
+            FROM agent_sessions as2
+            WHERE as2.user_id = ?
+              AND as2.workspace_type IN ('local', 'remote', 'terminal')
+              AND CAST(as2.created_at AS DATE) >= ? AND CAST(as2.created_at AS DATE) <= ?
             """,
             (user_id, start_date, end_date),
         )

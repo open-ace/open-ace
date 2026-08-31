@@ -81,11 +81,11 @@ class TestGetSessionOnlyUsage:
         assert result["tokens"] == 9_999_999
         assert result["requests"] == 77
         assert db.fetch_one.call_count == 2
-        # Second call must query agent_sessions (not session_messages, not daily_messages).
+        # Second call must query agent_sessions (daily_messages forbidden by #1125).
+        # session_messages subquery is allowed and matches aggregator behavior (#3231).
         fallback_sql = db.fetch_one.call_args_list[1][0][0]
         assert "FROM agent_sessions" in fallback_sql
         assert "total_tokens" in fallback_sql
-        assert "session_messages" not in fallback_sql
         assert "daily_messages" not in fallback_sql
 
     @pytest.mark.regression
