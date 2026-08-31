@@ -8,7 +8,14 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, StatCard, Button, Loading, Error as ErrorComponent, Badge } from '@/components/common';
+import {
+  Card,
+  StatCard,
+  Button,
+  Loading,
+  Error as ErrorComponent,
+  Badge,
+} from '@/components/common';
 import { tenantApi, type Tenant, type TenantStats, type TenantUsage } from '@/api';
 import { formatDateTime } from '@/utils';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
@@ -354,7 +361,7 @@ export const TenantDetail: React.FC = () => {
               {!stats.billing_cycle?.valid && (
                 <small className="text-muted mt-2 d-block">
                   <i className="bi bi-info-circle me-1" />
-                  {tenant.billing_cycle_start
+                  {stats.billing_cycle?.start
                     ? t('tenantBillingCyclePending', language)
                     : t('tenantLast30Days', language)}
                 </small>

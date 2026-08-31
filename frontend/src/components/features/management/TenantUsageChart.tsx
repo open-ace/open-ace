@@ -9,6 +9,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { LineChart } from '@/components/common';
 import type { TenantUsage } from '@/api';
+import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 
 interface TenantUsageChartProps {
   usage: TenantUsage[];
@@ -44,7 +45,7 @@ export const TenantUsageChart: React.FC<TenantUsageChartProps> = ({ usage, loadi
   const labels = sortedUsage.map((u) => u.date.slice(5)); // Show MM-DD format
 
   // Token data (convert to millions for better readability)
-  const tokenData = sortedUsage.map((u) => u.tokens);
+  const tokenData = sortedUsage.map((u) => u.tokens / TOKEN_QUOTA_MULTIPLIER);
 
   // Request data
   const requestData = sortedUsage.map((u) => u.requests);

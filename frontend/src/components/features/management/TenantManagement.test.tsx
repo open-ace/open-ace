@@ -219,6 +219,7 @@ vi.mock('@/utils', () => ({
 
 vi.mock('@/utils/quotaFormatter', () => ({
   formatQuotaForDisplay: (value: number) => `${value}M`,
+  formatNumberAsString: (value: number) => value.toLocaleString(),
 }));
 
 vi.mock('@/constants/quota', () => ({

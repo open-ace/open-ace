@@ -42,7 +42,7 @@ import { formatDateTime } from '@/utils';
 import { usePageRefresh, useAuth } from '@/hooks';
 import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
-import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
+import { formatQuotaForDisplay, formatNumberAsString } from '@/utils/quotaFormatter';
 import { canManageTenant } from '@/utils/permissions';
 import { QuotaCheckResultModal } from './QuotaCheckResultModal';
 
@@ -725,7 +725,7 @@ export const TenantManagement: React.FC = () => {
         <div className="col-md-4">
           <StatCard
             label={t('tenantTotalRequests', language)}
-            value={stats.totalRequests.toLocaleString()}
+            value={formatNumberAsString(stats.totalRequests)}
             icon={<i className="bi bi-lightning fs-4" />}
             variant="secondary"
           />
