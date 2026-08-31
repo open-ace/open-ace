@@ -99,12 +99,40 @@ export interface TenantUsage {
   requests: number;
 }
 
+// Issue #3197: Extended TenantStats to match backend API response
+export interface QuotaUsageItem {
+  used: number;
+  limit: number;
+  percentage: number;
+}
+
+export interface BillingCycleInfo {
+  valid: boolean;
+  start: string | null;
+  end: string | null;
+}
+
 export interface TenantStats {
-  total_users: number;
-  active_users: number;
-  total_sessions: number;
-  total_tokens: number;
-  total_requests: number;
+  tenant: Tenant;
+  usage_30_days: {
+    tokens: number;
+    requests: number;
+    daily_average: {
+      tokens: number;
+      requests: number;
+    };
+  };
+  quota_usage: {
+    daily_tokens: QuotaUsageItem;
+    daily_requests: QuotaUsageItem;
+    monthly_tokens: QuotaUsageItem;
+    monthly_requests: QuotaUsageItem;
+  };
+  users: {
+    count: number;
+    limit: number;
+  };
+  billing_cycle: BillingCycleInfo;
 }
 
 // PlanQuota - matches backend QuotaConfig.to_dict() from app/models/tenant.py

@@ -85,7 +85,10 @@ vi.mock('@/i18n', () => ({
   },
 }));
 
-// Mock common components
+// Mock react-router-dom - Issue #3197: Add useNavigate mock
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => vi.fn(),
+}));
 vi.mock('@/components/common', () => ({
   Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
   StatCard: ({ label, value }: { label: string; value: string }) => (
@@ -216,6 +219,7 @@ vi.mock('@/utils', () => ({
 
 vi.mock('@/utils/quotaFormatter', () => ({
   formatQuotaForDisplay: (value: number) => `${value}M`,
+  formatNumberAsString: (value: number) => value.toLocaleString(),
 }));
 
 vi.mock('@/constants/quota', () => ({

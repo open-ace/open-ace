@@ -12,6 +12,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -41,7 +42,7 @@ import { formatDateTime } from '@/utils';
 import { usePageRefresh, useAuth } from '@/hooks';
 import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
-import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
+import { formatQuotaForDisplay, formatNumberAsString } from '@/utils/quotaFormatter';
 import { canManageTenant } from '@/utils/permissions';
 import { QuotaCheckResultModal } from './QuotaCheckResultModal';
 
@@ -145,6 +146,7 @@ export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [tenants, setTenants] = useState<Tenant[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -259,13 +261,16 @@ export const TenantManagement: React.FC = () => {
     fetchTenants();
   }, [fetchTenants]);
 
-  // Statistics
+  // Statistics - Issue #3197: Add total users, tokens, requests
   const stats = useMemo(() => {
     const total = tenants.length;
     const active = tenants.filter((t) => t.status === 'active').length;
     const suspended = tenants.filter((t) => t.status === 'suspended').length;
     const trial = tenants.filter((t) => t.status === 'trial').length;
-    return { total, active, suspended, trial };
+    const totalUsers = tenants.reduce((sum, t) => sum + (t.user_count ?? 0), 0);
+    const totalTokens = tenants.reduce((sum, t) => sum + (t.total_tokens_used ?? 0), 0);
+    const totalRequests = tenants.reduce((sum, t) => sum + (t.total_requests_made ?? 0), 0);
+    return { total, active, suspended, trial, totalUsers, totalTokens, totalRequests };
   }, [tenants]);
 
   // Handlers
@@ -699,6 +704,34 @@ export const TenantManagement: React.FC = () => {
         </div>
       </div>
 
+      {/* Issue #3197: Usage Summary Statistics */}
+      <div className="row g-3 mb-4">
+        <div className="col-md-4">
+          <StatCard
+            label={t('tenantTotalUsers', language)}
+            value={stats.totalUsers.toString()}
+            icon={<i className="bi bi-people fs-4" />}
+            variant="info"
+          />
+        </div>
+        <div className="col-md-4">
+          <StatCard
+            label={t('tenantTotalTokens', language)}
+            value={formatQuotaForDisplay(stats.totalTokens / TOKEN_QUOTA_MULTIPLIER, true)}
+            icon={<i className="bi bi-cpu fs-4" />}
+            variant="primary"
+          />
+        </div>
+        <div className="col-md-4">
+          <StatCard
+            label={t('tenantTotalRequests', language)}
+            value={formatNumberAsString(stats.totalRequests)}
+            icon={<i className="bi bi-lightning fs-4" />}
+            variant="secondary"
+          />
+        </div>
+      </div>
+
       {/* Filters */}
       <Card className="mb-4">
         <div className="row g-3">
@@ -726,7 +759,8 @@ export const TenantManagement: React.FC = () => {
                   <th>{t('slug', language)}</th>
                   <th>{t('plan', language)}</th>
                   <th>{t('status', language)}</th>
-                  <th>{t('quotaUsage', language)}</th>
+                  <th>{t('tenantUserCount', language)}</th>
+                  <th>{t('tenantUsageStats', language)}</th>
                   <th>{t('createdAt', language)}</th>
                   <th>{t('tableActions', language)}</th>
                 </tr>
@@ -753,49 +787,65 @@ export const TenantManagement: React.FC = () => {
                         {getStatusLabel(tenant.status, language)}
                       </Badge>
                     </td>
+                    {/* Issue #3197: User count column */}
                     <td>
-                      {tenant.quota && tenant.total_tokens_used !== undefined ? (
-                        <div>
-                          <div className="progress" style={{ height: '6px' }}>
+                      <span className="text-nowrap">
+                        {tenant.user_count ?? 0} / {tenant.quota?.max_users ?? 0}
+                      </span>
+                      {tenant.quota &&
+                        tenant.user_count !== undefined &&
+                        tenant.quota.max_users > 0 && (
+                          <div className="progress mt-1" style={{ height: '4px' }}>
                             <div
                               className={cn(
                                 'progress-bar',
-                                (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
-                                  100 >=
-                                  90
+                                (tenant.user_count / tenant.quota.max_users) * 100 >= 100
                                   ? 'bg-danger'
-                                  : (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
-                                        100 >=
-                                      70
+                                  : (tenant.user_count / tenant.quota.max_users) * 100 >= 80
                                     ? 'bg-warning'
                                     : 'bg-success'
                               )}
                               style={{
-                                width: `${Math.min(100, (tenant.total_tokens_used / tenant.quota.monthly_token_limit) * 100)}%`,
+                                width: `${Math.min(100, (tenant.user_count / tenant.quota.max_users) * 100)}%`,
                               }}
                             />
                           </div>
-                          <small className="text-muted">
+                        )}
+                    </td>
+                    {/* Issue #3197: Usage statistics column - Token and Request cumulative usage */}
+                    <td>
+                      <div className="small">
+                        <div className="mb-1">
+                          <span className="text-muted">{t('tenantTokenUsage', language)}:</span>{' '}
+                          <span title={t('tenantCumulativeUsageTooltip', language)}>
                             {formatQuotaForDisplay(
-                              tenant.total_tokens_used / TOKEN_QUOTA_MULTIPLIER,
-                              true
-                            )}{' '}
-                            /{' '}
-                            {formatQuotaForDisplay(
-                              tenant.quota.monthly_token_limit / TOKEN_QUOTA_MULTIPLIER,
+                              (tenant.total_tokens_used ?? 0) / TOKEN_QUOTA_MULTIPLIER,
                               true
                             )}
-                          </small>
+                          </span>
                         </div>
-                      ) : (
-                        <span className="text-muted">-</span>
-                      )}
+                        <div>
+                          <span className="text-muted">{t('tenantRequestUsage', language)}:</span>{' '}
+                          <span title={t('tenantCumulativeUsageTooltip', language)}>
+                            {(tenant.total_requests_made ?? 0).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <small>{formatDateTime(tenant.created_at)}</small>
                     </td>
                     <td>
                       <div className="btn-group btn-group-sm">
+                        {/* Issue #3197: View details button */}
+                        <Button
+                          variant="outline-info"
+                          size="sm"
+                          onClick={() => navigate(`/manage/tenants/${tenant.id}`)}
+                          title={t('tenantViewDetails', language) ?? 'View Details'}
+                        >
+                          <i className="bi bi-eye" />
+                        </Button>
                         <Button
                           variant="outline-primary"
                           size="sm"
