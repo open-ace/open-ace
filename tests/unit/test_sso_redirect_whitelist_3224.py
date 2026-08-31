@@ -152,7 +152,7 @@ class TestSSORedirectWhitelist:
             assert "sso_success=1" in response.headers.get("Location", "")
 
             # Verify cookie is set
-            cookies = [c for c in response.headers.getlist("Set-Cookie")]
+            cookies = list(response.headers.getlist("Set-Cookie"))
             assert any("session_token" in c for c in cookies)
 
             # Session cleanup should NOT be called
