@@ -27,6 +27,10 @@ export interface Tenant {
   user_count?: number;
   total_tokens_used?: number;
   total_requests_made?: number;
+  // Issue #3200: Billing cycle fields
+  billing_cycle_start?: string;
+  billing_cycle_end?: string;
+  current_cycle_tokens?: number;
 }
 
 export interface TenantQuota {
@@ -193,6 +197,15 @@ export const tenantApi = {
     return apiClient.post<{ allowed: boolean; reason?: string }>(
       `/api/tenants/${tenantId}/check-quota`,
       data
+    );
+  },
+
+  // Issue #3200: Reset billing period for a tenant
+  async resetBillingPeriod(
+    tenantId: number
+  ): Promise<{ success: boolean; message: string; tenant: Tenant }> {
+    return apiClient.post<{ success: boolean; message: string; tenant: Tenant }>(
+      `/api/tenants/${tenantId}/reset-period`
     );
   },
 

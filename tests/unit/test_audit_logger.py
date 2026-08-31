@@ -542,7 +542,8 @@ class TestGetActionCategories:
         # Issue #2759: Added 4 tool_account_mapping actions (57 -> 61)
         # Issue #2755: Added user_restore action (61 -> 62)
         # Issue #2745: Added 2 shared_project_permission actions (62 -> 64)
-        assert total_actions == 64, f"Expected 64 actions, got {total_actions}"
+        # Issue #3200: Added tenant_billing_period_reset action (64 -> 65)
+        assert total_actions == 65, f"Expected 65 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""

@@ -34,6 +34,7 @@ class TestAuditActionsSynchronization:
             "User Management": 8,  # USER_CREATE, UPDATE, DELETE, RESTORE, PASSWORD_CHANGE, PASSWORD_CHANGE_FAILED, ROLE_CHANGE, STATUS_CHANGE
             "Permission": 4,  # PERMISSION_GRANT, REVOKE, SHARED_PROJECT_PERMISSION_SETUP_START, SHARED_PROJECT_PERMISSION_SETUP_COMPLETE (Issue #2745)
             "Quota": 3,  # QUOTA_UPDATE, ALERT, EXCEEDED
+            "Tenant Billing": 1,  # TENANT_BILLING_PERIOD_RESET (Issue #3200)
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE
             "System": 3,  # SYSTEM_CONFIG_CHANGE, START, STOP
             "Content Filter": 4,  # CONTENT_BLOCKED, FLAGGED, WARNED, REDACTED
