@@ -53,7 +53,7 @@ def _parse_date_field(value: Any) -> date | None:
     if isinstance(value, str):
         return date.fromisoformat(value)
     # Handle datetime objects by extracting date part
-    if hasattr(value, "date"):
+    if isinstance(value, datetime):
         return value.date()
     return None
 

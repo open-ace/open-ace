@@ -677,7 +677,7 @@ class TenantService:
 
             user_id = actor.user_id if actor else None
             username = None
-            if hasattr(actor, "username"):
+            if actor and hasattr(actor, "username"):
                 username = actor.username
 
             audit_logger.log_action(
