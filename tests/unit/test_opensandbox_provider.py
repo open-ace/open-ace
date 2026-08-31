@@ -14,6 +14,7 @@ from app.modules.workspace.autonomous.command_evidence.types import TerminalReas
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import parse_backend_config
 from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import FakeOpenSandboxApi
 from app.modules.workspace.autonomous.sandbox.opensandbox.provider import (
+    _GIT_SYNTHESIS,
     OpenSandboxProvider,
     OpenSandboxTurnSpec,
 )
@@ -534,10 +535,28 @@ def test_repo_synthesis_runs_after_upload_and_produces_a_commit(tmp_path):
     provider, api = _provider()
     handle = provider.create(_spec(project_path=str(tmp_path)))
     provider.upload_workspace(handle, str(tmp_path))
-    git_commands = [b["command"] for b in api.command_bodies if "git init" in b["command"]]
+    git_commands = [b["command"] for b in api.command_bodies if " init -q" in b["command"]]
     assert git_commands, "repo synthesis did not run"
     assert "user.email" in git_commands[0]  # self-contained identity
     assert api.uploaded[handle.sandbox_id]  # files landed first
+
+
+def test_every_git_invocation_in_the_synthesis_carries_safe_directory():
+    """Without this the synthesis dies `dubious ownership`, exit 128, every run.
+
+    The shipped template pins the sandbox container to uid 1000 while
+    /workspace is a root-owned emptyDir the entrypoint's chown — running as that
+    same uid 1000 — cannot change. git then refuses to operate on the tree.
+    Found on a live gVisor cluster; it affects BOTH tiers.
+
+    Asserted per-invocation rather than once on the whole string: the original
+    bug was that only the `commit` carried its own `-c` overrides, so a fix that
+    covered `commit` alone would still fail at `add`.
+    """
+    invocations = [part.strip() for part in _GIT_SYNTHESIS.split("&&")]
+    assert len(invocations) >= 3, invocations
+    missing = [inv for inv in invocations if "safe.directory=/workspace" not in inv]
+    assert not missing, f"git invocations without safe.directory: {missing}"
 
 
 # ── warm pool (acceptance criterion 10) ───────────────────────────────
@@ -841,6 +860,27 @@ def test_entrypoint_creates_the_directories_build_env_points_at():
     # pre-commit and tempfile all fail.
     for key in ("TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
         assert body["env"][key] in entrypoint, key
+
+
+def test_the_entrypoint_marks_the_workspace_safe_for_the_agents_own_git():
+    """`-c safe.directory` on OUR git does nothing for the git the AGENT runs.
+
+    Under the shipped template /workspace is a root-owned emptyDir and the agent
+    is uid 1000, so every `git status` / `git diff` the agent runs trips the same
+    ownership check that killed the repo synthesis — an autonomous coding agent
+    that cannot run git is not much use. Confirmed locally with git's
+    GIT_TEST_ASSUME_DIFFERENT_OWNER hook: `git status` kept failing with the
+    synthesis's own `-c` flags in place, and passed only once a GLOBAL
+    safe.directory was set.
+
+    So this is a distinct mechanism from
+    test_every_git_invocation_in_the_synthesis_carries_safe_directory, not a
+    duplicate of it, and it needs its own guard.
+    """
+    provider, api = _provider()
+    provider.create(_spec())
+    entrypoint = " ".join(api.created_bodies[0]["entrypoint"])
+    assert "git config --global --add safe.directory /workspace" in entrypoint
 
 
 def test_agent_home_is_outside_the_workspace():

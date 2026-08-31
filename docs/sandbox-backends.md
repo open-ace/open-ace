@@ -307,6 +307,17 @@ ChangeSet rejections use their own set: `absolute_path`, `path_escape`,
 
 ## 7. Known limitations
 
+**`pause` / `resume` do not converge on Kubernetes.** Observed twice on a real
+cluster, on two independent stacks: `pause` is accepted, the sandbox stays
+`Running`, the provider reports `pause_unconfirmed` — correctly, rather than
+claiming a pause that did not happen — and the following `resume` is then
+rejected with `409 Cannot resume sandbox in state Running, expected Paused`.
+Upstream's pause depends on a container freezer that the tested clusters did not
+supply. Treat these two calls as **unsupported on the Kubernetes runtime** until
+verified on a stack where the freezer works; nothing in the autonomous workflow
+calls them today. The refusal is honest either way, so the failure mode is a
+rejected request, never a sandbox believed to be paused while it keeps running.
+
 **A dropped PTY socket ends the turn.** Reconnecting is not implemented, and
 that is deliberate rather than pending. Re-attaching to a finished session makes
 execd start a *new* shell — a second agent process, not a resumed view of the

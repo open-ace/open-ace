@@ -93,6 +93,29 @@ def _build_entrypoint(uid: int, gid: int) -> list[str]:
     nothing to fail on yet, and an image whose /workspace is a read-only mount
     should surface that at write time with a real error rather than dying in an
     entrypoint the operator cannot see.
+
+    **The chown cannot succeed under the shipped pod template, and that is why
+    the safe.directory line below exists.** The template pins the sandbox
+    container to ``runAsUser: 1000``, and this entrypoint is that container's
+    PID 1 — so the chown runs as uid 1000 against a ``/workspace`` emptyDir the
+    kubelet created root-owned. It fails, ``|| true`` swallows it, and every git
+    command run there by uid 1000 then trips git's ownership check:
+    ``fatal: detected dubious ownership in repository at '/workspace'``, exit
+    128, which killed the repo synthesis on every run. Verified on a live gVisor
+    cluster and reproduced locally with git's own
+    ``GIT_TEST_ASSUME_DIFFERENT_OWNER`` hook.
+
+    The chown stays because it DOES work in a root-execd deployment (where the
+    template does not pin the uid), and the group-write bit from ``fsGroup``
+    is what makes the directory writable either way. What changes is that git no
+    longer depends on it having worked.
+
+    The global ``safe.directory`` covers git commands **the agent itself runs** —
+    ``git status``, ``git diff``, everything an autonomous coding agent does all
+    day. ``_GIT_SYNTHESIS`` carries its own ``-c safe.directory`` because it must
+    work even if this line did not, but ``-c`` on our own invocations does
+    nothing for the agent's: locally, ``git status`` still failed until the
+    global config was set.
     """
     dirs = (
         f"{_AGENT_HOME}/tmp {_AGENT_HOME}/.cache {_AGENT_HOME}/.config "
@@ -102,6 +125,7 @@ def _build_entrypoint(uid: int, gid: int) -> list[str]:
         "/bin/sh",
         "-c",
         f"mkdir -p {dirs} && chown -R {uid}:{gid} {_AGENT_HOME} {_WORKSPACE_ROOT} || true; "
+        f"git config --global --add safe.directory {_WORKSPACE_ROOT} || true; "
         "exec tail -f /dev/null",
     ]
 
@@ -633,30 +657,31 @@ def build_command_request(
     """
     if uid == 0 or gid == 0:
         raise SandboxError("refusing to exec as root inside the sandbox")
-    if not drop_credentials:
-        # execd already runs AS the exec identity (see
-        # Attestations.execd_runs_as_exec_identity), so asking it to switch to
-        # that identity fails: setgroups(2) needs CAP_SETGID, which a non-root
-        # execd does not have, and every command dies
-        # `fork/exec ...: operation not permitted`. Omitting uid/gid runs the
-        # command as execd itself — the same identity, and the one the shipped
-        # pod template pins.
-        return {
-            "command": " ".join(shlex.quote(part) for part in command),
-            "cwd": cwd,
-            "background": False,
-            "envs": dict(envs),
-            "timeout": wall_clock_limit,
-        }
+    # ONE body, with uid/gid added conditionally — not two bodies that happen to
+    # agree. The credential-dropping path used to be a separate early return and
+    # it drifted: it sent `timeout` in SECONDS while the other sent
+    # milliseconds, so an attested tier with wall_clock_limit=1 asked execd for a
+    # 1 ms budget and every foreground command died `context deadline exceeded`
+    # at startup. Verified on a live gVisor cluster. It also sent the key when
+    # the limit was 0, which is not the same as omitting it. Two copies of one
+    # request shape is what made a one-line divergence invisible.
     body: dict[str, Any] = {
         "command": " ".join(shlex.quote(part) for part in command),
         "cwd": cwd,
         "background": False,
-        "uid": uid,
-        "gid": gid,
         "envs": dict(envs),
     }
+    if drop_credentials:
+        body["uid"] = uid
+        body["gid"] = gid
+    # Otherwise execd already runs AS the exec identity (see
+    # Attestations.execd_runs_as_exec_identity), so asking it to switch to that
+    # identity fails: setgroups(2) needs CAP_SETGID, which a non-root execd does
+    # not have, and every command dies `fork/exec ...: operation not permitted`.
+    # Omitting uid/gid runs the command as execd itself — the same identity, and
+    # the one the shipped pod template pins.
     if wall_clock_limit > 0:
+        # Upstream's field is milliseconds.
         body["timeout"] = wall_clock_limit * 1000
     # Otherwise the key is OMITTED: upstream's contract is "if omitted, the
     # server will not enforce any timeout", and sending 0 is not omitting.

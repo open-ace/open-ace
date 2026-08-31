@@ -131,9 +131,22 @@ print('OPENACE_METADATA=' + probe('169.254.169.254', 80))
 print('OPENACE_CLUSTER=' + probe('kubernetes.default.svc.cluster.local', 443))
 " """
 
+# `safe.directory` on EVERY invocation, not just the commit. Under the shipped
+# pod template the sandbox container runs as uid 1000 while the /workspace
+# emptyDir is created root-owned, and the entrypoint's `chown -R` — which runs
+# as that same uid 1000 — cannot change it. git then refuses:
+#   fatal: detected dubious ownership in repository at '/workspace'
+# exit 128, killing the synthesis and therefore every run, on BOTH tiers. Found
+# on a live gVisor cluster; reproduced locally with git's own
+# GIT_TEST_ASSUME_DIFFERENT_OWNER hook, which fails `git add` at exactly this
+# point and passes with these `-c` flags in place.
+#
+# `-c` rather than relying on the entrypoint's global config so this works even
+# if that line did not: it is the one command whose failure has no fallback.
+_SAFE_DIR = f"-c safe.directory={_WORKSPACE}"
 _GIT_SYNTHESIS = (
-    "git init -q && git add -A && "
-    "git -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
+    f"git {_SAFE_DIR} init -q && git {_SAFE_DIR} add -A && "
+    f"git {_SAFE_DIR} -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
     "-c commit.gpgsign=false commit -q -m 'snapshot'"
 )
 # No --allow-empty on purpose: if upload_workspace's uploads silently failed,

@@ -484,6 +484,66 @@ def test_zero_wall_clock_omits_command_timeout_rather_than_sending_zero():
     assert "timeout" not in body
 
 
+@pytest.mark.parametrize("drop_credentials", [True, False])
+def test_the_timeout_unit_does_not_depend_on_the_credential_branch(drop_credentials):
+    """Both paths must agree on units, because they once did not.
+
+    The credential-dropping path was a separate early return that sent `timeout`
+    in SECONDS while the other sent milliseconds. On a live gVisor cluster an
+    attested tier with wall_clock_limit=1 therefore asked execd for a 1 ms
+    budget and every foreground command died `context deadline exceeded` at
+    startup — on the ONLY path the shipped pod template can use.
+
+    Parametrised over the branch rather than asserted once, so the two cannot
+    drift again without failing here.
+    """
+    body = build_command_request(
+        ["pytest"],
+        cwd="/workspace",
+        envs={},
+        wall_clock_limit=90,
+        uid=1000,
+        gid=1000,
+        drop_credentials=drop_credentials,
+    )
+    assert body["timeout"] == 90_000
+    # And zero still means omit, on both paths.
+    zero = build_command_request(
+        ["pytest"],
+        cwd="/workspace",
+        envs={},
+        wall_clock_limit=0,
+        uid=1000,
+        gid=1000,
+        drop_credentials=drop_credentials,
+    )
+    assert "timeout" not in zero
+
+
+@pytest.mark.parametrize("drop_credentials", [True, False])
+def test_the_two_credential_branches_differ_only_in_uid_and_gid(drop_credentials):
+    """The bodies are one construction now; nothing else may diverge."""
+    body = build_command_request(
+        ["pytest"],
+        cwd="/workspace",
+        envs={"A": "b"},
+        wall_clock_limit=5,
+        uid=1000,
+        gid=1000,
+        drop_credentials=drop_credentials,
+    )
+    assert ("uid" in body) is drop_credentials
+    assert ("gid" in body) is drop_credentials
+    shared = {k: v for k, v in body.items() if k not in ("uid", "gid")}
+    assert shared == {
+        "command": "pytest",
+        "cwd": "/workspace",
+        "background": False,
+        "envs": {"A": "b"},
+        "timeout": 5_000,
+    }
+
+
 # ── environment ───────────────────────────────────────────────────────
 
 
