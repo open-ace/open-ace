@@ -160,8 +160,7 @@ export const UserAlerts: React.FC = () => {
   };
 
   const handleDeleteAlert = async (alertId: string) => {
-    if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' })))
-      return;
+    if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' }))) return;
     try {
       await alertsApi.deleteAlert(alertId);
       setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
@@ -219,11 +218,7 @@ export const UserAlerts: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('myAlerts', language)}</h2>
         <div className="d-flex gap-2">
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            onClick={() => setShowPrefsModal(true)}
-          >
+          <Button variant="outline-secondary" size="sm" onClick={() => setShowPrefsModal(true)}>
             <i className="bi bi-gear me-1" />
             {t('preferences', language)}
           </Button>
@@ -341,17 +336,12 @@ export const UserAlerts: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      <span
-                        className="text-truncate d-inline-block"
-                        style={{ maxWidth: '300px' }}
-                      >
+                      <span className="text-truncate d-inline-block" style={{ maxWidth: '300px' }}>
                         {alert.message}
                       </span>
                     </td>
                     <td>
-                      <Badge variant={getTypeVariant(alert.type)}>
-                        {t(alert.type, language)}
-                      </Badge>
+                      <Badge variant={getTypeVariant(alert.type)}>{t(alert.type, language)}</Badge>
                     </td>
                     <td>
                       <Badge variant={getSeverityVariant(alert.severity)}>
