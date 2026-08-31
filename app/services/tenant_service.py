@@ -950,9 +950,11 @@ class TenantService:
                     "used": monthly_tokens_used,
                     "limit": tenant.quota.monthly_token_limit,
                     "percentage": round(
-                        (monthly_tokens_used / tenant.quota.monthly_token_limit * 100)
-                        if tenant.quota.monthly_token_limit > 0
-                        else 0,
+                        (
+                            (monthly_tokens_used / tenant.quota.monthly_token_limit * 100)
+                            if tenant.quota.monthly_token_limit > 0
+                            else 0
+                        ),
                         2,
                     ),
                 },
@@ -960,9 +962,11 @@ class TenantService:
                     "used": monthly_requests_used,
                     "limit": tenant.quota.monthly_request_limit,
                     "percentage": round(
-                        (monthly_requests_used / tenant.quota.monthly_request_limit * 100)
-                        if tenant.quota.monthly_request_limit > 0
-                        else 0,
+                        (
+                            (monthly_requests_used / tenant.quota.monthly_request_limit * 100)
+                            if tenant.quota.monthly_request_limit > 0
+                            else 0
+                        ),
                         2,
                     ),
                 },
