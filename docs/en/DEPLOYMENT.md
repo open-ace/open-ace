@@ -669,6 +669,13 @@ docker run --rm <image> code-server --version
 
    Using these placeholders will cause the application to refuse startup in production (`SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`) or disable features (`UPLOAD_AUTH_KEY`).
 
+8. **SSO Callback Whitelist** (Issue #3224): Production environments must configure `SSO_ALLOWED_REDIRECT_DOMAINS`
+   - **Environment variable**: `SSO_ALLOWED_REDIRECT_DOMAINS`
+   - **Format**: Comma-separated domain list, e.g., `example.com,www.example.com`
+   - **Default behavior**: Only `localhost` allowed when not configured (for development)
+   - ⚠️ **Production must configure**: SSO login will fail when accessed from non-localhost without whitelist
+   - **Security risk**: When whitelist is not configured, SSO login succeeds but redirect is blocked; session token is NOT exposed in JSON response (fixed)
+
 ### Upgrade Note: Encrypted Secrets
 
 Recent security hardening separates Flask session signing from stored-secret encryption. Before upgrading an existing deployment that already has encrypted SSO client secrets, SMTP passwords, or API keys, set `OPENACE_ENCRYPTION_KEY` to the same value previously used for `SECRET_KEY`. After the service starts and can read existing secrets, rotate `OPENACE_ENCRYPTION_KEY` during a planned maintenance window if you need a dedicated new key.

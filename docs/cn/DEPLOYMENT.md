@@ -738,6 +738,13 @@ docker run --rm <image> code-server --version
 
    使用这些占位符会导致应用在生产环境拒绝启动（`SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`）或功能被禁用（`UPLOAD_AUTH_KEY`）。
 
+8. **SSO 回调白名单**（Issue #3224）：生产环境必须配置 `SSO_ALLOWED_REDIRECT_DOMAINS`
+   - **环境变量**：`SSO_ALLOWED_REDIRECT_DOMAINS`
+   - **格式**：逗号分隔的域名列表，例如 `example.com,www.example.com`
+   - **默认行为**：未配置时仅允许 `localhost`（适用于开发环境）
+   - ⚠️ **生产环境必须配置**：从非 localhost 访问时，未配置白名单会导致 SSO 登录失败
+   - **安全风险**：未配置白名单时，SSO 登录成功但重定向被拒绝，会话令牌不会暴露在 JSON 响应中（已修复）
+
 ### 升级注意：已加密敏感数据
 
 近期安全加固将 Flask 会话签名与敏感数据加密拆分。已有部署如果已经保存了加密的 SSO client secret、SMTP 密码或 API Key，升级前请先把 `OPENACE_ENCRYPTION_KEY` 设置为旧版曾用于 `SECRET_KEY` 的同一个值。确认服务启动后能读取既有密文，再在计划维护窗口中按需轮换为新的专用加密密钥。

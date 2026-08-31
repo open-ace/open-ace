@@ -1670,14 +1670,67 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
         )
         return response
 
-    # Return result (fallback for API calls or missing session_token)
-    return jsonify(
-        {
-            "success": True,
-            "user": auth_result.user.to_dict() if auth_result.user else None,
-            "session_token": session_token,
-        }
-    )
+    # Handle fallback cases (redirect validation failed or no frontend_url/session_token)
+    # Security: Never expose session_token in JSON response to prevent token leakage
+
+    # Case 1: frontend_url provided but redirect validation failed
+    if frontend_url and not _validate_redirect_uri(frontend_url):
+        # Cleanup any created session to avoid orphaned records
+        if user_id and session_token:
+            try:
+                UserRepository().delete_session(user_id, session_token)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to cleanup session on redirect validation failure: {e}"
+                )
+            try:
+                get_sso_manager().delete_sso_session(session_token)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to cleanup SSO session on redirect validation failure: {e}"
+                )
+
+        # Log the redirect validation failure for security monitoring
+        logger.warning(
+            f"SSO login redirect blocked for provider {provider_name}: "
+            f"frontend_url not in allowed domains"
+        )
+
+        # Audit-log the redirect validation failure
+        try:
+            get_audit_logger().log(
+                action=AuditAction.LOGIN.value,
+                user_id=user_id,
+                username=auth_result.user.username if auth_result.user else None,
+                resource_type="sso_session",
+                resource_id=provider_name,
+                details={
+                    "provider": provider_name,
+                    "method": "sso",
+                    "denied_reason": "redirect_uri_not_allowed",
+                },
+                ip_address=request.remote_addr if request else None,
+                user_agent=request.headers.get("User-Agent") if request else None,
+                success=False,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to audit-log SSO redirect validation failure", exc_info=True
+            )
+
+        return (
+            jsonify(
+                {
+                    "error": "redirect_uri_not_allowed",
+                    "error_description": "SSO callback redirect URI is not allowed. "
+                    "Please configure SSO_ALLOWED_REDIRECT_DOMAINS environment variable.",
+                }
+            ),
+            400,
+        )
+
+    # Case 2: API call scenario (no frontend_url) - return success without sensitive data
+    return jsonify({"success": True})
 
 
 @sso_bp.route("/acs/<provider_name>", methods=["POST"])
