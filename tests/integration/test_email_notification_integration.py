@@ -19,6 +19,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+pytestmark = [pytest.mark.regression]
+
+
 class TestEmailNotificationFlow(unittest.TestCase):
     """Test complete email notification flow."""
 
@@ -230,44 +233,15 @@ class TestSMPTPasswordEncryptionFlow(unittest.TestCase):
         mock_pm.mask_password.return_value = "pass****"
         mock_password_manager.return_value = mock_pm
 
-        # Create temp database
-        import sqlite3
+        # Test encryption flow
+        from app.utils.smtp_password_manager import get_password_manager
 
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = f.name
+        pm = get_password_manager()
+        plain_password = "my_secret_password"
+        encrypted = pm.encrypt(plain_password)
 
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.execute("""
-                CREATE TABLE smtp_settings (
-                    id INTEGER PRIMARY KEY,
-                    smtp_host TEXT,
-                    smtp_port INTEGER,
-                    smtp_user TEXT,
-                    encrypted_password TEXT,
-                    encryption_version INTEGER,
-                    from_address TEXT,
-                    use_tls INTEGER,
-                    is_verified INTEGER,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP
-                )
-            """)
-            conn.commit()
-            conn.close()
-
-            # Test encryption flow
-            from app.utils.smtp_password_manager import get_password_manager
-
-            pm = get_password_manager()
-            plain_password = "my_secret_password"
-            encrypted = pm.encrypt(plain_password)
-
-            assert encrypted != plain_password
-            assert encrypted.startswith("gAAAA")  # Fernet prefix
-
-        finally:
-            os.unlink(db_path)
+        assert encrypted != plain_password
+        assert encrypted.startswith("gAAAA")  # Fernet prefix
 
     def test_password_decryption_matches(self):
         """Test that decryption returns original password."""

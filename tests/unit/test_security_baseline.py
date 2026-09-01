@@ -36,6 +36,15 @@ from app.utils.security_mode import (
 )
 
 
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.security,
+    pytest.mark.issue(1893),
+    pytest.mark.issue(2185),
+    pytest.mark.issue(2331),
+]
+
+
 class TestDetectSecurityMode:
     """Tests for security mode detection."""
 

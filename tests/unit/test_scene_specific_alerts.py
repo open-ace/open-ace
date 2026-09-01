@@ -24,6 +24,9 @@ from app.modules.governance.alert_notifier import (
 )
 
 
+pytestmark = [pytest.mark.regression]
+
+
 class TestServiceDownAlert:
     """Tests for create_service_down_alert."""
 

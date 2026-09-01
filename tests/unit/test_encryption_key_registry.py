@@ -21,6 +21,9 @@ from app.utils.encryption_key_registry import (
 )
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.security]
+
+
 @pytest.fixture(autouse=True)
 def reset_singleton():
     """Reset singleton before and after each test."""
@@ -355,9 +358,7 @@ class TestEncryptionKeyRegistryThreadSafety:
                     assert result is not None
                     decrypted, _ = result
                     assert decrypted == plaintext
-                except (
-                    Exception
-                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
+                except Exception as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                     errors.append(e)
 
             # Run 100 concurrent operations

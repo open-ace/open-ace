@@ -10,12 +10,14 @@ Tests cover:
 """
 
 import os
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+pytestmark = [pytest.mark.regression]
 
 
 class TestSMTPPasswordManager(unittest.TestCase):
