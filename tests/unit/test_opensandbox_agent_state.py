@@ -186,6 +186,124 @@ def test_a_transcript_at_the_cap_is_still_returned(sandbox):
     assert provider.export_agent_state(handle, cli_session_id=_SID) == blob
 
 
+# ── the audit trail ───────────────────────────────────────────────────
+#
+# Both events below were unpinned until now, and that is not a coincidence:
+# `agent_state_too_large` was DELETED during an earlier round of this very
+# change and no test noticed. An event nothing asserts is an event the next
+# refactor removes silently, which is how the refusal it records becomes
+# invisible exactly when it starts mattering.
+
+
+@pytest.fixture()
+def audited(monkeypatch):
+    """A provider whose emitted events are observable."""
+    monkeypatch.setenv("OSB_KEY", "k")
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
+    api = FakeOpenSandboxApi()
+    events: list[tuple[str, dict]] = []
+    provider = OpenSandboxProvider(
+        _cfg(),
+        api_factory=lambda endpoint: api,
+        event_sink=lambda name, data: events.append((name, data)),
+    )
+    handle = provider.create(_spec())
+    return provider, api, handle, events
+
+
+def test_an_oversized_transcript_is_recorded_not_just_refused(audited):
+    """The size refusal is the only place the real distribution is observable.
+
+    Returning None quietly would mean a session line stops carrying history
+    and keeps doing so every turn thereafter, with nothing in the audit trail
+    to say why — indistinguishable from a turn that never started a
+    conversation.
+    """
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT_STATE_BYTES
+
+    provider, api, handle, events = audited
+    api.uploaded[handle.sandbox_id][f"{_AGENT_STATE_DIR}/{_SID}.jsonl"] = b"x" * (
+        MAX_AGENT_STATE_BYTES + 1
+    )
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+
+    emitted = [data for name, data in events if name == "agent_state_too_large"]
+    assert emitted, f"the size refusal left no trace: {[n for n, _ in events]}"
+    assert emitted[0]["limit_bytes"] == MAX_AGENT_STATE_BYTES
+    assert emitted[0]["sandbox_id"] == handle.sandbox_id
+    assert str(MAX_AGENT_STATE_BYTES) in emitted[0]["detail"]
+
+
+def test_a_missing_transcript_is_not_recorded_as_oversized(audited):
+    """The routine case must not look like the pathological one.
+
+    A turn that never started a conversation has no transcript to fetch. If
+    that emitted the same event, the signal would fire on almost every first
+    turn and be worth nothing.
+    """
+    provider, _api, handle, events = audited
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+
+    assert not [n for n, _ in events if n == "agent_state_too_large"]
+
+
+def test_a_hostile_id_is_recorded_at_export(audited):
+    """Export is the FIRST place a hostile id surfaces.
+
+    The sandbox prints the id during its own turn, so the export at the end of
+    that turn is what tries to address it. The import refusal fires a turn
+    later and only if the id reached the database — so without this the
+    security-relevant event is the one nothing records.
+    """
+    provider, _api, handle, events = audited
+
+    assert provider.export_agent_state(handle, cli_session_id="../../etc/passwd") is None
+
+    refused = [data for name, data in events if name == "agent_state_id_refused"]
+    assert refused, f"a path-traversal id was refused silently: {[n for n, _ in events]}"
+    assert refused[0]["phase"] == "export"
+    assert refused[0]["sandbox_id"] == handle.sandbox_id
+
+
+@pytest.mark.parametrize("empty", ["", "   ", None])
+def test_no_session_id_is_not_an_incident(audited, empty):
+    """A turn whose stream never yielded a session id is ordinary, not hostile.
+
+    Emitting here would drown the real refusals in noise from every turn that
+    simply had nothing to carry.
+    """
+    provider, _api, handle, events = audited
+
+    assert provider.export_agent_state(handle, cli_session_id=empty) is None
+
+    assert not [n for n, _ in events if n == "agent_state_id_refused"]
+
+
+def test_a_non_api_sandbox_error_is_handled_without_touching_code(audited):
+    """This is what the two separate `except` clauses are FOR.
+
+    `OpenSandboxApiError` subclasses `SandboxError` and only the subclass
+    carries `.code`. Collapsing the handlers into a single
+    `except SandboxError as exc` therefore reads `.code` off a base
+    `SandboxError` that does not have one, turning an ordinary transport
+    failure at the end of a successful turn into an `AttributeError` — and
+    losing the transcript on a turn that had earned it.
+    """
+    from app.modules.workspace.autonomous.sandbox.provider import SandboxError
+
+    provider, api, handle, events = audited
+
+    def _boom(*_a, **_k):
+        raise SandboxError("execd went away")
+
+    api.download_file = _boom
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+    assert not [n for n, _ in events if n == "agent_state_too_large"]
+
+
 # ── the bounded download, at the client boundary ──────────────────────
 
 
