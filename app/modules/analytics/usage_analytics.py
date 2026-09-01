@@ -708,7 +708,7 @@ class UsageAnalytics:
             "poor": 0.3,
             "unavailable": None,
         }
-        confidence = confidence_mapping.get(quality_level, None)
+        confidence = confidence_mapping.get(quality_level)
 
         return quality_level, quality_desc, confidence
 
@@ -730,9 +730,7 @@ class UsageAnalytics:
         ).strftime("%Y-%m-%d")
 
         # Get historical data for backtest (excludes today)
-        historical_data, sample_days = self._get_historical_data_for_backtest(
-            start_date, end_date
-        )
+        historical_data, sample_days = self._get_historical_data_for_backtest(start_date, end_date)
 
         # Check minimum sample requirement
         if sample_days < FORECAST_MIN_SAMPLE_DAYS:

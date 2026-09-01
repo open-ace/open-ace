@@ -212,8 +212,7 @@ class TestBacktestWape:
         analytics = self._make_analytics()
         # Create 20 days of stable data (100 tokens each)
         historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 21)
+            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 21)
         ]
         wape = analytics._calculate_backtest_wape(historical_data)
         assert wape is not None
@@ -245,8 +244,7 @@ class TestBacktestWape:
         """All zero values should return None."""
         analytics = self._make_analytics()
         historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 0, "requests": 0}
-            for i in range(1, 21)
+            {"date": f"2026-01-{i:02d}", "tokens": 0, "requests": 0} for i in range(1, 21)
         ]
         wape = analytics._calculate_backtest_wape(historical_data)
         assert wape is None
@@ -296,8 +294,7 @@ class TestOutlierDetection:
         """Stable data should have no outliers."""
         analytics = self._make_analytics()
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 15)
+            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 15)
         ]
         count, ratio = analytics._detect_outliers(daily_data)
         assert count == 0
@@ -321,8 +318,7 @@ class TestOutlierDetection:
         """MAD=0 (identical values) should return no outliers."""
         analytics = self._make_analytics()
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 15)
+            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 15)
         ]
         # All values are 100, MAD=0
         count, ratio = analytics._detect_outliers(daily_data)
@@ -414,8 +410,7 @@ class TestMissingDays:
         """Continuous data should have no missing days."""
         analytics = self._make_analytics()
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 31)
+            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 31)
         ]
         missing = analytics._count_missing_days(daily_data, 30)
         assert missing == 0
@@ -425,8 +420,7 @@ class TestMissingDays:
         analytics = self._make_analytics()
         # Only 27 days of data for expected 30
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 28)
+            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 28)
         ]
         missing = analytics._count_missing_days(daily_data, 30)
         assert missing == 3
@@ -448,8 +442,7 @@ class TestHistoricalDataForBacktest:
 
         # Mock data including today
         daily_data = [
-            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 31)
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 31)
         ]
         # Override last entry to be today
         daily_data[-1]["date"] = today
@@ -481,8 +474,7 @@ class TestForecastQualityMetrics:
 
         # Mock 30 days of stable historical data (excluding today)
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50}
-            for i in range(1, 31)
+            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50} for i in range(1, 31)
         ]
         mock_db.fetch_all.return_value = daily_data
 
@@ -501,8 +493,7 @@ class TestForecastQualityMetrics:
         analytics, mock_db = self._make_analytics()
 
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50}
-            for i in range(1, 31)
+            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50} for i in range(1, 31)
         ]
         mock_db.fetch_all.return_value = daily_data
 
