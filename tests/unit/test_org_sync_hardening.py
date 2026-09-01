@@ -20,7 +20,7 @@ BOTH ``app.repositories.database`` and ``app.modules.workspace.collaboration``
 ``_ensure_supporting_tables`` would dial the ambient Postgres URL) — so the dev
 environment's globally-configured Postgres URL cannot corrupt them (the same
 isolation tests/issues/1773 applies). The real Postgres self-heal path lives in
-tests/integration/test_org_sync_lock_recovery.py.
+tests/integration/test_org_sync_lock_recovery_pg.py.
 
 Drift repair (batch 12 migration): production #3028/#3029 changed the directory
 snapshot / department-users contracts. The fakes here were realigned:

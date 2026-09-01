@@ -2,7 +2,7 @@
 
 Covers the pure logic (terminal-reason derivation, structured verdict, output
 digest) and the shadow comparison, without a database. The repo/recorder
-persistence is covered by ``tests/integration/test_command_evidence_repo.py``.
+persistence is covered by ``tests/integration/test_command_evidence_repo_pg.py``.
 """
 
 from __future__ import annotations

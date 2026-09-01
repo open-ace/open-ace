@@ -1049,10 +1049,15 @@ def test_postgres_job_sets_the_variable_the_conftest_reads():
     must export PG_TEST_URL with a postgresql:// scheme."""
     workflow = yaml.safe_load(CI_WORKFLOW.read_text())
     job = next(j for j in workflow["jobs"].values() if "ci.py run postgres" in str(j))
+    # Step env is STEP-scoped: the variable must sit on the step that runs
+    # the suite, not merely somewhere in the job.
+    run_steps = [
+        s for s in job.get("steps", []) if isinstance(s, dict) and "ci.py run postgres" in str(s)
+    ]
+    assert run_steps, "no step runs the postgres suite through the shared runner"
     env = dict(job.get("env") or {})
-    for step in job.get("steps", []):
-        if isinstance(step, dict):
-            env.update(step.get("env") or {})
+    for step in run_steps:
+        env.update(step.get("env") or {})
     assert env.get("PG_TEST_URL", "").startswith("postgresql://"), (
         "the postgres job must set PG_TEST_URL (what tests/integration/conftest.py "
         f"_get_pg_base_url actually reads); got {env.get('PG_TEST_URL')!r}"

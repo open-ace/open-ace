@@ -66,8 +66,9 @@ def _serialize_json_field(value: Any, is_postgresql: bool) -> Any:
         is_postgresql: Whether the database is PostgreSQL.
 
     Returns:
-        For PostgreSQL: The value as-is (psycopg2 handles JSON serialization).
-        For SQLite: JSON-encoded string.
+        JSON-encoded text for both dialects (the PostgreSQL jsonb column
+        casts it; see the inline note below for why the raw value cannot
+        be passed).
     """
     if value is None:
         return None
