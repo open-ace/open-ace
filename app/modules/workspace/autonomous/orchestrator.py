@@ -2052,6 +2052,33 @@ REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 #           pr_updated → pr_review_summary
 #   review: plan_reviewed → pr_reviewed
 #   test:   tests_run (reused across dev rounds)
+# Workflow statuses after which no further turn will run, so the session lines'
+# carried CLI transcripts (#3237) are no longer needed. "paused" is deliberately
+# absent — a paused workflow resumes later and still needs its history.
+_TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def purge_agent_state_if_terminal(
+    workflow_id: str, updates: dict, store: object | None = None
+) -> None:
+    """Drop a finished workflow's carried CLI transcripts (#3237).
+
+    Called from ``_update_workflow``, the one place every status write passes
+    through. Best-effort by design: failing to tidy up must never turn a
+    completed workflow into a failed one.
+    """
+    if str((updates or {}).get("status") or "") not in _TERMINAL_WORKFLOW_STATUSES:
+        return
+    try:
+        if store is None:
+            from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+            store = AgentStateStore()
+        store.purge(workflow_id)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - cleanup must not fail a finished workflow
+        logger.warning("Failed to purge agent state for %s", workflow_id, exc_info=True)
+
+
 SESSION_LINE_FIELDS = {
     "main": "main_session_id",
     "review": "review_session_id",
@@ -6391,6 +6418,12 @@ class AutonomousOrchestrator:
         """Update workflow and emit event."""
         self._persist_workflow_update(updates)
         self._emit("workflow_updated", updates)
+        # #3237: a finished workflow's carried CLI transcripts are dead weight.
+        # Hooked HERE rather than after each terminal status write: there are
+        # ~20 of those across this module, and one added per site would be
+        # missed on the next edit. This is the single chokepoint they all pass
+        # through.
+        purge_agent_state_if_terminal(self._workflow_id, updates)
 
     def _cleanup_worktree_and_branch(
         self,

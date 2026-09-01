@@ -155,3 +155,73 @@ def test_reap_drops_slots_older_than_the_window(store):
 
 def test_reap_on_an_empty_root_is_a_noop(tmp_path):
     assert AgentStateStore(root=str(tmp_path / "nothing-here")).reap() == 0
+
+
+# ── retention: a finished workflow keeps nothing ──────────────────────
+
+
+def test_terminal_status_purges_the_workflows_transcripts(tmp_path):
+    """Hooked into _update_workflow, the single chokepoint for status writes.
+
+    There are ~20 terminal status writes across the orchestrator; a call added
+    after each would guarantee one gets missed on the next edit.
+    """
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    store = AgentStateStore(root=str(tmp_path))
+    store.put("wf-done", "main", b"MAIN")
+    store.put("wf-done", "review", b"REVIEW")
+
+    purge_agent_state_if_terminal("wf-done", {"status": "completed"}, store=store)
+
+    assert store.get("wf-done", "main") is None
+    assert store.get("wf-done", "review") is None
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_every_terminal_status_drops_the_transcripts(tmp_path, status):
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    store = AgentStateStore(root=str(tmp_path))
+    store.put("wf-1", "main", b"MAIN")
+
+    purge_agent_state_if_terminal("wf-1", {"status": status}, store=store)
+
+    assert store.get("wf-1", "main") is None
+
+
+@pytest.mark.parametrize("status", ["running", "paused", "pending"])
+def test_a_non_terminal_status_keeps_the_transcripts(tmp_path, status):
+    """A paused workflow resumes later and still needs its history."""
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    store = AgentStateStore(root=str(tmp_path))
+    store.put("wf-1", "main", b"MAIN")
+
+    purge_agent_state_if_terminal("wf-1", {"status": status}, store=store)
+
+    assert store.get("wf-1", "main") == b"MAIN"
+
+
+def test_an_update_without_a_status_key_keeps_the_transcripts(tmp_path):
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    store = AgentStateStore(root=str(tmp_path))
+    store.put("wf-1", "main", b"MAIN")
+
+    purge_agent_state_if_terminal("wf-1", {"error_message": "x"}, store=store)
+
+    assert store.get("wf-1", "main") == b"MAIN"
+
+
+def test_cleanup_failure_never_propagates(tmp_path):
+    """Tidying up must not turn a completed workflow into a failed one."""
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    class Exploding(AgentStateStore):
+        def purge(self, workflow_id):
+            raise OSError("disk gone")
+
+    purge_agent_state_if_terminal(
+        "wf-1", {"status": "completed"}, store=Exploding(root=str(tmp_path))
+    )
