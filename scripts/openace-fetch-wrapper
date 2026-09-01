@@ -133,14 +133,13 @@ validate_arg_value() {
     fi
 
     # 拒绝 shell 元字符
-    # 分号、管道、&、$、反引号、括号
-    # 使用 printf 安全检测反引号
-    local backtick
-    backtick=$(printf '\x60')
+    # 分号、管道、&、$、反引号、括号、重定向、history expansion、换行
     if [[ "$value" == *";"* ]] || [[ "$value" == *"|"* ]] || \
        [[ "$value" == *"&"* ]] || [[ "$value" == *"$"* ]] || \
-       [[ "$value" == *"$backtick"* ]] || [[ "$value" == *"("* ]] || \
-       [[ "$value" == *")"* ]]; then
+       [[ "$value" == *\`* ]] || [[ "$value" == *"("* ]] || \
+       [[ "$value" == *")"* ]] || [[ "$value" == *"!"* ]] || \
+       [[ "$value" == *"<"* ]] || [[ "$value" == *">"* ]] || \
+       [[ "$value" =~ $'\n' ]] || [[ "$value" =~ $'\r' ]]; then
         echo "ERROR: Invalid characters in $arg_name value" >&2
         return 1
     fi
@@ -366,10 +365,13 @@ validate_file() {
 # ============================================================================
 # 参数验证
 # Issue #3249: 重构参数验证，分离工具名与参数校验
+# Issue #3249: 两阶段校验，先检测重复和格式，再检查路径存在性
 # ============================================================================
 
 # 验证参数是否符合允许的模式
-# 使用参数分离验证，显式参数白名单，参数重复检测
+# 使用两阶段验证：
+# 1. 第一阶段：重复检测、格式校验（不依赖文件系统）
+# 2. 第二阶段：路径存在性校验
 validate_args() {
     # 检查参数不为空
     if [[ $# -eq 0 ]]; then
@@ -384,8 +386,12 @@ validate_args() {
 
     # 关联数组跟踪已见参数（需要 bash 4.0+）
     local -A seen_params=()
+    # 存储需要第二阶段校验的配置路径
+    local config_path=""
 
-    # 遍历参数
+    # ========================================
+    # 第一阶段：重复检测和格式校验
+    # ========================================
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --days)
@@ -396,22 +402,24 @@ validate_args() {
                 fi
                 seen_params[--days]=1
 
-                # 参数值校验
+                # 参数值格式校验（不依赖文件系统）
                 validate_arg_value "--days" "${2:-}" || return 1
                 validate_days "$2" || return 1
                 shift 2
                 ;;
             --config)
-                # 检测重复参数
+                # 检测重复参数（优先于路径校验）
                 if [[ -n "${seen_params[--config]:-}" ]]; then
                     echo "ERROR: Duplicate parameter: --config" >&2
                     return 1
                 fi
                 seen_params[--config]=1
 
-                # 参数值校验
+                # 参数值格式校验（不依赖文件系统）
                 validate_arg_value "--config" "${2:-}" || return 1
-                validate_config_path "$2" || return 1
+
+                # 记录配置路径，等待第二阶段校验
+                config_path="${2:-}"
                 shift 2
                 ;;
             --mode)
@@ -442,6 +450,13 @@ validate_args() {
                 ;;
         esac
     done
+
+    # ========================================
+    # 第二阶段：路径存在性校验
+    # ========================================
+    if [[ -n "$config_path" ]]; then
+        validate_config_path "$config_path" || return 1
+    fi
 
     return 0
 }

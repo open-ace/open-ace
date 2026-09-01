@@ -307,6 +307,172 @@ class TestParameterValueBoundary:
         assert result.returncode != 0
         assert "requires a value" in result.stderr or "ERROR" in result.stderr
 
+    def test_exclamation_mark_rejected(self, wrapper_path):
+        """Test that ! (history expansion) is rejected."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1!"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr
+
+    def test_redirect_in_rejected(self, wrapper_path):
+        """Test that < (input redirect) is rejected."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1<"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr
+
+    def test_redirect_out_rejected(self, wrapper_path):
+        """Test that > (output redirect) is rejected."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1>"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr
+
+    def test_newline_rejected(self, wrapper_path):
+        """Test that newline is rejected."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1\n2"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr or "ERROR" in result.stderr
+
+
+# ============================================================================
+# Issue #3249: Positive test cases (verify valid parameters are accepted)
+# ============================================================================
+
+
+class TestValidParametersAccepted:
+    """Issue #3249: Test that valid parameter combinations are accepted."""
+
+    def test_valid_tool_with_days_accepted(self, wrapper_path):
+        """Test that fetch_qwen --days 1 is not rejected by validation."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1"],
+            capture_output=True,
+            text=True,
+        )
+        # Should NOT be rejected by validation
+        assert "Invalid tool" not in result.stderr
+        assert "Invalid characters" not in result.stderr
+        assert "Unknown argument" not in result.stderr
+        assert "Duplicate parameter" not in result.stderr
+
+    def test_valid_tool_with_multi_user_accepted(self, wrapper_path):
+        """Test that fetch_qwen --days 1 --multi-user is not rejected by validation."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--multi-user"],
+            capture_output=True,
+            text=True,
+        )
+        # Should NOT be rejected by validation
+        assert "Invalid tool" not in result.stderr
+        assert "Invalid characters" not in result.stderr
+        assert "Unknown argument" not in result.stderr
+
+    def test_valid_tool_with_recent_accepted(self, wrapper_path):
+        """Test that fetch_qwen --days 1 --recent is not rejected by validation."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--recent"],
+            capture_output=True,
+            text=True,
+        )
+        # Should NOT be rejected by validation
+        assert "Invalid tool" not in result.stderr
+        assert "Invalid characters" not in result.stderr
+        assert "Unknown argument" not in result.stderr
+
+    def test_all_allowed_tools_accepted(self, wrapper_path):
+        """Test that all ALLOWED_TOOLS pass validation."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        allowed_tools = [
+            "fetch_qwen",
+            "fetch_claude",
+            "fetch_zcode",
+            "fetch_codex",
+            "fetch_openclaw",
+        ]
+
+        for tool in allowed_tools:
+            result = subprocess.run(
+                ["bash", wrapper_path, tool, "--days", "1"],
+                capture_output=True,
+                text=True,
+            )
+            # Should NOT be rejected as "Invalid tool"
+            assert "Invalid tool" not in result.stderr, f"Tool {tool} was rejected as invalid"
+
+    def test_days_boundary_min_accepted(self, wrapper_path):
+        """Test that --days 1 (minimum) is accepted."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1"],
+            capture_output=True,
+            text=True,
+        )
+        assert "Invalid --days" not in result.stderr
+
+    def test_days_boundary_max_accepted(self, wrapper_path):
+        """Test that --days 365 (maximum) is accepted."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "365"],
+            capture_output=True,
+            text=True,
+        )
+        assert "Invalid --days" not in result.stderr
+
+    def test_days_boundary_over_rejected(self, wrapper_path):
+        """Test that --days 366 is rejected."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "366"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid --days" in result.stderr
+
 
 # ============================================================================
 # Issue #3249: Relative path rejection tests
