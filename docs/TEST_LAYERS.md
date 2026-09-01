@@ -95,8 +95,9 @@ GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分�
   每个非文档改动都跑。版本特有的回归几乎总先在最老解释器上暴露（例如 3.11 之前
   `datetime.fromisoformat` 不接受 `Z` 后缀），旧矩阵只在 3.10 跑 7 文件 smoke，使
   这类**单元级**回归在 PR 与合并后 main 推送上都漏网、红 main 75 分钟无人察觉。
-  只跑 unit 使其快（~2min）且确定（无 integration flake、无覆盖率/超时——直接在
-  较慢的 3.10 上跑全量 `tests/` 会撞 10 分钟预算并放大 flake）。
+  只跑 unit 使其快（~2min）且确定（无 integration flake、无覆盖率开销；该 suite 的
+  预算已因 GitHub runner 方差从 600s 抬至 1200s——同 commit 曾 183s↔652s 波动（#3240）
+  ——但直接在较慢的 3.10 上跑全量 `tests/` 仍会拉长墙钟并放大 flake）。
 - **3.12、3.14（前向兼容）**：`compatibility-smoke`——`compileall` + 少量关键单元
   文件，按依赖变更选择。
 

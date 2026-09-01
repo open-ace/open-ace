@@ -150,7 +150,7 @@
     },
     "python-min": {
       "description": "compileall + full unit suite on the minimum supported Python (catches version-specific regressions on the oldest interpreter; #2868)",
-      "timeout_seconds": 600,
+      "timeout_seconds": 1200,
       "commands": [
         [
           "{python}",
