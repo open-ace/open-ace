@@ -1470,12 +1470,26 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: 'Forecast Total Tokens',
     forecastTotalRequests: 'Forecast Total Requests',
     forecastDailyAvg: 'Daily Average Forecast',
-    confidenceScore: 'Confidence Score',
+    confidenceScore: 'Confidence Score', // Deprecated, kept for backward compatibility
     forecastExplanation:
       'Forecast is calculated using moving average based on the past 7 days of historical data',
     historicalData: 'Historical Data',
     predictedData: 'Predicted Data',
     historicalDataUnavailable: 'Historical data unavailable, showing forecast only',
+
+    // Forecast Quality Metrics
+    forecastQuality: 'Forecast Quality',
+    qualityMetrics: 'Quality Metrics',
+    qualityLevelQuality: 'High Quality',
+    qualityLevelSatisfactory: 'Good',
+    qualityLevelFair: 'Fair',
+    qualityLevelPoor: 'Low',
+    qualityLevelUnavailable: 'Unavailable',
+    backtestError: 'Backtest Error',
+    adjustedError: 'Adjusted Error',
+    sampleDays: 'Sample Days',
+    missingDaysCount: '{count} days missing',
+    forDays: 'For {days}-day forecast',
 
     // ROI Analysis
     totalCost: 'Total Cost',
@@ -3776,11 +3790,25 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '预测总 Token',
     forecastTotalRequests: '预测总请求数',
     forecastDailyAvg: '日均预测',
-    confidenceScore: '置信度得分',
+    confidenceScore: '置信度得分', // 已废弃，保留向后兼容
     forecastExplanation: '预测基于过去7天的历史数据使用移动平均方法计算',
     historicalData: '历史数据',
     predictedData: '预测数据',
     historicalDataUnavailable: '历史数据不可用，仅显示预测数据',
+
+    // Forecast Quality Metrics
+    forecastQuality: '预测质量',
+    qualityMetrics: '质量指标',
+    qualityLevelQuality: '高质量',
+    qualityLevelSatisfactory: '良好',
+    qualityLevelFair: '一般',
+    qualityLevelPoor: '较低',
+    qualityLevelUnavailable: '不可用',
+    backtestError: '回测误差',
+    adjustedError: '调整误差',
+    sampleDays: '样本天数',
+    missingDaysCount: '{count} 天缺失',
+    forDays: '{days}天预测',
 
     // ROI Analysis
     totalCost: '总成本',
@@ -5944,11 +5972,25 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '予測総トークン数',
     forecastTotalRequests: '予測総リクエスト数',
     forecastDailyAvg: '日平均予測',
-    confidenceScore: '信頼度スコア',
+    confidenceScore: '信頼度スコア', // 非推奨、後方互換性のため維持
     forecastExplanation: '過去7日間の履歴データに基づいて移動平均で予測を計算しています',
     historicalData: '履歴データ',
     predictedData: '予測データ',
     historicalDataUnavailable: '履歴データが利用できません。予測データのみを表示しています',
+
+    // Forecast Quality Metrics
+    forecastQuality: '予測品質',
+    qualityMetrics: '品質指標',
+    qualityLevelQuality: '高品質',
+    qualityLevelSatisfactory: '良好',
+    qualityLevelFair: '普通',
+    qualityLevelPoor: '低い',
+    qualityLevelUnavailable: '利用不可',
+    backtestError: 'バックテスト誤差',
+    adjustedError: '調整誤差',
+    sampleDays: 'サンプル日数',
+    missingDaysCount: '{count}日分のデータが不足',
+    forDays: '{days}日予測',
 
     // ROI Analysis
     roiAnalysis: 'ROI 分析',
@@ -8069,11 +8111,25 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '예측 총 토큰',
     forecastTotalRequests: '예측 총 요청',
     forecastDailyAvg: '일일 평균 예측',
-    confidenceScore: '신뢰도 점수',
+    confidenceScore: '신뢰도 점수', // 사용되지 않음, 이전 버전 호환성 유지
     forecastExplanation: '지난 7일간의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
     historicalData: '과거 데이터',
     predictedData: '예측 데이터',
     historicalDataUnavailable: '과거 데이터를 사용할 수 없습니다. 예측 데이터만 표시합니다',
+
+    // Forecast Quality Metrics
+    forecastQuality: '예측 품질',
+    qualityMetrics: '품질 지표',
+    qualityLevelQuality: '고품질',
+    qualityLevelSatisfactory: '양호',
+    qualityLevelFair: '보통',
+    qualityLevelPoor: '낮음',
+    qualityLevelUnavailable: '사용 불가',
+    backtestError: '백테스트 오차',
+    adjustedError: '조정 오차',
+    sampleDays: '샘플 일수',
+    missingDaysCount: '{count}일 데이터 누락',
+    forDays: '{days}일 예측',
 
     // ROI Analysis
     roiAnalysis: 'ROI 분석',
