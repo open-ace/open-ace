@@ -153,7 +153,7 @@ than transferred.
 One class, one job: hold one transcript per session line.
 
 ```
-<state_root>/<workflow_id>/<session_line>.jsonl     # 0700, control-plane owned
+<state_root>/<workflow_id>/<tracking_session_id>.jsonl   # 0700, control-plane owned
 ```
 
 `state_root` follows the existing per-task convention —
@@ -165,9 +165,14 @@ tmpfs on Linux: transcripts do not survive a reboot. That is the same bargain
 
 Operations: `put`, `get`, `discard`, `purge(workflow_id)`.
 
-Keyed by **line, not by `cli_session_id`** — the id changes whenever a line is
-force-freshed, while the line is the stable identity `SESSION_LINE_FIELDS`
-already encodes.
+Keyed by the line's **tracking** session id, never by `cli_session_id`. The two
+are different things and the distinction is the whole point: `cli_session_id` is
+the provider's transcript id and changes on every force-fresh, while the tracking
+id is the stable per-line identity `SESSION_LINE_FIELDS` stores on the workflow
+row and `_resolve_session_line` returns. It survives force-fresh, and
+`run_agent_task` already receives it as `session_id` — so this keying needs no
+signature change. A `"fresh"` line gets a new uuid per call and therefore
+correctly carries nothing.
 
 Retention: purged when the workflow reaches a terminal state, plus an age-based
 reaper bounding orphans, mirroring the `.claude-preserve` sibling reaper that
