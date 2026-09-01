@@ -19,9 +19,11 @@ export {
 } from './format';
 export {
   getDefaultDateRange,
+  getQuickRangeDateRange,
   toLocalDateString,
   DEFAULT_DATE_RANGE_DAYS,
   type DateRange,
+  type QuickRangeOption,
 } from './dateRange';
 
 export {

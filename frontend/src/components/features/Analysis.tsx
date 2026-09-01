@@ -20,7 +20,7 @@ import {
   SimpleTabs,
   DatePicker,
 } from '@/components/common';
-import { formatTokens, formatDate, formatToolName, formatHourRange } from '@/utils';
+import { formatTokens, formatToolName, formatHourRange, getQuickRangeDateRange } from '@/utils';
 import {
   useKeyMetrics,
   useDailyHourlyUsage,
@@ -72,36 +72,9 @@ export const Analysis: React.FC = () => {
   const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
+  // Uses getQuickRangeDateRange to ensure exactly N calendar days with proper local date handling
   const dateRange = useMemo(() => {
-    const end = new Date();
-    let start: Date;
-
-    switch (quickRange) {
-      case '7':
-        start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30':
-        start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90':
-        start = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case 'all':
-      default:
-        // Use the actual data range when available; fall back to last year.
-        if (dataRange?.min_date && dataRange?.max_date) {
-          start = new Date(dataRange.min_date);
-          end.setTime(new Date(dataRange.max_date).getTime());
-        } else {
-          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // Last year as "all"
-        }
-        break;
-    }
-
-    return {
-      start: formatDate(start, 'iso'),
-      end: formatDate(end, 'iso'),
-    };
+    return getQuickRangeDateRange(quickRange, dataRange ?? undefined);
   }, [quickRange, dataRange]);
 
   const [startDate, setStartDate] = useState(dateRange.start);

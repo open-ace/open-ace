@@ -19,7 +19,7 @@ import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Card, StatCard, Error, EmptyState, LineChart, Loading } from '@/components/common';
-import { formatTokens } from '@/utils';
+import { formatTokens, getDefaultDateRange } from '@/utils';
 import { useUsageForecast, useDailyHourlyUsage } from '@/hooks';
 
 /**
@@ -64,14 +64,8 @@ export const UsageForecast: React.FC = () => {
   } = useUsageForecast(forecastDays);
 
   // Fetch historical data (past 7 days, matching backend moving average window)
-  const historicalDateRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
+  // Use getDefaultDateRange to ensure exactly 7 calendar days with proper local date handling
+  const historicalDateRange = useMemo(() => getDefaultDateRange(7), []);
 
   const {
     data: historicalData,
