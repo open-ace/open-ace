@@ -102,16 +102,79 @@ def test_python_min_timeout_budget_absorbs_runner_variance():
     599s ("Command exceeded 599s") with ZERO test failures. The lane is a
     required check, so the kill randomly blocked merges. The 600s budget was
     shared by compileall + the whole pytest run. 1200s keeps ~1.8x headroom
-    over the worst observed run without masking a real slowdown: the same
-    unit tests also run under python-core's unchanged 600s on 3.11 (typical
-    340-388s), which would trip first. Changing this pin requires consciously
-    re-deriving the budget from fresh variance evidence, not silently
-    trimming it back toward the variance cliff.
+    over the worst observed run without masking a real slowdown: per-test
+    --timeout on both unit lanes (see test_unit_lanes_fail_fast_on_hung_tests)
+    now catches genuine hangs far below the suite budget. Changing this pin
+    requires consciously re-deriving the budget from fresh variance
+    evidence, not silently trimming it back toward the variance cliff.
     """
     import json
 
     suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
     assert suites["python-min"]["timeout_seconds"] == 1200
+
+
+def test_python_core_timeout_budget_absorbs_runner_variance():
+    """#3280: python-core's suite budget must absorb GitHub-hosted runner variance.
+
+    #3241 kept python-core at 600s as a "tripwire" that would trip before
+    python-min's raised budget if the suite genuinely slowed down. The
+    2026-09-01 evidence in #3280 shows that tripwire sits INSIDE the runner
+    variance band, so it fires on healthy runs: the same main-branch suite
+    passed in 535.69s (run 33497187190) while two other runs were killed at
+    599s (33490406262, 33482741069) and the fast tail finishes in ~290-385s.
+    A required check that dies on a 1.6x slow runner is a flake source, not
+    a regression tripwire; the regression signal now comes from per-test
+    --timeout instead (test_unit_lanes_fail_fast_on_hung_tests). 1200s matches
+    python-min and keeps ~2.2x headroom over the slowest observed healthy
+    run. Changing this pin requires re-deriving the budget from fresh
+    variance evidence, not trimming it back toward the variance cliff.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["python-core"]["timeout_seconds"] == 1200
+
+
+def _pytest_command(suite_name: str) -> list[str]:
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    commands = [tuple(c) for c in suites[suite_name]["commands"]]
+    pytest_cmd = next((c for c in commands if c[:3] == ("{python}", "-m", "pytest")), None)
+    assert pytest_cmd is not None, f"{suite_name} must run pytest"
+    return list(pytest_cmd)
+
+
+def _has_flag_pair(command: list[str], pair: tuple[str, str]) -> bool:
+    return any(command[i : i + 2] == list(pair) for i in range(len(command) - 1))
+
+
+def test_unit_lanes_fail_fast_on_hung_tests():
+    """#3280: unit lanes must bound each test instead of only the whole suite.
+
+    pytest-timeout is installed but was never passed on these lanes, so a
+    hung xdist worker (e.g. the gevent-at-collection deadlock shape #3280
+    cites) burned the ENTIRE suite budget and died with a bare
+    "Command exceeded 599s" plus undiagnosable "OSError: cannot send". A
+    300s per-test bound with the thread method dumps every thread's stack
+    and kills the hung worker loudly: 300s is ~6x the slowest single test
+    on record (46.7s, full-suite --durations measurement on 2026-09-01),
+    so it cannot falsely kill a healthy test, while a hang surfaces in
+    bounded time with a stack trace instead of at the suite ceiling.
+    --durations=20 prints the slowest tests on every run so a shrinking
+    budget margin is visible in the log before it becomes a timeout.
+    """
+    for lane in ("python-core", "python-min"):
+        command = _pytest_command(lane)
+        for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
+            pair = (flag, value)
+            assert _has_flag_pair(
+                command, pair
+            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
+        assert (
+            "--durations" in command
+        ), f"{lane} pytest command must pass --durations (got {command})"
 
 
 def test_backend_change_runs_the_min_version_unit_lane():
