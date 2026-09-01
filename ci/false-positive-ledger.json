@@ -285,18 +285,6 @@
     },
     {
       "pattern": "no_assertion",
-      "file": "tests/unit/test_agent_transport.py",
-      "function": "test_shutdown_on_an_already_dead_process_does_not_raise",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_analytics_routes.py",
-      "function": "TestParseDateRange.test_route",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
       "file": "tests/unit/test_fetch_wrapper_2543.py",
       "function": "TestAuditLogging.test_audit_log_created",
       "count": 1
@@ -425,42 +413,6 @@
       "pattern": "no_assertion",
       "file": "tests/unit/test_openace_git_wrapper.py",
       "function": "test_version_and_help_are_only_standalone_passthrough",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_client.py",
-      "function": "test_delete_sandbox_treats_404_as_success",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_policy.py",
-      "function": "test_a_cni_tier_accepts_any_public_proxy_host",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_policy.py",
-      "function": "test_an_allowlisted_proxy_url_passes",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_provider.py",
-      "function": "test_destroy_attribution_never_raises",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_wiring.py",
-      "function": "test_sweep_survives_a_provider_failure_on_one_row",
-      "count": 1
-    },
-    {
-      "pattern": "no_assertion",
-      "file": "tests/unit/test_opensandbox_workspace.py",
-      "function": "test_apply_deleting_a_missing_path_is_not_an_error",
       "count": 1
     }
   ]

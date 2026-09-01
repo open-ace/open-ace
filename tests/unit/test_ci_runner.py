@@ -843,7 +843,7 @@ KNOWN_DEBT_FROZEN_SEED = (
     ),
 )
 
-KNOWN_DEBT_FINDING_TOTAL = 77  # total findings across all seed entries
+KNOWN_DEBT_FINDING_TOTAL = 69  # total findings across all seed entries (#3186 batch 1: 77 -> 69)
 
 
 def _ledger_counts() -> dict[tuple[str, str, str], int]:

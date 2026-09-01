@@ -104,7 +104,7 @@ def test_shutdown_escalates_sigterm_then_sigkill_on_the_process_group():
     # Reproduces today's teardown exactly: SIGTERM, wait, then SIGKILL. The
     # child ignores SIGTERM, so only the escalation ends it.
     process = _spawn(
-        "import signal, time\n" "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" "time.sleep(60)"
+        "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)"
     )
     transport = LocalProcessTransport(process)
     started = time.monotonic()
@@ -117,7 +117,8 @@ def test_shutdown_on_an_already_dead_process_does_not_raise():
     process = _spawn("pass")
     transport = LocalProcessTransport(process)
     transport.wait(timeout=5)
-    transport.shutdown(grace=0.5)
+    assert process.poll() is not None  # premise: dead AND reaped by wait()
+    assert transport.shutdown(grace=0.5) is None
 
 
 def test_local_transport_satisfies_the_protocol():
