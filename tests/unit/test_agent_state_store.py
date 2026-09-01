@@ -134,12 +134,61 @@ def test_the_file_is_private(store):
         ("...", "main"),
         ("wf-1", ".."),
         ("wf-1", "."),
+        # Trailing newline. Python's `$` matches BEFORE one, so a `$`-anchored
+        # pattern accepts "wf-1\n" — and the key is used verbatim as a path
+        # component, so that workflow would own two slots and resume half its
+        # history. `\Z` is what closes it.
+        ("wf-1\n", "main"),
+        ("wf-1", "main\n"),
+        # Surrounding whitespace. Refused rather than stripped: stripping is
+        # the "silently rewriting a key" the module comment forbids, because
+        # " wf-1 " and "wf-1" stay two distinct database values while landing
+        # in one slot.
+        (" wf-1", "main"),
+        ("wf-1 ", "main"),
+        ("wf-1", " main"),
+        ("wf-1", "main "),
     ],
 )
 def test_keys_that_are_not_plain_components_are_refused(store, workflow_id, line_id):
     """Both ids reach this from the database; neither is a trusted path fragment."""
     with pytest.raises(ValueError):
         store.put(workflow_id, line_id, b"nope")
+
+
+def test_a_trailing_newline_is_not_the_same_slot(store):
+    """The consequence the anchor prevents, stated as an outcome.
+
+    If `wf-1\n` were accepted it would be a SEPARATE directory from `wf-1`,
+    so the same workflow would resume from whichever spelling the caller
+    happened to pass — losing every turn stored under the other one.
+    """
+    store.put("wf-1", "main", b"the real history")
+
+    with pytest.raises(ValueError):
+        store.put("wf-1\n", "main", b"a second slot")
+
+    assert store.get("wf-1", "main") == b"the real history"
+    assert [p.name for p in store.path_for("wf-1", "main").parent.parent.iterdir()] == ["wf-1"]
+
+
+def test_the_store_and_the_provider_agree_on_what_a_safe_id_is(store):
+    """One rule, two enforcers. They must not drift apart.
+
+    The provider refuses a session id that the store would have accepted (or
+    vice versa) only if one of them is wrong — and the loose one is where the
+    bug lands.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import _SAFE_SESSION_ID
+
+    for bad in ("wf-1\n", " wf-1", "wf-1 ", "..", ".", "wf/1", ""):
+        assert not _SAFE_SESSION_ID.match(bad), f"the provider accepted {bad!r}"
+        with pytest.raises(ValueError):
+            store.put("wf-1", bad, b"nope")
+
+    for good in ("wf-1", "main", "review", "a_b.c-d"):
+        assert _SAFE_SESSION_ID.match(good), f"the provider refused {good!r}"
+        store.put("wf-1", good, b"ok")
 
 
 @pytest.mark.parametrize("op", ["purge", "discard", "get", "path_for"])

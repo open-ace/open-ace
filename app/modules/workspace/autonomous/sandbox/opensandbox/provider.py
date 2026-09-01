@@ -47,7 +47,10 @@ from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT
 from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as workspace_mod
-from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
+from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
+    HttpOpenSandboxApi,
+    OpenSandboxApiError,
+)
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 from app.modules.workspace.autonomous.sandbox.opensandbox.transport import PtyWebSocketTransport
 from app.modules.workspace.autonomous.sandbox.provider import (
@@ -562,9 +565,26 @@ class OpenSandboxProvider:
             # scheduler pod runs with a 512Mi limit, so reading first and
             # measuring second could OOM-kill the control plane.
             blob = self._api.download_file(handle.sandbox_id, path, max_bytes=MAX_AGENT_STATE_BYTES)
+        except OpenSandboxApiError as exc:
+            # Both outcomes return None, but they are NOT the same event and
+            # must not look the same in the audit trail. A missing transcript is
+            # routine — a turn that never started a session. An oversized one
+            # means this line has silently stopped carrying history and will
+            # keep doing so every turn, and it is the only place the real size
+            # distribution is observable. An earlier revision folded the two
+            # together: the same silent-refusal defect fixed twenty lines above
+            # for hostile ids, reintroduced by the fix for the size bound.
+            if exc.code == "FILE_TOO_LARGE":
+                self._emit(
+                    "agent_state_too_large",
+                    {
+                        "sandbox_id": handle.sandbox_id,
+                        "limit_bytes": MAX_AGENT_STATE_BYTES,
+                        "detail": str(exc),
+                    },
+                )
+            return None
         except SandboxError:
-            # Covers "no transcript there" and "too large" alike: both mean
-            # nothing is carried, and neither may cost a finished milestone.
             return None
         return blob
 

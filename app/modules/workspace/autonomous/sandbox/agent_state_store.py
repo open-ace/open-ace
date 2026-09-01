@@ -46,7 +46,13 @@ DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600
 # `/run/openace-agent-tasks` — where `shutil.rmtree` would take out every live
 # agent's per-task HOME/TMP/XDG and every `.claude-preserve` directory with it.
 # Verified destructive against a temp tree modelling that layout.
-_SAFE_KEY = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
+#
+# `\Z`, not `$`: Python's `$` also matches before a trailing newline, so `$`
+# here would ACCEPT "wf-1\n" — and since the key is used verbatim as a path
+# component, "wf-1\n" and "wf-1" would then be two different slots for one
+# workflow, silently splitting its history. Matching `_SAFE_SESSION_ID` in the
+# OpenSandbox provider, which refuses the same input for the same reason.
+_SAFE_KEY = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\Z")
 
 
 class AgentStateError(Exception):
@@ -163,7 +169,11 @@ class AgentStateStore:
 
     @staticmethod
     def _key(value: str) -> str:
-        candidate = str(value or "").strip()
+        # No `.strip()`. Stripping is sanitising, and the comment on _SAFE_KEY
+        # says why that is the wrong move here: " wf-1 " and "wf-1" would map
+        # to one slot while remaining two distinct database values. Refuse the
+        # odd one instead, so a caller with a malformed id learns about it.
+        candidate = str(value or "")
         if not _SAFE_KEY.match(candidate):
             raise ValueError(f"unsafe agent-state key {value!r}")
         return candidate

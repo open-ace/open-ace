@@ -210,13 +210,26 @@ class _FakeResponse:
 
 
 def _client_with(response, monkeypatch):
+    """Returns (api, calls) where `calls` records the kwargs of each request.
+
+    Recording them is the point. Round 1's lesson was that tests can exercise
+    a feature's logic thoroughly while never observing the mechanism that makes
+    it work — and `stream=True` IS the mechanism here. Without it `requests`
+    buffers the whole body before anything measures it, `iter_content` walks an
+    already-resident body, and every size assertion still passes while the OOM
+    protection is gone.
+    """
     from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
 
     api = HttpOpenSandboxApi.__new__(HttpOpenSandboxApi)
-    monkeypatch.setattr(
-        HttpOpenSandboxApi, "_execd_request", lambda self, *a, **k: response, raising=False
-    )
-    return api
+    calls: list[dict] = []
+
+    def _record(self, *a, **k):
+        calls.append(k)
+        return response
+
+    monkeypatch.setattr(HttpOpenSandboxApi, "_execd_request", _record, raising=False)
+    return api, calls
 
 
 def test_a_bounded_download_refuses_on_content_length_without_reading(monkeypatch):
@@ -228,7 +241,7 @@ def test_a_bounded_download_refuses_on_content_length_without_reading(monkeypatc
     from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
 
     response = _FakeResponse(b"x" * 100, declared="100")
-    api = _client_with(response, monkeypatch)
+    api, _calls = _client_with(response, monkeypatch)
 
     with pytest.raises(OpenSandboxApiError, match="over the"):
         api.download_file("sb-1", "/p", max_bytes=10)
@@ -245,7 +258,7 @@ def test_a_bounded_download_still_counts_when_the_header_lies(monkeypatch):
     from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
 
     response = _FakeResponse(b"x" * 500_000, declared="1")
-    api = _client_with(response, monkeypatch)
+    api, _calls = _client_with(response, monkeypatch)
 
     with pytest.raises(OpenSandboxApiError, match="mid-transfer"):
         api.download_file("sb-1", "/p", max_bytes=1000)
@@ -255,7 +268,7 @@ def test_a_bounded_download_with_no_length_header_still_bounds(monkeypatch):
     from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
 
     response = _FakeResponse(b"x" * 500_000)
-    api = _client_with(response, monkeypatch)
+    api, _calls = _client_with(response, monkeypatch)
 
     with pytest.raises(OpenSandboxApiError, match="mid-transfer"):
         api.download_file("sb-1", "/p", max_bytes=1000)
@@ -263,7 +276,7 @@ def test_a_bounded_download_with_no_length_header_still_bounds(monkeypatch):
 
 def test_a_bounded_download_returns_a_body_within_the_limit(monkeypatch):
     response = _FakeResponse(b"small", declared="5")
-    api = _client_with(response, monkeypatch)
+    api, _calls = _client_with(response, monkeypatch)
 
     assert api.download_file("sb-1", "/p", max_bytes=1000) == b"small"
 
@@ -275,7 +288,90 @@ def test_an_unbounded_download_is_unchanged(monkeypatch):
     need of the streaming path and must not pay for it.
     """
     response = _FakeResponse(b"whatever", declared="8")
-    api = _client_with(response, monkeypatch)
+    api, _calls = _client_with(response, monkeypatch)
 
     assert api.download_file("sb-1", "/p") == b"whatever"
     assert response.read_bytes == 0, "the unbounded path should use .content"
+
+
+def test_a_bounded_download_actually_streams(monkeypatch):
+    """`stream=True` IS the bound. Without it the body is already resident.
+
+    Every size assertion in this file passes with the flag removed, because
+    the fake response yields from a body it already holds. Only observing the
+    request kwargs catches it.
+    """
+    response = _FakeResponse(b"small", declared="5")
+    api, calls = _client_with(response, monkeypatch)
+
+    api.download_file("sb-1", "/p", max_bytes=1000)
+
+    assert calls and calls[0].get("stream") is True, (
+        f"the bounded download did not stream; requests would buffer the whole "
+        f"body before the cap could apply: {calls}"
+    )
+
+
+def test_an_unbounded_download_does_not_stream(monkeypatch):
+    """The ChangeSet path must keep using .content, unchanged."""
+    response = _FakeResponse(b"whatever", declared="8")
+    api, calls = _client_with(response, monkeypatch)
+
+    api.download_file("sb-1", "/p")
+
+    assert (
+        calls and "stream" not in calls[0]
+    ), f"the unbounded path changed shape; ChangeSet fetches share this method: {calls}"
+
+
+def test_a_bounded_download_closes_the_response_on_success(monkeypatch):
+    response = _FakeResponse(b"small", declared="5")
+    api, _calls = _client_with(response, monkeypatch)
+
+    api.download_file("sb-1", "/p", max_bytes=1000)
+
+    assert response.closed, "a streamed response was left open"
+
+
+def test_a_bounded_download_closes_the_response_when_it_refuses(monkeypatch):
+    """The leak that matters: refusing mid-transfer must not strand a socket."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    response = _FakeResponse(b"x" * 500_000)
+    api, _calls = _client_with(response, monkeypatch)
+
+    with pytest.raises(OpenSandboxApiError):
+        api.download_file("sb-1", "/p", max_bytes=1000)
+
+    assert response.closed, "the connection leaked when the cap was exceeded"
+
+
+def test_the_real_clients_boundary_is_inclusive(monkeypatch):
+    """Exactly max_bytes is allowed — asserted against the CLIENT, not the fake.
+
+    The fake has its own independent boundary check, so an at-the-cap test
+    routed through it leaves the real client's edge unexercised and lets the
+    two implementations disagree by one byte.
+    """
+    body = b"x" * 1000
+    response = _FakeResponse(body, declared="1000")
+    api, _calls = _client_with(response, monkeypatch)
+
+    assert api.download_file("sb-1", "/p", max_bytes=1000) == body
+
+
+def test_the_fake_and_the_client_agree_at_the_boundary():
+    """Both refuse at cap+1 and both allow at cap.
+
+    A fake that disagrees with the client is how a cap looks enforced in tests
+    and is not in production.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    api = FakeOpenSandboxApi()
+    api.sandboxes["sb-x"] = {"id": "sb-x", "status": {"state": "Running"}, "metadata": {}}
+    api.uploaded["sb-x"] = {"/p": b"x" * 1000}
+
+    assert api.download_file("sb-x", "/p", max_bytes=1000) == b"x" * 1000
+    with pytest.raises(OpenSandboxApiError):
+        api.download_file("sb-x", "/p", max_bytes=999)
