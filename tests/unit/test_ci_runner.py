@@ -101,15 +101,15 @@ def test_min_supported_python_runs_the_full_unit_suite():
     suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
     commands = suites["python-min"]["commands"]
     flat = [tuple(c) for c in commands]
-    assert any(c[:3] == ("{python}", "-m", "compileall") for c in flat), (
-        "python-min must compileall"
-    )
+    assert any(
+        c[:3] == ("{python}", "-m", "compileall") for c in flat
+    ), "python-min must compileall"
     pytest_cmd = next((c for c in flat if c[:3] == ("{python}", "-m", "pytest")), None)
     assert pytest_cmd is not None, "python-min must run pytest"
     # The WHOLE unit tree, not a hand-picked subset — that is the #2868 fix.
-    assert "tests/unit/" in pytest_cmd, (
-        f"python-min must run the full tests/unit/, got {pytest_cmd}"
-    )
+    assert (
+        "tests/unit/" in pytest_cmd
+    ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
 
 
 def test_python_min_timeout_budget_absorbs_runner_variance():
@@ -188,12 +188,12 @@ def test_unit_lanes_fail_fast_on_hung_tests():
         command = _pytest_command(lane)
         for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
             pair = (flag, value)
-            assert _has_flag_pair(command, pair), (
-                f"{lane} pytest command must pass {flag} {value} (got {command})"
-            )
-        assert "--durations" in command, (
-            f"{lane} pytest command must pass --durations (got {command})"
-        )
+            assert _has_flag_pair(
+                command, pair
+            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
+        assert (
+            "--durations" in command
+        ), f"{lane} pytest command must pass --durations (got {command})"
 
 
 def test_backend_change_runs_the_min_version_unit_lane():
@@ -903,9 +903,9 @@ def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
     live = scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT)
-    assert all(counts[identity] <= live.get(identity, 0) for identity in ledger_ids), (
-        f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
-    )
+    assert all(
+        counts[identity] <= live.get(identity, 0) for identity in ledger_ids
+    ), f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
 
 
 def test_every_selectable_pr_suite_has_a_workflow_consumer():
@@ -985,9 +985,9 @@ def test_false_positive_scan_lane_is_gate_consumed():
         if "ci.py run false-positive-scan" in str(job)
     )
     gate = workflow["jobs"]["pr-gate"]
-    assert scan_job in gate["needs"], (
-        f"job {scan_job} executes the scanner but is absent from pr-gate needs"
-    )
+    assert (
+        scan_job in gate["needs"]
+    ), f"job {scan_job} executes the scanner but is absent from pr-gate needs"
     validate_step = next(s for s in gate["steps"] if "Validate required" in str(s.get("name", "")))
     snippet = str(validate_step["run"])
     assert "SCAN" in validate_step["env"], "pr-gate must map the scanner result to SCAN"
@@ -1102,6 +1102,6 @@ def test_every_postgres_marked_integration_file_uses_pg_naming():
             if marked:
                 offenders.append(path.name)
                 break
-    assert not offenders, (
-        f"postgres-marked files not matching *_pg.py (the lane-selection glob): {offenders}"
-    )
+    assert (
+        not offenders
+    ), f"postgres-marked files not matching *_pg.py (the lane-selection glob): {offenders}"
