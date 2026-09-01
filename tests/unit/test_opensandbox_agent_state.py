@@ -284,12 +284,25 @@ def test_no_session_id_is_not_an_incident(audited, empty):
 def test_a_non_api_sandbox_error_is_handled_without_touching_code(audited):
     """This is what the two separate `except` clauses are FOR.
 
-    `OpenSandboxApiError` subclasses `SandboxError` and only the subclass
-    carries `.code`. Collapsing the handlers into a single
-    `except SandboxError as exc` therefore reads `.code` off a base
-    `SandboxError` that does not have one, turning an ordinary transport
-    failure at the end of a successful turn into an `AttributeError` — and
-    losing the transcript on a turn that had earned it.
+    `OpenSandboxApiError` is the ONLY `SandboxError` subclass carrying
+    `.code`; `SandboxError` itself, `CapabilityUnsupported`,
+    `SandboxConfigError` and `OpenSandboxError` (which carries `reason_code`)
+    do not. Collapsing the handlers into a single `except SandboxError as exc`
+    therefore reads `.code` off an exception that does not have one, and the
+    handler itself raises `AttributeError`.
+
+    Scope, stated honestly. Every `raise` in `client.py` is an
+    `OpenSandboxApiError`, and so is every raise in `FakeOpenSandboxApi`, so
+    no bare `SandboxError` reaches this block through either implementation
+    that exists today. And `_run_local` wraps the export in
+    `except Exception` -> log -> `discard()`, so even if one did, the turn
+    would survive with the same outcome as the `return None` path.
+
+    So this is not a data-loss bug: it is a latent crash inside an error
+    handler, on a Protocol seam typed by the base class, that the deliberate
+    catch-all upstream would mask into a misleading log line. Worth pinning
+    because the `except SandboxError` clause exists precisely to serve
+    implementations other than today's two.
     """
     from app.modules.workspace.autonomous.sandbox.provider import SandboxError
 
