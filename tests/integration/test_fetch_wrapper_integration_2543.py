@@ -80,71 +80,20 @@ def temp_db():
 # ============================================================================
 
 
-class TestPermission700Collection:
-    """Test that users with permission 700 home directories are collected."""
-
-    @pytest.mark.skipif(
-        os.geteuid() != 0,
-        reason="Requires root access",
-    )
-    def test_two_users_permission_700_collected(self, project_root, wrapper_path, temp_test_users):
-        """
-        Test case 1 from verification plan:
-        Two users with permission 700 home directories are collected.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        # Create test users with permission 700 home directories
-        # Create Qwen data in their home directories
-        # Run wrapper
-        # Verify data is collected
-
-        pass
-
-    @pytest.mark.skipif(
-        os.geteuid() != 0,
-        reason="Requires root access",
-    )
-    def test_message_count_correct(self, project_root, wrapper_path):
-        """
-        Test that message_count and request_count are correct after collection.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        pass
-
-    @pytest.mark.skipif(
-        os.geteuid() != 0,
-        reason="Requires root access",
-    )
-    def test_user_id_mapping_correct(self, project_root, wrapper_path):
-        """
-        Test that user_id is correctly mapped from system_account.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        pass
-
-
-# ============================================================================
-# Security tests
-# ============================================================================
+# TestPermission700Collection was deleted (#3186 batch 3): three root-gated
+# pass-body placeholders requiring real user creation — no CI-honest path
+# (mock-gated testing is the forbidden formal repair). The root/multi-user
+# e2e family is tracked in #3293. temp_test_users (an unimplemented shell
+# fixture) was removed with it.
 
 
 class TestSecurityIntegration:
     """Security tests that require full environment."""
 
-    def test_web_service_cannot_read_other_users(self, project_root):
-        """
-        Test that web service still cannot read other users' home directories.
-        """
-        # This test verifies that the wrapper doesn't create a security hole
-        # Web service should still get permission denied
-
-        pass
+    # test_web_service_cannot_read_other_users was deleted (#3186 batch 3):
+    # the service-account permission-regression e2e needs a deployment
+    # context (#3293); the wrapper's sudoers confinement face is asserted by
+    # test_sudoers_only_allows_wrapper below.
 
     def test_sudoers_only_allows_wrapper(self, project_root):
         """
@@ -187,29 +136,82 @@ class TestSecurityIntegration:
             )
             assert result.returncode != 0, f"Injection not blocked: {args}"
 
-    def test_symlink_attack_blocked(self, wrapper_path):
+    def test_symlink_attack_blocked(self, wrapper_path, tmp_path):
+        """A whitelist-side symlink pointing OUTSIDE the whitelist is rejected
+        by the REAL validate_file closure (#3186 batch 3).
+
+        The link must live under a home-shaped path (the allowlist gates the
+        link location); its malicious target lives in plain tmp_path —
+        safe_resolve_symlink must refuse to resolve outside the whitelist,
+        and the rejection is audited.
         """
-        Test that symlink attacks are blocked.
-        """
+        import re as _re
+        import shutil
+        import subprocess as _sp
+        import uuid
+
         if wrapper_path is None:
             pytest.skip("Wrapper not installed")
 
-        # Create a symlink attack scenario
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create malicious file
-            malicious_file = Path(tmpdir) / "malicious.jsonl"
-            malicious_file.write_text('{"malicious": true}')
+        text = Path(wrapper_path).read_text(encoding="utf-8")
+        parts = []
+        for fn in [
+            "normalize_path",
+            "is_allowed_path",
+            "safe_resolve_symlink",
+            "log_audit",
+            "validate_file",
+        ]:
+            m = _re.search(rf"^{fn}\(\) \{{.*?^\}}", text, _re.S | _re.M)
+            assert m, f"extraction failed for {fn}"
+            parts.append(m.group(0))
+        for cp, flags in [
+            (r"^MAX_FILE_SIZE=.*$", _re.M),
+            (r"^MAX_SYMLINK_DEPTH=.*$", _re.M),
+            (r"^AUDIT_LOG=.*$", _re.M),
+            (r"^declare -A TOOL_TO_DIR=\(.*?^\)$", _re.S | _re.M),
+        ]:
+            m = _re.search(cp, text, flags)
+            assert m, f"extraction failed for {cp}"
+            parts.append(m.group(0))
+        harness = tmp_path / "closure.sh"
+        harness.write_text("\n\n".join(parts) + "\n")
 
-            # Create user directory structure
-            user_dir = Path(tmpdir) / "home" / "user" / ".qwen" / "projects"
-            user_dir.mkdir(parents=True)
+        under_home = Path.home() / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
+        audit = tmp_path / "audit.log"
+        try:
+            proj = under_home / "projects"
+            proj.mkdir(parents=True)
+            malicious = tmp_path / "malicious.jsonl"
+            malicious.write_text('{"malicious": true}')
+            symlink = proj / "attack.jsonl"
+            symlink.symlink_to(malicious)
 
-            # Create symlink
-            symlink = user_dir / "attack.jsonl"
-            symlink.symlink_to(malicious_file)
+            preflight = (
+                "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit validate_file; "
+                "do declare -F $f >/dev/null || exit 99; done"
+            )
+            script = (
+                f"set -u; source {harvest_quote(harness)}; {preflight} || exit 99; "
+                f"validate_file {harvest_quote(symlink)}; echo rc=$?"
+            )
+            result = _sp.run(
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "AUDIT_LOG": str(audit)},
+            )
+            assert result.returncode == 0, result.stderr
+            assert "rc=1" in result.stdout
+            assert "symlink_rejected" in audit.read_text()
+        finally:
+            shutil.rmtree(under_home, ignore_errors=True)
 
-            # The wrapper should reject this when trying to read
-            # (actual test would need full setup)
+
+def harvest_quote(path) -> str:
+    import shlex
+
+    return shlex.quote(str(path))
 
 
 # ============================================================================
@@ -268,38 +270,11 @@ class TestConfigurationIntegration:
 # ============================================================================
 
 
-class TestErrorHandlingIntegration:
-    """Test error handling and degraded states."""
-
-    def test_degraded_status_on_partial_failure(self, wrapper_path):
-        """
-        Test that degraded status is returned when some users are denied.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        # Setup: Some users accessible, some not
-        # Run collection
-        # Verify status is "degraded" not "failed"
-
-        pass
-
-    def test_idempotent_collection(self, wrapper_path, temp_db):
-        """
-        Test that repeated collection doesn't duplicate messages.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        # Run collection twice
-        # Verify message count doesn't double
-
-        pass
-
-
-# ============================================================================
-# Audit logging tests
-# ============================================================================
+# TestErrorHandlingIntegration was deleted (#3186 batch 3): the degraded
+# contract is implemented for real in
+# tests/unit/test_fetch_wrapper_2543.py::TestIntegration (additive home_base
+# scan root + chmod-000 projects dir => REAL PermissionError => denied), and
+# idempotent collection likewise (test_idempotent_collection).
 
 
 class TestAuditLoggingIntegration:
@@ -358,39 +333,8 @@ class TestAuditLoggingIntegration:
 
 # ============================================================================
 # Performance tests
-# ============================================================================
-
-
-class TestPerformanceIntegration:
-    """Performance tests for large scale collection."""
-
-    @pytest.mark.slow
-    def test_100_users_performance(self, wrapper_path):
-        """
-        Test that collection of 100 users completes in reasonable time.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        # This test would create 100 test users and measure collection time
-        # Target: < 5 minutes
-
-        pass
-
-    @pytest.mark.slow
-    def test_large_file_handling(self, wrapper_path):
-        """
-        Test that large files are handled correctly.
-        """
-        if wrapper_path is None:
-            pytest.skip("Wrapper not installed")
-
-        # Create a file > 50MB
-        # Verify it's skipped
-        # Verify other files are still collected
-
-        pass
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+# TestPerformanceIntegration was deleted (#3186 batch 3): the 100-real-user
+# scale scenario belongs to the root/e2e family (#3293), and the large-file
+# contract is covered for real by the extracted validate_file test in
+# tests/unit/test_fetch_wrapper_2543.py (these were @pytest.mark.slow, not
+# performance-marked — a different case from #3290).

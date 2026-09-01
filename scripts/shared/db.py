@@ -177,8 +177,7 @@ def get_connection() -> sqlite3.Connection | Any:
             return conn
         except ImportError:
             raise ImportError(
-                "psycopg2 is required for PostgreSQL. "
-                "Install it with: pip install psycopg2-binary"
+                "psycopg2 is required for PostgreSQL. Install it with: pip install psycopg2-binary"
             )
     else:
         ensure_db_dir()
@@ -339,6 +338,7 @@ def init_database() -> None:
             sender_id TEXT,
             sender_name TEXT,
             message_source TEXT,
+            user_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(date, tool_name, message_id, host_name)
         )
@@ -367,6 +367,15 @@ def init_database() -> None:
     if not _column_exists(cursor, "daily_usage", "request_count"):
         print("Adding request_count column to existing database...")
         _execute(cursor, "ALTER TABLE daily_usage ADD COLUMN request_count INTEGER DEFAULT 0")
+        conn.commit()
+
+    # user_id: schema-sqlite.sql and the alembic baseline already carry it, but
+    # this CREATE TABLE historically omitted it — every fresh init_database()
+    # SQLite crashed save_messages_batch with "no such column: user_id"
+    # (#3186 batch 3; the SELECT/INSERT reference it on both dialects).
+    if not _column_exists(cursor, "daily_messages", "user_id"):
+        print("Adding user_id column to existing database...")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN user_id INTEGER")
         conn.commit()
 
     # Check if full_entry column exists in daily_messages, add it if not (for old databases)
@@ -570,7 +579,7 @@ def get_usage_by_date(
         cursor,
         f"""
         SELECT * FROM daily_usage
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
         ORDER BY date DESC
     """,
         params,
@@ -618,7 +627,7 @@ def get_usage_by_tool(
         cursor,
         f"""
         SELECT * FROM daily_usage
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
         ORDER BY date DESC
     """,
         params,
@@ -786,7 +795,7 @@ def get_daily_range(
         cursor,
         f"""
         SELECT * FROM daily_usage
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
         ORDER BY date DESC
     """,
         params,
@@ -1415,7 +1424,7 @@ def get_unique_senders(
                 ELSE sender_id
             END as sender
         FROM daily_messages
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
           AND (sender_name IS NOT NULL OR sender_id IS NOT NULL)
         ORDER BY sender
     """,
@@ -1899,7 +1908,7 @@ def update_user(user_id: int, **kwargs) -> bool:
     _execute(
         cursor,
         f"""
-        UPDATE users SET {', '.join(updates)} WHERE id = ?
+        UPDATE users SET {", ".join(updates)} WHERE id = ?
     """,
         params,
     )
@@ -3145,7 +3154,7 @@ def get_key_metrics(
         f"""
         SELECT SUM(tokens_used) as prev_tokens
         FROM daily_usage
-        WHERE {' AND '.join(prev_conditions)}
+        WHERE {" AND ".join(prev_conditions)}
     """,
         prev_params,
     )

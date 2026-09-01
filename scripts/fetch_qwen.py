@@ -61,12 +61,19 @@ def extract_system_account_from_sender_name(sender_name: str) -> str | None:
     return parts[0]
 
 
-def find_all_qwen_project_dirs() -> dict:
+def find_all_qwen_project_dirs(home_base: Path | None = None) -> dict:
     """
     Find Qwen project directories for all users on the system.
 
     Scans /home/*/.qwen/projects (Linux) or /Users/*/.qwen/projects (macOS)
     Handles PermissionError for directories that cannot be accessed.
+
+    Args:
+        home_base: Override the scanned user-home root (tests pass a fixture
+            tree; the default is the platform's real /home or /Users — the
+            platform branch below MUST stay keyed on os_type, never on this
+            parameter, or a fixture scan silently falls back to the real
+            home (#3186 batch 3 review hazard note).
 
     Issue #2733: Return structured coverage data so the scheduler can detect
     degraded fetch results instead of silently succeeding.
@@ -86,19 +93,27 @@ def find_all_qwen_project_dirs() -> dict:
     }
     os_type = platform.system().lower()
 
-    # Determine user home directories based on OS
-    if os_type == "linux":
-        home_base = Path("/home")
-    elif os_type == "darwin":
-        home_base = Path("/Users")
+    # Determine user home directories based on OS — ONLY when the caller did
+    # not pass a scan root. The platform branch stays keyed on os_type and
+    # must never overwrite a caller-provided home_base (the shared name made
+    # the original unconditional assignment clobber the fixture; #3186
+    # batch 3).
+    if home_base is None:
+        if os_type == "linux":
+            home_base = Path("/home")
+        elif os_type == "darwin":
+            home_base = Path("/Users")
+        else:
+            # Windows or other - just use current user
+            home = Path.home()
+            qwen_projects = home / ".qwen" / "projects"
+            if qwen_projects.is_dir():
+                user = getpass.getuser()
+                result["accessible"].append((user, qwen_projects))
+            return result
     else:
-        # Windows or other - just use current user
-        home = Path.home()
-        qwen_projects = home / ".qwen" / "projects"
-        if qwen_projects.is_dir():
-            user = getpass.getuser()
-            result["accessible"].append((user, qwen_projects))
-        return result
+        # Caller-provided scan root (tests pass a fixture tree).
+        home_base = Path(home_base)
 
     # Scan all user directories
     if not home_base.is_dir():
@@ -1262,6 +1277,7 @@ def fetch_and_save(
     hostname: str | None = None,
     multi_user_mode: bool = False,
     recent: bool = False,
+    home_base: Path | None = None,
 ) -> bool:
     """
     Fetch Qwen usage and save to database.
@@ -1315,7 +1331,7 @@ def fetch_and_save(
 
     if multi_user_mode:
         print("Multi-user mode: scanning all users' qwen directories...")
-        scan_result = find_all_qwen_project_dirs()
+        scan_result = find_all_qwen_project_dirs(home_base=home_base)
 
         accessible = scan_result.get("accessible", [])
         denied = scan_result.get("denied", [])
