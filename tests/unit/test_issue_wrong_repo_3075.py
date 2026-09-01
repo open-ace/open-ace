@@ -262,9 +262,9 @@ class TestPreparationIssueCreation:
         # Verify create_issue was called with the correct repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "blueberry521/123", (
-            f"Expected repo='blueberry521/123', got repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "blueberry521/123"
+        ), f"Expected repo='blueberry521/123', got repo={call_kwargs.kwargs.get('repo')!r}"
         assert result.next_phase == "planning"
 
     def test_create_issue_with_ghes_url(self, tmp_path):
@@ -339,9 +339,9 @@ class TestPreparationIssueCreation:
         # Verify create_issue was called with the correct GHES repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "owner/my-ghes-project", (
-            f"Expected repo='owner/my-ghes-project', got repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "owner/my-ghes-project"
+        ), f"Expected repo='owner/my-ghes-project', got repo={call_kwargs.kwargs.get('repo')!r}"
 
     def test_error_when_repo_url_empty_for_new_project(self, tmp_path):
         """When repo_url is empty and is_new_project=True, an error is raised."""
@@ -541,9 +541,9 @@ class TestIssue3199ExistingProject:
         # Verify create_issue was called with the correct repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "user/existing-project", (
-            f"Expected repo='user/existing-project', got repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "user/existing-project"
+        ), f"Expected repo='user/existing-project', got repo={call_kwargs.kwargs.get('repo')!r}"
         assert result.next_phase == "planning"
 
     def test_existing_project_no_remote_raises_clear_error(self, tmp_path):

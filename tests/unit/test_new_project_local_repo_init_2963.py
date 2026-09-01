@@ -92,9 +92,9 @@ class TestSyncWfAfterCreateRepo:
 
             # Verify wf was synced (this is what the fix adds)
             # In the actual code, this is done by: wf["project_repo_url"] = repo_url
-            assert wf.get("project_repo_url") == repo_url, (
-                "wf should be synced with repo_url after _update_workflow"
-            )
+            assert (
+                wf.get("project_repo_url") == repo_url
+            ), "wf should be synced with repo_url after _update_workflow"
 
 
 class TestIssueRepoFromLocalVariable:
