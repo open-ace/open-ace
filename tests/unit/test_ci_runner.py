@@ -101,15 +101,15 @@ def test_min_supported_python_runs_the_full_unit_suite():
     suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
     commands = suites["python-min"]["commands"]
     flat = [tuple(c) for c in commands]
-    assert any(
-        c[:3] == ("{python}", "-m", "compileall") for c in flat
-    ), "python-min must compileall"
+    assert any(c[:3] == ("{python}", "-m", "compileall") for c in flat), (
+        "python-min must compileall"
+    )
     pytest_cmd = next((c for c in flat if c[:3] == ("{python}", "-m", "pytest")), None)
     assert pytest_cmd is not None, "python-min must run pytest"
     # The WHOLE unit tree, not a hand-picked subset — that is the #2868 fix.
-    assert (
-        "tests/unit/" in pytest_cmd
-    ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    assert "tests/unit/" in pytest_cmd, (
+        f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    )
 
 
 def test_python_min_timeout_budget_absorbs_runner_variance():
@@ -188,12 +188,12 @@ def test_unit_lanes_fail_fast_on_hung_tests():
         command = _pytest_command(lane)
         for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
             pair = (flag, value)
-            assert _has_flag_pair(
-                command, pair
-            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
-        assert (
-            "--durations" in command
-        ), f"{lane} pytest command must pass --durations (got {command})"
+            assert _has_flag_pair(command, pair), (
+                f"{lane} pytest command must pass {flag} {value} (got {command})"
+            )
+        assert "--durations" in command, (
+            f"{lane} pytest command must pass --durations (got {command})"
+        )
 
 
 def test_backend_change_runs_the_min_version_unit_lane():
@@ -903,9 +903,9 @@ def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
     live = scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT)
-    assert all(
-        counts[identity] <= live.get(identity, 0) for identity in ledger_ids
-    ), f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
+    assert all(counts[identity] <= live.get(identity, 0) for identity in ledger_ids), (
+        f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
+    )
 
 
 def test_every_selectable_pr_suite_has_a_workflow_consumer():
@@ -985,9 +985,9 @@ def test_false_positive_scan_lane_is_gate_consumed():
         if "ci.py run false-positive-scan" in str(job)
     )
     gate = workflow["jobs"]["pr-gate"]
-    assert (
-        scan_job in gate["needs"]
-    ), f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    assert scan_job in gate["needs"], (
+        f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    )
     validate_step = next(s for s in gate["steps"] if "Validate required" in str(s.get("name", "")))
     snippet = str(validate_step["run"])
     assert "SCAN" in validate_step["env"], "pr-gate must map the scanner result to SCAN"
@@ -1035,3 +1035,73 @@ def test_false_positive_scan_suite_command_shape():
             "ci/false-positive-ledger.json",
         ]
     ], suites["false-positive-scan"]["commands"]
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL lane wiring (#3287): the lane had NEVER executed a test — the
+# conftest reads PG_TEST_URL while the job only set DATABASE_URL, so all 88
+# postgres-marked tests silently skipped in every run since the lane existed.
+# ---------------------------------------------------------------------------
+
+
+def test_postgres_job_sets_the_variable_the_conftest_reads():
+    """Workflow side of the two-sided pin: the job running the postgres suite
+    must export PG_TEST_URL with a postgresql:// scheme."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    job = next(j for j in workflow["jobs"].values() if "ci.py run postgres" in str(j))
+    env = dict(job.get("env") or {})
+    for step in job.get("steps", []):
+        if isinstance(step, dict):
+            env.update(step.get("env") or {})
+    assert env.get("PG_TEST_URL", "").startswith("postgresql://"), (
+        "the postgres job must set PG_TEST_URL (what tests/integration/conftest.py "
+        f"_get_pg_base_url actually reads); got {env.get('PG_TEST_URL')!r}"
+    )
+
+
+def test_integration_conftest_reads_pg_test_url(monkeypatch):
+    """Conftest side of the two-sided pin: _get_pg_base_url must honor exactly
+    the variable the workflow exports. A rename on either side turns one of
+    the pair red instead of silently re-skipping the whole lane."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "integration_conftest", ROOT / "tests" / "integration" / "conftest.py"
+    )
+    assert spec and spec.loader
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    sentinel = "postgresql://ace:ace@localhost:5433/ace_test_pin_sentinel"
+    monkeypatch.setenv("PG_TEST_URL", sentinel)
+    assert conftest._get_pg_base_url() == sentinel
+
+
+def test_every_postgres_marked_integration_file_uses_pg_naming():
+    """Naming contract (#3287): every tests/integration file containing the
+    postgres marker must be named *_pg.py — that glob is what selects the
+    postgres CI lane for plain test edits (POSTGRES_PATTERNS), so a
+    differently-named postgres-marked file rides the lane only when some
+    policy file happens to change too."""
+    import ast
+
+    offenders = []
+    for path in sorted((ROOT / "tests" / "integration").glob("*.py")):
+        if path.name.endswith("_pg.py") or path.name.startswith("conftest"):
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            marked = False
+            if isinstance(node, ast.Assign):
+                marked = any(
+                    (isinstance(t, ast.Name) and t.id == "pytestmark")
+                    or (isinstance(t, ast.Attribute) and t.attr == "pytestmark")
+                    for t in node.targets
+                ) and "postgres" in ast.unparse(node.value)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                marked = any("postgres" in ast.unparse(d) for d in node.decorator_list)
+            if marked:
+                offenders.append(path.name)
+                break
+    assert not offenders, (
+        f"postgres-marked files not matching *_pg.py (the lane-selection glob): {offenders}"
+    )
