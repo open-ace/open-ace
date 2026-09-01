@@ -123,11 +123,10 @@ class UserDailyStatsAggregator:
                             -- Session data from agent_sessions
                             -- Must match get_combined_usage filters:
                             -- - workspace_type IN ('local', 'remote', 'terminal')
-                            -- - requests from session_messages subquery (not request_count field)
+                            -- - requests from request_count (model turn count, not message rows)
+                            -- Issue #3267: Use request_count for accurate model turn counting
                             SELECT DATE(as2.created_at) as date,
-                                   COALESCE((SELECT COUNT(*) FROM session_messages sm
-                                             WHERE sm.session_id = as2.session_id
-                                               AND sm.role = 'assistant'), 0) as requests,
+                                   COALESCE(as2.request_count, 0) as requests,
                                    COALESCE(as2.total_tokens, 0) as tokens,
                                    COALESCE(as2.total_input_tokens, 0) as input_tokens,
                                    COALESCE(as2.total_output_tokens, 0) as output_tokens
@@ -202,11 +201,10 @@ class UserDailyStatsAggregator:
                             -- Session data from agent_sessions
                             -- Must match get_combined_usage filters:
                             -- - workspace_type IN ('local', 'remote', 'terminal')
-                            -- - requests from session_messages subquery (not request_count field)
+                            -- - requests from request_count (model turn count, not message rows)
+                            -- Issue #3267: Use request_count for accurate model turn counting
                             SELECT DATE(as2.created_at) as date,
-                                   COALESCE((SELECT COUNT(*) FROM session_messages sm
-                                             WHERE sm.session_id = as2.session_id
-                                               AND sm.role = 'assistant'), 0) as requests,
+                                   COALESCE(as2.request_count, 0) as requests,
                                    COALESCE(as2.total_tokens, 0) as tokens,
                                    COALESCE(as2.total_input_tokens, 0) as input_tokens,
                                    COALESCE(as2.total_output_tokens, 0) as output_tokens
