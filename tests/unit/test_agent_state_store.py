@@ -8,6 +8,7 @@ between turns.
 from __future__ import annotations
 
 import os
+import pathlib
 import time
 
 import pytest
@@ -161,10 +162,12 @@ def test_reap_on_an_empty_root_is_a_noop(tmp_path):
 
 
 def test_terminal_status_purges_the_workflows_transcripts(tmp_path):
-    """Hooked into _update_workflow, the single chokepoint for status writes.
+    """Hooked into _update_workflow, which most status writes pass through.
 
-    There are ~20 terminal status writes across the orchestrator; a call added
-    after each would guarantee one gets missed on the next edit.
+    There are ~20 terminal status writes in the orchestrator; a call added
+    after each would guarantee one gets missed on the next edit. It is not the
+    ONLY path — autonomous_scheduler writes one directly and purges itself —
+    so this is the main hook, not a chokepoint.
     """
     from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
 
@@ -225,3 +228,95 @@ def test_cleanup_failure_never_propagates(tmp_path):
     purge_agent_state_if_terminal(
         "wf-1", {"status": "completed"}, store=Exploding(root=str(tmp_path))
     )
+
+
+# ── hardening found by independent review ─────────────────────────────
+
+
+def test_the_root_itself_is_private(tmp_path):
+    """The root holds one directory per workflow.
+
+    A mode left to the umask lets any local user enumerate workflow ids, even
+    though the per-workflow directories underneath are 0700.
+    """
+    store = AgentStateStore(root=str(tmp_path / "state"))
+    store.put("wf-1", "main", b"data")
+
+    assert store.path_for("wf-1", "main").parent.parent.stat().st_mode & 0o077 == 0
+
+
+def test_the_transcript_is_never_briefly_world_readable(tmp_path, monkeypatch):
+    """Created 0600, not created-then-chmod'ed.
+
+    A chmod after the write leaves a window where a transcript — full
+    conversation content, possibly tool output — is readable by anyone.
+    """
+    monkeypatch.setattr("os.umask", lambda mask: 0)
+    store = AgentStateStore(root=str(tmp_path / "state"))
+
+    seen: list[int] = []
+    real_replace = pathlib.Path.replace
+
+    def _replace(self, target):
+        seen.append(self.stat().st_mode & 0o777)
+        return real_replace(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "replace", _replace)
+    store.put("wf-1", "main", b"secret")
+
+    assert seen and all(
+        mode & 0o077 == 0 for mode in seen
+    ), f"the temp file was world-readable before the rename: {[oct(m) for m in seen]}"
+
+
+def test_concurrent_writers_on_one_key_cannot_tear_the_slot(tmp_path):
+    """A fixed temp name lets two writers interleave and rename a torn blob.
+
+    get() cannot detect that — only an OSError raises CorruptAgentState — so
+    the next turn would silently resume half a history.
+    """
+    import threading
+
+    store = AgentStateStore(root=str(tmp_path / "state"))
+    big_a = b"A" * 200_000
+    big_b = b"B" * 200_000
+    errors: list[BaseException] = []
+
+    def write(blob):
+        try:
+            for _ in range(20):
+                store.put("wf-1", "main", blob)
+        except BaseException as exc:  # noqa: BLE001 - surfaced below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=write, args=(big_a,)),
+        threading.Thread(target=write, args=(big_b,)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    final = store.get("wf-1", "main")
+    assert final in (big_a, big_b), (
+        "the slot holds neither writer's blob intact — it was torn by an "
+        f"interleaved write ({len(final or b'')} bytes)"
+    )
+
+
+def test_a_failed_write_leaves_no_temp_file_behind(tmp_path, monkeypatch):
+    store = AgentStateStore(root=str(tmp_path / "state"))
+    store.put("wf-1", "main", b"first")
+
+    def _boom(self, target):
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(pathlib.Path, "replace", _boom)
+    with pytest.raises(OSError):
+        store.put("wf-1", "main", b"second")
+
+    leftovers = [p.name for p in store.path_for("wf-1", "main").parent.iterdir()]
+    assert leftovers == ["main.jsonl"], leftovers
+    assert store.get("wf-1", "main") == b"first", "the previous slot was destroyed"

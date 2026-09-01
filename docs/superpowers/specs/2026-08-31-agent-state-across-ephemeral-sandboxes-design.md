@@ -144,9 +144,12 @@ settings. Credentials must never round-trip through the control plane, and
 #2023's rule is that the sandbox environment is constructed, never inherited —
 `build_env` already mints the proxy token fresh each turn.
 
-A blob larger than `_MAX_AGENT_STATE_BYTES` (16 MB — an order of magnitude over
-the measured max, matching the shape of `ChangesetLimits`) is refused rather
-than transferred.
+A blob larger than `MAX_AGENT_STATE_BYTES` (16 MB — an order of magnitude over
+the measured max, matching the shape of `ChangesetLimits`) is refused. The
+ordering, stated honestly: execd's download API returns a whole body, so an
+oversized transcript **is** buffered before it can be measured. The check stops
+it going any further; it does not stop the read. HOME is a 1Gi `emptyDir`, so
+that buffer is bounded by the pod rather than by anything here.
 
 ### 5.3 The store
 
@@ -174,9 +177,13 @@ row and `_resolve_session_line` returns. It survives force-fresh, and
 signature change. A `"fresh"` line gets a new uuid per call and therefore
 correctly carries nothing.
 
-Retention: purged when the workflow reaches a terminal state, plus an age-based
-reaper bounding orphans, mirroring the `.claude-preserve` sibling reaper that
-`openace-run-as.sh` already runs for exactly this failure mode.
+Retention has two mechanisms, and both need a caller or they are decoration.
+The **purge** fires from `_update_workflow`, where most terminal status writes
+pass, and again from `autonomous_scheduler`'s worktree recovery sweep, which
+writes a terminal status directly and would otherwise bypass it. The **age-based
+reaper** is the backstop for rows that never reach a terminal status at all (a
+control plane killed mid-run) and runs at scheduler startup, mirroring the
+`.claude-preserve` sibling reaper `openace-run-as.sh` runs on every invocation.
 
 ### 5.4 Ordering in `_run_local`
 

@@ -27,6 +27,7 @@ obvious reading, and getting them wrong is silent rather than loud:
 from __future__ import annotations
 
 import itertools
+import re
 import shlex
 import time
 import uuid
@@ -42,6 +43,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     compute_output_digest,
     derive_terminal_reason,
 )
+from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT_STATE_BYTES
 from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as workspace_mod
@@ -158,6 +160,33 @@ _SAFE_DIR = f"-c safe.directory={_WORKSPACE}"
 # test_the_transcript_dir_matches_what_the_cli_really_writes pins both halves
 # so they cannot drift apart.
 _AGENT_STATE_DIR = "/home/agent/.claude/projects/-workspace"
+
+
+def _agent_state_path(cli_session_id: str) -> str | None:
+    """The transcript path for *cli_session_id*, or ``None`` if unusable.
+
+    The id is NOT trusted. It reaches here from ``agent_sessions.cli_session_id``,
+    which ``_extract_stream_session_id`` fills with whatever the sandbox printed
+    on its own stdout — and under this backend the sandbox is the untrusted
+    party by construction. Without this, a compromised sandbox could name
+    ``../../../../workspace/.git/hooks/pre-commit`` and have the NEXT turn's
+    sandbox receive attacker-chosen bytes at that path.
+
+    ``AgentStateStore`` already applies exactly this reasoning to the same class
+    of database-sourced id ("neither is a trusted path fragment"); this is the
+    one place that had not. Refused rather than sanitised, for the same reason:
+    rewriting an id silently changes which file is addressed.
+    """
+    candidate = str(cli_session_id or "").strip()
+    if not _SAFE_SESSION_ID.match(candidate):
+        return None
+    return f"{_AGENT_STATE_DIR}/{candidate}.jsonl"
+
+
+# Session ids are uuids in practice; this is deliberately a little wider so a
+# CLI that changes its id format does not silently stop carrying history, while
+# still admitting no separator, no dot-segment and no absolute path.
+_SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 _GIT_SYNTHESIS = (
     f"git {_SAFE_DIR} init -q && git {_SAFE_DIR} add -A && "
@@ -505,14 +534,24 @@ class OpenSandboxProvider:
         started a conversation). Neither is an error, and neither should cost
         the caller a completed milestone.
         """
-        if not cli_session_id:
+        path = _agent_state_path(cli_session_id)
+        if path is None:
             return None
         try:
-            return self._api.download_file(
-                handle.sandbox_id, f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl"
-            )
+            blob = self._api.download_file(handle.sandbox_id, path)
         except SandboxError:
             return None
+        # The cap is re-checked at the store, but a blob that never fits must
+        # not be handed onward either. HOME is an emptyDir with a 1Gi
+        # sizeLimit, so a runaway transcript is bounded by the pod, not by
+        # anything here — and `download_file` buffers the whole body.
+        if len(blob) > MAX_AGENT_STATE_BYTES:
+            self._emit(
+                "agent_state_too_large",
+                {"sandbox_id": handle.sandbox_id, "bytes": len(blob)},
+            )
+            return None
+        return blob
 
     def import_agent_state(
         self, handle: SandboxHandle, *, cli_session_id: str, blob: bytes
@@ -526,12 +565,14 @@ class OpenSandboxProvider:
         otherwise empty HOME is sufficient for ``--resume`` to resolve, with
         the original session id preserved.
         """
-        self._api.upload_file(
-            handle.sandbox_id,
-            f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl",
-            blob,
-            0o600,
-        )
+        path = _agent_state_path(cli_session_id)
+        if path is None:
+            raise self._refuse(
+                f"agent state id {cli_session_id!r} is not a plain path component; "
+                "refusing to build a transcript path from it",
+                "agent_state_unavailable",
+            )
+        self._api.upload_file(handle.sandbox_id, path, blob, 0o600)
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         state = self._state.get(handle.sandbox_id)

@@ -116,9 +116,11 @@ class _Carried:
 def test_a_resuming_turn_on_an_ephemeral_provider_is_refused_before_create():
     """Free by construction: no sandbox, no tokens, no wasted invocation.
 
-    This is what converts today's guaranteed failed run — --resume into an
-    empty HOME, "No conversation found with session ID: <id>", then the #2035
-    recovery retrying fresh — into an up-front refusal.
+    Forward-looking, and inert today — no shipped provider is `ephemeral`
+    (Legacy/Remote/Fake declare `persists`, OpenSandbox `carried`). What fixes
+    today's wasted run under OpenSandbox is the store, not this branch. This
+    guard is what stops the NEXT provider added without the seam from silently
+    reintroducing the bug: it fails closed instead.
     """
     plan = _runner()._plan_agent_state(
         _Ephemeral(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
@@ -199,59 +201,110 @@ def test_an_unusable_key_is_refused_not_silently_run_without_history(tmp_path):
 # ── the secondary breakage: host-path readers are empty under a sandbox ──
 
 
-def test_response_recovery_reads_the_carried_transcript(tmp_path):
-    """The host's ~/.claude/projects is empty for a run inside a sandbox.
+def _epoch(iso: str) -> float:
+    from datetime import datetime
 
-    Without this the large-context recovery net silently no-ops on exactly
-    the turns it exists for — assistant stream events dropped near the
-    context limit.
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+
+
+def _session_at(started_at_epoch: float):
+    """A minimal _LocalSession for the transcript readers."""
+    from app.modules.workspace.autonomous.agent_runner import _LocalSession
+
+    session = _LocalSession(session_id="sid-1", process=None, transport=None)
+    session.workflow_id = "wf-1"
+    session.started_at_epoch = started_at_epoch
+    return session
+
+
+def _row(text: str, ts: str) -> bytes:
+    import json
+
+    return (
+        json.dumps(
+            {
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {"content": [{"type": "text", "text": text}]},
+            }
+        )
+        + "\n"
+    ).encode()
+
+
+def test_recovery_returns_only_this_turns_final_answer(tmp_path):
+    """The carried blob is the WHOLE session line, appended across milestones.
+
+    A reader without the started_at_epoch filter hands back milestones 1..N
+    concatenated, and the caller persists that as this milestone's deliverable
+    — a plausible-looking wrong answer rather than an honest failure. An
+    earlier version of this reader did exactly that, and its own test asserted
+    the concatenation; an independent review caught it.
     """
     runner = _runner(tmp_path)
     runner._agent_state_store.put(
         "wf-1",
         "sid-1",
-        b'{"type":"assistant","message":{"content":[{"type":"text","text":"RECOVERED"}]}}\n',
+        _row("PLAN FROM MILESTONE 1", "2026-08-31T10:00:00Z")
+        + _row("REVIEW FROM MILESTONE 2", "2026-08-31T11:00:00Z")
+        + _row("Let me read the file.", "2026-08-31T12:00:30Z")
+        + _row("THIS TURNS REAL ANSWER", "2026-08-31T12:00:45Z"),
     )
+    session = _session_at(_epoch("2026-08-31T12:00:00Z"))
 
-    assert "RECOVERED" in runner._recover_response_text_from_store("wf-1", "sid-1")
+    recovered = runner._recover_response_text_from_store(session, "wf-1", "sid-1")
+
+    assert recovered == "THIS TURNS REAL ANSWER"
+    assert "MILESTONE 1" not in recovered
+    assert "MILESTONE 2" not in recovered
+    assert (
+        "Let me read the file." not in recovered
+    ), "intermediate narration was folded into the deliverable"
 
 
-def test_response_recovery_concatenates_every_assistant_block(tmp_path):
+def test_recovery_matches_the_host_reader(tmp_path):
+    """Both readers must agree — they delegate to one parser on purpose."""
     runner = _runner(tmp_path)
-    runner._agent_state_store.put(
-        "wf-1",
-        "sid-1",
-        b'{"type":"assistant","message":{"content":[{"type":"text","text":"AB"}]}}\n'
-        b'{"type":"user","message":{"content":"ignored"}}\n'
-        b'{"type":"assistant","message":{"content":[{"type":"text","text":"CD"}]}}\n',
+    blob = _row("EARLIER MILESTONE", "2026-08-31T10:00:00Z") + _row(
+        "THIS ANSWER", "2026-08-31T12:00:45Z"
     )
+    runner._agent_state_store.put("wf-1", "sid-1", blob)
+    session = _session_at(_epoch("2026-08-31T12:00:00Z"))
 
-    assert runner._recover_response_text_from_store("wf-1", "sid-1") == "ABCD"
+    carried = runner._recover_response_text_from_store(session, "wf-1", "sid-1")
+    host = runner._last_assistant_text_in_transcript(blob.decode(), session, "sid-1")
+
+    assert carried == host == "THIS ANSWER"
 
 
-def test_response_recovery_tolerates_a_string_content_block(tmp_path):
-    """Older transcript rows carry `content` as a bare string."""
+def test_recovery_reads_the_carried_transcript_at_all(tmp_path):
+    """The host's ~/.claude/projects is empty for a run inside a sandbox.
+
+    Without this source the large-context recovery net silently no-ops on
+    exactly the turns it exists for.
+    """
     runner = _runner(tmp_path)
-    runner._agent_state_store.put(
-        "wf-1", "sid-1", b'{"type":"assistant","message":{"content":"PLAIN"}}\n'
-    )
+    runner._agent_state_store.put("wf-1", "sid-1", _row("RECOVERED", "2026-08-31T12:00:45Z"))
+    session = _session_at(_epoch("2026-08-31T12:00:00Z"))
 
-    assert runner._recover_response_text_from_store("wf-1", "sid-1") == "PLAIN"
+    assert runner._recover_response_text_from_store(session, "wf-1", "sid-1") == "RECOVERED"
 
 
 @pytest.mark.parametrize(
     "blob",
     [b"", b"not json at all\n", b'{"type":"assistant"}\n', b"\n\n"],
 )
-def test_response_recovery_never_raises_on_junk(tmp_path, blob):
+def test_recovery_never_raises_on_junk(tmp_path, blob):
     """A net that can fail the run it is catching is worse than no net."""
     runner = _runner(tmp_path)
     runner._agent_state_store.put("wf-1", "sid-1", blob)
+    session = _session_at(0.0)
 
-    assert runner._recover_response_text_from_store("wf-1", "sid-1") == ""
+    assert runner._recover_response_text_from_store(session, "wf-1", "sid-1") == ""
 
 
-def test_response_recovery_returns_empty_without_ids(tmp_path):
+def test_recovery_returns_empty_without_ids(tmp_path):
     runner = _runner(tmp_path)
-    assert runner._recover_response_text_from_store("", "sid-1") == ""
-    assert runner._recover_response_text_from_store("wf-1", "") == ""
+    session = _session_at(0.0)
+    assert runner._recover_response_text_from_store(session, "", "sid-1") == ""
+    assert runner._recover_response_text_from_store(session, "wf-1", "") == ""

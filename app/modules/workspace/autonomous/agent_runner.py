@@ -1955,6 +1955,27 @@ class AutonomousAgentRunner:
                 exc,
             )
             return ""
+        return self._last_assistant_text_in_transcript(content, session, cli_session_id)
+
+    def _last_assistant_text_in_transcript(
+        self, content: str, session: _LocalSession, cli_session_id: str
+    ) -> str:
+        """Extract THIS turn's final assistant text from a transcript (#2640).
+
+        Shared by the host-JSONL reader above and the carried-transcript reader
+        below (#3237), because they must not diverge. Two properties do the
+        work and both matter:
+
+        * records older than ``started_at_epoch`` are skipped — a session
+          line's transcript is cumulative across milestones, so without this a
+          later turn would recover the whole line's history;
+        * only the LAST visible assistant text is kept — concatenating every
+          block would fold intermediate narration ("Let me read the file.")
+          into the deliverable.
+
+        An earlier version of the carried reader did neither, and its own test
+        asserted the concatenation. An independent review caught it.
+        """
         last_text = ""
         try:
             for line in content.splitlines():
@@ -2020,9 +2041,10 @@ class AutonomousAgentRunner:
             # #3237: the reader above resolves a HOST path
             # (_claude_projects_root), which is empty for a run that happened
             # inside a sandbox — so this net silently no-opped on exactly the
-            # large-context turns it exists for. Same parsing, carried source.
+            # large-context turns it exists for. Carried source, same parsing:
+            # both go through _last_assistant_text_in_transcript.
             recovered = self._recover_response_text_from_store(
-                session.workflow_id, session.session_id
+                session, session.workflow_id, session.session_id
             )
             source = "carried_transcript"
 
@@ -2045,19 +2067,27 @@ class AutonomousAgentRunner:
             len(recovered),
         )
 
-    def _recover_response_text_from_store(self, workflow_id: str, tracking_session_id: str) -> str:
-        """Recover assistant text from the CARRIED transcript (#3237).
+    def _recover_response_text_from_store(
+        self, session: _LocalSession, workflow_id: str, tracking_session_id: str
+    ) -> str:
+        """Recover THIS turn's assistant text from the CARRIED transcript (#3237).
 
         The sibling ``_recover_response_text_from_jsonl`` reads the host's
         ``~/.claude/projects``, which is empty for a run that happened inside a
-        sandbox — the transcript lived in the pod and left with it. Same
-        parsing, different source.
+        sandbox — the transcript lived in the pod and left with it. Different
+        source, IDENTICAL parsing: both delegate to
+        ``_last_assistant_text_in_transcript``, so the turn filter and the
+        last-message rule cannot drift between them.
+
+        That sharing is load-bearing here rather than merely tidy. The carried
+        blob is the whole session line's transcript, appended across every
+        milestone, so a reader without the ``started_at_epoch`` filter would
+        hand back milestones 1-N concatenated and the caller would persist it
+        as this milestone's deliverable.
 
         Never raises: this is a recovery net, and a net that can fail the run
         it is catching is worse than no net.
         """
-        import json
-
         if not workflow_id or not tracking_session_id:
             return ""
         try:
@@ -2066,24 +2096,9 @@ class AutonomousAgentRunner:
             return ""
         if not blob:
             return ""
-        chunks: list[str] = []
-        for raw in blob.decode("utf-8", errors="replace").splitlines():
-            if not raw.strip():
-                continue
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                continue
-            if not isinstance(event, dict) or event.get("type") != "assistant":
-                continue
-            content = (event.get("message") or {}).get("content") or []
-            if isinstance(content, str):
-                chunks.append(content)
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    chunks.append(str(block.get("text") or ""))
-        return "".join(chunks)
+        return self._last_assistant_text_in_transcript(
+            blob.decode("utf-8", errors="replace"), session, tracking_session_id
+        )
 
     def _finalize_local_completed_result(
         self,
@@ -2674,6 +2689,27 @@ class AutonomousAgentRunner:
             return _AgentStatePlan(resume=False)
         return _AgentStatePlan(resume=True, blob=blob)
 
+    @staticmethod
+    def _resolve_agent_command(
+        adapter: Any, adapter_args: list[str], previous_cmd: list[str]
+    ) -> list[str]:
+        """Turn adapter args into a launchable command, reusing argv[0] (#3237).
+
+        The first build resolves the executable through ``shutil.which`` for
+        adapters whose ``provides_full_command()`` is False. A re-derivation
+        later in the run must land on the SAME argv[0] — taking the adapter
+        args verbatim would silently swap a resolved path for a bare name, so
+        a merely degraded turn (no ``--resume``) would become a turn that
+        launches a different binary, or none.
+
+        ``previous_cmd`` supplies that already-resolved argv[0] rather than
+        re-running ``which``: it is what this run actually started from.
+        """
+        if adapter.provides_full_command():
+            return list(adapter_args)
+        head = previous_cmd[0] if previous_cmd else adapter.get_executable_name()
+        return [head] + (list(adapter_args[1:]) if len(adapter_args) > 1 else [])
+
     def _build_agent_argv(
         self,
         adapter: Any,
@@ -2865,6 +2901,10 @@ class AutonomousAgentRunner:
                 error_code=state_plan.reason_code,
             )
         resume = state_plan.resume
+        # The CLI session id this turn actually resumed, set only once the
+        # transcript is really in place. The export below falls back to it when
+        # the stream capture missed.
+        resumed_with = ""
 
         # Build command
         # When resuming an established session, pass the real CLI session_id
@@ -2987,20 +3027,31 @@ class AutonomousAgentRunner:
                         cli_session_id=resume_target,
                         blob=state_plan.blob,
                     )
+                    resumed_with = resume_target
                 except Exception as exc:  # noqa: BLE001 - degrade, never fail the turn
                     logger.warning(
                         "Agent state import failed for %s, starting a fresh session: %s",
                         resume_target[:8],
                         exc,
                     )
-                    cmd = self._build_agent_argv(
+                    # Rebuild through the SAME executable-resolution branch the
+                    # first build used. Taking the adapter args verbatim here
+                    # would silently change argv[0] from the resolved path to a
+                    # bare name for every adapter whose provides_full_command()
+                    # is False — which is claude-code, the only tool this path
+                    # carries state for.
+                    cmd = self._resolve_agent_command(
                         adapter,
-                        resume_target,
-                        project_path,
-                        model,
-                        permission_mode,
-                        allowed_tools,
-                        resume=False,
+                        self._build_agent_argv(
+                            adapter,
+                            resume_target,
+                            project_path,
+                            model,
+                            permission_mode,
+                            allowed_tools,
+                            resume=False,
+                        ),
+                        cmd,
                     )
             # The provider decides its own per-turn policy. Passing a literal
             # None here is what kept every OpenSandbox run on the foreground
@@ -3152,7 +3203,13 @@ class AutonomousAgentRunner:
         # quality loss for a correctness loss. The stale slot is dropped so the
         # next turn starts fresh cleanly instead of resuming half a history.
         if hasattr(provider, "export_agent_state"):
-            captured = getattr(session, "cli_session_id", "") or ""
+            # Prefer the id the stream reported; fall back to the id this turn
+            # actually resumed. The stream capture is gated on
+            # _uses_sidebar_session_source, so on a resumed turn where that
+            # capture missed, `resumed_with` is still the file the CLI has been
+            # appending to — and without this fallback the line would silently
+            # stop carrying history from that turn on.
+            captured = getattr(session, "cli_session_id", "") or resumed_with
             try:
                 blob = provider.export_agent_state(sandbox_handle, cli_session_id=captured)
                 if blob is not None:

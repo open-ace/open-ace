@@ -6420,9 +6420,13 @@ class AutonomousOrchestrator:
         self._emit("workflow_updated", updates)
         # #3237: a finished workflow's carried CLI transcripts are dead weight.
         # Hooked HERE rather than after each terminal status write: there are
-        # ~20 of those across this module, and one added per site would be
-        # missed on the next edit. This is the single chokepoint they all pass
-        # through.
+        # ~20 of those in this module, and one added per site would be missed on
+        # the next edit.
+        #
+        # Not the only path, though — `autonomous_scheduler` writes a terminal
+        # status straight through `repo.update_workflow` in its worktree
+        # recovery sweep, and calls the purge itself. The scheduler also reaps
+        # orphans at startup for rows that never reach a terminal status at all.
         purge_agent_state_if_terminal(self._workflow_id, updates)
 
     def _cleanup_worktree_and_branch(

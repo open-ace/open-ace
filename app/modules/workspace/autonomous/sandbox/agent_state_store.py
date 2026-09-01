@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -85,15 +86,31 @@ class AgentStateStore:
                 f"agent state is {len(blob)} bytes, over the {MAX_AGENT_STATE_BYTES} "
                 "limit; refusing to store it"
             )
+        # 0o700 on BOTH levels. The root holds one directory per workflow, so a
+        # mode left to the umask would let any local user enumerate workflow ids.
+        self._root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._root, 0o700)
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
         # Write-then-rename so a crash mid-write cannot leave a slot that is
         # present but truncated — which get() would have to treat as corrupt,
         # turning a tidy restart into a refused turn.
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_bytes(blob)
-        os.chmod(tmp, 0o600)
-        tmp.replace(path)
+        #
+        # A UNIQUE temp name, not "<key>.jsonl.tmp": two writers on one key
+        # would otherwise interleave on the same file and rename a torn blob
+        # into the slot, which get() cannot detect (only an OSError raises
+        # CorruptAgentState) and which would silently resume half a history.
+        # Created 0600 by mkstemp rather than chmod'ed afterwards, so the
+        # transcript is never briefly world-readable.
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(blob)
+            tmp.replace(path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def get(self, workflow_id: str, line_id: str) -> bytes | None:
         path = self.path_for(workflow_id, line_id)

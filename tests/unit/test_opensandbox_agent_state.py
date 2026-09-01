@@ -106,3 +106,81 @@ def test_no_credential_file_is_ever_carried(sandbox):
     written = set(api.uploaded[handle.sandbox_id])
     assert written == {f"{_AGENT_STATE_DIR}/{_SID}.jsonl"}
     assert not any(".credentials" in p or ".claude.json" in p for p in written)
+
+
+# ── the id is sandbox-controlled, so it is not a path fragment ────────
+
+
+@pytest.mark.parametrize(
+    "hostile_id",
+    [
+        "../../../../workspace/.git/hooks/pre-commit",
+        "../escape",
+        "a/b",
+        "/etc/passwd",
+        ".",
+        "..",
+        "",
+        "   ",
+    ],
+)
+def test_a_hostile_session_id_never_becomes_a_path(sandbox, hostile_id):
+    """`cli_session_id` comes from the SANDBOX's own stdout.
+
+    `_extract_stream_session_id` accepts any non-empty string the sandbox
+    prints, and under this backend the sandbox is the untrusted party. Without
+    validation a compromised sandbox could name a traversal and have the NEXT
+    turn's sandbox receive attacker-chosen bytes at that path.
+    """
+    from app.modules.workspace.autonomous.sandbox.provider import SandboxError
+
+    provider, api, handle = sandbox
+
+    with pytest.raises(SandboxError):
+        provider.import_agent_state(handle, cli_session_id=hostile_id, blob=b"x")
+
+    assert not any(
+        ".." in path or "hooks" in path for path in api.uploaded[handle.sandbox_id]
+    ), f"a traversal escaped the transcript directory: {sorted(api.uploaded[handle.sandbox_id])}"
+
+
+@pytest.mark.parametrize("hostile_id", ["../../etc/shadow", "a/b", ""])
+def test_export_refuses_a_hostile_id_rather_than_reading_it(sandbox, hostile_id):
+    """The read side needs the same guard: it addresses a file too."""
+    provider, _api, handle = sandbox
+    assert provider.export_agent_state(handle, cli_session_id=hostile_id) is None
+
+
+def test_a_normal_uuid_session_id_still_works(sandbox):
+    """The guard must not be so tight that it breaks the real format."""
+    provider, api, handle = sandbox
+    provider.import_agent_state(handle, cli_session_id=_SID, blob=b"OK\n")
+    assert api.uploaded[handle.sandbox_id][f"{_AGENT_STATE_DIR}/{_SID}.jsonl"] == b"OK\n"
+
+
+def test_an_oversized_transcript_is_refused_rather_than_returned(sandbox):
+    """HOME is a 1Gi emptyDir and download_file buffers the whole body.
+
+    The store re-checks the cap, but handing a multi-hundred-MB blob onward
+    would already have cost the control plane the memory. The scheduler pod
+    runs with a 512Mi limit.
+    """
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT_STATE_BYTES
+
+    provider, api, handle = sandbox
+    api.uploaded[handle.sandbox_id][f"{_AGENT_STATE_DIR}/{_SID}.jsonl"] = b"x" * (
+        MAX_AGENT_STATE_BYTES + 1
+    )
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+
+
+def test_a_transcript_at_the_cap_is_still_returned(sandbox):
+    """Off-by-one check: the cap is a limit, not a threshold."""
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT_STATE_BYTES
+
+    provider, api, handle = sandbox
+    blob = b"x" * MAX_AGENT_STATE_BYTES
+    api.uploaded[handle.sandbox_id][f"{_AGENT_STATE_DIR}/{_SID}.jsonl"] = blob
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) == blob

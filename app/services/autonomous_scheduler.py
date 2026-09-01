@@ -1570,6 +1570,13 @@ def _reconcile_pending_transitions():
                     )
                 except Exception:  # noqa: BLE001
                     logger.error("Could not persist recovery_failed for %s", (wf_id or "")[:8])
+                else:
+                    # #3237: this writes a terminal status WITHOUT going through
+                    # WorkflowOrchestrator._update_workflow, so the purge hooked
+                    # there does not fire. Called explicitly rather than left to
+                    # the reaper, which only bounds the leak rather than closing
+                    # it.
+                    _purge_agent_state(wf_id)
 
         logger.info("Reconciled %d interrupted worktree transition(s)", len(pending))
     except Exception as e:  # noqa: BLE001
@@ -1697,6 +1704,42 @@ def _parse_epoch(value: Any) -> float | None:
             return float(value)
         except Exception:
             return None
+
+
+def _purge_agent_state(workflow_id: str) -> None:
+    """Drop a terminal workflow's carried CLI transcripts (#3237).
+
+    The orchestrator purges from ``_update_workflow``, but this module writes a
+    terminal status directly through ``repo.update_workflow`` in the worktree
+    recovery path, bypassing it. Best-effort, like every other cleanup here.
+    """
+    try:
+        from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+        purge_agent_state_if_terminal(workflow_id, {"status": "failed"})
+    except Exception:  # noqa: BLE001 - cleanup must not break the sweep
+        logger.warning("Could not purge agent state for %s", (workflow_id or "")[:8])
+
+
+def _reap_agent_state() -> int:
+    """Bound orphaned transcripts that no terminal-status write ever claimed.
+
+    The purge above is the primary mechanism; this is the backstop for rows
+    that never reach a terminal status at all (a control plane killed mid-run),
+    mirroring the ``.claude-preserve`` sibling reaper ``openace-run-as.sh``
+    runs on every invocation. Without a caller the reaper is decoration, and
+    the spec promised one.
+    """
+    try:
+        from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+        removed = AgentStateStore().reap()
+        if removed:
+            logger.info("Reaped %d orphaned agent-state transcript(s)", removed)
+        return removed
+    except Exception:  # noqa: BLE001 - a bounded leak beats a broken sweep
+        logger.warning("Agent-state reap failed", exc_info=True)
+        return 0
 
 
 def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> bool:
@@ -1855,6 +1898,12 @@ def init_autonomous_scheduler():
 
     remote_session_manager = RemoteSessionManager()
     _reconcile_orphan_sandboxes(remote_session_manager=remote_session_manager)
+    # #3237: bound transcripts left by workflows that never reached a terminal
+    # status (a control plane killed mid-run), which the purge cannot see.
+    # Startup is the same moment openace-run-as.sh reaps its .claude-preserve
+    # siblings, and the store lives on tmpfs, so a restart is exactly when
+    # stale entries accumulate.
+    _reap_agent_state()
 
     scheduler = AutonomousScheduler.instance()
     scheduler.remote_session_manager = remote_session_manager
