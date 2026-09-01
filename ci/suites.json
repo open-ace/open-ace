@@ -149,8 +149,8 @@
           "{python}",
           "scripts/scan_test_false_positives.py",
           "tests",
-          "--baseline",
-          ".false-positive-baseline.json"
+          "--ledger",
+          "ci/false-positive-ledger.json"
         ]
       ]
     },

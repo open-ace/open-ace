@@ -1,0 +1,467 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_batch_session_termination",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_deregister_with_active_session",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_full_deregistration_flow",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_coverage_data_in_result",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_multi_user_session_collection",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_session_data_persistence",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_single_user_session_collection",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_tenant_attribution",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_user_id_resolution",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_agent_sessions_user_id_filled",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_daily_messages_user_id_filled",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_by_username",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_system_user_sync_2735.py",
+      "function": "TestSystemUserSync.test_sync_failure_logging",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/integration/test_system_user_sync_2735.py",
+      "function": "TestSystemUserSync.test_sync_system_users_creates_users",
+      "count": 1
+    },
+    {
+      "pattern": "erroneous_skip",
+      "file": "tests/performance/test_qwen_performance_2735.py",
+      "function": "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_batch_session_termination",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_deregister_with_active_session",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/e2e/remote/test_deregister_e2e.py",
+      "function": "TestDeregisterE2E.test_full_deregistration_flow",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestErrorHandlingIntegration.test_degraded_status_on_partial_failure",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestErrorHandlingIntegration.test_idempotent_collection",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestPerformanceIntegration.test_100_users_performance",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestPerformanceIntegration.test_large_file_handling",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestPermission700Collection.test_message_count_correct",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestPermission700Collection.test_two_users_permission_700_collected",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestPermission700Collection.test_user_id_mapping_correct",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestSecurityIntegration.test_symlink_attack_blocked",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_fetch_wrapper_integration_2543.py",
+      "function": "TestSecurityIntegration.test_web_service_cannot_read_other_users",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_coverage_data_in_result",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_multi_user_session_collection",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_session_data_persistence",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_single_user_session_collection",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_tenant_attribution",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_multiuser_qwen_collection_2735.py",
+      "function": "TestMultiUserQwenCollection.test_user_id_resolution",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_agent_sessions_user_id_filled",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_daily_messages_user_id_filled",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_by_username",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_qwen_user_attribution_2735.py",
+      "function": "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_system_user_sync_2735.py",
+      "function": "TestSystemUserSync.test_sync_failure_logging",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/integration/test_system_user_sync_2735.py",
+      "function": "TestSystemUserSync.test_sync_system_users_creates_users",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/performance/test_qwen_performance_2735.py",
+      "function": "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_agent_transport.py",
+      "function": "test_shutdown_on_an_already_dead_process_does_not_raise",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_analytics_routes.py",
+      "function": "TestParseDateRange.test_route",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestAuditLogging.test_audit_log_created",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestAuditLogging.test_username_sanitized",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestFileSizeLimits.test_large_file_rejected",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestIntegration.test_degraded_status_on_partial_failure",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestIntegration.test_multi_user_collection_with_permission_700",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestParameterValidation.test_exact_match_valid_params",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestUserIdentityMapping.test_no_match_returns_none",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestUserIdentityMapping.test_resolve_user_id_by_system_account",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_fetch_wrapper_2543.py",
+      "function": "TestUserIdentityMapping.test_resolve_user_id_by_username",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_issue_wrong_repo_3075.py",
+      "function": "TestIssueRepoFallback.test_fallback_raises_githubopserror",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_new_project_local_repo_init_2963.py",
+      "function": "TestValidateProjectPath.test_pass_if_valid_git_repository",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_gh_wrapper.py",
+      "function": "test_admin_merge_is_config_gated",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_gh_wrapper.py",
+      "function": "test_current_github_ops_gh_shapes_are_allowed",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_gh_wrapper.py",
+      "function": "test_dangerous_gh_shapes_are_denied",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_gh_wrapper.py",
+      "function": "test_version_and_help_are_only_standalone_passthrough",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_current_github_ops_git_shapes_are_allowed",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_forbidden_global_options_and_configs_are_denied",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_git_commands_require_hardening_globals",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_mutating_branches_are_limited_to_workflow_branches",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_relative_path_operands_cannot_escape_worktree",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_show_tree_paths_allow_real_filenames_but_not_escapes",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_openace_git_wrapper.py",
+      "function": "test_version_and_help_are_only_standalone_passthrough",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_client.py",
+      "function": "test_delete_sandbox_treats_404_as_success",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_policy.py",
+      "function": "test_a_cni_tier_accepts_any_public_proxy_host",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_policy.py",
+      "function": "test_an_allowlisted_proxy_url_passes",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_provider.py",
+      "function": "test_destroy_attribution_never_raises",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_wiring.py",
+      "function": "test_sweep_survives_a_provider_failure_on_one_row",
+      "count": 1
+    },
+    {
+      "pattern": "no_assertion",
+      "file": "tests/unit/test_opensandbox_workspace.py",
+      "function": "test_apply_deleting_a_missing_path_is_not_an_error",
+      "count": 1
+    }
+  ]
+}
