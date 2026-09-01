@@ -70,8 +70,6 @@ def fake_config(temp_dir):
 # macOS bash 3.2 skips.
 # ============================================================================
 
-BASH_MAJOR = int(os.environ.get("BASH_MAJOR", "0"))
-
 
 def _bash_major() -> int:
     import subprocess
@@ -152,7 +150,31 @@ def _run_closure(
 
 
 def harvest_quoted(path: Path) -> str:
-    return str(path).replace(" ", "\\ ")
+    return shlex_quote(str(path))
+
+
+def shlex_quote(value: str) -> str:
+    import shlex
+
+    return shlex.quote(value)
+
+
+def _real_user_home() -> Path:
+    """The ACCOUNT's home directory, immune to HOME env overrides.
+
+    The CI suite runner isolates HOME to a tmp path (ci.py
+    isolated_environment) that the wrapper's hardcoded /home|/Users
+    allowlist can never accept — Path.home() there points outside the
+    whitelist. pwd.getpwuid gives the real, home-shaped, writable
+    directory (/home/runner on CI, /Users/<user> on macOS). Skips
+    (legitimately, conditionally) where none exists.
+    """
+    import pwd
+
+    pw_dir = pwd.getpwuid(os.getuid()).pw_dir
+    if re.match(r"^/(home|Users)/[a-zA-Z0-9_-]+$", pw_dir) and os.access(pw_dir, os.W_OK):
+        return Path(pw_dir)
+    pytest.skip(f"no writable home-shaped directory for the wrapper allowlist (pw_dir={pw_dir})")
 
 
 # ============================================================================
@@ -199,9 +221,9 @@ class TestUnderscoreInToolName:
             text=True,
         )
         # Should NOT have "Invalid characters" error for underscore
-        assert (
-            "Invalid characters" not in result.stderr
-        ), "Underscore should not cause 'Invalid characters' error"
+        assert "Invalid characters" not in result.stderr, (
+            "Underscore should not cause 'Invalid characters' error"
+        )
 
 
 # ============================================================================
@@ -359,9 +381,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert (
-            "cannot start with '-'" in result.stderr
-        ), "Should reject parameter value starting with '-'"
+        assert "cannot start with '-'" in result.stderr, (
+            "Should reject parameter value starting with '-'"
+        )
 
     def test_mode_value_starts_with_dash_rejected(self, wrapper_path):
         """Test that --mode value starting with - is rejected."""
@@ -374,9 +396,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert (
-            "cannot start with '-'" in result.stderr
-        ), "Should reject parameter value starting with '-'"
+        assert "cannot start with '-'" in result.stderr, (
+            "Should reject parameter value starting with '-'"
+        )
 
     def test_days_missing_value_rejected(self, wrapper_path):
         """Test that --days without value is rejected."""
@@ -751,12 +773,8 @@ class TestParameterValidation:
         assert "tool=fetch_qwen" in log_lines
         assert "action=fetch_end" in log_lines
         assert argv_file.exists(), "the shim python3 must have been invoked"
-
-
-def shlex_quote(value: str) -> str:
-    import shlex
-
-    return shlex.quote(value)
+        argv = argv_file.read_text().split()
+        assert argv[0].endswith("fetch_qwen.py"), argv
 
     def test_reject_malicious_param_prefix(self, wrapper_path):
         """Test that malicious prefix is rejected (no substring match)."""
@@ -1076,7 +1094,7 @@ class TestFileSizeLimits:
         import uuid
 
         harness = _extract_closure(tmp_path)
-        under_home = Path.home() / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
+        under_home = _real_user_home() / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
         try:
             proj = under_home / "projects"
             proj.mkdir(parents=True)

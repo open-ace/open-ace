@@ -25,6 +25,23 @@ import pytest
 # ============================================================================
 
 
+def _bash_major() -> int:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["bash", "-c", "echo ${BASH_VERSINFO[0]}"], capture_output=True, text=True
+        )
+        return int(out.stdout.strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+requires_bash4 = pytest.mark.skipif(
+    _bash_major() < 4, reason="wrapper requires bash>=4 (CI bash5 runs it)"
+)
+
+
 @pytest.fixture
 def project_root():
     """Get the project root directory."""
@@ -136,6 +153,7 @@ class TestSecurityIntegration:
             )
             assert result.returncode != 0, f"Injection not blocked: {args}"
 
+    @requires_bash4
     def test_symlink_attack_blocked(self, wrapper_path, tmp_path):
         """A whitelist-side symlink pointing OUTSIDE the whitelist is rejected
         by the REAL validate_file closure (#3186 batch 3).
@@ -177,7 +195,10 @@ class TestSecurityIntegration:
         harness = tmp_path / "closure.sh"
         harness.write_text("\n\n".join(parts) + "\n")
 
-        under_home = Path.home() / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
+        import pwd
+
+        pw_dir = pwd.getpwuid(os.getuid()).pw_dir
+        under_home = Path(pw_dir) / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
         audit = tmp_path / "audit.log"
         try:
             proj = under_home / "projects"
@@ -189,7 +210,9 @@ class TestSecurityIntegration:
 
             preflight = (
                 "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit validate_file; "
-                "do declare -F $f >/dev/null || exit 99; done"
+                "do declare -F $f >/dev/null || exit 99; done; "
+                "for v in MAX_FILE_SIZE MAX_SYMLINK_DEPTH AUDIT_LOG TOOL_TO_DIR; "
+                "do declare -p $v >/dev/null || exit 99; done"
             )
             script = (
                 f"set -u; source {harvest_quote(harness)}; {preflight} || exit 99; "
