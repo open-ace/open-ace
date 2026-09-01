@@ -102,7 +102,9 @@ class TestUnderscoreInToolName:
             text=True,
         )
         # Should NOT have "Invalid characters" error for underscore
-        assert "Invalid characters" not in result.stderr, "Underscore should not cause 'Invalid characters' error"
+        assert (
+            "Invalid characters" not in result.stderr
+        ), "Underscore should not cause 'Invalid characters' error"
 
 
 # ============================================================================
@@ -192,9 +194,13 @@ class TestDuplicateParameterDetection:
 
         result = subprocess.run(
             [
-                "bash", wrapper_path, "fetch_qwen",
-                "--config", "/etc/openace/config.json",
-                "--config", "/etc/openace/config.json",
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--config",
+                "/etc/openace/config.json",
+                "--config",
+                "/etc/openace/config.json",
             ],
             capture_output=True,
             text=True,
@@ -209,9 +215,13 @@ class TestDuplicateParameterDetection:
 
         result = subprocess.run(
             [
-                "bash", wrapper_path, "fetch_openclaw",
-                "--mode", "both",
-                "--mode", "usage",
+                "bash",
+                wrapper_path,
+                "fetch_openclaw",
+                "--mode",
+                "both",
+                "--mode",
+                "usage",
             ],
             capture_output=True,
             text=True,
@@ -252,7 +262,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert "cannot start with '-'" in result.stderr, "Should reject parameter value starting with '-'"
+        assert (
+            "cannot start with '-'" in result.stderr
+        ), "Should reject parameter value starting with '-'"
 
     def test_mode_value_starts_with_dash_rejected(self, wrapper_path):
         """Test that --mode value starting with - is rejected."""
@@ -265,7 +277,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert "cannot start with '-'" in result.stderr, "Should reject parameter value starting with '-'"
+        assert (
+            "cannot start with '-'" in result.stderr
+        ), "Should reject parameter value starting with '-'"
 
     def test_days_missing_value_rejected(self, wrapper_path):
         """Test that --days without value is rejected."""
@@ -355,14 +369,21 @@ class TestPathNormalization:
 
         result = subprocess.run(
             [
-                "bash", wrapper_path, "fetch_qwen",
-                "--config", "/home/user/.open-ace/../../../etc/passwd",
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--config",
+                "/home/user/.open-ace/../../../etc/passwd",
             ],
             capture_output=True,
             text=True,
         )
         assert result.returncode != 0
-        assert "not allowed" in result.stderr or "not found" in result.stderr or "ERROR" in result.stderr
+        assert (
+            "not allowed" in result.stderr
+            or "not found" in result.stderr
+            or "ERROR" in result.stderr
+        )
 
     def test_nonexistent_path_rejected(self, wrapper_path):
         """Test that nonexistent path is rejected."""
@@ -371,8 +392,11 @@ class TestPathNormalization:
 
         result = subprocess.run(
             [
-                "bash", wrapper_path, "fetch_qwen",
-                "--config", "/nonexistent/path/config.json",
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--config",
+                "/nonexistent/path/config.json",
             ],
             capture_output=True,
             text=True,
