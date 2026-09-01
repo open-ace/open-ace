@@ -194,3 +194,64 @@ def test_an_unusable_key_is_refused_not_silently_run_without_history(tmp_path):
     )
     assert plan.refuse is True
     assert plan.reason_code == "agent_state_unavailable"
+
+
+# ── the secondary breakage: host-path readers are empty under a sandbox ──
+
+
+def test_response_recovery_reads_the_carried_transcript(tmp_path):
+    """The host's ~/.claude/projects is empty for a run inside a sandbox.
+
+    Without this the large-context recovery net silently no-ops on exactly
+    the turns it exists for — assistant stream events dropped near the
+    context limit.
+    """
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put(
+        "wf-1",
+        "sid-1",
+        b'{"type":"assistant","message":{"content":[{"type":"text","text":"RECOVERED"}]}}\n',
+    )
+
+    assert "RECOVERED" in runner._recover_response_text_from_store("wf-1", "sid-1")
+
+
+def test_response_recovery_concatenates_every_assistant_block(tmp_path):
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put(
+        "wf-1",
+        "sid-1",
+        b'{"type":"assistant","message":{"content":[{"type":"text","text":"AB"}]}}\n'
+        b'{"type":"user","message":{"content":"ignored"}}\n'
+        b'{"type":"assistant","message":{"content":[{"type":"text","text":"CD"}]}}\n',
+    )
+
+    assert runner._recover_response_text_from_store("wf-1", "sid-1") == "ABCD"
+
+
+def test_response_recovery_tolerates_a_string_content_block(tmp_path):
+    """Older transcript rows carry `content` as a bare string."""
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put(
+        "wf-1", "sid-1", b'{"type":"assistant","message":{"content":"PLAIN"}}\n'
+    )
+
+    assert runner._recover_response_text_from_store("wf-1", "sid-1") == "PLAIN"
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [b"", b"not json at all\n", b'{"type":"assistant"}\n', b"\n\n"],
+)
+def test_response_recovery_never_raises_on_junk(tmp_path, blob):
+    """A net that can fail the run it is catching is worse than no net."""
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put("wf-1", "sid-1", blob)
+
+    assert runner._recover_response_text_from_store("wf-1", "sid-1") == ""
+
+
+def test_response_recovery_returns_empty_without_ids(tmp_path):
+    runner = _runner(tmp_path)
+    assert runner._recover_response_text_from_store("", "sid-1") == ""
+    assert runner._recover_response_text_from_store("wf-1", "") == ""

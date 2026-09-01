@@ -2017,6 +2017,16 @@ class AutonomousAgentRunner:
             source = "transcript_jsonl"
 
         if not recovered:
+            # #3237: the reader above resolves a HOST path
+            # (_claude_projects_root), which is empty for a run that happened
+            # inside a sandbox — so this net silently no-opped on exactly the
+            # large-context turns it exists for. Same parsing, carried source.
+            recovered = self._recover_response_text_from_store(
+                session.workflow_id, session.session_id
+            )
+            source = "carried_transcript"
+
+        if not recovered:
             return
 
         session.event_log.append(
@@ -2034,6 +2044,46 @@ class AutonomousAgentRunner:
             session.session_id[:8],
             len(recovered),
         )
+
+    def _recover_response_text_from_store(self, workflow_id: str, tracking_session_id: str) -> str:
+        """Recover assistant text from the CARRIED transcript (#3237).
+
+        The sibling ``_recover_response_text_from_jsonl`` reads the host's
+        ``~/.claude/projects``, which is empty for a run that happened inside a
+        sandbox — the transcript lived in the pod and left with it. Same
+        parsing, different source.
+
+        Never raises: this is a recovery net, and a net that can fail the run
+        it is catching is worse than no net.
+        """
+        import json
+
+        if not workflow_id or not tracking_session_id:
+            return ""
+        try:
+            blob = self._agent_state_store.get(workflow_id, tracking_session_id)
+        except Exception:  # noqa: BLE001 - recovery must never raise
+            return ""
+        if not blob:
+            return ""
+        chunks: list[str] = []
+        for raw in blob.decode("utf-8", errors="replace").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or event.get("type") != "assistant":
+                continue
+            content = (event.get("message") or {}).get("content") or []
+            if isinstance(content, str):
+                chunks.append(content)
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    chunks.append(str(block.get("text") or ""))
+        return "".join(chunks)
 
     def _finalize_local_completed_result(
         self,
