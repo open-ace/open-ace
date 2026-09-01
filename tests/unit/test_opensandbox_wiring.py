@@ -786,6 +786,6 @@ def test_a_failing_destroy_does_not_replace_the_original_error(api, tmp_path, mo
 
     result = _run_local_against(_DestroyRaises(inner), worktree, monkeypatch)
     assert result.success is False
-    assert "upgrade refused" in (result.error or ""), (
-        f"the destroy failure replaced the original error: {result.error!r}"
-    )
+    assert "upgrade refused" in (
+        result.error or ""
+    ), f"the destroy failure replaced the original error: {result.error!r}"
