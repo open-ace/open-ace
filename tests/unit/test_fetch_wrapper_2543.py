@@ -199,9 +199,9 @@ class TestUnderscoreInToolName:
             text=True,
         )
         # Should NOT have "Invalid characters" error for underscore
-        assert "Invalid characters" not in result.stderr, (
-            "Underscore should not cause 'Invalid characters' error"
-        )
+        assert (
+            "Invalid characters" not in result.stderr
+        ), "Underscore should not cause 'Invalid characters' error"
 
 
 # ============================================================================
@@ -359,9 +359,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert "cannot start with '-'" in result.stderr, (
-            "Should reject parameter value starting with '-'"
-        )
+        assert (
+            "cannot start with '-'" in result.stderr
+        ), "Should reject parameter value starting with '-'"
 
     def test_mode_value_starts_with_dash_rejected(self, wrapper_path):
         """Test that --mode value starting with - is rejected."""
@@ -374,9 +374,9 @@ class TestParameterValueBoundary:
             text=True,
         )
         assert result.returncode != 0
-        assert "cannot start with '-'" in result.stderr, (
-            "Should reject parameter value starting with '-'"
-        )
+        assert (
+            "cannot start with '-'" in result.stderr
+        ), "Should reject parameter value starting with '-'"
 
     def test_days_missing_value_rejected(self, wrapper_path):
         """Test that --days without value is rejected."""
@@ -1230,6 +1230,7 @@ class TestIntegration:
         if str(scripts_dir) not in _sys.path:
             _sys.path.insert(0, str(scripts_dir))
         import fetch_qwen
+
         import shared.db as shared_db
         from shared import config as shared_config
 
