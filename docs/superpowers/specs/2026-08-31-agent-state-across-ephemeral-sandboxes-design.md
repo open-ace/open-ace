@@ -289,11 +289,43 @@ session id** instead of minting a new one. This is the evidence behind §5.2's
 A trivial single-turn transcript was 8,748 bytes, consistent with §2's measured
 distribution.
 
-**Still unobserved:** the same two turns executed inside a real sandbox pod,
-which additionally exercises the download/upload path through execd. The
-implementation plan keeps that as its final verification step, on the same
-reasoning that made this section necessary — every real run on #2023 found
-something reading had missed.
+### Confirmed on a live gVisor cluster
+
+The two-turn sequence was then run in-cluster against the real OpenSandbox
+server, exercising the export/import path through real execd rather than the
+fake. Every assertion passed, and three of them could not have been made any
+other way:
+
+**The loss is real and total.** In the second, brand-new sandbox, before any
+import:
+
+```
+ls: cannot access '/home/agent/.claude/projects/-workspace/': No such file or directory
+```
+
+The directory does not merely lack the transcript — it does not exist. That is
+the defect, observed rather than inferred.
+
+**execd creates the parent directory.** This was the load-bearing assumption:
+importing into a fresh sandbox writes to a path whose parent is absent. Reading
+upstream's `filesystem_upload.go:155` said `MkdirAllWithOwnership` is called;
+the live run confirmed it, and the listing shows the file landing correctly.
+
+**The mode encoding is right.** The uploaded file reads back as
+`-rw------- openace openace` — 0600, the value asked for. #2023's file-mode
+defect (`0o644` arriving as `-r---w----`) lived in exactly this call, so a
+second confirmation of `_wire_mode` on a new caller is worth having.
+
+Also confirmed: a byte-exact round trip (155 bytes out, 155 back), and that
+`/home/agent/.claude` afterwards contains only `projects` — no `.claude.json`,
+no `.credentials.json`.
+
+**Still unobserved:** two turns of a *real agent*, with the CLI itself writing
+and then resuming the transcript inside the sandbox. That needs the agent CLI
+and working credentials in the image. The two halves either side of it are now
+each verified — the CLI's behaviour against a real CLI (§8 above), and the
+transport against a real cluster — but the seam between them has not been run
+end to end.
 
 ## 9. Open risks
 
