@@ -548,8 +548,8 @@ class UsageAnalytics:
         tokens = [d.get("tokens", 0) for d in historical_data]
 
         # Rolling backtest on last 7 days
-        abs_errors = []
-        actuals = []
+        abs_errors: list[float] = []
+        actuals: list[float] = []
 
         test_start = len(tokens) - FORECAST_BACKTEST_DAYS
 
