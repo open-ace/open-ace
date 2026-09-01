@@ -843,7 +843,7 @@ KNOWN_DEBT_FROZEN_SEED = (
     ),
 )
 
-KNOWN_DEBT_FINDING_TOTAL = 8  # total findings across all seed entries (#3186 batch 4: 19 -> 8)
+KNOWN_DEBT_FINDING_TOTAL = 0  # #3186 fully paid down (batch 5: 8 -> 0). Any new finding is red.
 
 
 def _ledger_counts() -> dict[tuple[str, str, str], int]:
