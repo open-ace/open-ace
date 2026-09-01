@@ -63,6 +63,36 @@ class TestUsageAnalytics:
         assert result["peak_day"] == "2026-01-01"
         assert result["peak_tokens"] == 1000
 
+    def test_calculate_summary_normalizes_date_object(self):
+        """PostgreSQL returns datetime.date object; should normalize to YYYY-MM-DD string."""
+        from datetime import date
+
+        analytics, _, _ = self._make_analytics()
+        data = [
+            {
+                "date": date(2026, 1, 1),  # PostgreSQL returns datetime.date
+                "tool_name": "qwen",
+                "host_name": "h1",
+                "tokens": 1000,
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "requests": 10,
+            },
+            {
+                "date": date(2026, 1, 2),
+                "tool_name": "claude",
+                "host_name": "h1",
+                "tokens": 500,
+                "input_tokens": 400,
+                "output_tokens": 100,
+                "requests": 5,
+            },
+        ]
+        result = analytics._calculate_summary(data)
+        # peak_day should be string, not datetime.date object
+        assert result["peak_day"] == "2026-01-01"
+        assert isinstance(result["peak_day"], str)
+
     def test_generate_report_no_data(self):
         analytics, mock_db, _ = self._make_analytics()
         mock_db.fetch_all.return_value = []

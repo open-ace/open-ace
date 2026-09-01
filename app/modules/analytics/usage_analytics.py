@@ -262,6 +262,9 @@ class UsageAnalytics:
             # Aggregate by date
             date = d.get("date")
             if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
                 daily_totals[date] = daily_totals.get(date, 0) + d.get("tokens", 0)
 
         # Calculate averages

@@ -177,6 +177,24 @@ interface SummaryCardsProps {
   language: Language;
 }
 
+/**
+ * Format peak day value for display.
+ * Handles both ISO format (YYYY-MM-DD) and legacy RFC 1123 format from historical data.
+ */
+const formatPeakDay = (value: string | null): string => {
+  if (!value) return '-';
+  // Handle RFC 1123 format (e.g., "Tue, 25 Aug 2026 00:00:00 GMT")
+  if (value.includes('GMT') || value.includes(', ')) {
+    try {
+      const date = new Date(value);
+      return date.toISOString().split('T')[0];
+    } catch {
+      return value;
+    }
+  }
+  return value;
+};
+
 const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
   <div className="row g-3 mb-4">
     <div className="col-md-2">
@@ -213,8 +231,8 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
     </div>
     <div className="col-md-2">
       <StatCard
-        label={t('peakUsagePeriods', language)}
-        value={summary.peak_day ?? '-'}
+        label={t('peakDay', language)}
+        value={formatPeakDay(summary.peak_day)}
         icon={<i className="bi bi-calendar-check fs-4" />}
         variant="secondary"
       />
