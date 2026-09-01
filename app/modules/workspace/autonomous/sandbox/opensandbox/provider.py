@@ -48,7 +48,11 @@ from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as wo
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 from app.modules.workspace.autonomous.sandbox.opensandbox.transport import PtyWebSocketTransport
-from app.modules.workspace.autonomous.sandbox.provider import SandboxError, is_current_generation
+from app.modules.workspace.autonomous.sandbox.provider import (
+    AGENT_STATE_CARRIED,
+    SandboxError,
+    is_current_generation,
+)
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -144,6 +148,17 @@ print('OPENACE_CLUSTER=' + probe('kubernetes.default.svc.cluster.local', 443))
 # `-c` rather than relying on the entrypoint's global config so this works even
 # if that line did not: it is the one command whose failure has no fallback.
 _SAFE_DIR = f"-c safe.directory={_WORKSPACE}"
+# Where the CLI keeps its conversation transcript inside the sandbox (#3237).
+#
+# The directory name is the CLI's encoding of its own cwd, and inside the
+# sandbox that cwd is always _WORKSPACE — `_exec_command` passes it — so this
+# is a constant rather than a host-derived path. Verified against a real CLI
+# (2.1.170): the directory it created matched
+# `AutonomousAgentRunner._encode_project_path("/workspace")` exactly, and
+# test_the_transcript_dir_matches_what_the_cli_really_writes pins both halves
+# so they cannot drift apart.
+_AGENT_STATE_DIR = "/home/agent/.claude/projects/-workspace"
+
 _GIT_SYNTHESIS = (
     f"git {_SAFE_DIR} init -q && git {_SAFE_DIR} add -A && "
     f"git {_SAFE_DIR} -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
@@ -207,6 +222,11 @@ class _SandboxState:
 
 class OpenSandboxProvider:
     """SandboxProvider over OpenSandbox's Kubernetes runtime."""
+
+    # HOME is an emptyDir that dies with the pod, so the CLI transcript has to
+    # be moved in and out by hand or `--resume` finds nothing. See
+    # export_agent_state / import_agent_state below (#3237).
+    agent_state_persistence = AGENT_STATE_CARRIED
 
     def __init__(
         self,
@@ -476,6 +496,42 @@ class OpenSandboxProvider:
             deleted=deleted,
         )
         self._emit("changeset_applied", {"sandbox_id": handle.sandbox_id})
+
+    def export_agent_state(self, handle: SandboxHandle, *, cli_session_id: str) -> bytes | None:
+        """Read the CLI transcript out before the sandbox is destroyed (#3237).
+
+        Returns ``None`` when there is nothing to carry — no session id (the
+        stream never yielded one) or no transcript at that path (the turn never
+        started a conversation). Neither is an error, and neither should cost
+        the caller a completed milestone.
+        """
+        if not cli_session_id:
+            return None
+        try:
+            return self._api.download_file(
+                handle.sandbox_id, f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl"
+            )
+        except SandboxError:
+            return None
+
+    def import_agent_state(
+        self, handle: SandboxHandle, *, cli_session_id: str, blob: bytes
+    ) -> None:
+        """Place the transcript where ``--resume`` will look for it (#3237).
+
+        Only this one file. Not ``.claude.json``, not ``.credentials.json``,
+        not settings: the sandbox environment is constructed, never inherited,
+        and a credential must not round-trip through the control plane.
+        Verified against a real CLI that restoring this file alone into an
+        otherwise empty HOME is sufficient for ``--resume`` to resolve, with
+        the original session id preserved.
+        """
+        self._api.upload_file(
+            handle.sandbox_id,
+            f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl",
+            blob,
+            0o600,
+        )
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         state = self._state.get(handle.sandbox_id)
