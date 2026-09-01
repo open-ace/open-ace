@@ -5,7 +5,76 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
-from app.routes.analytics import parse_date_range
+from app.routes.analytics import parse_date_range, validate_forecast_days
+
+
+class TestValidateForecastDays:
+    """Test validate_forecast_days function."""
+
+    def test_none_returns_default(self):
+        """Test that None returns default value 7."""
+        days, error = validate_forecast_days(None)
+        assert days == 7
+        assert error is None
+
+    def test_valid_integer_1(self):
+        """Test valid integer 1."""
+        days, error = validate_forecast_days("1")
+        assert days == 1
+        assert error is None
+
+    def test_valid_integer_7(self):
+        """Test valid integer 7."""
+        days, error = validate_forecast_days("7")
+        assert days == 7
+        assert error is None
+
+    def test_valid_integer_90(self):
+        """Test valid integer 90."""
+        days, error = validate_forecast_days("90")
+        assert days == 90
+        assert error is None
+
+    def test_invalid_zero(self):
+        """Test that days=0 returns error."""
+        days, error = validate_forecast_days("0")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
+        assert "1 and 90" in error["message"]
+
+    def test_invalid_negative(self):
+        """Test that negative days returns error."""
+        days, error = validate_forecast_days("-1")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
+        assert error["received"] == -1
+
+    def test_invalid_exceeds_max(self):
+        """Test that days > 90 returns error."""
+        days, error = validate_forecast_days("91")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
+        assert error["received"] == 91
+
+    def test_invalid_non_integer(self):
+        """Test that non-integer returns error."""
+        days, error = validate_forecast_days("abc")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
+        assert error["received"] == "abc"
+
+    def test_invalid_float(self):
+        """Test that float returns error."""
+        days, error = validate_forecast_days("7.5")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
+        assert error["received"] == "7.5"
+
+    def test_large_integer(self):
+        """Test large integer returns error."""
+        days, error = validate_forecast_days("999999999")
+        assert error is not None
+        assert error["error"] == "invalid_parameter"
 
 
 class TestParseDateRange:
