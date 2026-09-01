@@ -23,7 +23,6 @@ from app.modules.governance.alert_notifier import (
     create_suspicious_activity_alert,
 )
 
-
 pytestmark = [pytest.mark.regression]
 
 

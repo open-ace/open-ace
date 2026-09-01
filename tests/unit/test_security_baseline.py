@@ -35,7 +35,6 @@ from app.utils.security_mode import (
     reset_security_mode_cache,
 )
 
-
 pytestmark = [
     pytest.mark.regression,
     pytest.mark.security,
