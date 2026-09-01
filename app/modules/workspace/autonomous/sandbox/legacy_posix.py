@@ -37,6 +37,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     derive_terminal_reason,
 )
 from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
+from app.modules.workspace.autonomous.sandbox.transport import LocalProcessTransport
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -233,6 +234,20 @@ class LegacyPosixProvider:
         """
         return self._procs[exec_handle.command_id]
 
+    def get_transport(self, exec_handle: ExecHandle) -> LocalProcessTransport:
+        """Return the :class:`AgentTransport` for an execution (#2023).
+
+        The seam ``#2022`` anticipated: ``_run_local`` consumes this instead of
+        the raw ``Popen`` from :meth:`get_process`, so a backend with no local
+        process (OpenSandbox's PTY transport) can drive the same CLI
+        stream-json protocol. Legacy's implementation is a strict pass-through,
+        so routing the runner through it changes nothing here.
+
+        :meth:`get_process` stays for callers that genuinely need the raw
+        object.
+        """
+        return LocalProcessTransport(self._procs[exec_handle.command_id])
+
     def build_launch_argv(
         self,
         handle: SandboxHandle,
@@ -371,6 +386,24 @@ class LegacyPosixProvider:
 
     def upload_workspace(self, handle: SandboxHandle, snapshot: Any | None) -> None:
         # Legacy no-op: the local worktree is already in place.
+        return None
+
+    def apply_changes(self, handle: SandboxHandle, worktree_path: str) -> None:
+        """No-op: the agent edited the trusted worktree directly (#2023).
+
+        Paired with :meth:`upload_workspace`. ``_run_local`` calls both
+        unconditionally so the sandboxed round-trip is the *default* shape of a
+        run rather than a branch a future backend has to remember to add; for
+        Legacy both ends collapse to nothing, which is the honest answer.
+        """
+        return None
+
+    def agent_turn_policy(self, *, prompt: str, model: str, env: Any) -> None:
+        """Legacy has no per-turn execution policy (#2023).
+
+        ``None`` is exactly what ``_run_local`` passed as ``exec_policy``
+        before the seam existed, so routing Legacy through it is a no-change.
+        """
         return None
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:

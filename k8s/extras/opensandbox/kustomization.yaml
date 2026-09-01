@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rbac.yaml
+  - runtimeclasses.yaml
+  - configmap-sandbox-template.yaml
+  - networkpolicy.yaml
+  - configmap-gvisor.yaml
+  - configmap-kata.yaml
+  - server-gvisor.yaml
+  - server-kata.yaml
+  # image-policy.yaml is intentionally NOT applied by default: it requires
+  # Kyverno. Apply it separately once a policy controller is installed.

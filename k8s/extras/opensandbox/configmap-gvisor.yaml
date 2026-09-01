@@ -1,0 +1,104 @@
+# OpenSandbox server configuration for the gvisor tier (Issue #2023).
+#
+# Schema: https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md
+# Keys are placed in the sections upstream actually parses. `namespace` and
+# `batchsandbox_template_file` live under [kubernetes], NOT [runtime] —
+# [runtime] accepts only type / execd_image / execd_run_as_init, so a
+# `namespace` written there does not select the sandbox namespace and the
+# template is never loaded at all.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-config-gvisor
+  namespace: open-ace
+data:
+  sandbox.toml: |
+    [server]
+    host = "0.0.0.0"
+    # Must match the Deployment's containerPort and the probe port.
+    port = 8080
+
+    [runtime]
+    type = "kubernetes"
+    execd_image = "opensandbox/execd:v1.1.0"
+
+    [kubernetes]
+    # In-cluster credentials: kubeconfig_path stays unset on purpose.
+    namespace = "open-ace-sandboxes"
+    workload_provider = "batchsandbox"
+    # The pod hardening that backs the nonroot / readonly-rootfs / seccomp /
+    # dedicated-service-account / ephemeral-storage attestations. Without this
+    # line the template is inert and every one of those attestations is a
+    # promise nothing keeps.
+    batchsandbox_template_file = "/etc/opensandbox/templates/batchsandbox-template.yaml"
+    image_pull_policy = "IfNotPresent"
+
+    [secure_runtime]
+    # Server-level, not per-request. The provider's boot probe reads
+    # /proc/version in a fresh sandbox and refuses to run if the kernel does not
+    # match the tier's declared runtime_class, so this value is verified rather
+    # than trusted. The server stamps runtimeClassName on every sandbox pod from
+    # k8s_runtime_class, which is why the shared template does not set it.
+    type = "gvisor"
+    k8s_runtime_class = "gvisor"
+
+    # NO [egress] SECTION, deliberately.
+    #
+    # gVisor cannot run the egress sidecar: it redirects DNS through the iptables
+    # nat table, which gVisor's netstack does not implement. A real server logs
+    #   "The egress sidecar's iptables nat-based DNS redirect is incompatible
+    #    with gVisor. Sandboxes created with network_policy will be rejected at
+    #    creation time."
+    # and then answers every create with
+    #   "networkPolicy is not compatible with runtime 'gvisor': ... Use a
+    #    compatible runtime (e.g. kata) or remove networkPolicy."
+    # This provider once sent a networkPolicy unconditionally, so not one
+    # sandbox on this tier could start — which is what running a real server
+    # against it revealed.
+    #
+    # Egress on this tier is therefore enforced one layer down, by the cluster
+    # NetworkPolicy in networkpolicy.yaml, which the CNI applies outside the
+    # sandbox kernel where gVisor's missing nat table is irrelevant. The
+    # provider omits `networkPolicy` from every create for a tier attesting
+    # `egress_cni_default_deny` — upstream's own prescribed remedy — and its
+    # boot probe verifies from inside a live sandbox that the cluster policy is
+    # in force.
+    #
+    # What that costs, stated plainly: CIDR rules cannot express an FQDN
+    # allowlist, so this tier denies the metadata service, the cluster's own
+    # ranges and every private network, but leaves the public internet open.
+    # It does not get NETWORK_EGRESS_POLICY, and a spec that requires a
+    # per-sandbox egress policy is refused here rather than silently degraded.
+    # Use the Kata tier when the allowlist itself is the control you need.
+    # See docs/sandbox-backends.md §7.
+
+    [store]
+    # REQUIRED. Without it upstream defaults to ~/.opensandbox/opensandbox.db,
+    # which under this pod (UID 1000, readOnlyRootFilesystem, only /tmp
+    # writable) resolves somewhere unwritable — and the snapshot repository
+    # creates its parent directory and schema at import time, so the server
+    # fails before readiness rather than at first use.
+    type = "sqlite"
+    path = "/var/lib/opensandbox/opensandbox.db"
+
+    [ingress]
+    # gateway, NOT direct: `secureAccess` is honoured only for Kubernetes
+    # sandboxes under gateway mode (server/configuration.md). Under direct
+    # ingress no per-sandbox credential is minted, every sandbox shares the one
+    # static EXECD_ACCESS_TOKEN, and a compromised agent can reach a peer's
+    # execd — which #2023's `test_sandbox_cannot_read_host_or_peer_workspace`
+    # exists to forbid. The `secure_access_required` attestation is what this
+    # block backs; dropping either without the other makes the workflow row lie.
+    mode = "gateway"
+
+    [ingress.gateway]
+    # MUST be changed per deployment: the host clients reach sandboxes through,
+    # with NO scheme. This is the ingress gateway's address, not the server's.
+    address = "opensandbox-gateway.open-ace.example"
+    # header, not wildcard. Upstream's shipped gateway (components/ingress,
+    # deployed by the opensandbox-server chart) accepts `--mode <header|uri>`
+    # only; its chart documents gatewayRouteMode as "header or uri". Choosing
+    # `wildcard` would have the server hand out `<id>-<port>.<domain>` hosts
+    # that the gateway cannot route, and require wildcard DNS and a wildcard
+    # certificate on top.
+    route.mode = "header"

@@ -1,0 +1,121 @@
+# The BatchSandbox CR template both OpenSandbox servers apply (Issue #2023).
+#
+# This is the file `[kubernetes] batchsandbox_template_file` points at. It is
+# NOT a core/v1 PodTemplate: upstream's BatchSandboxTemplateManager reads a
+# partial BatchSandbox CR whose `spec.template` is a corev1.PodTemplateSpec, and
+# merges it into the manifest it generates per sandbox. An unreferenced
+# `kind: PodTemplate` object applied to the cluster is inert — the server never
+# looks for one — which would leave every attestation below asserted with
+# nothing enforcing it (the #2082 failure this design exists to avoid).
+#
+# EVERY property here backs an attestation in sandbox-backends.json. The
+# provider cannot observe any of them through the sandbox API, so it declares
+# the matching capability only because an operator asserted it — and refuses to
+# run at all when the assertion is absent (spec §5.2 refusal 9). Removing a
+# field here without removing its attestation makes the workflow row lie.
+#
+#   runAsNonRoot / runAsUser           -> nonroot_enforced
+#   readOnlyRootFilesystem             -> readonly_rootfs
+#   seccompProfile RuntimeDefault      -> seccomp_runtime_default
+#   serviceAccountName (no RBAC)       -> dedicated_service_account
+#   emptyDir sizeLimit                 -> ephemeral_storage_enforced
+#   podPidsLimit (kubelet, see README) -> pod_pids_limit
+#
+# The container is named `sandbox` deliberately: upstream's
+# _extract_template_pod_extras() searches the template's containers for exactly
+# that name and lifts its volumeMounts and securityContext into the generated
+# pod. Without a match it falls back to containers[0] — the same entry today,
+# but do not rely on that.
+#
+# runtimeClassName is deliberately ABSENT. The server sets it from
+# `[secure_runtime] k8s_runtime_class`, so one template serves both the gVisor
+# and the Kata tier and neither can drift from its own server's real runtime.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-sandbox-template
+  namespace: open-ace
+data:
+  batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensandbox-sandbox
+        app.kubernetes.io/part-of: open-ace
+    spec:
+      replicas: 1
+      template:
+        metadata:
+          # POD labels — the ones networkpolicy.yaml's podSelector matches.
+          #
+          # The block above this is the BatchSandbox CR's own metadata, which
+          # does NOT reach the pod: upstream builds the pod's labels itself at
+          # `spec.template.metadata.labels` and deep-merges the template over
+          # them, so a label written only at CR level selects the custom
+          # resource and nothing else. The NetworkPolicy would then match zero
+          # pods while `metadata_cidr_blocked` and `egress_cni_default_deny`
+          # went on being attested — a capability declared and not enforced,
+          # which is the failure this whole design exists to prevent.
+          #
+          # test_the_networkpolicy_selects_the_sandbox_pods binds these two
+          # files together so they cannot drift apart again.
+          labels:
+            app.kubernetes.io/name: opensandbox-sandbox
+            app.kubernetes.io/part-of: open-ace
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          serviceAccountName: opensandbox-sandbox
+          automountServiceAccountToken: false
+          # POD level carries only what must apply to every container.
+          #
+          # `runAsUser: 1000` sits on the `sandbox` container below, and that
+          # is ALSO execd's identity: upstream's bootstrap.sh is PID 1 of this
+          # container and starts execd as another process inside it, so execd
+          # is not a sidecar and cannot be given a different uid here. An
+          # earlier revision moved runAsUser to the container in the belief
+          # that it left execd running as root; it did not, and every
+          # /command carrying a uid/gid still died
+          # `fork/exec /usr/bin/bash: operation not permitted` (setgroups(2)
+          # needs CAP_SETGID, which a uid-1000 execd does not have). Verified
+          # on a live gVisor cluster.
+          #
+          # A deployment shaped like this one must therefore attest
+          # `execd_runs_as_exec_identity`, which stops the provider sending
+          # uid/gid at all and lets execd run commands as itself. The agent is
+          # non-root either way, which is what `nonroot_enforced` attests.
+          securityContext:
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sandbox
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                # HOME must be writable — the repo synthesis runs `git init`
+                # plus a commit and git needs somewhere to write config under a
+                # read-only rootfs — and must live OUTSIDE /workspace, or
+                # `git add -A` stages the whole home tree (pip wheels, npm,
+                # pre-commit envs) into the initial commit.
+                - name: home
+                  mountPath: /home/agent
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: home
+              emptyDir:
+                sizeLimit: 1Gi
+            - name: workspace
+              emptyDir:
+                sizeLimit: 8Gi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

@@ -1,0 +1,84 @@
+# OpenSandbox server configuration for the kata tier (Issue #2023).
+#
+# Schema: https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md
+# Keys are placed in the sections upstream actually parses. `namespace` and
+# `batchsandbox_template_file` live under [kubernetes], NOT [runtime] —
+# [runtime] accepts only type / execd_image / execd_run_as_init, so a
+# `namespace` written there does not select the sandbox namespace and the
+# template is never loaded at all.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-config-kata
+  namespace: open-ace
+data:
+  sandbox.toml: |
+    [server]
+    host = "0.0.0.0"
+    # Must match the Deployment's containerPort and the probe port.
+    port = 8080
+
+    [runtime]
+    type = "kubernetes"
+    execd_image = "opensandbox/execd:v1.1.0"
+
+    [kubernetes]
+    # In-cluster credentials: kubeconfig_path stays unset on purpose.
+    namespace = "open-ace-sandboxes"
+    workload_provider = "batchsandbox"
+    # The pod hardening that backs the nonroot / readonly-rootfs / seccomp /
+    # dedicated-service-account / ephemeral-storage attestations. Without this
+    # line the template is inert and every one of those attestations is a
+    # promise nothing keeps.
+    batchsandbox_template_file = "/etc/opensandbox/templates/batchsandbox-template.yaml"
+    image_pull_policy = "IfNotPresent"
+
+    [secure_runtime]
+    # Server-level, not per-request. The provider's boot probe reads
+    # /proc/version in a fresh sandbox and refuses to run if the kernel does not
+    # match the tier's declared runtime_class, so this value is verified rather
+    # than trusted. The server stamps runtimeClassName on every sandbox pod from
+    # k8s_runtime_class, which is why the shared template does not set it.
+    type = "kata"
+    k8s_runtime_class = "kata-qemu"
+
+    [egress]
+    # image is REQUIRED whenever a client sends networkPolicy on create, and
+    # this provider always does (policy.build_network_policy). Omitting it makes
+    # every create fail rather than quietly running without egress control.
+    image = "opensandbox/egress:v1.1.7"
+    # dns+nft, not dns: DNS-only enforcement cannot stop a connection made to a
+    # bare IP. The provider probes the sidecar's /policy and fails closed when
+    # enforcementMode is anything else.
+    mode = "dns+nft"
+
+    [store]
+    # REQUIRED. Without it upstream defaults to ~/.opensandbox/opensandbox.db,
+    # which under this pod (UID 1000, readOnlyRootFilesystem, only /tmp
+    # writable) resolves somewhere unwritable — and the snapshot repository
+    # creates its parent directory and schema at import time, so the server
+    # fails before readiness rather than at first use.
+    type = "sqlite"
+    path = "/var/lib/opensandbox/opensandbox.db"
+
+    [ingress]
+    # gateway, NOT direct: `secureAccess` is honoured only for Kubernetes
+    # sandboxes under gateway mode (server/configuration.md). Under direct
+    # ingress no per-sandbox credential is minted, every sandbox shares the one
+    # static EXECD_ACCESS_TOKEN, and a compromised agent can reach a peer's
+    # execd — which #2023's `test_sandbox_cannot_read_host_or_peer_workspace`
+    # exists to forbid. The `secure_access_required` attestation is what this
+    # block backs; dropping either without the other makes the workflow row lie.
+    mode = "gateway"
+
+    [ingress.gateway]
+    # MUST be changed per deployment: the host clients reach sandboxes through,
+    # with NO scheme. This is the ingress gateway's address, not the server's.
+    address = "opensandbox-gateway.open-ace.example"
+    # header, not wildcard. Upstream's shipped gateway (components/ingress,
+    # deployed by the opensandbox-server chart) accepts `--mode <header|uri>`
+    # only; its chart documents gatewayRouteMode as "header or uri". Choosing
+    # `wildcard` would have the server hand out `<id>-<port>.<domain>` hosts
+    # that the gateway cannot route, and require wildcard DNS and a wildcard
+    # certificate on top.
+    route.mode = "header"
