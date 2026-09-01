@@ -13,7 +13,9 @@ Issue #2543: Local workspace session data collection permission fix
 Issue #3249: Parameter validation underscore fix and security hardening
 """
 
+import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -56,6 +58,123 @@ def fake_config(temp_dir):
     config_path = temp_dir / "config.json"
     config_path.write_text('{"database": {"url": "sqlite:///test.db"}}')
     return str(config_path)
+
+
+# ============================================================================
+# #3186 Phase B batch 3: real-behavior tests for the wrapper's file gate.
+# The harness below extracts the REAL function text from
+# scripts/openace-fetch-wrapper at test time (column-0 anchored) and sources
+# it — a wrapper edit that breaks the extraction fails the define-preflight,
+# and no harness fallbacks exist to mask drift. bash >= 4 required (the
+# wrapper uses associative arrays); CI's bash 5 always runs these, stock
+# macOS bash 3.2 skips.
+# ============================================================================
+
+
+def _bash_major() -> int:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["bash", "-c", "echo ${BASH_VERSINFO[0]}"], capture_output=True, text=True
+        )
+        return int(out.stdout.strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+requires_bash4 = pytest.mark.skipif(
+    _bash_major() < 4, reason="wrapper requires bash>=4 (CI bash5 runs it)"
+)
+
+
+WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "openace-fetch-wrapper"
+
+
+def _extract_closure(tmp_path: Path) -> Path:
+    """Extract validate_file and its full dependency closure from the real
+    wrapper into a sourceable harness file (fail-closed: define-preflight in
+    the consumer asserts everything landed)."""
+    names = [
+        "normalize_path",
+        "is_allowed_path",
+        "safe_resolve_symlink",
+        "log_audit",
+        "validate_file",
+    ]
+    text = WRAPPER.read_text(encoding="utf-8")
+    parts = []
+    for fn in names:
+        pattern = re.compile(rf"^{fn}\(\) \{{.*?^\}}", re.S | re.M)
+        m = pattern.search(text)
+        assert m, f"extraction failed for {fn} — wrapper drifted?"
+        parts.append(m.group(0))
+    # Constants the closure reads (single-line matches — NO re.S here, or
+    # `.*$` would swallow the rest of the file under re.M's line anchors).
+    for const_pat in [
+        r"^MAX_FILE_SIZE=.*$",
+        r"^MAX_SYMLINK_DEPTH=.*$",
+        r"^AUDIT_LOG=.*$",
+        r"^declare -A TOOL_TO_DIR=\(.*?^\)$",
+    ]:
+        # Single-line patterns must NOT use re.S: `.*$` under re.S+re.M
+        # swallows the rest of the file (the TOOL_TO_DIR entry needs re.S
+        # for its multi-line value, where the non-greedy `.*?^\)` stops at
+        # the declaration's column-0 close).
+        flags = re.S | re.M if "TOOL_TO_DIR" in const_pat else re.M
+        m = re.search(const_pat, text, flags)
+        assert m, f"extraction failed for {const_pat} — wrapper drifted?"
+        parts.append(m.group(0))
+    harness = tmp_path / "wrapper_closure.sh"
+    harness.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+    return harness
+
+
+def _run_closure(
+    harness: Path, script: str, env: dict | None = None
+) -> subprocess.CompletedProcess:
+    """Source the extracted closure and run `script` under bash; fail-closed
+    preflight asserts every symbol is defined by the extraction alone."""
+    import os as _os
+
+    preflight = (
+        "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit validate_file; "
+        'do declare -F $f >/dev/null || { echo "PREFLIGHT-MISSING: $f" >&2; exit 99; }; done; '
+        "for v in MAX_FILE_SIZE MAX_SYMLINK_DEPTH AUDIT_LOG TOOL_TO_DIR; "
+        'do declare -p $v >/dev/null || { echo "PREFLIGHT-MISSING: $v" >&2; exit 99; }; done'
+    )
+    full = f"set -u; source {harvest_quoted(harness)}; {preflight} || exit 99; {script}"
+    environ = dict(_os.environ)
+    environ.update(env or {})
+    return subprocess.run(["bash", "-c", full], capture_output=True, text=True, env=environ)
+
+
+def harvest_quoted(path: Path) -> str:
+    return shlex_quote(str(path))
+
+
+def shlex_quote(value: str) -> str:
+    import shlex
+
+    return shlex.quote(value)
+
+
+def _real_user_home() -> Path:
+    """The ACCOUNT's home directory, immune to HOME env overrides.
+
+    The CI suite runner isolates HOME to a tmp path (ci.py
+    isolated_environment) that the wrapper's hardcoded /home|/Users
+    allowlist can never accept — Path.home() there points outside the
+    whitelist. pwd.getpwuid gives the real, home-shaped, writable
+    directory (/home/runner on CI, /Users/<user> on macOS). Skips
+    (legitimately, conditionally) where none exists.
+    """
+    import pwd
+
+    pw_dir = pwd.getpwuid(os.getuid()).pw_dir
+    if re.match(r"^/(home|Users)/[a-zA-Z0-9_-]+$", pw_dir) and os.access(pw_dir, os.W_OK):
+        return Path(pw_dir)
+    pytest.skip(f"no writable home-shaped directory for the wrapper allowlist (pw_dir={pw_dir})")
 
 
 # ============================================================================
@@ -617,14 +736,45 @@ class TestErrorMessageSecurity:
 class TestParameterValidation:
     """Test that parameter validation uses exact matching."""
 
-    def test_exact_match_valid_params(self, wrapper_path, fake_config):
-        """Test that valid parameters are accepted."""
+    @requires_bash4
+    def test_exact_match_valid_params(self, wrapper_path, tmp_path, monkeypatch):
+        """Valid params pass validation — asserted on the POSITIVE face.
+
+        Complements test_valid_tool_with_days_accepted (absence-of-rejection)
+        by proving the wrapper actually starts and finishes the fetch: a
+        PATH-shim python3 records the invocation and exits 0, and the audit
+        log must carry fetch_start/fetch_end for tool=fetch_qwen. The shim
+        keeps the run deterministic on both OSes and never touches the
+        developer's real ~/.qwen.
+        """
         if not os.path.exists(wrapper_path):
             pytest.skip("Wrapper not installed")
 
-        # This would call the wrapper, but we'll test the validation logic
-        # by checking if the wrapper rejects invalid params
-        pass
+        shim_dir = tmp_path / "bin"
+        shim_dir.mkdir()
+        argv_file = tmp_path / "argv.txt"
+        (shim_dir / "python3").write_text(
+            '#!/bin/sh\necho "$@" >> ' + shlex_quote(str(argv_file)) + "\nexit 0\n"
+        )
+        (shim_dir / "python3").chmod(0o755)
+        monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
+        audit_log = tmp_path / "audit.log"
+        monkeypatch.setenv("AUDIT_LOG", str(audit_log))
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1"],
+            capture_output=True,
+            text=True,
+        )
+        assert "Invalid tool" not in result.stderr
+        assert audit_log.exists(), "the wrapper must audit a real fetch"
+        log_lines = audit_log.read_text()
+        assert "action=fetch_start" in log_lines
+        assert "tool=fetch_qwen" in log_lines
+        assert "action=fetch_end" in log_lines
+        assert argv_file.exists(), "the shim python3 must have been invoked"
+        argv = argv_file.read_text().split()
+        assert argv[0].endswith("fetch_qwen.py"), argv
 
     def test_reject_malicious_param_prefix(self, wrapper_path):
         """Test that malicious prefix is rejected (no substring match)."""
@@ -930,15 +1080,57 @@ class TestFileSizeLimits:
         assert small_file.exists()
         assert small_file.stat().st_size < 50 * 1024 * 1024
 
-    def test_large_file_rejected(self, temp_dir):
-        """Test that files over 50MB are rejected."""
-        user_dir = temp_dir / "home" / "user1" / ".qwen" / "projects"
-        user_dir.mkdir(parents=True)
+    @requires_bash4
+    def test_large_file_rejected(self, tmp_path):
+        """validate_file rejects files over the real 50MB limit.
 
-        # Create a large file (this would be > 50MB in real scenario)
-        # In test, we just verify the logic would reject it
-        # The wrapper should skip files over 50MB
-        # This is a conceptual test
+        Drives the REAL extracted validate_file closure. The accept-path
+        fixture must live under a home-shaped path (is_allowed_path gates
+        before the size check and rejects tmp paths); os.truncate makes the
+        >50MB file sparse so no bytes are written. Note (rev3 NIT-F): the
+        whitelist regex excludes dots in usernames — fine on CI (runner) and
+        this repo's dev machines.
+        """
+        import uuid
+
+        harness = _extract_closure(tmp_path)
+        under_home = _real_user_home() / ".qwen" / f"fwtest-{uuid.uuid4().hex[:8]}"
+        try:
+            proj = under_home / "projects"
+            proj.mkdir(parents=True)
+            small = proj / "small.jsonl"
+            small.write_text('{"test": "data"}')
+            big = proj / "big.jsonl"
+            big.write_text("x")
+            os.truncate(big, 50 * 1024 * 1024 + 1)
+
+            rc_small = _run_closure(
+                harness,
+                f"validate_file {shlex_quote(str(small))} 2>&1; echo rc=$?; "
+                f"readlink -f {shlex_quote(str(small))}",
+            )
+            assert rc_small.returncode == 0, rc_small.stderr + rc_small.stdout
+            assert rc_small.stdout.strip().endswith(str(small)), (
+                f"small-file accept path failed on the real closure:\n"
+                f"stdout: {rc_small.stdout}\nstderr: {rc_small.stderr}"
+            )
+            assert "rc=0" in rc_small.stdout, rc_small.stdout + rc_small.stderr
+
+            audit = tmp_path / "audit.log"
+            rc_big = _run_closure(
+                harness,
+                f"validate_file {shlex_quote(str(big))}; echo $?",
+                env={"AUDIT_LOG": str(audit)},
+            )
+            assert rc_big.returncode == 0, rc_big.stderr
+            assert rc_big.stdout.strip().endswith("1")
+            assert "WARNING: File too large" in rc_big.stderr
+            assert "file_skipped" in audit.read_text()
+            assert "reason=too_large" in audit.read_text()
+        finally:
+            import shutil
+
+            shutil.rmtree(under_home, ignore_errors=True)
 
 
 # ============================================================================
@@ -947,18 +1139,36 @@ class TestFileSizeLimits:
 
 
 class TestAuditLogging:
-    """Test that audit logging works correctly."""
+    """Audit logging via the REAL extracted log_audit closure."""
 
-    def test_audit_log_created(self, temp_dir):
-        """Test that audit log is created when wrapper runs."""
-        # In real deployment, the wrapper creates this log
-        # The test verifies the expected log format
+    @requires_bash4
+    def test_audit_log_created(self, tmp_path):
+        """log_audit writes the documented line format to AUDIT_LOG.
 
-    def test_username_sanitized(self):
-        """Test that usernames are sanitized in logs."""
-        # Usernames should be sanitized to first letter + ***
-        # e.g., "alice" -> "a***"
-        # This prevents leaking sensitive information
+        The line is "<timestamp> | caller=<user> | action=<action> | <details>"
+        (fragments asserted separately — they are ` | `-separated). The
+        end-to-end fetch_start/fetch_end path is covered by
+        TestParameterValidation.test_exact_match_valid_params (real wrapper).
+        """
+        harness = _extract_closure(tmp_path)
+        audit = tmp_path / "audit.log"
+        rc = _run_closure(
+            harness,
+            'log_audit "fetch_start" "tool=fetch_qwen"; echo $?',
+            env={"AUDIT_LOG": str(audit), "USER": "auditprobe"},
+        )
+        assert rc.returncode == 0, rc.stderr
+        assert rc.stdout.strip().endswith("0")
+        line = audit.read_text().strip()
+        assert " | caller=auditprobe | " in line
+        assert " | action=fetch_start | " in line
+        assert line.endswith("tool=fetch_qwen")
+
+    # test_username_sanitized was deleted (#3186 batch 3): sanitize_username is
+    # defined-but-never-called in the wrapper and log_audit writes the raw
+    # caller/user — the sanitization requirement was never implemented. The
+    # implement-or-remove decision is tracked in #3292 (the wrapper header's
+    # "脱敏" claim is currently false).
 
 
 # ============================================================================
@@ -1009,21 +1219,11 @@ class TestPrivilegeDrop:
 # ============================================================================
 
 
-class TestUserIdentityMapping:
-    """Test that user identity mapping works correctly."""
-
-    def test_resolve_user_id_by_system_account(self):
-        """Test that user_id is resolved from system_account."""
-        # Import the function from fetch_qwen
-        # This test would need a database connection or mock
-
-    def test_resolve_user_id_by_username(self):
-        """Test that user_id is resolved from username."""
-        # Similar to above, but using username field
-
-    def test_no_match_returns_none(self):
-        """Test that no match returns None (not error)."""
-        # When system_account is not found, should return None
+# TestUserIdentityMapping was deleted (#3186 batch 3): all three contracts
+# (resolve by system_account, by username, unknown -> None) are covered by
+# REAL PostgreSQL tests in
+# tests/integration/test_qwen_user_attribution_2735_pg.py::TestUserIdResolution
+# (batch 2b) — keeping hollow local stubs would duplicate coverage.
 
 
 # ============================================================================
@@ -1032,25 +1232,155 @@ class TestUserIdentityMapping:
 
 
 class TestIntegration:
-    """Integration tests that require a full environment."""
+    """fetch_and_save multi-user status contract, driven for real."""
 
-    @pytest.mark.skipif(
-        not os.path.exists("/home") or os.geteuid() != 0,
-        reason="Requires root access and /home directory",
-    )
-    def test_multi_user_collection_with_permission_700(self, wrapper_path):
-        """Test that users with permission 700 home directories are collected."""
-        # This test requires:
-        # 1. Root access
-        # 2. At least two users with permission 700 home directories
-        # 3. Those users to have .qwen data
-        pass
+    def test_degraded_status_on_partial_failure(self, tmp_path, monkeypatch, capsys):
+        """One accessible user + one denied user => status "degraded".
 
-    def test_degraded_status_on_partial_failure(self, wrapper_path):
-        """Test that degraded status is returned when some users fail."""
-        # When some users are denied, the result should be "degraded"
-        # not "failed" or "completed"
-        pass
+        The fixture root reaches the REAL find_all_qwen_project_dirs via the
+        additive home_base parameter (zero monkeypatching of the scan). The
+        denied user's .qwen stays traversable (0o755) while its projects/
+        subdir is chmod 000 — opendir EACCES raises on every Python version
+        (3.13+ pathlib rewrote predicate methods, not iteration errors), and
+        the except PermissionError -> denied classification inside the real
+        scan fires. Status/coverage are asserted from the FETCH_RESULT JSON
+        markers on stdout.
+        """
+        import importlib.util
+        import json as _json
+        import sys as _sys
+
+        scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if str(scripts_dir) not in _sys.path:
+            _sys.path.insert(0, str(scripts_dir))
+        import fetch_qwen
+
+        import shared.db as shared_db
+        from shared import config as shared_config
+
+        # Fixture: userA good (.qwen/projects/<subdir>/*.jsonl), userB denied
+        user_a_projects = tmp_path / "home" / "userA" / ".qwen" / "projects" / "proj1"
+        user_a_projects.mkdir(parents=True)
+        entry_user = {
+            "uuid": "du1",
+            "parentUuid": None,
+            "type": "user",
+            "timestamp": "2026-01-05T10:00:00Z",
+            "sessionId": "sess-deg-1",
+            "message": {"message_id": "dm1", "parts": []},
+        }
+        entry_asst = {
+            "uuid": "da1",
+            "parentUuid": "du1",
+            "type": "assistant",
+            "timestamp": "2026-01-05T10:00:05Z",
+            "sessionId": "sess-deg-1",
+            "model": "qwen-max",
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 15,
+            },
+            "message": {"message_id": "dm2", "parts": []},
+        }
+        (user_a_projects / "2026-01-05.jsonl").write_text(
+            _json.dumps(entry_user) + "\n" + _json.dumps(entry_asst) + "\n"
+        )
+        user_b_qwen = tmp_path / "home" / "userB" / ".qwen"
+        (user_b_qwen / "projects").mkdir(parents=True)
+        (user_b_qwen / "projects").chmod(0o000)
+
+        # Isolated, schema-initialized SQLite bound through BOTH seams (the
+        # URL cache and the config resolver fetch_qwen actually imports).
+        db_file = tmp_path / "degraded.db"
+        test_url = f"sqlite:///{db_file}"
+        monkeypatch.setattr(shared_db, "_db_url_cache", None)
+        monkeypatch.setattr(shared_config, "get_database_url", lambda: test_url)
+        shared_db.init_database()
+
+        try:
+            ok = fetch_qwen.fetch_and_save(
+                days=7,
+                hostname="deghost",
+                multi_user_mode=True,
+                home_base=tmp_path / "home",
+            )
+            assert ok is True
+        finally:
+            (user_b_qwen / "projects").chmod(0o755)
+
+        out = capsys.readouterr().out
+        assert "===FETCH_RESULT_START===" in out, out[-2000:]
+        payload = out.split("===FETCH_RESULT_START===", 1)[1].split("===FETCH_RESULT_END===", 1)[0]
+        result = _json.loads(payload)
+        assert result["status"] == "degraded", result
+        assert "userB" in result["coverage"]["users_denied"], result
+        assert result["coverage"]["users_scanned"] >= 1, result
+
+    # test_multi_user_collection_with_permission_700 was deleted (#3186
+    # batch 3): root + real multi-user e2e has no CI-honest path (mock-gated
+    # testing is the forbidden formal repair) — tracked with the rest of the
+    # root-e2e family in #3293.
+
+    def test_idempotent_collection(self, tmp_path):
+        """Re-scanning the same tree is deterministic and per-file dedup holds.
+
+        Two runs over the same fixture tree with FRESH aggregation dicts must
+        produce identical (daily, messages); and a fixture file repeating one
+        assistant message_id must count request_count once (seen_msg_ids
+        contract — the per-file dedup that prevents double counting).
+        """
+        import importlib.util
+        import json as _json
+        import sys as _sys
+        from collections import defaultdict
+
+        scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if str(scripts_dir) not in _sys.path:
+            _sys.path.insert(0, str(scripts_dir))
+        import fetch_qwen
+
+        proj = tmp_path / "home" / "userA" / ".qwen" / "projects" / "proj1"
+        proj.mkdir(parents=True)
+        base = {
+            "type": "assistant",
+            "model": "qwen-max",
+            "usageMetadata": {"totalTokenCount": 7},
+            "message": {"message_id": "same-id", "parts": []},
+        }
+        e1 = dict(base, uuid="r1", timestamp="2026-01-05T10:00:00Z")
+        e2 = dict(base, uuid="r2", timestamp="2026-01-05T10:01:00Z")
+        (proj / "2026-01-05.jsonl").write_text(_json.dumps(e1) + "\n" + _json.dumps(e2) + "\n")
+
+        def new_agg():
+            return defaultdict(
+                lambda: {
+                    "prompt_tokens": 0,
+                    "candidates_tokens": 0,
+                    "thoughts_tokens": 0,
+                    "cached_tokens": 0,
+                    "total_tokens": 0,
+                    "request_count": 0,
+                    "models_used": set(),
+                }
+            )
+
+        results = []
+        for _ in range(2):
+            agg = new_agg()
+            msgs: list = []
+            fetch_qwen._process_projects_dir(proj.parent, "idemhost", "userA", agg, msgs)
+            results.append(
+                ({k: dict(v, models_used=sorted(v["models_used"])) for k, v in agg.items()}, msgs)
+            )
+        (daily1, msgs1), (daily2, msgs2) = results
+        assert daily1 == daily2, "re-scan must be deterministic"
+        assert len(msgs1) == len(msgs2) and msgs1 == msgs2
+        # The repeated assistant message_id must be counted once.
+        assert daily1["2026-01-05"]["request_count"] == 1, daily1
+
+    # (Idempotency lives here rather than in the integration file, whose
+    # TestErrorHandlingIntegration placeholders were deleted in #3186 batch 3.)
 
 
 # ============================================================================
