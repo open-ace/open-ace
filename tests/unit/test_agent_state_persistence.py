@@ -90,3 +90,107 @@ def test_argv_carries_resume_only_when_asked():
     assert "--resume" in with_state
     assert "sid-1" in with_state
     assert "--resume" not in without_state
+
+
+# ── the planning decision, one test per row of the spec's §5.5 table ──
+
+
+def _runner(tmp_path=None):
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    if tmp_path is not None:
+        runner._agent_state_store = AgentStateStore(root=str(tmp_path))
+    return runner
+
+
+class _Ephemeral:
+    pass
+
+
+class _Carried:
+    agent_state_persistence = AGENT_STATE_CARRIED
+
+
+def test_a_resuming_turn_on_an_ephemeral_provider_is_refused_before_create():
+    """Free by construction: no sandbox, no tokens, no wasted invocation.
+
+    This is what converts today's guaranteed failed run — --resume into an
+    empty HOME, "No conversation found with session ID: <id>", then the #2035
+    recovery retrying fresh — into an up-front refusal.
+    """
+    plan = _runner()._plan_agent_state(
+        _Ephemeral(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is True
+    assert plan.reason_code == "agent_state_unavailable"
+
+
+def test_a_non_resuming_turn_on_an_ephemeral_provider_is_fine():
+    plan = _runner()._plan_agent_state(
+        _Ephemeral(), workflow_id="wf-1", tracking_session_id="sid-1", resume=False
+    )
+    assert plan.refuse is False
+    assert plan.resume is False
+
+
+def test_a_persisting_provider_resumes_with_no_transfer():
+    plan = _runner()._plan_agent_state(
+        LegacyPosixProvider(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is False
+    assert plan.resume is True
+    assert plan.blob is None
+
+
+def test_a_carried_provider_with_no_stored_state_starts_fresh(tmp_path):
+    """Absent is NOT a failure — first turn, or tmpfs cleared by a reboot.
+
+    openace-run-as.sh guards its restore with `if [ -d ... ]` and skips. If
+    absent were fail-closed instead, every control-plane restart would kill
+    in-flight workflows.
+    """
+    plan = _runner(tmp_path)._plan_agent_state(
+        _Carried(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is False
+    assert plan.resume is False
+    assert plan.blob is None
+
+
+def test_a_carried_provider_with_stored_state_plans_to_resume(tmp_path):
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put("wf-1", "sid-1", b"TRANSCRIPT\n")
+
+    plan = runner._plan_agent_state(
+        _Carried(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is False
+    assert plan.resume is True
+    assert plan.blob == b"TRANSCRIPT\n"
+
+
+def test_a_corrupt_slot_is_refused_rather_than_read_as_absent(tmp_path, monkeypatch):
+    """Present-but-unreadable is the mis-shaped-tree hazard `exit 70` exists for."""
+    runner = _runner(tmp_path)
+    runner._agent_state_store.put("wf-1", "sid-1", b"data")
+
+    def boom(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("pathlib.Path.read_bytes", boom)
+
+    plan = runner._plan_agent_state(
+        _Carried(), workflow_id="wf-1", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is True
+    assert plan.reason_code == "agent_state_unavailable"
+
+
+def test_an_unusable_key_is_refused_not_silently_run_without_history(tmp_path):
+    plan = _runner(tmp_path)._plan_agent_state(
+        _Carried(), workflow_id="../escape", tracking_session_id="sid-1", resume=True
+    )
+    assert plan.refuse is True
+    assert plan.reason_code == "agent_state_unavailable"
