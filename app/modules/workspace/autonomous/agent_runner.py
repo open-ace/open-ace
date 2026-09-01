@@ -200,7 +200,15 @@ class _LocalSession:
     """Tracks a local CLI subprocess session."""
 
     session_id: str
+    # The raw Popen, populated ONLY by LocalProcessTransport. Kept so the
+    # pid-keyed call sites (mark_session_*_by_pid) behave exactly as before on
+    # the Legacy path; a container backend leaves it None.
     process: subprocess.Popen | None
+    # #2023: the agent IO seam. Every stdin/stdout/stderr/poll/wait call goes
+    # through this. Derived from `process` when not supplied (see __post_init__)
+    # so a session built directly from a Popen — which several suites and the
+    # remote tracker do — still has a working transport.
+    transport: Any = None
     cli_tool: str = "claude-code"
     allowed_tools: list[str] | None = None
     output_lines: list[str] = field(default_factory=list)
@@ -272,6 +280,16 @@ class _LocalSession:
     # route through it (gVisor has no local Popen — signals MUST reach the
     # sandbox via the provider). None on legacy tracker paths.
     sandbox_provider: Any = None
+
+    def __post_init__(self) -> None:
+        # A session built directly from a Popen still gets the seam, so the
+        # reader/writer paths have exactly one code path regardless of how the
+        # session was constructed. Remote trackers pass neither and keep
+        # transport None, which those paths already handle.
+        if self.transport is None and self.process is not None:
+            from app.modules.workspace.autonomous.sandbox.transport import LocalProcessTransport
+
+            self.transport = LocalProcessTransport(self.process)
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -978,6 +996,7 @@ class AutonomousAgentRunner:
         session_id: str,
         sandbox_handle: Any,
         remote_session_id: str | None,
+        provider: Any = None,
     ) -> None:
         """Fire ``on_sandbox_created`` so the orchestrator persists mid-run state (#2022 P6).
 
@@ -1000,7 +1019,14 @@ class AutonomousAgentRunner:
             )
 
             try:
-                declared_caps = self._sandbox_provider.capabilities()
+                # The provider that actually ran this task, NOT the injected
+                # default. Reading self._sandbox_provider stamped Legacy's
+                # capability set onto a row labelled provider_name="opensandbox"
+                # — so the row claimed CPU_MEM_PIDS_TIME_QUOTA (always in
+                # _LEGACY_CAPS) even for a tier that attested no pod pids limit,
+                # and omitted the namespace/egress isolation it really had.
+                # effective_policy's contract is that the map cannot lie.
+                declared_caps = (provider or self._sandbox_provider).capabilities()
             except Exception:
                 declared_caps = frozenset()
             effective_policy = build_effective_policy(
@@ -2271,19 +2297,17 @@ class AutonomousAgentRunner:
         # here; _run_zcode_appserver creates the row under the real CLI id.
         creates_session_late = cli_tool in _APPSERVER_TOOLS
 
+        # Resolved unconditionally. It is read later by _sync_usage_to_daily_usage
+        # on BOTH the local and remote paths, but was assigned only inside the
+        # branch below — so any app-server tool (ZCode sets creates_session_late)
+        # raised UnboundLocalError there. That surfaced as a bare
+        # "cannot access local variable" with error_code=None, masking the real
+        # diagnostic, including the #2023 production-isolation refusal. The bug
+        # predates this PR; the new refusal is what made it visible.
+        wf_tenant_id = self._resolve_tenant_id(user_id)
+
         # Create wrapper sessions only for tools without a deferred session id.
         if self.session_manager and not creates_session_late:
-            # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
-            wf_tenant_id = 1
-            if user_id:
-                try:
-                    from app.repositories.user_repo import UserRepository
-
-                    wf_user = UserRepository().get_user_by_id(user_id)
-                    if wf_user and wf_user.get("tenant_id"):
-                        wf_tenant_id = int(wf_user["tenant_id"])
-                except Exception:
-                    pass  # default tenant
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
@@ -2508,6 +2532,7 @@ class AutonomousAgentRunner:
         milestone_id: str = "",
         system_account: str | None = None,
         runtime_python_command: list[str] | None = None,
+        tenant_id: int | None = None,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -2529,6 +2554,26 @@ class AutonomousAgentRunner:
         project_path = os.path.expanduser(project_path)
         # Ensure the project dir exists (cross-user safe, Issue #1395).
         self._ensure_project_dir(project_path, system_account)
+
+        # #2023: resolve the tenant and check the isolation policy HERE, above
+        # the protocol dispatch. The dispatch below returns from inside itself
+        # for ZCode and for every adapter without stdin, so neither ever reached
+        # the provider gate further down — a tenant in production_required_tenants
+        # picking one of those tools would have run on Legacy with nothing
+        # recorded to say the policy had been bypassed. Fail closed instead.
+        try:
+            if tenant_id is None:
+                tenant_id = self._resolve_tenant_for_isolation(
+                    user_id, cli_tool=cli_tool, adapter=adapter
+                )
+        except SandboxError as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
 
         # Protocol dispatch: different CLI tools speak different stdin protocols.
         # The generic _LocalSession path below assumes Claude SDK stream-json,
@@ -2642,44 +2687,106 @@ class AutonomousAgentRunner:
                 self._resolve_home_dir(system_account) / ".cache" / "pre-commit"
             )
             self._validate_cross_user_guard_bin(env)
-        sandbox_handle = self._sandbox_provider.create(
-            SandboxSpec(
-                task_id=session_id,
+        # #2023: resolve the provider per run through the isolation gate rather
+        # than reaching for the constructor-injected one. _select_sandbox_provider
+        # had exactly one caller (inside _run_remote), so routing only that method
+        # would have left this path on Legacy forever.
+        # A fail-closed refusal (a missing attestation, a probe mismatch) and a
+        # malformed backend config are both SandboxError, not OSError — without
+        # this they would escape _run_local with no AgentTaskResult at all.
+        try:
+            provider = self._select_sandbox_provider(
+                "local",
+                tenant_id=tenant_id,
                 project_path=project_path,
-                cli_tool=cli_tool,
-                system_account=system_account,
-                # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
-                # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
-                policy=self._load_task_policy(),
+                generation=self._resolve_sandbox_generation(workflow_id),
             )
-        )
+            sandbox_handle = provider.create(
+                SandboxSpec(
+                    task_id=session_id,
+                    project_path=project_path,
+                    cli_tool=cli_tool,
+                    system_account=system_account,
+                    # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
+                    # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
+                    policy=self._load_task_policy(),
+                )
+            )
+            # Persist attribution the moment an id exists, BEFORE upload/exec/
+            # attach. Recording it only after attach left a window in which a
+            # crash — or a failed boot probe whose best-effort delete also
+            # failed — left a live sandbox no workflow row could name, and the
+            # metadata-scoped server sweep that could have found it anyway has
+            # no production caller. Emitting twice is harmless: the second call
+            # rewrites the same row with the same ids.
+            self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
+        except SandboxError as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
         # Preserve the old log: the wrapped launch argv (sudo/openace-run-as for
         # cross-user, verbatim for same-user). build_launch_argv is pure, so
         # calling it for display is harmless; exec re-derives it internally.
-        logger.info(
-            "Launching local agent: %s",
-            " ".join(self._sandbox_provider.build_launch_argv(sandbox_handle, cmd, env)),
-        )
+        # build_launch_argv is a Legacy-only escape hatch (deliberately NOT on
+        # the Protocol), and this call exists only to build a log line — calling
+        # it unconditionally would raise AttributeError on any other provider
+        # before exec even runs.
+        if hasattr(provider, "build_launch_argv"):
+            logger.info(
+                "Launching local agent: %s",
+                " ".join(provider.build_launch_argv(sandbox_handle, cmd, env)),
+            )
+        else:
+            logger.info("Launching agent in sandbox %s", sandbox_handle.sandbox_id)
 
         try:
-            exec_handle = self._sandbox_provider.exec(
-                sandbox_handle, command=cmd, env=env, exec_policy=None
+            # #2023: materialize the project tree inside the sandbox BEFORE the
+            # agent starts. Legacy no-ops (the worktree is already there); an
+            # ephemeral backend would otherwise hand the agent an empty /workspace.
+            provider.upload_workspace(sandbox_handle, None)
+            # The provider decides its own per-turn policy. Passing a literal
+            # None here is what kept every OpenSandbox run on the foreground
+            # /command branch, whose ExecHandle get_transport() then refuses.
+            exec_policy = provider.agent_turn_policy(prompt=prompt, model=model, env=env)
+            exec_handle = provider.exec(
+                sandbox_handle, command=cmd, env=env, exec_policy=exec_policy
             )
-            # NOTE (#2023): get_process/build_launch_argv are Legacy-only escape
-            # hatches (NOT on the SandboxProvider Protocol) — the CLI stream-json
-            # protocol layer (_read_stdout/_send_sdk_init) drives a local Popen's
-            # stdin/stdout directly. A gVisor/container provider has no local
-            # Popen, so reusing this path requires abstracting the IO into a
-            # provider-returned transport handle (the "replaceable local seam").
-            # Deferred to #2023's first step (when gVisor needs to reuse
-            # stream-json); P4 deliberately stops at spawn/signal decoupling.
-            process = self._sandbox_provider.get_process(exec_handle)
+            # #2023: the "replaceable local seam" #2022 anticipated. The CLI
+            # stream-json layer (_read_stdout/_send_sdk_init) now drives an
+            # AgentTransport rather than a raw Popen, so a container backend
+            # with no local process can serve the same protocol.
+            # LocalProcessTransport is a strict pass-through, so the Legacy path
+            # keeps the same object and the same syscalls.
+            transport = provider.get_transport(exec_handle)
+            # Populated only by LocalProcessTransport; a container backend leaves
+            # it None and the pid-keyed paths below are inapplicable there.
+            process = getattr(transport, "process", None)
             # #2022 P6: persist a mid-run 'running' row so a crash between exec
             # and task completion leaves an orphan the reconciler can destroy.
             # Local has no external session id → None.
-            self._notify_sandbox_created(session_id, sandbox_handle, None)
-        except (OSError, subprocess.SubprocessError) as e:
-            self._sandbox_provider.destroy(sandbox_handle)
+            self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
+        except Exception as e:  # noqa: BLE001 - the sandbox EXISTS; nothing may leak it
+            # Deliberately catch-all. The previous tuple (OSError,
+            # SubprocessError, SandboxError) missed the normal failure of a
+            # rejected PTY upgrade: websockets raises InvalidStatus on a
+            # 401/403 handshake, which is none of those. The sandbox is
+            # already created at this point, so an escaping exception would
+            # leak a live sandbox.
+            try:
+                provider.destroy(sandbox_handle)
+            except Exception as destroy_error:  # noqa: BLE001 - must not mask `e`
+                # The server that just failed the exec is the one being asked to
+                # delete, so this raising is entirely plausible — and letting it
+                # replace `e` would escape _run_local with no AgentTaskResult at
+                # all. Attribution was persisted right after create, so the
+                # reconciler can still find this sandbox.
+                logger.warning(
+                    "sandbox destroy failed while handling %s: %s", type(e).__name__, destroy_error
+                )
             return self._stamp_sandbox_attribution(
                 AgentTaskResult(
                     session_id=(
@@ -2692,12 +2799,13 @@ class AutonomousAgentRunner:
                     error=f"Failed to start process: {e}",
                 ),
                 sandbox_handle,
-                self._sandbox_provider,
+                provider,
             )
 
         session = _LocalSession(
             session_id=session_id,
             process=process,
+            transport=transport,
             cli_tool=cli_tool,
             allowed_tools=allowed_tools,
             project_path=project_path,
@@ -2711,7 +2819,7 @@ class AutonomousAgentRunner:
             task_id=session_id,
             sandbox_handle=sandbox_handle,
             exec_handle=exec_handle,
-            sandbox_provider=self._sandbox_provider,
+            sandbox_provider=provider,
         )
         # For a resumed session the real CLI session_id is known up front; pin
         # it so sidebar detection reuses the existing record instead of guessing.
@@ -2721,10 +2829,11 @@ class AutonomousAgentRunner:
             session.sdk_initialized.set()
         self._local_sessions[session_id] = session
 
-        # Persist PID to database for reliable cancel/pause
-        if self._on_pid_registered:
+        # Persist PID to database for reliable cancel/pause. A container backend
+        # has no pid; cancellation there routes through the provider instead.
+        if self._on_pid_registered and transport.pid is not None:
             try:
-                self._on_pid_registered(session_id, process.pid)
+                self._on_pid_registered(session_id, transport.pid)
             except Exception as e:
                 logger.warning("on_pid_registered callback failed: %s", e)
 
@@ -2753,30 +2862,38 @@ class AutonomousAgentRunner:
         completed = self._wait_for_completion(session, timeout)
 
         # Cleanup
-        if completed and process.returncode is None:
-            try:
-                # The isolated launcher performs its .git integrity check
-                # after the CLI emits the terminal result event. Give that
-                # trusted wrapper a short window to finish before escalation.
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-        if process.returncode is None:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                process.wait(timeout=5)
-            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                except (ProcessLookupError, OSError):
-                    pass
+        if completed and transport.returncode is None:
+            # The isolated launcher performs its .git integrity check after the
+            # CLI emits the terminal result event. Give that trusted wrapper a
+            # short window to finish BEFORE escalation — folding this into
+            # shutdown() would start signalling mid-check.
+            transport.wait(timeout=5)
+        if transport.returncode is None:
+            # "Signal the process group" has no meaning for a container backend,
+            # and os.getpgid(None) raises a TypeError none of the handlers here
+            # catch. The transport owns its own escalation.
+            transport.shutdown(grace=5.0)
+
+        # #2023: bring the agent's work product back out BEFORE destroy — after
+        # destroy the ephemeral filesystem is gone and the run's entire output
+        # with it. Legacy no-ops (the agent edited the trusted worktree in
+        # place). A failure here is NOT swallowed: for an ephemeral backend an
+        # un-collected run has produced nothing, and reporting it as a success
+        # is exactly the quiet data loss this backend exists to prevent.
+        try:
+            provider.apply_changes(sandbox_handle, project_path)
+        except Exception as e:  # noqa: BLE001 - any failure invalidates the run
+            logger.error("sandbox changeset apply failed for %s: %s", session_id[:8], e)
+            if not session.error:
+                session.error = f"Sandbox work product could not be applied: {e}"
+                session.error_code = getattr(e, "reason_code", "") or "changeset_apply_failed"
 
         # #2022 P3b: release the provider sandbox (reap any stragglers the
         # process-group signal missed + clear its _procs so a shared provider
         # instance does not leak across sessions). The reap above already killed
         # the proc; destroy is idempotent on an already-dead sandbox.
         try:
-            self._sandbox_provider.destroy(sandbox_handle)
+            provider.destroy(sandbox_handle)
         except Exception as e:
             logger.warning("sandbox destroy failed for %s: %s", session_id[:8], e)
 
@@ -2798,7 +2915,7 @@ class AutonomousAgentRunner:
             # explicit stop (`session._stopped`) means WE killed it — never a
             # resource breach, so the wall-clock/stop code below is preserved.
             cls_code, cls_msg = self._classify_isolated_exit_code(
-                process.returncode,
+                transport.returncode,
                 session.last_stderr,
                 orchestrator_initiated=(not completed) or session._stopped.is_set(),
                 resource_policy_configured=self._resource_policy_configured(),
@@ -2839,7 +2956,7 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=self._classify_sidebar_start_failure(
-                    process.returncode,
+                    transport.returncode,
                     session.error_code,
                     session.last_stderr,
                 ),
@@ -2878,7 +2995,7 @@ class AutonomousAgentRunner:
                     or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
                 ),
                 sandbox_handle,
-                self._sandbox_provider,
+                provider,
             )
 
         # #2640: route through the recovery-aware finalizer so a run whose
@@ -3667,7 +3784,112 @@ class AutonomousAgentRunner:
 
         return events, tool_calls
 
-    def _select_sandbox_provider(self, workspace_type: str) -> Any:
+    def _resolve_tenant_id_strict(self, user_id: int | None) -> int:
+        """Resolve the tenant, raising rather than guessing (#2023).
+
+        Single source: the sandbox isolation tier and the session row must agree
+        on which tenant a run belongs to, and a second derivation path would
+        drift from the first — so this is the only lookup, and
+        :meth:`_resolve_tenant_id` is a wrapper over it.
+
+        A lookup FAILURE is not the same as "tenant 1".
+        ``production_required_tenants`` is keyed by tenant, so answering 1 for a
+        tenant whose policy demands production isolation silently downgrades
+        exactly the runs the policy exists to protect — and a DB blip is when
+        that is most likely to happen. Callers deciding *isolation* use this and
+        fail closed; callers doing *bookkeeping* use the lenient wrapper,
+        because a usage-sync row is not worth failing a run over.
+        """
+        if not user_id:
+            return 1
+        try:
+            from app.repositories.user_repo import UserRepository
+
+            user = UserRepository().get_user_by_id(user_id)
+        except Exception as e:
+            raise SandboxError(
+                f"cannot resolve tenant for user {user_id}: {e}; refusing to assume "
+                "the default tenant because its isolation policy may be weaker"
+            ) from e
+        if user and user.get("tenant_id"):
+            try:
+                return int(user["tenant_id"])
+            except (TypeError, ValueError) as e:
+                raise SandboxError(
+                    f"user {user_id} has a non-integer tenant_id {user['tenant_id']!r}"
+                ) from e
+        # No row, or a row with no tenant: a real, readable answer, not an error.
+        return 1
+
+    def _resolve_tenant_id(self, user_id: int | None) -> int:
+        """Lenient tenant resolution for session/usage bookkeeping only.
+
+        NOT for the isolation decision — see :meth:`_resolve_tenant_id_strict`.
+        """
+        try:
+            return self._resolve_tenant_id_strict(user_id)
+        except SandboxError as e:
+            logger.warning(
+                "tenant lookup failed for user %s, using 1 for bookkeeping: %s", user_id, e
+            )
+            return 1
+
+    def _resolve_tenant_for_isolation(
+        self,
+        user_id: int | None,
+        *,
+        cli_tool: str,
+        adapter: Any,
+    ) -> int:
+        """Resolve the tenant and refuse a path that cannot honour its policy (#2023).
+
+        ``_select_sandbox_provider`` is the gate, but two paths in ``_run_local``
+        return before reaching it: ZCode speaks its own app-server protocol, and
+        an adapter without stdin goes through ``_run_single_shot``. Both spawn a
+        local process directly, which for a tenant in
+        ``production_required_tenants`` is exactly the silent fallback
+        acceptance criterion 12 forbids. It becomes a refusal here instead —
+        naming the tool, because "sandbox unavailable" with no cause sends an
+        operator to the cluster to look for a fault that is not there.
+
+        Strictness is scoped rather than global. When no tenant has a
+        production-isolation policy, a guessed tenant id cannot downgrade
+        anyone, so a tenant lookup that fails stays lenient — failing every
+        local run because the users table hiccuped would be a far larger
+        outage than the one this guards against.
+        """
+        from app.modules.workspace.autonomous.sandbox.isolation_tier import (
+            requires_production_isolation,
+        )
+
+        config = self._load_backend_config()
+        if config is None or not config.production_required_tenants:
+            return self._resolve_tenant_id(user_id)
+
+        tenant_id = self._resolve_tenant_id_strict(user_id)
+        if not requires_production_isolation(tenant_id, config):
+            return tenant_id
+        if cli_tool in _APPSERVER_TOOLS:
+            reason = "speaks its own app-server protocol"
+        elif not adapter.supports_stdin_input():
+            reason = "has no stdin protocol and runs single-shot"
+        else:
+            return tenant_id
+        raise SandboxError(
+            f"tenant {tenant_id} requires production isolation, but {cli_tool!r} {reason} "
+            "and its execution path bypasses the sandbox provider; choose a CLI tool that "
+            "supports the stream-json protocol (claude-code, qwen-code-cli) or remove the "
+            "tenant from production_required_tenants"
+        )
+
+    def _select_sandbox_provider(
+        self,
+        workspace_type: str,
+        *,
+        tenant_id: int | None = None,
+        project_path: str | None = None,
+        generation: int = 1,
+    ) -> Any:
         """Pick the SandboxProvider for a task (#2022 P4 ③).
 
         Centralizes backend selection so adding gVisor (#2023) is one branch
@@ -3676,9 +3898,65 @@ class AutonomousAgentRunner:
         ``remote_session_manager``. The runner no longer decides isolation
         mechanics inline — it asks the provider.
         """
-        if workspace_type == "remote" and self.remote_session_manager is not None:
-            return RemoteMachineProvider(self.remote_session_manager)
-        return self._sandbox_provider
+        if workspace_type == "remote":
+            # Remote never routes through the local isolation gate: doing so
+            # could hand a remote workspace an OpenSandboxProvider.
+            if self.remote_session_manager is not None:
+                return RemoteMachineProvider(self.remote_session_manager)
+            return self._sandbox_provider
+        # #2023: local runs route through the isolation gate. A tenant listed in
+        # production_required_tenants gets OpenSandbox or an exception — there is
+        # no path from "required" to Legacy. With no backend configured the gate
+        # returns the injected provider unchanged, so behaviour and constructor
+        # injection are both preserved.
+        from app.modules.workspace.autonomous.sandbox.isolation_tier import select_provider
+
+        return select_provider(
+            tenant=tenant_id,
+            project_path=project_path,
+            config=self._load_backend_config(),
+            fallback=self._sandbox_provider,
+            generation=generation,
+        )
+
+    def _resolve_sandbox_generation(self, workflow_id: str) -> int:
+        """Read the workflow's current ``sandbox_generation``, defaulting to 1.
+
+        The reconciler bumps this on every restart sweep. The provider compares
+        a handle's generation against it, so passing a constant here would make
+        the stale-handle guard accept exactly the handles it exists to reject.
+        """
+        if not workflow_id:
+            return 1
+        try:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+            workflow = AutonomousWorkflowRepository().get_workflow(workflow_id)
+            if workflow and workflow.get("sandbox_generation"):
+                return int(workflow["sandbox_generation"])
+        except Exception:
+            pass  # a missing row or an unavailable DB must not fail the run
+        return 1
+
+    def _load_backend_config(self):
+        """Load the sandbox backend config, cached on the config file's mtime.
+
+        Re-reading and re-parsing on every task would do three stat calls plus a
+        JSON parse per run for a file that changes at deploy time.
+        """
+        from app.modules.workspace.autonomous.sandbox.opensandbox.config import (
+            load_backend_config,
+            resolve_backend_config_path,
+        )
+
+        path = resolve_backend_config_path()
+        stamp = (path, os.path.getmtime(path)) if path else (None, 0.0)
+        cached = getattr(self, "_backend_config_cache", None)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        config = load_backend_config()
+        self._backend_config_cache = (stamp, config)
+        return config
 
     def _run_remote(
         self,
@@ -3772,7 +4050,9 @@ class AutonomousAgentRunner:
                     remote_session_id = exec_handle.command_id
                     # #2022 P6: persist mid-run 'running' + remote_session_id so
                     # a crash leaves an orphan the reconciler can destroy by id.
-                    self._notify_sandbox_created(session_id, sandbox_handle, remote_session_id)
+                    self._notify_sandbox_created(
+                        session_id, sandbox_handle, remote_session_id, provider
+                    )
                     tracker.persisted_session_id = remote_session_id
                     tracker.sandbox_handle = sandbox_handle
                     tracker.exec_handle = exec_handle
@@ -4143,10 +4423,9 @@ class AutonomousAgentRunner:
     def _write_stdin(self, session: _LocalSession, payload: str) -> bool:
         """Write a JSON message to the subprocess stdin."""
         try:
-            if session.process is None:
+            if session.transport is None:
                 return False
-            session.process.stdin.write((payload + "\n").encode("utf-8"))
-            session.process.stdin.flush()
+            session.transport.write_stdin((payload + "\n").encode("utf-8"))
             return True
         except (OSError, BrokenPipeError, AttributeError) as e:
             logger.error("Failed to write to stdin for %s: %s", session.session_id[:8], e)
@@ -4176,9 +4455,9 @@ class AutonomousAgentRunner:
         """Read stdout lines from the subprocess."""
         try:
             while not session._stopped.is_set():
-                if session.process is None:
+                if session.transport is None:
                     break
-                line = session.process.stdout.readline()
+                line = session.transport.readline_stdout()
                 if not line:
                     break
                 if isinstance(line, bytes):
@@ -4368,8 +4647,8 @@ class AutonomousAgentRunner:
                         # only the sudo launcher can strand the isolated wrapper
                         # while it still holds the per-agent ACL lock.
                         try:
-                            if session.process and session.process.stdin:
-                                session.process.stdin.close()
+                            if session.transport is not None:
+                                session.transport.close_stdin()
                         except (OSError, BrokenPipeError, AttributeError, ValueError):
                             pass
                         session.completed.set()
@@ -4531,18 +4810,22 @@ class AutonomousAgentRunner:
             # timeout (#2031).
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
-                if session.process:
-                    session.process.poll()
-                    if session.process.returncode is not None:
+                if session.transport is not None:
+                    # Two steps on purpose. `returncode` is the non-reaping
+                    # accessor the pause/resume guards share, so the transport
+                    # keeps the two operations separate; this loop is the one
+                    # place that should actively reap, then read the result.
+                    session.transport.poll()
+                    if session.transport.returncode is not None:
                         session.completed.set()
 
     def _read_stderr(self, session: _LocalSession) -> None:
         """Read stderr from the subprocess."""
         try:
             while not session._stopped.is_set():
-                if session.process is None:
+                if session.transport is None:
                     break
-                line = session.process.stderr.readline()
+                line = session.transport.readline_stderr()
                 if not line:
                     break
                 if isinstance(line, bytes):
@@ -4645,14 +4928,30 @@ class AutonomousAgentRunner:
         """Suspend a running local session using SIGSTOP.
 
         The process is frozen in place and can be resumed with
-        :meth:`resume_session` using SIGCONT. Legacy-effective only: a remote
-        tracker has ``process=None`` and returns False here (a remote CLI
-        session has no SIGSTOP analogue — pause is unsupported, not silently
-        claimed). The provider branch is reached only for local sessions with a
-        live process; ``RemoteMachineProvider.pause`` is a documented no-op.
+        :meth:`resume_session` using SIGCONT. A remote tracker has no transport
+        and returns False here (a remote CLI session has no SIGSTOP analogue —
+        pause is unsupported, not silently claimed);
+        ``RemoteMachineProvider.pause`` is a documented no-op.
+
+        #2023: the guard keys off the transport, not a local ``process``. A
+        container backend is pidless, so the old ``not session.process`` check
+        returned False before the provider branch below could run — making pause
+        permanently unavailable for it. ``mark_session_paused_by_pid`` /
+        ``mark_session_resumed_by_pid`` remain pid-keyed and are therefore
+        inapplicable to a pidless backend; for those, this method is the only
+        pause path, and the provider branch sets ``_paused``, which is what
+        freezes ``_wait_for_completion``'s budget.
         """
         session = self._local_sessions.get(session_id)
-        if not session or not session.process or session.process.returncode is not None:
+        # #2023: the liveness guard must not require a local process. A container
+        # backend has session.process None, and the old ordering returned False
+        # here — making pause permanently unavailable for it, before the provider
+        # branch below was ever reached. returncode (not poll()) keeps this a
+        # cached read, so no waitpid() is added to a path that runs concurrently
+        # with _wait_for_completion's own poll().
+        if not session or session.transport is None:
+            return False
+        if session.transport.returncode is not None:
             return False
         if session._paused.is_set():
             return True
@@ -4680,7 +4979,11 @@ class AutonomousAgentRunner:
     def resume_session(self, session_id: str) -> bool:
         """Resume a paused local session using SIGCONT."""
         session = self._local_sessions.get(session_id)
-        if not session or not session.process or session.process.returncode is not None:
+        # See pause_session: the guard is transport-based so a pidless backend
+        # reaches the provider branch below.
+        if not session or session.transport is None:
+            return False
+        if session.transport.returncode is not None:
             return False
         if not session._paused.is_set():
             return True

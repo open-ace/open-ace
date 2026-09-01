@@ -768,16 +768,24 @@ class AutonomousScheduler:
             updated = _parse_epoch(wf.get("updated_at"))
             if updated is None or now_epoch - updated < ttl:
                 continue  # fresh (or no timestamp) — not stale yet
-            _destroy_orphan_sandbox(wf, remote_session_manager)
-            repo.update_workflow(
-                wf["workflow_id"],
-                {
-                    "sandbox_state": "destroyed",
-                    "sandbox_id": None,
-                    "sandbox_remote_session_id": None,
-                    "sandbox_last_error": (f"reaped by TTL sweep: running sandbox stale > {ttl}s"),
-                },
-            )
+            destroyed_ok = _destroy_orphan_sandbox(wf, remote_session_manager)
+            # Only drop the external ids once teardown is confirmed. They are
+            # the sole handle a later sweep has on a sandbox that is still
+            # running, so clearing them after a failed delete converts a
+            # retryable leak into a permanent one.
+            updates: dict[str, Any] = {
+                "sandbox_state": "destroyed" if destroyed_ok else "running",
+                "sandbox_last_error": (
+                    f"reaped by TTL sweep: running sandbox stale > {ttl}s"
+                    if destroyed_ok
+                    else f"TTL sweep could not destroy sandbox (stale > {ttl}s); "
+                    "attribution retained for retry"
+                ),
+            }
+            if destroyed_ok:
+                updates["sandbox_id"] = None
+                updates["sandbox_remote_session_id"] = None
+            repo.update_workflow(wf["workflow_id"], updates)
             logger.info(
                 "Reaped stale running sandbox for workflow %s",
                 wf.get("workflow_id", "")[:8],
@@ -1691,16 +1699,27 @@ def _parse_epoch(value: Any) -> float | None:
             return None
 
 
-def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
+def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> bool:
     """Best-effort real destroy of one orphan sandbox by persisted attribution (#2022 P6).
 
     Rebuilds the provider from the workflow row's ``sandbox_provider`` name and
     calls ``destroy_attribution`` with the persisted ids. The per-call provider
     instance that ran the task (and held its ``sandbox_id`` -> handle map) is
     gone after a restart, so ``destroy(handle)`` cannot resolve the session —
-    only the persisted strings remain. Local/gVisor rows without an external id
-    no-op (the proc died with the server); ``destroy_attribution`` swallows its
-    own failures so a bad row never aborts the sweep.
+    only the persisted strings remain. Rows whose provider owns no external
+    resource (Legacy) no-op, because the proc died with the server;
+    ``destroy_attribution`` swallows its own failures so a bad row never aborts
+    the sweep — but it now REPORTS them, and so does this function. Returns
+    ``False`` only when teardown was attempted and demonstrably did not happen;
+    ``True`` covers both "destroyed" and "nothing to destroy". Callers use that
+    to decide whether it is safe to clear the persisted ids, because clearing
+    them after a failed delete discards the only handle a retry could use and
+    strands a live sandbox until its TTL.
+
+    #2023: ``opensandbox`` rows DO own an external resource. Their sandbox keeps
+    running on the OpenSandbox server after a control-plane restart, so treating
+    them like Legacy would leak every one of them while the workflow row claimed
+    it had been destroyed.
 
     Scope firewall: this acts ONLY on the autonomous workflow row's own
     persisted ``sandbox_remote_session_id`` — it never enumerates or stops
@@ -1711,15 +1730,36 @@ def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
     remote_sid = raw_sid if isinstance(raw_sid, str) else ""
     raw_sandbox = wf.get("sandbox_id")
     sandbox_id = raw_sandbox if isinstance(raw_sandbox, str) else ""
-    # Only remote_machine has an external resource still alive after a restart;
-    # legacy/gVisor rows without an id have nothing to stop.
-    if provider_name != "remote_machine" or not remote_sid:
-        return
+    # Which providers own an external resource that outlives this process?
+    # remote_machine keys off its session id; opensandbox keys off sandbox_id —
+    # its sandbox keeps running (up to its TTL) after a control-plane restart,
+    # and _reconcile_orphan_sandboxes marks the row destroyed regardless, so
+    # without this branch every OpenSandbox sandbox leaks silently while the DB
+    # claims otherwise. Legacy has nothing to stop: the process died with the
+    # server, and the DB reset is the real cleanup.
+    if provider_name == "remote_machine":
+        has_external_resource = bool(remote_sid)
+    elif provider_name == "opensandbox":
+        has_external_resource = bool(sandbox_id)
+    else:
+        has_external_resource = False
+    if not has_external_resource:
+        return True
     try:
         from app.modules.workspace.autonomous.sandbox.registry import provider_for
 
         provider = provider_for(provider_name, remote_session_manager)
-        provider.destroy_attribution(sandbox_id, remote_sid)
+        # Prefer the reporting variant when the provider has one. The frozen
+        # #2022 Protocol types destroy_attribution as returning None, so a
+        # provider that can tell us whether teardown happened exposes it as an
+        # extension (same shape as get_transport) rather than by widening the
+        # contract for every backend.
+        checked = getattr(provider, "destroy_attribution_checked", None)
+        if checked is not None:
+            outcome = checked(sandbox_id, remote_sid)
+        else:
+            provider.destroy_attribution(sandbox_id, remote_sid)
+            outcome = None
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "Failed to destroy orphan sandbox %s for workflow %s: %s",
@@ -1728,6 +1768,11 @@ def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
             e,
             exc_info=True,
         )
+        return False
+    # A provider with no reporting variant gives no signal (RemoteMachineProvider,
+    # whose contract predates this) — keep its pre-existing behaviour rather than
+    # inventing a failure it never reported.
+    return outcome is not False
 
 
 def _reconcile_orphan_sandboxes(repo=None, remote_session_manager=None):
@@ -1741,9 +1786,10 @@ def _reconcile_orphan_sandboxes(repo=None, remote_session_manager=None):
     #2022 P6: real resource teardown now. A ``remote_machine`` orphan carries the
     persisted ``sandbox_remote_session_id`` (the manager row id written mid-run
     via ``on_sandbox_created``); the sweep rebuilds a provider via the registry
-    and stops that session by id. Local/gVisor rows have no external id — the
-    proc died with the server, so ``destroy_attribution`` is a no-op and the
-    DB-reset is the real cleanup. Then reset state/generation/sandbox_id/
+    and stops that session by id. An ``opensandbox`` orphan (#2023) carries a
+    live sandbox keyed by ``sandbox_id``. Legacy rows have no external resource
+    — the proc died with the server, so ``destroy_attribution`` is a no-op and
+    the DB-reset is the real cleanup. Then reset state/generation/sandbox_id/
     remote_session_id so a second sweep is a no-op.
     """
     logger.info("Reconciling orphan sandbox state...")
@@ -1761,23 +1807,34 @@ def _reconcile_orphan_sandboxes(repo=None, remote_session_manager=None):
             return
 
         for wf in workflows:
-            _destroy_orphan_sandbox(wf, remote_session_manager)
+            destroyed_ok = _destroy_orphan_sandbox(wf, remote_session_manager)
             current_gen = int(wf.get("sandbox_generation") or 0)
-            repo.update_workflow(
-                wf["workflow_id"],
-                {
-                    "sandbox_state": "destroyed",
-                    "sandbox_generation": current_gen + 1,
-                    "sandbox_id": None,
-                    "sandbox_remote_session_id": None,
-                    "sandbox_last_error": ("reconciled at startup: orphan sandbox destroyed"),
-                },
-            )
+            # The generation bump is unconditional: it fences the stale handle
+            # whether or not the remote resource died, and that is what stops a
+            # pre-restart handle from operating on anything. Clearing the ids is
+            # NOT unconditional — see _destroy_orphan_sandbox. A sandbox we
+            # failed to delete is still burning quota, and its id is the only
+            # way any later sweep can name it.
+            updates: dict[str, Any] = {
+                "sandbox_state": "destroyed" if destroyed_ok else "running",
+                "sandbox_generation": current_gen + 1,
+                "sandbox_last_error": (
+                    "reconciled at startup: orphan sandbox destroyed"
+                    if destroyed_ok
+                    else "reconciled at startup: orphan sandbox destroy FAILED; "
+                    "attribution retained for retry"
+                ),
+            }
+            if destroyed_ok:
+                updates["sandbox_id"] = None
+                updates["sandbox_remote_session_id"] = None
+            repo.update_workflow(wf["workflow_id"], updates)
             logger.info(
-                "Reconciled orphan sandbox for workflow %s (generation %d -> %d)",
+                "Reconciled orphan sandbox for workflow %s (generation %d -> %d, destroyed=%s)",
                 wf["workflow_id"][:8],
                 current_gen,
                 current_gen + 1,
+                destroyed_ok,
             )
     except Exception as e:  # noqa: BLE001
         logger.error("Sandbox reconciliation sweep failed: %s", e, exc_info=True)

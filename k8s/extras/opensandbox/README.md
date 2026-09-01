@@ -1,0 +1,220 @@
+# OpenSandbox backend manifests (Issue #2023)
+
+These manifests provision the OpenSandbox servers that back the
+`OpenSandboxProvider`, and — just as importantly — they are what makes the
+`attestations` block in `sandbox-backends.json` *true*.
+
+## The attestation contract
+
+The provider cannot observe pod security context, kubelet limits, the cluster
+NetworkPolicy, or the egress sidecar's mode through the sandbox API. It declares
+a capability only because an operator asserted the corresponding property, and
+it **refuses to run at all** when one of the pod-hardening assertions is absent.
+
+So these files and that config are two halves of one statement. Removing a field
+here without removing its attestation does not degrade the backend — it makes
+the workflow row lie about what protected the run.
+
+| Attestation | Made true by |
+| --- | --- |
+| `nonroot_enforced` | `configmap-sandbox-template.yaml` — `runAsNonRoot: true`, `runAsUser: 1000` |
+| `readonly_rootfs` | `configmap-sandbox-template.yaml` — `readOnlyRootFilesystem: true` |
+| `seccomp_runtime_default` | `configmap-sandbox-template.yaml` — `seccompProfile: RuntimeDefault` |
+| `dedicated_service_account` | `rbac.yaml` — a ServiceAccount with no Role, and `automountServiceAccountToken: false` |
+| `pod_pids_limit` | kubelet `--pod-max-pids` / `podPidsLimit` on the sandbox nodes (see below) |
+| `metadata_cidr_blocked` | `networkpolicy.yaml`, selecting the sandbox pods by the labels `configmap-sandbox-template.yaml` sets at `spec.template.metadata.labels` |
+| `egress_cni_default_deny` | the same `networkpolicy.yaml`. This is the whole of a gVisor tier's egress control: CIDR-based, identical for every sandbox, public internet open. Attested *instead of* the two below, never alongside them. |
+| `egress_enforced`, `egress_mode_dns_nft` | **`configmap-kata.yaml` only** — `[egress] mode = "dns+nft"`. `configmap-gvisor.yaml` deliberately has no `[egress]`: gVisor cannot run the sidecar, so that tier attests `egress_cni_default_deny` instead (the config parser refuses the sidecar there, and refuses an endpoint attesting neither mechanism or both). |
+| `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
+| `secure_access_required` | `configmap-*.yaml` — `[ingress] mode = "gateway"` plus `[ingress.gateway]`, and the `OPENSANDBOX_SECURE_ACCESS_*` keys in `server-*.yaml`. Under `direct` no per-sandbox token is minted and this must NOT be attested. |
+| `ephemeral_storage_enforced` | `configmap-sandbox-template.yaml` volume `sizeLimit`s |
+| — (not an attestation, but required) | `configmap-sandbox-template.yaml` mounts a **writable** volume at `/home/agent`. `HOME` lives outside `/workspace` on purpose: under `/workspace` the repo synthesis's `git add -A` stages the agent's whole home tree — pip wheels, npm, pre-commit environments — into the initial commit. |
+| `inode_quota_enforced` | **nothing here.** Leave it `false` unless the node filesystem carries a real project quota — see below. |
+
+### `pod_pids_limit` is a kubelet setting, not a manifest
+
+Kubernetes has no per-pod pids field. Set it on every node that schedules
+sandbox pods, in the kubelet config:
+
+```yaml
+podPidsLimit: 512
+```
+
+This is the only real defence against a fork bomb. The provider deliberately does
+**not** claim pids enforcement from an in-sandbox `ulimit`: an agent can reach
+execd (every command inherits execd's environment, including its access token)
+and ask for `uid: 0`, so any in-band limit is bypassable from inside.
+
+### `inode_quota_enforced` should normally stay `false`
+
+`ulimit -f` caps a single file's size, and a Kubernetes `ephemeral-storage`
+limit is enforced by kubelet eviction polling with no inode dimension. Neither
+is an inode quota. Turning this on without an actual project quota (XFS pquota
+or equivalent) writes `"enforced": {"inode": true}` into the workflow row for a
+guarantee nothing provides.
+
+## The pod template must be *referenced*, not merely applied
+
+`configmap-sandbox-template.yaml` holds a partial **BatchSandbox CR**, and it
+does something only because `configmap-*.yaml` names it:
+
+```toml
+[kubernetes]
+batchsandbox_template_file = "/etc/opensandbox/templates/batchsandbox-template.yaml"
+```
+
+The server merges that file into every sandbox it generates. It never looks for
+a cluster object, so an unreferenced `kind: PodTemplate` applied to the cluster
+is inert — which is exactly how a set of attestations can read as satisfied
+while nothing enforces them. If you change the mount path in `server-*.yaml`,
+change this key with it.
+
+Upstream's `_extract_template_pod_extras()` matches the template container by
+the literal name `sandbox` to lift its `volumeMounts` and `securityContext`, so
+that name is load-bearing.
+
+One template serves both tiers: `runtimeClassName` is deliberately absent from
+it, because the server stamps the pod from `[secure_runtime] k8s_runtime_class`.
+A per-tier copy could disagree with its own server's runtime. The
+`/proc/version` probe catches that only across the gVisor/Kata boundary, not
+between two Kata tiers (see below), so do not rely on it to notice a copy that
+drifted — keep the single template.
+
+## Two tiers, because the runtime is server-level
+
+gVisor vs Kata is chosen in the OpenSandbox server's own config, not per
+request — upstream: "All sandboxes on that server transparently use the
+configured runtime. SDK users and API callers require no code changes." Each
+tier therefore needs its own Deployment, Service and ConfigMap, and the backend
+config routes tenants to the right endpoint.
+
+The provider checks that on the first sandbox per endpoint by reading
+`/proc/version` — but **the check is one-directional, and the weaker direction
+is the one that matters here**. gVisor's kernel identifies itself, so a tier
+declaring gVisor and not getting it is caught. Kata boots a real kernel in a VM
+whose `/proc/version` is indistinguishable from an unisolated `runc`
+container's, so a Kata tier is only confirmed *not* gVisor — the probe cannot
+prove Kata is in force. A Kata tier's isolation therefore rests on
+`[secure_runtime] k8s_runtime_class` plus the RuntimeClass genuinely existing on
+the node, not on this probe.
+
+Both tiers run agent workloads; what differs is egress. gVisor cannot run the
+egress sidecar, so its tier enforces only `networkpolicy.yaml` — CIDR-based,
+identical for every sandbox, public internet open — and does not declare
+`network_egress_policy`. Route a tenant whose egress must be allowlisted to the
+Kata tier. See `docs/sandbox-backends.md` §7 for exactly what that costs.
+
+## Applying
+
+### 1. Install the BatchSandbox CRD and controller FIRST
+
+These manifests configure the server with `workload_provider = "batchsandbox"`,
+but the CRD and the controller that reconciles those objects are upstream's, and
+this kustomization deliberately does not vendor them — pinning someone else's
+CRDs inside our tree is how they silently drift out of date. Without them the
+first sandbox create is *accepted* and then never reconciled, which looks like a
+hang rather than a missing prerequisite.
+
+```bash
+helm install opensandbox-controller \
+  oci://ghcr.io/opensandbox-group/charts/opensandbox-controller \
+  --version <pinned> -n opensandbox-system --create-namespace
+kubectl get crd batchsandboxes.sandbox.opensandbox.io   # must exist before step 4
+```
+
+### 2. Deploy the ingress gateway data plane
+
+Setting `[ingress] mode = "gateway"` tells the server to *hand out* gateway
+URLs. It does not deploy anything that serves them. Upstream ships the gateway
+as separate resources (ServiceAccount, ClusterRole/Binding, Deployment,
+Service running `components/ingress`), disabled by default in its chart
+(`server.gateway.enabled: false`). Without it the server advertises endpoints
+nothing answers, and every upload/exec/PTY call fails to connect — the same
+"accepted then never serviced" shape as a missing BatchSandbox controller.
+
+Deploy it with `server.gateway.enabled=true`, `gatewayRouteMode=header` (matching
+`route.mode` in the ConfigMaps), and the same `secure-access` Secret as below —
+the gateway is what *verifies* the signing keys the server signs with.
+
+### 3. Set your gateway address
+
+`configmap-gvisor.yaml` and `configmap-kata.yaml` ship a placeholder
+`ingress.gateway.address` (`opensandbox-gateway.open-ace.example`). Replace it
+with the host of the gateway you deployed in step 2 — a plain domain, **no
+scheme and no wildcard**, resolving to that gateway's Service.
+
+A wildcard would be wrong here and upstream rejects it: `route.mode` is
+`header`, and `validate_ingress_mode` refuses a wildcard address for any
+non-wildcard route mode, so the server fails to load its config and never
+becomes ready. Wildcard addresses go with `route.mode = "wildcard"`, which the
+shipped gateway does not serve.
+
+Gateway mode is also what makes `secureAccess` mint per-sandbox credentials;
+leaving the placeholder means sandbox endpoints resolve nowhere.
+
+### 4. Apply
+
+```bash
+kubectl apply -k k8s/extras/opensandbox/
+```
+
+`image-policy.yaml` is **not** in the kustomization: it requires Kyverno. Apply
+it separately once a policy controller is installed —
+
+```bash
+kubectl apply -f k8s/extras/opensandbox/image-policy.yaml
+```
+
+Cosign signature and SBOM verification live there, at admission. The provider
+enforces only allowlist membership and digest pinning, so "image allowlist,
+signature and SBOM" is a split responsibility, not a single Python check.
+
+## Cluster prerequisites
+
+- **A CNI that enforces `NetworkPolicy`.** Calico, Cilium and most managed
+  offerings do; kind's default `kindnet` does not — it accepts the objects and
+  silently ignores them. `networkpolicy.yaml` is what backs
+  `metadata_cidr_blocked`, and on a gVisor tier it is the *only* egress control,
+  so a CNI that ignores it leaves agents with open egress. The provider probes
+  this from inside the first sandbox and refuses with `egress_cni_not_enforced`
+  rather than trusting the attestation.
+
+## Node prerequisites
+
+- **gVisor** — `runsc` plus `containerd-shim-runsc-v1`.
+- **Kata** — `kata-containers`, hardware virtualization (VT-x / AMD-V), KVM,
+  and a kernel ≥ 5.10.
+
+`kubectl get runtimeclass` should list both before the servers start; the
+OpenSandbox server validates its configured runtime at boot and refuses to
+start when it is unavailable.
+
+## Secrets
+
+```bash
+kubectl create secret generic opensandbox-keys -n open-ace \
+  --from-literal=gvisor-api-key="$(openssl rand -hex 32)" \
+  --from-literal=gvisor-execd-token="$(openssl rand -hex 32)" \
+  --from-literal=kata-api-key="$(openssl rand -hex 32)" \
+  --from-literal=kata-execd-token="$(openssl rand -hex 32)" \
+  --from-literal=gvisor-secure-access-keys="a=$(openssl rand -base64 32)" \
+  --from-literal=gvisor-secure-access-active-key="a" \
+  --from-literal=kata-secure-access-keys="a=$(openssl rand -base64 32)" \
+  --from-literal=kata-secure-access-active-key="a"
+```
+
+**The `secure-access-*` shape is not free-form.** Upstream parses
+`OPENSANDBOX_SECURE_ACCESS_KEYS` as a comma-separated list of
+`<key_id>=<base64-secret>`, where `key_id` is **exactly one character** in
+`[0-9a-z]`, and `OPENSANDBOX_SECURE_ACCESS_ACTIVE_KEY` must be one such id
+present in that list. A bare random hex string has no `=` and fails config
+validation at startup with `entries must be in key_id=base64 form` — the server
+never becomes ready.
+
+These keys sign *signed URLs*. The opaque per-sandbox `OpenSandbox-Secure-Access`
+token that the peer-isolation guarantee actually rests on needs only
+`[ingress] mode = "gateway"`; the keys are required by the gateway component
+below, which verifies them.
+
+`sandbox-backends.json` names the environment variables holding these; the
+values never appear in that file.
