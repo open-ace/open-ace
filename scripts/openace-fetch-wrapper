@@ -5,16 +5,22 @@
 # 然后降权传递给 fetch 脚本进行解析和数据库写入。
 #
 # 安全特性：
-# 1. 参数精确匹配白名单（使用正则白名单）
-# 2. 工具名称白名单校验
+# 1. 参数精确匹配白名单（使用参数分离验证）
+# 2. 工具名称白名单校验（支持 fetch_* 下划线格式）
 # 3. 符号链接攻击防护（多层解析、循环检测、路径白名单）
 # 4. 审计日志记录（用户名脱敏）
 # 5. 降权机制（root 读取，openace 写入）
+# 6. 路径规范化防遍历攻击（使用 readlink -f）
+# 7. 参数重复检测和参数值边界校验
 #
 # 存放位置：/usr/local/bin/openace-fetch-wrapper
 # 权限：root:root, 755
 #
+# 平台支持：Linux (readlink -f 来自 GNU coreutils)
+# 不支持平台：macOS (BSD readlink 不支持 -f 参数)
+#
 # Issue #2543: 本地工作区会话数据采集权限修复
+# Issue #3249: 参数校验下划线修复和安全加固
 
 set -euo pipefail
 
@@ -89,6 +95,7 @@ sanitize_username() {
 }
 
 # 验证工具名称是否在白名单内
+# Issue #3249: 缩短错误信息，避免泄露敏感信息
 validate_tool() {
     local tool="$1"
     local allowed
@@ -99,8 +106,137 @@ validate_tool() {
         fi
     done
 
-    echo "ERROR: Invalid tool: $tool" >&2
-    echo "Allowed tools: ${ALLOWED_TOOLS[*]}" >&2
+    echo "ERROR: Invalid tool" >&2
+    return 1
+}
+
+# ============================================================================
+# 参数值校验函数
+# Issue #3249: 新增参数值边界校验
+# ============================================================================
+
+# 校验参数值非空且安全
+validate_arg_value() {
+    local arg_name="$1"
+    local value="$2"
+
+    # 参数值不能为空
+    if [[ -z "$value" ]]; then
+        echo "ERROR: $arg_name requires a value" >&2
+        return 1
+    fi
+
+    # 参数值不能以 - 开头（防止伪造参数）
+    if [[ "${value:0:1}" == "-" ]]; then
+        echo "ERROR: $arg_name value cannot start with '-'" >&2
+        return 1
+    fi
+
+    # 拒绝 shell 元字符
+    # 分号、管道、&、$、反引号、括号
+    # 使用 printf 安全检测反引号
+    local backtick
+    backtick=$(printf '\x60')
+    if [[ "$value" == *";"* ]] || [[ "$value" == *"|"* ]] || \
+       [[ "$value" == *"&"* ]] || [[ "$value" == *"$"* ]] || \
+       [[ "$value" == *"$backtick"* ]] || [[ "$value" == *"("* ]] || \
+       [[ "$value" == *")"* ]]; then
+        echo "ERROR: Invalid characters in $arg_name value" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# 校验 --days 参数值
+validate_days() {
+    local value="${1:-}"
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: Invalid --days value" >&2
+        return 1
+    fi
+
+    if [[ "$value" -lt 1 ]] || [[ "$value" -gt 365 ]]; then
+        echo "ERROR: Invalid --days value (must be 1-365)" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# 校验 --mode 参数值
+# Issue #3249: 新增 --mode 参数校验
+validate_mode() {
+    local value="${1:-}"
+
+    if [[ "$value" != "both" ]] && \
+       [[ "$value" != "usage" ]] && \
+       [[ "$value" != "messages" ]]; then
+        echo "ERROR: Invalid --mode value" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# 校验 --config 路径
+# Issue #3249: 使用 normalize_path 加固，拒绝相对路径
+validate_config_path() {
+    local path="${1:-}"
+    local normalized
+
+    # 拒绝相对路径
+    if [[ "${path:0:1}" != "/" ]]; then
+        echo "ERROR: Config path must be absolute" >&2
+        return 1
+    fi
+
+    # 规范化路径
+    normalized=$(normalize_path "$path") || {
+        echo "ERROR: Config path not found" >&2
+        return 1
+    }
+
+    # 校验规范化后的路径是否在白名单内
+    # 缩短错误信息，避免路径泄露
+    if [[ "$normalized" != "/etc/openace/config.json" ]] && \
+       [[ ! "$normalized" =~ ^/home/[a-zA-Z0-9_-]+/\.open-ace/config\.json$ ]]; then
+        echo "ERROR: Config path not allowed" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# 路径规范化函数
+# ============================================================================
+# Issue #3249: 修复路径规范化 Bug，使用 readlink -f 或 realpath
+# 平台支持：Linux (readlink -f 来自 GNU coreutils)
+# 不支持平台：macOS (BSD readlink 不支持 -f)
+
+normalize_path() {
+    local path="$1"
+    local normalized
+
+    # 方法 1: 使用 readlink -f（推荐，Linux 标准工具）
+    if command -v readlink >/dev/null 2>&1; then
+        normalized=$(readlink -f "$path" 2>/dev/null) && {
+            echo "$normalized"
+            return 0
+        }
+    fi
+
+    # 方法 2: 使用 realpath（GNU coreutils）
+    if command -v realpath >/dev/null 2>&1; then
+        normalized=$(realpath "$path" 2>/dev/null) && {
+            echo "$normalized"
+            return 0
+        }
+    fi
+
+    # 无法规范化，返回失败
     return 1
 }
 
@@ -113,13 +249,14 @@ validate_tool() {
 is_allowed_path() {
     local path="$1"
 
-    # 解析为绝对路径
+    # 解析为绝对路径（使用 readlink -f 修复 Bug）
     local abs_path
-    abs_path=$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path") 2>/dev/null || return 1
+    abs_path=$(normalize_path "$path") || return 1
 
     # 检查是否在允许的目录下
     # Linux: /home/<user>/.<tool>/...
     # macOS: /Users/<user>/.<tool>/...
+    # 用户名字符集限制: [a-zA-Z0-9_-]（不支持 Unicode）
     for tool_dir in "${TOOL_TO_DIR[@]}"; do
         # Linux 路径
         if [[ "$abs_path" =~ ^/home/[a-zA-Z0-9_-]+/${tool_dir}/ ]]; then
@@ -155,8 +292,8 @@ safe_resolve_symlink() {
             link_target="${base_dir}/${link_target}"
         fi
 
-        # 规范化路径
-        resolved=$(cd "$(dirname "$link_target")" 2>/dev/null && pwd)/$(basename "$link_target") 2>/dev/null || return 1
+        # 规范化路径（使用 normalize_path 修复 Bug）
+        resolved=$(normalize_path "$link_target") || return 1
 
         # 检测循环
         for visited_path in "${visited[@]}"; do
@@ -228,64 +365,83 @@ validate_file() {
 
 # ============================================================================
 # 参数验证
+# Issue #3249: 重构参数验证，分离工具名与参数校验
 # ============================================================================
 
 # 验证参数是否符合允许的模式
+# 使用参数分离验证，显式参数白名单，参数重复检测
 validate_args() {
-    local args="$*"
-    local pattern
-
     # 检查参数不为空
-    if [ -z "$args" ]; then
+    if [[ $# -eq 0 ]]; then
         echo "ERROR: No arguments provided" >&2
         return 1
     fi
 
-    # 【Issue #2543 安全加固】使用正则匹配检查参数格式
-    # 只允许字母、数字、短横线、斜杠、点、空格、等号
-    # 这可以防止命令注入攻击（如 base64 编码绕过）
-    if [[ ! "$args" =~ ^[a-zA-Z0-9\ \-\/\.\=]+$ ]]; then
-        echo "ERROR: Invalid characters in arguments" >&2
-        return 1
-    fi
-
-    # 检查参数格式
-    # 允许的格式：
-    # <tool> --days N --multi-user --recent --config /path
-    # <tool> --days N --recent --config /path
-    local tool="${args%% *}"
-    local tool_args="${args#* }"
-
-    # 验证工具名称
+    # 提取并校验工具名（第一个参数）
+    local tool="${1:-}"
     validate_tool "$tool" || return 1
+    shift
 
-    # 验证参数格式
-    # 必须包含 --config 且指向允许的路径
-    if [[ "$tool_args" == *"--config "* ]]; then
-        local config_path="${tool_args##*--config }"
-        config_path="${config_path%% *}"
+    # 关联数组跟踪已见参数（需要 bash 4.0+）
+    local -A seen_params=()
 
-        # 【Issue #2543 安全加固】严格验证配置文件路径
-        # 只允许：
-        # 1. 系统配置文件: /etc/openace/config.json
-        # 2. 用户配置文件: /home/[a-zA-Z0-9_-]+/.open-ace/config.json
-        # 使用正则匹配防止路径遍历攻击
-        if [[ "$config_path" != "/etc/openace/config.json" ]] && \
-           [[ ! "$config_path" =~ ^/home/[a-zA-Z0-9_-]+/\.open-ace/config\.json$ ]]; then
-            echo "ERROR: Config path not allowed: $config_path" >&2
-            return 1
-        fi
-    fi
+    # 遍历参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days)
+                # 检测重复参数
+                if [[ -n "${seen_params[--days]:-}" ]]; then
+                    echo "ERROR: Duplicate parameter: --days" >&2
+                    return 1
+                fi
+                seen_params[--days]=1
 
-    # 验证 --days 参数范围
-    if [[ "$tool_args" == *"--days "* ]]; then
-        local days="${tool_args#*--days }"
-        days="${days%% *}"
-        if ! [[ "$days" =~ ^[0-9]+$ ]] || [ "$days" -lt 1 ] || [ "$days" -gt 365 ]; then
-            echo "ERROR: Invalid --days value: $days (must be 1-365)" >&2
-            return 1
-        fi
-    fi
+                # 参数值校验
+                validate_arg_value "--days" "${2:-}" || return 1
+                validate_days "$2" || return 1
+                shift 2
+                ;;
+            --config)
+                # 检测重复参数
+                if [[ -n "${seen_params[--config]:-}" ]]; then
+                    echo "ERROR: Duplicate parameter: --config" >&2
+                    return 1
+                fi
+                seen_params[--config]=1
+
+                # 参数值校验
+                validate_arg_value "--config" "${2:-}" || return 1
+                validate_config_path "$2" || return 1
+                shift 2
+                ;;
+            --mode)
+                # Issue #3249: 新增 --mode 参数校验
+                # 检测重复参数
+                if [[ -n "${seen_params[--mode]:-}" ]]; then
+                    echo "ERROR: Duplicate parameter: --mode" >&2
+                    return 1
+                fi
+                seen_params[--mode]=1
+
+                # 参数值校验
+                validate_arg_value "--mode" "${2:-}" || return 1
+                validate_mode "$2" || return 1
+                shift 2
+                ;;
+            --multi-user|--recent)
+                # 标志参数，无值
+                shift
+                ;;
+            --)
+                # 参数分隔符，停止解析
+                break
+                ;;
+            *)
+                echo "ERROR: Unknown argument: $1" >&2
+                return 1
+                ;;
+        esac
+    done
 
     return 0
 }
@@ -305,7 +461,8 @@ main() {
     fi
 
     # 验证参数（包括工具名称）
-    validate_args "${args[*]}" || exit 1
+    # Issue #3249: 使用参数分离验证
+    validate_args "$@" || exit 1
 
     # 提取工具名称
     local tool_name="${args[0]}"
