@@ -93,6 +93,27 @@ def test_min_supported_python_runs_the_full_unit_suite():
     ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
 
 
+def test_python_min_timeout_budget_absorbs_runner_variance():
+    """#3240: python-min's suite budget must absorb GitHub-hosted runner variance.
+
+    Evidence: the SAME commit ran 183s and 652s on the 3.10 lane (PR #3205
+    run 33410540459 first attempt vs same-commit rerun), and main run
+    33384495716 was budget-killed at
+    599s ("Command exceeded 599s") with ZERO test failures. The lane is a
+    required check, so the kill randomly blocked merges. The 600s budget was
+    shared by compileall + the whole pytest run. 1200s keeps ~1.8x headroom
+    over the worst observed run without masking a real slowdown: the same
+    unit tests also run under python-core's unchanged 600s on 3.11 (typical
+    340-388s), which would trip first. Changing this pin requires consciously
+    re-deriving the budget from fresh variance evidence, not silently
+    trimming it back toward the variance cliff.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["python-min"]["timeout_seconds"] == 1200
+
+
 def test_backend_change_runs_the_min_version_unit_lane():
     """End-to-end of the #2868 fix: an app/** change selects python-min, and the
     matrix runs python-min on the minimum supported interpreter -- so the full
