@@ -285,6 +285,10 @@ jobs:
       - name: Run PostgreSQL suite
         env:
           DATABASE_URL: postgresql://ace:ace@localhost:5432/ace_test
+          # #3287: the integration conftest reads PG_TEST_URL (NOT DATABASE_URL)
+          # to create per-test throwaway databases. Without this variable every
+          # pg_db test silently skipped -- the lane had never executed a test.
+          PG_TEST_URL: postgresql://ace:ace@localhost:5432/ace_test
           ACE_DATABASE_NAME: ace_test
         run: python scripts/ci.py run postgres
 

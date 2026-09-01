@@ -1035,3 +1035,78 @@ def test_false_positive_scan_suite_command_shape():
             "ci/false-positive-ledger.json",
         ]
     ], suites["false-positive-scan"]["commands"]
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL lane wiring (#3287): the lane had NEVER executed a test — the
+# conftest reads PG_TEST_URL while the job only set DATABASE_URL, so all 88
+# postgres-marked tests silently skipped in every run since the lane existed.
+# ---------------------------------------------------------------------------
+
+
+def test_postgres_job_sets_the_variable_the_conftest_reads():
+    """Workflow side of the two-sided pin: the job running the postgres suite
+    must export PG_TEST_URL with a postgresql:// scheme."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    job = next(j for j in workflow["jobs"].values() if "ci.py run postgres" in str(j))
+    # Step env is STEP-scoped: the variable must sit on the step that runs
+    # the suite, not merely somewhere in the job.
+    run_steps = [
+        s for s in job.get("steps", []) if isinstance(s, dict) and "ci.py run postgres" in str(s)
+    ]
+    assert run_steps, "no step runs the postgres suite through the shared runner"
+    env = dict(job.get("env") or {})
+    for step in run_steps:
+        env.update(step.get("env") or {})
+    assert env.get("PG_TEST_URL", "").startswith("postgresql://"), (
+        "the postgres job must set PG_TEST_URL (what tests/integration/conftest.py "
+        f"_get_pg_base_url actually reads); got {env.get('PG_TEST_URL')!r}"
+    )
+
+
+def test_integration_conftest_reads_pg_test_url(monkeypatch):
+    """Conftest side of the two-sided pin: _get_pg_base_url must honor exactly
+    the variable the workflow exports. A rename on either side turns one of
+    the pair red instead of silently re-skipping the whole lane."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "integration_conftest", ROOT / "tests" / "integration" / "conftest.py"
+    )
+    assert spec and spec.loader
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    sentinel = "postgresql://ace:ace@localhost:5433/ace_test_pin_sentinel"
+    monkeypatch.setenv("PG_TEST_URL", sentinel)
+    assert conftest._get_pg_base_url() == sentinel
+
+
+def test_every_postgres_marked_integration_file_uses_pg_naming():
+    """Naming contract (#3287): every tests/integration file containing the
+    postgres marker must be named *_pg.py — that glob is what selects the
+    postgres CI lane for plain test edits (POSTGRES_PATTERNS), so a
+    differently-named postgres-marked file rides the lane only when some
+    policy file happens to change too."""
+    import ast
+
+    offenders = []
+    for path in sorted((ROOT / "tests" / "integration").glob("*.py")):
+        if path.name.endswith("_pg.py") or path.name.startswith("conftest"):
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            marked = False
+            if isinstance(node, ast.Assign):
+                marked = any(
+                    (isinstance(t, ast.Name) and t.id == "pytestmark")
+                    or (isinstance(t, ast.Attribute) and t.attr == "pytestmark")
+                    for t in node.targets
+                ) and "postgres" in ast.unparse(node.value)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                marked = any("postgres" in ast.unparse(d) for d in node.decorator_list)
+            if marked:
+                offenders.append(path.name)
+                break
+    assert (
+        not offenders
+    ), f"postgres-marked files not matching *_pg.py (the lane-selection glob): {offenders}"
