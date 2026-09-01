@@ -324,4 +324,104 @@ describe('EnterpriseReport Component', () => {
       expect(screen.getByText('结束日期')).toBeInTheDocument();
     });
   });
+
+  describe('peak_tokens subtitle', () => {
+    it('should display peak_tokens subtitle when peak_tokens > 0', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: '2024-01-15',
+          peak_tokens: 5000,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        refetch: vi.fn(),
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        // Should display peak usage period label
+        expect(screen.getByText('峰值使用时段')).toBeInTheDocument();
+        // Should display peak day value
+        expect(screen.getByText('2024-01-15')).toBeInTheDocument();
+        // Should display peak tokens subtitle with label
+        expect(screen.getByText(/峰值 Tokens:/)).toBeInTheDocument();
+        expect(screen.getByText(/5.00K/)).toBeInTheDocument();
+      });
+    });
+
+    it('should not display peak_tokens subtitle when peak_tokens is 0', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        refetch: vi.fn(),
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        // Should display peak usage period label
+        expect(screen.getByText('峰值使用时段')).toBeInTheDocument();
+        // Should display dash when no peak day
+        expect(screen.getByText('-')).toBeInTheDocument();
+      });
+
+      // Should NOT display peak tokens subtitle
+      expect(screen.queryByText(/峰值 Tokens:/)).not.toBeInTheDocument();
+    });
+  });
 });

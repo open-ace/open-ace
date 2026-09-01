@@ -235,10 +235,12 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
         value={formatPeakDay(summary.peak_day)}
         icon={<i className="bi bi-calendar-check fs-4" />}
         variant="secondary"
+        subtitle={
+          summary.peak_tokens > 0
+            ? `${t('peakTokens', language)}: ${formatTokens(summary.peak_tokens)}`
+            : undefined
+        }
       />
-      {summary.peak_tokens > 0 && (
-        <small className="text-muted">{formatTokens(summary.peak_tokens)}</small>
-      )}
     </div>
     <div className="col-md-2">
       <StatCard
