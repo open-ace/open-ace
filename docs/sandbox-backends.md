@@ -287,6 +287,7 @@ event.
 | `egress_mode_insufficient` | sidecar reports `dns`, not `dns+nft` | DNS-only cannot stop a bare-IP connection; set `mode = "dns+nft"` |
 | `egress_cni_not_enforced` | the sandbox reached the metadata service or the Kubernetes API server | the cluster NetworkPolicy is not restricting this pod: apply `networkpolicy.yaml`, check its `podSelector` matches the sandbox pod labels, and check your service CIDR falls inside one of its excluded ranges |
 | `egress_probe_unavailable` | the cluster-egress probe produced no verdict | it needs `python3` on `PATH` in the sandbox image; an unverifiable attestation is refused rather than trusted |
+| `agent_state_unavailable` | a resuming session line on a provider that cannot carry the CLI transcript, or a stored transcript that exists but cannot be read | raised **before** the sandbox is created, so a turn that could not have resumed costs nothing; check `OPENACE_AGENT_STATE_ROOT` is writable |
 | `spec_refused` | the request could not be built (image, volumes, egress, pids) | the message names the field |
 | `stale_generation` | a handle from before a reconciliation bump | benign; the workflow will re-create |
 | `destroy_unconfirmed` | teardown was issued but never observed terminal | the reconciler retries; check server health |
@@ -431,10 +432,30 @@ so the crash window that could strand an unnameable sandbox is closed — but a
 sandbox whose workflow row is lost entirely is still reclaimed by its TTL rather
 than by Open ACE.
 
-**Multi-turn `--resume` does not carry session history.** Each turn gets a fresh
-sandbox with an empty `HOME`, so a `--resume` on turn 2 finds no local session
-state from turn 1. The prompt and the workspace carry over; the CLI's own
-session cache does not.
+**Multi-turn `--resume` carries the CLI transcript, and nothing else.** Each
+turn gets a fresh sandbox with an empty `HOME`, so the transcript `--resume`
+reads is exported before the sandbox is destroyed and imported into the next
+one (#3237). Exactly one file moves —
+`$HOME/.claude/projects/-workspace/<id>.jsonl` — never `.claude.json`,
+`.credentials.json` or settings: the sandbox environment is constructed, never
+inherited, and a credential must not round-trip through the control plane. A
+real CLI confirms that this one file is sufficient for `--resume` to resolve,
+with the original session id preserved.
+
+Transcripts rest on the control plane under `OPENACE_AGENT_STATE_ROOT`
+(default: alongside the per-task runtime directories), keyed by the session
+line's stable tracking id, and are purged when the workflow reaches a terminal
+state. That default is on `/run`, which is tmpfs — point the override at
+persistent storage if you want transcripts to survive a reboot.
+
+A line whose stored transcript is **absent** — its first turn, or a control
+plane restart that cleared tmpfs — simply starts a fresh session. That is not a
+failure. A line on a provider that cannot carry state at all, or one whose
+stored transcript exists but cannot be **read**, is refused with
+`agent_state_unavailable` *before* the sandbox is created, so a turn that could
+not have resumed spends no tokens. The three cases differ on purpose: the same
+split `scripts/openace-run-as.sh` makes between its fail-closed capture
+(`exit 70`), its log-only exit-trap capture, and its best-effort restore.
 
 ---
 
