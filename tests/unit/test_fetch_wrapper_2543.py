@@ -1087,10 +1087,16 @@ class TestFileSizeLimits:
             os.truncate(big, 50 * 1024 * 1024 + 1)
 
             rc_small = _run_closure(
-                harness, f"validate_file {shlex_quote(str(small))} >/dev/null 2>&1; echo $?"
+                harness,
+                f"validate_file {shlex_quote(str(small))} 2>&1; echo rc=$?; "
+                f"readlink -f {shlex_quote(str(small))}",
             )
             assert rc_small.returncode == 0, rc_small.stderr + rc_small.stdout
-            assert rc_small.stdout.strip().endswith("0")
+            assert rc_small.stdout.strip().endswith(str(small)), (
+                f"small-file accept path failed on the real closure:\n"
+                f"stdout: {rc_small.stdout}\nstderr: {rc_small.stderr}"
+            )
+            assert "rc=0" in rc_small.stdout, rc_small.stdout + rc_small.stderr
 
             audit = tmp_path / "audit.log"
             rc_big = _run_closure(
