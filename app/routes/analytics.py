@@ -27,6 +27,43 @@ def get_client_info():
     }
 
 
+def validate_forecast_days(days_str: str | None) -> tuple[int, dict | None]:
+    """
+    Validate forecast days parameter.
+
+    Args:
+        days_str: Raw days parameter from request.
+
+    Returns:
+        Tuple of (validated_days, error_response).
+        If validation fails, error_response contains 400 response dict.
+    """
+    if days_str is None:
+        return 7, None
+
+    try:
+        days = int(days_str)
+    except ValueError:
+        return 7, {
+            "error": "invalid_parameter",
+            "message": "days must be an integer",
+            "parameter": "days",
+            "received": days_str,
+            "valid_range": "1-90",
+        }
+
+    if days < 1 or days > 90:
+        return 7, {
+            "error": "invalid_parameter",
+            "message": "days must be between 1 and 90",
+            "parameter": "days",
+            "received": days,
+            "valid_range": "1-90",
+        }
+
+    return days, None
+
+
 def parse_date_range():
     """
     Parse date range from request parameters.
@@ -104,7 +141,9 @@ def api_usage_report():
 @admin_required
 def api_usage_forecast():
     """Get usage forecast."""
-    days = request.args.get("days", default=7, type=int)
+    days, error = validate_forecast_days(request.args.get("days"))
+    if error:
+        return jsonify(error), 400
 
     forecast = usage_analytics.get_forecast(days=days)
 

@@ -721,11 +721,17 @@ class UsageAnalytics:
         Get usage forecast based on historical data.
 
         Args:
-            days: Number of days to forecast.
+            days: Number of days to forecast (must be 1-90).
 
         Returns:
             Dict with forecast data including quality metrics.
+
+        Raises:
+            ValueError: If days is not in valid range 1-90.
         """
+        if not isinstance(days, int) or days < 1 or days > 90:
+            raise ValueError(f"days must be an integer between 1 and 90, got {days}")
+
         # Get last 30 days of data
         end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         start_date = (
