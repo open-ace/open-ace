@@ -55,3 +55,38 @@ def test_the_fake_declares_persists_so_existing_resume_tests_still_hold():
 
 def test_the_three_states_are_distinct():
     assert len({AGENT_STATE_PERSISTS, AGENT_STATE_CARRIED, AGENT_STATE_EPHEMERAL}) == 3
+
+
+class _ClaudeLikeAdapter:
+    """Minimal stand-in with the two methods _build_agent_argv calls."""
+
+    def build_start_args(self, session_id, project_path, model, **kw):
+        args = ["claude", "--print"]
+        if kw.get("resume"):
+            args += ["--resume", session_id]
+        return args
+
+    def provides_full_command(self):
+        return True
+
+    def get_executable_name(self):
+        return "claude"
+
+
+def test_argv_carries_resume_only_when_asked():
+    """The whole point: --resume must not be sent into an empty HOME."""
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    adapter = _ClaudeLikeAdapter()
+
+    with_state = runner._build_agent_argv(
+        adapter, "sid-1", "/workspace", "opus", None, None, resume=True
+    )
+    without_state = runner._build_agent_argv(
+        adapter, "sid-1", "/workspace", "opus", None, None, resume=False
+    )
+
+    assert "--resume" in with_state
+    assert "sid-1" in with_state
+    assert "--resume" not in without_state

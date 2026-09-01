@@ -2514,6 +2514,36 @@ class AutonomousAgentRunner:
                 error=str(e),
             )
 
+    def _build_agent_argv(
+        self,
+        adapter: Any,
+        resume_target: str,
+        project_path: str,
+        model: str,
+        permission_mode: str | None,
+        allowed_tools: list[str] | None,
+        *,
+        resume: bool,
+    ) -> list[str]:
+        """Build the adapter's argv. PURE — no I/O, no side effects.
+
+        Extracted so the sandbox path can re-derive argv once it knows whether
+        the agent state actually landed (#3237). ``cmd`` is otherwise built
+        before the sandbox exists, which bakes ``--resume`` in before anything
+        could know whether the transcript is there to resume from.
+        """
+        return cast(
+            "list[str]",
+            adapter.build_start_args(
+                resume_target,
+                project_path,
+                model,
+                permission_mode=permission_mode,
+                allowed_tools=allowed_tools,
+                resume=resume,
+            ),
+        )
+
     def _run_local(
         self,
         session_id: str,
@@ -2638,12 +2668,13 @@ class AutonomousAgentRunner:
         # so the adapter emits `--resume <id>`; otherwise let the CLI mint a new
         # session and capture its id from the control_response.
         resume_target = resume_session_id if (resume and resume_session_id) else session_id
-        adapter_args = adapter.build_start_args(
+        adapter_args = self._build_agent_argv(
+            adapter,
             resume_target,
             project_path,
             model,
-            permission_mode=permission_mode,
-            allowed_tools=allowed_tools,
+            permission_mode,
+            allowed_tools,
             resume=resume,
         )
 
