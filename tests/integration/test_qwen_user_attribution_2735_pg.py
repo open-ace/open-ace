@@ -21,6 +21,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import fetch_qwen  # noqa: E402
+
 from app.repositories.usage_repo import UsageRepository  # noqa: E402
 from shared import config as shared_config  # noqa: E402
 from shared import db as shared_db  # noqa: E402
