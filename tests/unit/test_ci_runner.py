@@ -101,15 +101,15 @@ def test_min_supported_python_runs_the_full_unit_suite():
     suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
     commands = suites["python-min"]["commands"]
     flat = [tuple(c) for c in commands]
-    assert any(
-        c[:3] == ("{python}", "-m", "compileall") for c in flat
-    ), "python-min must compileall"
+    assert any(c[:3] == ("{python}", "-m", "compileall") for c in flat), (
+        "python-min must compileall"
+    )
     pytest_cmd = next((c for c in flat if c[:3] == ("{python}", "-m", "pytest")), None)
     assert pytest_cmd is not None, "python-min must run pytest"
     # The WHOLE unit tree, not a hand-picked subset — that is the #2868 fix.
-    assert (
-        "tests/unit/" in pytest_cmd
-    ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    assert "tests/unit/" in pytest_cmd, (
+        f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    )
 
 
 def test_python_min_timeout_budget_absorbs_runner_variance():
@@ -388,416 +388,511 @@ KNOWN_DEBT_FROZEN_SEED = (
         "erroneous_skip",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_batch_session_termination",
+        1,
     ),
     (
         "no_assertion",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_batch_session_termination",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_deregister_with_active_session",
+        1,
     ),
     (
         "no_assertion",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_deregister_with_active_session",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_full_deregistration_flow",
+        1,
     ),
     (
         "no_assertion",
         "tests/e2e/remote/test_deregister_e2e.py",
         "TestDeregisterE2E.test_full_deregistration_flow",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestErrorHandlingIntegration.test_degraded_status_on_partial_failure",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestErrorHandlingIntegration.test_idempotent_collection",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestPerformanceIntegration.test_100_users_performance",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestPerformanceIntegration.test_large_file_handling",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestPermission700Collection.test_message_count_correct",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestPermission700Collection.test_two_users_permission_700_collected",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestPermission700Collection.test_user_id_mapping_correct",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestSecurityIntegration.test_symlink_attack_blocked",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_fetch_wrapper_integration_2543.py",
         "TestSecurityIntegration.test_web_service_cannot_read_other_users",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_coverage_data_in_result",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_coverage_data_in_result",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_multi_user_session_collection",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_multi_user_session_collection",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_session_data_persistence",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_session_data_persistence",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_single_user_session_collection",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_single_user_session_collection",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_tenant_attribution",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_tenant_attribution",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_user_id_resolution",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_multiuser_qwen_collection_2735.py",
         "TestMultiUserQwenCollection.test_user_id_resolution",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_agent_sessions_user_id_filled",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_agent_sessions_user_id_filled",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_daily_messages_user_id_filled",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_daily_messages_user_id_filled",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_by_username",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_by_username",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_qwen_user_attribution_2735.py",
         "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_system_user_sync_2735.py",
         "TestSystemUserSync.test_sync_failure_logging",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_system_user_sync_2735.py",
         "TestSystemUserSync.test_sync_failure_logging",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/integration/test_system_user_sync_2735.py",
         "TestSystemUserSync.test_sync_system_users_creates_users",
+        1,
     ),
     (
         "no_assertion",
         "tests/integration/test_system_user_sync_2735.py",
         "TestSystemUserSync.test_sync_system_users_creates_users",
+        1,
     ),
     (
         "erroneous_skip",
         "tests/performance/test_qwen_performance_2735.py",
         "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+        1,
     ),
     (
         "no_assertion",
         "tests/performance/test_qwen_performance_2735.py",
         "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_agent_transport.py",
         "test_shutdown_on_an_already_dead_process_does_not_raise",
+        1,
     ),
-    ("no_assertion", "tests/unit/test_analytics_routes.py", "TestParseDateRange.test_route"),
+    ("no_assertion", "tests/unit/test_analytics_routes.py", "TestParseDateRange.test_route", 1),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestAuditLogging.test_audit_log_created",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestAuditLogging.test_username_sanitized",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestFileSizeLimits.test_large_file_rejected",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestIntegration.test_degraded_status_on_partial_failure",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestIntegration.test_multi_user_collection_with_permission_700",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestParameterValidation.test_exact_match_valid_params",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestUserIdentityMapping.test_no_match_returns_none",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestUserIdentityMapping.test_resolve_user_id_by_system_account",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_fetch_wrapper_2543.py",
         "TestUserIdentityMapping.test_resolve_user_id_by_username",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_issue_wrong_repo_3075.py",
         "TestIssueRepoFallback.test_fallback_raises_githubopserror",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_new_project_local_repo_init_2963.py",
         "TestValidateProjectPath.test_pass_if_valid_git_repository",
+        1,
     ),
-    ("no_assertion", "tests/unit/test_openace_gh_wrapper.py", "test_admin_merge_is_config_gated"),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_admin_merge_is_config_gated",
+        1,
+    ),
     (
         "no_assertion",
         "tests/unit/test_openace_gh_wrapper.py",
         "test_current_github_ops_gh_shapes_are_allowed",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_gh_wrapper.py",
         "test_dangerous_gh_shapes_are_denied",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_gh_wrapper.py",
         "test_version_and_help_are_only_standalone_passthrough",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_current_github_ops_git_shapes_are_allowed",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_forbidden_global_options_and_configs_are_denied",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_git_commands_require_hardening_globals",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_mutating_branches_are_limited_to_workflow_branches",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_relative_path_operands_cannot_escape_worktree",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_show_tree_paths_allow_real_filenames_but_not_escapes",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_openace_git_wrapper.py",
         "test_version_and_help_are_only_standalone_passthrough",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_client.py",
         "test_delete_sandbox_treats_404_as_success",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_policy.py",
         "test_a_cni_tier_accepts_any_public_proxy_host",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_policy.py",
         "test_an_allowlisted_proxy_url_passes",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_provider.py",
         "test_destroy_attribution_never_raises",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_wiring.py",
         "test_sweep_survives_a_provider_failure_on_one_row",
+        1,
     ),
     (
         "no_assertion",
         "tests/unit/test_opensandbox_workspace.py",
         "test_apply_deleting_a_missing_path_is_not_an_error",
+        1,
     ),
 )
 
+KNOWN_DEBT_FINDING_TOTAL = 77  # total findings across all seed entries
 KNOWN_DEBT_LEDGER_SIZE = 77
 
 
-def _ledger_identities() -> set[tuple[str, str, str]]:
+def _ledger_counts() -> dict[tuple[str, str, str], int]:
     import json
 
     data = json.loads((ROOT / "ci" / "false-positive-ledger.json").read_text())
-    return {(e["pattern"], e["file"], e.get("function") or "<module>") for e in data["entries"]}
+    return {
+        (e["pattern"], e["file"], e.get("function") or "<module>"): int(e.get("count", 1))
+        for e in data["entries"]
+    }
 
 
 def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
     """#3186: the known-debt ledger starts EXACTLY as the frozen seed and only shrinks.
 
-    Three properties, all load-bearing:
-    1. entries ⊆ KNOWN_DEBT_FROZEN_SEED — substitution is programmatically red:
+    Four properties, all load-bearing (the seed tuples carry counts):
+    1. identities ⊆ seed identities — substitution is programmatically red:
        "fix A, introduce B, hand-edit the ledger to add B" fails here because
        B is not in the frozen seed. Enrollment is impossible via --prune-ledger
        (removal-only by design).
-    2. len == KNOWN_DEBT_LEDGER_SIZE — the EXACT size pin is the only guard
-       against RE-enrolling an identity that was already paid down but still
-       sits in the frozen seed (⊆ passes, size red). Do NOT relax this to <=.
-       A legitimate paydown (Phase B) shrinks the ledger AND edits this pin
-       in the same PR — that visible pin edit is the audit trail.
-    3. every ledger entry still matches a live finding — a stale entry means
-       someone moved/renamed debt without pruning; the CI scanner job fails
-       on stale entries too, this keeps the unit lane honest as well.
+    2. per-identity count <= seed count — raising an existing entry's count
+       (e.g. 1 -> 2 to absorb a second hit in an already-indebted function)
+       is red without a visible seed edit.
+    3. sum(counts) == KNOWN_DEBT_FINDING_TOTAL — the EXACT total pin is the
+       only guard against re-enrolling debt that was already paid down but
+       still sits in the frozen seed (⊆ passes, total red). Do NOT relax to
+       <=. A legitimate paydown (Phase B) prunes the ledger AND lowers this
+       pin in the same PR — that visible pin edit is the audit trail.
+    4. every ledger identity still matches a live finding — a stale entry
+       means debt moved/renamed without pruning; the CI scanner job fails on
+       stale entries too, this keeps the unit lane honest as well.
     """
-    identities = _ledger_identities()
-    assert identities <= set(KNOWN_DEBT_FROZEN_SEED), (
+    counts = _ledger_counts()
+    seed_counts = {(p, f, fn): c for p, f, fn, c in KNOWN_DEBT_FROZEN_SEED}
+    ledger_ids = set(counts)
+    assert ledger_ids <= set(seed_counts), (
         "ledger contains identities outside the frozen seed (substitution or "
-        "enrollment attempt): "
-        f"{sorted(identities - set(KNOWN_DEBT_FROZEN_SEED))}"
+        f"enrollment attempt): {sorted(ledger_ids - set(seed_counts))}"
     )
-    assert len(identities) == KNOWN_DEBT_LEDGER_SIZE, (
-        f"known-debt ledger size {len(identities)} != pin {KNOWN_DEBT_LEDGER_SIZE}; "
+    raised = {
+        identity: (counts[identity], seed_counts[identity])
+        for identity in ledger_ids
+        if counts[identity] > seed_counts[identity]
+    }
+    assert not raised, f"ledger counts exceed the frozen seed (enrollment attempt): {raised}"
+    total = sum(counts.values())
+    assert total == KNOWN_DEBT_FINDING_TOTAL, (
+        f"known-debt finding total {total} != pin {KNOWN_DEBT_FINDING_TOTAL}; "
         "legitimate shrink: prune the ledger AND lower this pin in the same PR; "
         "growth is never allowed (fix the finding instead)"
     )
@@ -808,10 +903,10 @@ def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
     assert spec and spec.loader
     scanner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scanner)
-    live = set(scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT))
-    assert (
-        identities <= live
-    ), f"stale ledger entries (debt moved/fixed): {sorted(identities - live)}"
+    live = scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT)
+    assert all(counts[identity] <= live.get(identity, 0) for identity in ledger_ids), (
+        f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
+    )
 
 
 def test_every_selectable_pr_suite_has_a_workflow_consumer():
@@ -844,35 +939,32 @@ def test_every_selectable_pr_suite_has_a_workflow_consumer():
 
         return _json.dumps(job)
 
+    import re as _re
+
     for suite in sorted(pr_suites):
         key = suite.replace("-", "_")
         executed = False
         for job in workflow["jobs"].values():
-            if (
-                job is None
-                or "runs" not in job_text(job)
-                and "run" not in str(job.get("steps", []))
-            ):
-                pass
             text = job_text(job)
-            runs_suite = f"run {suite}" in text or (
-                "${{ matrix.suite }}" in text
-                and any(
-                    inc.get("suite") == suite
-                    for inc in job.get("strategy", {}).get("matrix", {}).get("include", [])
-                )
+            # Word-boundary match so a suite that prefixes another cannot
+            # cross-match ("python-min" vs a hypothetical "python-minimal").
+            runs_suite = _re.search(rf"ci\.py run {_re.escape(suite)}\b", text) is not None
+            in_matrix = "${{ matrix.suite }}" in text and any(
+                inc.get("suite") == suite
+                for inc in job.get("strategy", {}).get("matrix", {}).get("include", [])
             )
-            if not runs_suite:
+            if not runs_suite and not in_matrix:
                 continue
             gated = f"outputs.{key}" in text
             step_gated = any(f"outputs.{key}" in str(s.get("if", "")) for s in job.get("steps", []))
             job_gated = f"outputs.{key}" in str(job.get("if", ""))
             if gated or job_gated or step_gated:
-                executed = True  # arm (i)
-            elif "${{ matrix.suite }}" in text:
-                continue  # matrix job: gating checked per suite below
-            else:
-                executed = True  # arm (ii): runs regardless of selection
+                executed = True  # arm (i): selection-gated execution
+            elif not in_matrix:
+                executed = True  # arm (ii): always-run execution (e.g. package in build)
+            # A matrix lane counts ONLY when the output key gates the job
+            # somewhere (job- or step-level `if`) — an ungated matrix lane is
+            # fail-closed: not counted here.
         assert executed, (
             f"suite {suite} is selectable but no ci.yml job executes it through "
             "either the selection-gated or always-run arm (orphan suite)"
@@ -894,9 +986,9 @@ def test_false_positive_scan_lane_is_gate_consumed():
         if "ci.py run false-positive-scan" in str(job)
     )
     gate = workflow["jobs"]["pr-gate"]
-    assert (
-        scan_job in gate["needs"]
-    ), f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    assert scan_job in gate["needs"], (
+        f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    )
     validate_step = next(s for s in gate["steps"] if "Validate required" in str(s.get("name", "")))
     snippet = str(validate_step["run"])
     assert "SCAN" in validate_step["env"], "pr-gate must map the scanner result to SCAN"

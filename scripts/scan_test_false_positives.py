@@ -617,13 +617,15 @@ def _current_counts(findings: list[Finding], root: Path) -> dict[tuple[str, str,
 
 
 def _load_ledger(path: Path) -> dict[tuple[str, str, str], int]:
-    """Load and validate the ledger file; raise SystemExit-style errors via _ledger_error."""
+    """Load and validate the ledger file; malformed input raises LedgerError."""
     try:
         data = json.loads(path.read_text())
     except OSError as e:
         raise LedgerError(f"Cannot read ledger {path}: {e}") from e
     except json.JSONDecodeError as e:
         raise LedgerError(f"Ledger {path} is not valid JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise LedgerError(f"Ledger {path} must be a JSON object, got {type(data).__name__}")
     if data.get("version") != LEDGER_VERSION:
         raise LedgerError(f"Ledger {path} has unsupported version {data.get('version')!r}")
     entries = data.get("entries")
