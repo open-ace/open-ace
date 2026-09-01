@@ -54,9 +54,28 @@ def test_docs_only_change_selects_no_runtime_suite():
 def test_backend_change_selects_production_python_suite():
     assert ci.select_pr_suites(["app/services/auth_service.py"]) == [
         "default-collection",
+        "false-positive-scan",
         "python-core",
         "python-min",
     ]
+
+
+def test_every_non_docs_change_selects_false_positive_scan():
+    """#3186 Phase A: the scanner lane rides on every non-docs change.
+
+    The docs promise "每个非文档改动都跑" is now literally what the selector
+    implements — a tests-only change, a product-code change, a scanner-script
+    change, and an empty-changes push all select it; only docs-only does not.
+    """
+    for changed in (
+        ["tests/unit/test_example.py"],  # plain test change / new test
+        ["app/services/auth_service.py"],  # product code
+        ["scripts/scan_test_false_positives.py"],  # the scanner itself
+        ["ci/false-positive-ledger.json"],  # ledger edit (also policy)
+        [],  # empty change set
+    ):
+        assert "false-positive-scan" in ci.select_pr_suites(changed), changed
+    assert "false-positive-scan" not in ci.select_pr_suites(["README.md"])
 
 
 def test_min_supported_python_runs_the_full_unit_suite():
@@ -82,15 +101,15 @@ def test_min_supported_python_runs_the_full_unit_suite():
     suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
     commands = suites["python-min"]["commands"]
     flat = [tuple(c) for c in commands]
-    assert any(
-        c[:3] == ("{python}", "-m", "compileall") for c in flat
-    ), "python-min must compileall"
+    assert any(c[:3] == ("{python}", "-m", "compileall") for c in flat), (
+        "python-min must compileall"
+    )
     pytest_cmd = next((c for c in flat if c[:3] == ("{python}", "-m", "pytest")), None)
     assert pytest_cmd is not None, "python-min must run pytest"
     # The WHOLE unit tree, not a hand-picked subset — that is the #2868 fix.
-    assert (
-        "tests/unit/" in pytest_cmd
-    ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    assert "tests/unit/" in pytest_cmd, (
+        f"python-min must run the full tests/unit/, got {pytest_cmd}"
+    )
 
 
 def test_python_min_timeout_budget_absorbs_runner_variance():
@@ -358,3 +377,570 @@ def test_changed_files_includes_committed_and_local_worktree_changes(monkeypatch
             text=True,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Known-debt ledger contract (#3186 Phase A)
+# ---------------------------------------------------------------------------
+
+KNOWN_DEBT_FROZEN_SEED = (
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_batch_session_termination",
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_batch_session_termination",
+    ),
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_deregister_with_active_session",
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_deregister_with_active_session",
+    ),
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_full_deregistration_flow",
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_full_deregistration_flow",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestErrorHandlingIntegration.test_degraded_status_on_partial_failure",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestErrorHandlingIntegration.test_idempotent_collection",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPerformanceIntegration.test_100_users_performance",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPerformanceIntegration.test_large_file_handling",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_message_count_correct",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_two_users_permission_700_collected",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_user_id_mapping_correct",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestSecurityIntegration.test_symlink_attack_blocked",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestSecurityIntegration.test_web_service_cannot_read_other_users",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_coverage_data_in_result",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_coverage_data_in_result",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_multi_user_session_collection",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_multi_user_session_collection",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_session_data_persistence",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_session_data_persistence",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_single_user_session_collection",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_single_user_session_collection",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_tenant_attribution",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_tenant_attribution",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_user_id_resolution",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_user_id_resolution",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_agent_sessions_user_id_filled",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_agent_sessions_user_id_filled",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_daily_messages_user_id_filled",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_daily_messages_user_id_filled",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_by_username",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_by_username",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_failure_logging",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_failure_logging",
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_system_users_creates_users",
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_system_users_creates_users",
+    ),
+    (
+        "erroneous_skip",
+        "tests/performance/test_qwen_performance_2735.py",
+        "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+    ),
+    (
+        "no_assertion",
+        "tests/performance/test_qwen_performance_2735.py",
+        "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_agent_transport.py",
+        "test_shutdown_on_an_already_dead_process_does_not_raise",
+    ),
+    ("no_assertion", "tests/unit/test_analytics_routes.py", "TestParseDateRange.test_route"),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestAuditLogging.test_audit_log_created",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestAuditLogging.test_username_sanitized",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestFileSizeLimits.test_large_file_rejected",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestIntegration.test_degraded_status_on_partial_failure",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestIntegration.test_multi_user_collection_with_permission_700",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestParameterValidation.test_exact_match_valid_params",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_no_match_returns_none",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_resolve_user_id_by_system_account",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_resolve_user_id_by_username",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_issue_wrong_repo_3075.py",
+        "TestIssueRepoFallback.test_fallback_raises_githubopserror",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_new_project_local_repo_init_2963.py",
+        "TestValidateProjectPath.test_pass_if_valid_git_repository",
+    ),
+    ("no_assertion", "tests/unit/test_openace_gh_wrapper.py", "test_admin_merge_is_config_gated"),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_current_github_ops_gh_shapes_are_allowed",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_dangerous_gh_shapes_are_denied",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_version_and_help_are_only_standalone_passthrough",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_current_github_ops_git_shapes_are_allowed",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_forbidden_global_options_and_configs_are_denied",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_git_commands_require_hardening_globals",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_mutating_branches_are_limited_to_workflow_branches",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_relative_path_operands_cannot_escape_worktree",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_show_tree_paths_allow_real_filenames_but_not_escapes",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_version_and_help_are_only_standalone_passthrough",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_client.py",
+        "test_delete_sandbox_treats_404_as_success",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_policy.py",
+        "test_a_cni_tier_accepts_any_public_proxy_host",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_policy.py",
+        "test_an_allowlisted_proxy_url_passes",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_provider.py",
+        "test_destroy_attribution_never_raises",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_wiring.py",
+        "test_sweep_survives_a_provider_failure_on_one_row",
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_workspace.py",
+        "test_apply_deleting_a_missing_path_is_not_an_error",
+    ),
+)
+
+KNOWN_DEBT_LEDGER_SIZE = 77
+
+
+def _ledger_identities() -> set[tuple[str, str, str]]:
+    import json
+
+    data = json.loads((ROOT / "ci" / "false-positive-ledger.json").read_text())
+    return {(e["pattern"], e["file"], e.get("function") or "<module>") for e in data["entries"]}
+
+
+def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
+    """#3186: the known-debt ledger starts EXACTLY as the frozen seed and only shrinks.
+
+    Three properties, all load-bearing:
+    1. entries ⊆ KNOWN_DEBT_FROZEN_SEED — substitution is programmatically red:
+       "fix A, introduce B, hand-edit the ledger to add B" fails here because
+       B is not in the frozen seed. Enrollment is impossible via --prune-ledger
+       (removal-only by design).
+    2. len == KNOWN_DEBT_LEDGER_SIZE — the EXACT size pin is the only guard
+       against RE-enrolling an identity that was already paid down but still
+       sits in the frozen seed (⊆ passes, size red). Do NOT relax this to <=.
+       A legitimate paydown (Phase B) shrinks the ledger AND edits this pin
+       in the same PR — that visible pin edit is the audit trail.
+    3. every ledger entry still matches a live finding — a stale entry means
+       someone moved/renamed debt without pruning; the CI scanner job fails
+       on stale entries too, this keeps the unit lane honest as well.
+    """
+    identities = _ledger_identities()
+    assert identities <= set(KNOWN_DEBT_FROZEN_SEED), (
+        "ledger contains identities outside the frozen seed (substitution or "
+        "enrollment attempt): "
+        f"{sorted(identities - set(KNOWN_DEBT_FROZEN_SEED))}"
+    )
+    assert len(identities) == KNOWN_DEBT_LEDGER_SIZE, (
+        f"known-debt ledger size {len(identities)} != pin {KNOWN_DEBT_LEDGER_SIZE}; "
+        "legitimate shrink: prune the ledger AND lower this pin in the same PR; "
+        "growth is never allowed (fix the finding instead)"
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "scan_fp", ROOT / "scripts" / "scan_test_false_positives.py"
+    )
+    assert spec and spec.loader
+    scanner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scanner)
+    live = set(scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT))
+    assert identities <= live, (
+        f"stale ledger entries (debt moved/fixed): {sorted(identities - live)}"
+    )
+
+
+def test_every_selectable_pr_suite_has_a_workflow_consumer():
+    """#3186 Phase A req 4: no selectable suite may be a workflow orphan.
+
+    For every suite the selector can pick (pr_suites), the ci.yml `changes`
+    job must expose its output key, and some job must actually execute the
+    suite, via either arm:
+      (i) selection-gated: a job/step `if` references outputs.<key> and the
+          job runs `ci.py run <suite>` (matrix entries resolve to their
+          `ci.py run ${{ matrix.suite }}` job); or
+      (ii) always-run: a step runs `ci.py run <suite>` with no `if` gating on
+          that suite's output (e.g. `package` inside `build`).
+    A registered-but-never-executed suite (the pre-#3186 false-positive-scan
+    situation) fails here.
+    """
+    import json
+
+    pr_suites = json.loads((ROOT / "ci" / "suites.json").read_text())["pr_suites"]
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+
+    changes_outputs = set(workflow["jobs"]["changes"]["outputs"])
+    # Every suite name's snake_case key must be exposed by the changes job.
+    for suite in pr_suites:
+        key = suite.replace("-", "_")
+        assert key in changes_outputs, f"suite {suite}: changes job does not expose {key}"
+
+    def job_text(job: dict) -> str:
+        import json as _json
+
+        return _json.dumps(job)
+
+    for suite in sorted(pr_suites):
+        key = suite.replace("-", "_")
+        executed = False
+        for job in workflow["jobs"].values():
+            if (
+                job is None
+                or "runs" not in job_text(job)
+                and "run" not in str(job.get("steps", []))
+            ):
+                pass
+            text = job_text(job)
+            runs_suite = f"run {suite}" in text or (
+                "${{ matrix.suite }}" in text
+                and any(
+                    inc.get("suite") == suite
+                    for inc in job.get("strategy", {}).get("matrix", {}).get("include", [])
+                )
+            )
+            if not runs_suite:
+                continue
+            gated = f"outputs.{key}" in text
+            step_gated = any(f"outputs.{key}" in str(s.get("if", "")) for s in job.get("steps", []))
+            job_gated = f"outputs.{key}" in str(job.get("if", ""))
+            if gated or job_gated or step_gated:
+                executed = True  # arm (i)
+            elif "${{ matrix.suite }}" in text:
+                continue  # matrix job: gating checked per suite below
+            else:
+                executed = True  # arm (ii): runs regardless of selection
+        assert executed, (
+            f"suite {suite} is selectable but no ci.yml job executes it through "
+            "either the selection-gated or always-run arm (orphan suite)"
+        )
+
+
+def test_false_positive_scan_lane_is_gate_consumed():
+    """#3186 Phase A req 3: the scanner lane's result must feed PR Gate.
+
+    Executing is not enough — an advisory job would pass the consumer test
+    above. The job that runs `ci.py run false-positive-scan` must be in
+    pr-gate's `needs` AND its result variable must appear in the validation
+    snippet, so a red scanner blocks merge.
+    """
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    scan_job = next(
+        name
+        for name, job in workflow["jobs"].items()
+        if "ci.py run false-positive-scan" in str(job)
+    )
+    gate = workflow["jobs"]["pr-gate"]
+    assert scan_job in gate["needs"], (
+        f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    )
+    validate_step = next(s for s in gate["steps"] if "Validate required" in str(s.get("name", "")))
+    snippet = str(validate_step["run"])
+    assert "SCAN" in validate_step["env"], "pr-gate must map the scanner result to SCAN"
+    assert '"SCAN"' in snippet, "the pr-gate validation dict must consume SCAN"
+
+
+def test_workflow_suite_references_resolve():
+    """Every `ci.py run <name>` and changes output key in ci.yml is a real suite."""
+    import json
+    import re
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    run_texts = [
+        str(step.get("run", ""))
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    for run_text in run_texts:
+        for name in re.findall(r"ci\.py run ([a-z][a-z0-9-]*[a-z0-9])", run_text):
+            assert name in suites, f"ci.yml runs unknown suite {name!r}"
+    for key in workflow["jobs"]["changes"]["outputs"]:
+        if key == "selected":
+            continue
+        assert key.replace("_", "-") in suites, f"changes output {key!r} has no suite"
+
+
+def test_false_positive_scan_suite_command_shape():
+    """The scanner suite must scan the whole tests/ tree against the ledger.
+
+    Narrowing the scan via suites.json (--exclude-dirs/--pattern/another
+    target) is the only remaining way to hide new debt without touching the
+    ledger; this pin makes any such narrowing a visible contract change.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["false-positive-scan"]["commands"] == [
+        [
+            "{python}",
+            "scripts/scan_test_false_positives.py",
+            "tests",
+            "--ledger",
+            "ci/false-positive-ledger.json",
+        ]
+    ], suites["false-positive-scan"]["commands"]

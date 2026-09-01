@@ -181,7 +181,7 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     """Select coarse, fail-safe PR lanes from repository-relative paths."""
     clean = sorted({path.strip().lstrip("./") for path in changed_files if path.strip()})
     if not clean:
-        return ["default-collection", "python-core", "python-min"]
+        return ["default-collection", "false-positive-scan", "python-core", "python-min"]
 
     policy_change = any(matches(path, POLICY_PATTERNS) for path in clean)
     docs_only = all(matches(path, DOC_PATTERNS) for path in clean)
@@ -194,8 +194,11 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     # for every code change (#2868): version-specific regressions surface on the
     # oldest Python first (e.g. datetime.fromisoformat rejecting 'Z' before
     # 3.11), and it is unit-only so it stays fast and deterministic.
+    # false-positive-scan rides along on every non-docs change (#3186 Phase A):
+    # a ~3s AST scan keeping new no-assert/skip debt out of required CI.
     selected = {
         "default-collection",
+        "false-positive-scan",
         "python-core",
         "python-min",
     }

@@ -36,6 +36,10 @@ class Finding(NamedTuple):
     severity: str  # P0, P1, P2
     pattern: str
     message: str
+    # Class-qualified function name ("<Class>.<func>", bare "<func>" outside
+    # classes, "<module>" at module level) — the stable identity component for
+    # the known-debt ledger (line numbers churn, names do not).
+    function: str = "<module>"
 
 
 ASSERT_METHODS = frozenset(
@@ -180,7 +184,7 @@ def _extract_and_validate_annotation(
                 import warnings
 
                 warnings.warn(
-                    f"Invalid annotation content at line {i+1}: '{annotation_content}' "
+                    f"Invalid annotation content at line {i + 1}: '{annotation_content}' "
                     f"does not match any template for {pattern_type}",
                     UserWarning,
                     stacklevel=3,
@@ -216,6 +220,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
         self.findings: list[Finding] = []
         self.current_function: str | None = None
         self.current_func_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+        self.class_stack: list[str] = []
         self.is_test_function = False
         self.has_assertion = False
         self.has_return_true = False
@@ -230,7 +235,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
             self.has_return_true,
             self.cond_depth,
         )
-        self.current_function = node.name
+        self.current_function = ".".join([*self.class_stack, node.name])
         self.current_func_node = node
         self.is_test_function = node.name.startswith("test_")
         self.has_assertion = False
@@ -255,6 +260,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
                         severity="P0",
                         pattern="no_assertion",
                         message=f"Test function '{node.name}' has no assertions",
+                        function=self.current_function or "<module>",
                     )
                 )
             if self.has_return_true and not self.has_assertion and not allow_no_assert:
@@ -265,6 +271,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
                         severity="P0",
                         pattern="return_true",
                         message=f"Test function '{node.name}' returns True without asserting",
+                        function=self.current_function or "<module>",
                     )
                 )
 
@@ -282,6 +289,11 @@ class FalsePositiveScanner(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.class_stack.append(node.name)
+        self.generic_visit(node)
+        self.class_stack.pop()
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         broad = (
@@ -308,6 +320,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
                             f"Broad except {node.type.id} swallows (no raise/assert) "
                             f"in '{self.current_function}'"
                         ),
+                        function=self.current_function or "<module>",
                     )
                 )
         self.generic_visit(node)
@@ -347,6 +360,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
                                     f"Unconditional pytest.skip() in '{self.current_function}' "
                                     f"hides failures"
                                 ),
+                                function=self.current_function or "<module>",
                             )
                         )
         self.generic_visit(node)
@@ -474,6 +488,22 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="Write the current per-pattern counts to FILE and exit 0.",
     )
+    parser.add_argument(
+        "--ledger",
+        metavar="FILE",
+        help="Known-debt ledger JSON (precise per-finding identities). Exit 1 on "
+        "any finding whose identity is absent from the ledger (or exceeds its "
+        "recorded count) AND on any stale ledger entry. Relative paths resolve "
+        "against the project root.",
+    )
+    parser.add_argument(
+        "--prune-ledger",
+        metavar="FILE",
+        help="Removal-only ledger maintenance: drop stale entries and lower "
+        "counts to the current values, then exit 0. REFUSES (exit 1) if any "
+        "current finding's identity is absent from the ledger or would need a "
+        "count increase — pruning can never enroll new debt.",
+    )
     args = parser.parse_args(argv)
 
     test_dir = Path(args.dir)
@@ -514,6 +544,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline:
         return _compare_baseline(Path(args.baseline), by_pattern)
 
+    if args.ledger or args.prune_ledger:
+        if args.ledger and args.prune_ledger:
+            print("::error::--ledger and --prune-ledger are mutually exclusive")
+            return 1
+        ledger_path = Path(args.ledger or args.prune_ledger)
+        if not ledger_path.is_absolute():
+            ledger_path = project_root / ledger_path
+        if args.prune_ledger:
+            return _prune_ledger(ledger_path, findings, project_root)
+        return _compare_ledger(ledger_path, findings, project_root)
+
     for finding in findings:
         print(f"\n[{finding.severity}] {finding.pattern}")
         print(f"  File: {finding.file}:{finding.line}")
@@ -544,6 +585,173 @@ def _compare_baseline(baseline_path: Path, by_pattern: dict[str, int]) -> int:
             f"(regression — fix the new finding or run --update-baseline)"
         )
     return 1 if regressions else 0
+
+
+# ---------------------------------------------------------------------------
+# Known-debt ledger (Issue #3186 Phase A): precise per-finding identities so
+# the CI gate can distinguish "new debt" from "known debt" and make
+# same-count substitution (fix A, introduce B) programmatically red. The
+# count-based --baseline above is retired from CI consumption; it remains for
+# backwards compatibility only.
+# ---------------------------------------------------------------------------
+
+LEDGER_VERSION = 1
+MODULE_LEVEL = "<module>"
+
+
+def _ledger_identity(finding: Finding, root: Path) -> tuple[str, str, str]:
+    """Stable identity: (pattern, repo-relative file, class-qualified function)."""
+    try:
+        rel = Path(finding.file).relative_to(root)
+    except ValueError:
+        rel = Path(finding.file)
+    return (finding.pattern, rel.as_posix(), finding.function or MODULE_LEVEL)
+
+
+def _current_counts(findings: list[Finding], root: Path) -> dict[tuple[str, str, str], int]:
+    counts: dict[tuple[str, str, str], int] = {}
+    for finding in findings:
+        identity = _ledger_identity(finding, root)
+        counts[identity] = counts.get(identity, 0) + 1
+    return counts
+
+
+def _load_ledger(path: Path) -> dict[tuple[str, str, str], int]:
+    """Load and validate the ledger file; raise SystemExit-style errors via _ledger_error."""
+    try:
+        data = json.loads(path.read_text())
+    except OSError as e:
+        raise LedgerError(f"Cannot read ledger {path}: {e}") from e
+    except json.JSONDecodeError as e:
+        raise LedgerError(f"Ledger {path} is not valid JSON: {e}") from e
+    if data.get("version") != LEDGER_VERSION:
+        raise LedgerError(f"Ledger {path} has unsupported version {data.get('version')!r}")
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        raise LedgerError(f"Ledger {path} must contain an 'entries' list")
+    counts: dict[tuple[str, str, str], int] = {}
+    for entry in entries:
+        try:
+            identity = (entry["pattern"], entry["file"], entry.get("function") or MODULE_LEVEL)
+            count = int(entry.get("count", 1))
+        except (KeyError, TypeError, ValueError) as e:
+            raise LedgerError(f"Ledger {path} has a malformed entry {entry!r}: {e}") from e
+        if identity in counts:
+            raise LedgerError(f"Ledger {path} has duplicate entry for {identity}")
+        if count < 1:
+            raise LedgerError(f"Ledger {path} entry {identity} has non-positive count {count}")
+        counts[identity] = count
+    return counts
+
+
+class LedgerError(RuntimeError):
+    """Invalid ledger file (unreadable, wrong version, malformed entries)."""
+
+
+def _render_identity(identity: tuple[str, str, str]) -> str:
+    return f"{identity[0]} | {identity[1]} | {identity[2]}"
+
+
+def _compare_ledger(ledger_path: Path, findings: list[Finding], root: Path) -> int:
+    """Exit 1 on unknown findings (new debt) or stale ledger entries.
+
+    Comparison is count-exact per identity: a second hit under an existing
+    identity must be covered by the recorded count, and a count above the
+    current value marks the entry stale (the debt was fixed — prune it).
+    """
+    try:
+        ledger = _load_ledger(ledger_path)
+    except LedgerError as e:
+        print(f"::error::{e}")
+        return 1
+    current = _current_counts(findings, root)
+
+    problems = []
+    for identity, count in sorted(current.items()):
+        allowed = ledger.get(identity, 0)
+        if count > allowed:
+            problems.append(
+                f"unknown finding {identity[2]} in {identity[1]} "
+                f"({identity[0]}): {count} hit(s), ledger covers {allowed}"
+            )
+    for identity, allowed in sorted(ledger.items()):
+        count = current.get(identity, 0)
+        if count < allowed:
+            problems.append(
+                f"stale ledger entry {identity[2]} in {identity[1]} "
+                f"({identity[0]}): ledger covers {allowed}, current {count} "
+                f"— fix confirmed, prune with --prune-ledger"
+            )
+    for problem in problems:
+        print(f"::error::{problem}")
+    print(f"Ledger check: {len(current)} finding identities, {len(ledger)} ledger entries")
+    if problems:
+        print(f"FAILED: {len(problems)} problem(s) — new debt is never enrollable via prune")
+        return 1
+    print("OK: every finding is known debt; ledger mirrors reality exactly")
+    return 0
+
+
+def _prune_ledger(ledger_path: Path, findings: list[Finding], root: Path) -> int:
+    """Removal-only ledger maintenance; refuses to enroll anything.
+
+    Drops identities the scan no longer finds and lowers counts to the
+    current values. If any current identity is absent from the ledger, or a
+    count would have to rise, refuse (exit 1): pruning can never absorb new
+    debt — enrollment is only possible by hand-editing the ledger, which the
+    FROZEN_SEED contract test (tests/unit/test_ci_runner.py) then rejects.
+    """
+    try:
+        ledger = _load_ledger(ledger_path)
+    except LedgerError as e:
+        print(f"::error::{e}")
+        return 1
+    current = _current_counts(findings, root)
+
+    refusals = []
+    for identity, count in sorted(current.items()):
+        allowed = ledger.get(identity, 0)
+        if allowed == 0:
+            refusals.append(
+                f"unknown finding {identity[2]} in {identity[1]} "
+                f"({identity[0]}) — prune cannot enroll new debt; fix the "
+                f"finding or hand-edit the ledger (contract test guards this)"
+            )
+        elif count > allowed:
+            refusals.append(
+                f"count increase for {identity[2]} in {identity[1]} "
+                f"({identity[0]}): {allowed} -> {count} — prune cannot raise counts"
+            )
+    for refusal in refusals:
+        print(f"::error::{refusal}")
+    if refusals:
+        print(f"FAILED: prune refused ({len(refusals)} problem(s)); ledger left unchanged")
+        return 1
+
+    removed = [
+        (identity, allowed) for identity, allowed in ledger.items() if identity not in current
+    ]
+    reduced = [
+        (identity, allowed, current[identity])
+        for identity, allowed in ledger.items()
+        if identity in current and current[identity] < allowed
+    ]
+    if not removed and not reduced:
+        print(f"Prune: no changes (ledger already mirrors reality: {len(current)} entries)")
+        return 0
+    entries = [
+        {"pattern": identity[0], "file": identity[1], "function": identity[2], "count": count}
+        for identity, count in sorted(current.items())
+    ]
+    ledger_path.write_text(
+        json.dumps({"version": LEDGER_VERSION, "entries": entries}, indent=2) + "\n"
+    )
+    print(f"Pruned ledger written to {ledger_path}: {len(entries)} entries")
+    for identity, allowed in sorted(removed):
+        print(f"  removed (fixed): {_render_identity(identity)} (was {allowed})")
+    for identity, allowed, now in sorted(reduced):
+        print(f"  reduced: {_render_identity(identity)} {allowed} -> {now}")
+    return 0
 
 
 if __name__ == "__main__":

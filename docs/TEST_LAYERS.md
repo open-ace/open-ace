@@ -96,7 +96,11 @@ GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分�
   只留一句不可诊断的 "Command exceeded"；`--durations` 让预算余量的收缩
   在日志里先于超时可见。
 - **false-positive-scan**：测试代码假阳性扫描（Issue #2189，Scope #6），
-  每个非文档改动都跑，独立于 `python-core` 以避免超时。
+  每个非文档改动都跑（`ci.py select_pr_suites` 默认集 + `PR Gate` 消费，#3186
+  Phase A），独立于 `python-core` 以避免超时。已知债务以**精确身份 ledger**
+  （`ci/false-positive-ledger.json`：pattern + 文件 + 类限定函数名）表达——
+  新增/置换 finding 即红；修复只允许**收缩**（`--prune-ledger` 只删不增），
+  且规模由契约测试钉死（只减不增）。旧的按计数 baseline 已退役。
 - **3.10（最低支持版本）**：`python-min`——`compileall` + 全量 `pytest tests/unit/`，
   每个非文档改动都跑。版本特有的回归几乎总先在最老解释器上暴露（例如 3.11 之前
   `datetime.fromisoformat` 不接受 `Z` 后缀），旧矩阵只在 3.10 跑 7 文件 smoke，使
