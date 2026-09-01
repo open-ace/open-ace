@@ -4,7 +4,6 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
-
 # Pre-compile regex pattern for better performance in batch operations
 _TZ_PATTERN = re.compile(r"[+-]\d{2}:\d{2}$")
 

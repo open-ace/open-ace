@@ -11,7 +11,7 @@ excludes incomplete current day, and returns history window metadata.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, NamedTuple
 
@@ -76,7 +76,7 @@ def calculate_moving_average(values: list[float], window: int = 7) -> float | No
     """
     if len(values) < window:
         return None
-    return sum(values[-window:]) / len(values[-window:])
+    return sum(values[-window:]) / window
 
 
 class TrendDirection(Enum):
@@ -455,7 +455,7 @@ class UsageAnalytics:
         self,
         window: ForecastWindow,
         tenant_id: int | None = None,
-    ) -> ContinuousDailyTotals:
+    ) -> ContinuousDailyTotals | None:
         """Get continuous daily totals with missing days filled as zeros.
 
         Issue #3244: Ensures the forecast window contains exactly the specified
@@ -466,83 +466,87 @@ class UsageAnalytics:
             tenant_id: Optional tenant ID for isolation.
 
         Returns:
-            ContinuousDailyTotals with data and metadata.
+            ContinuousDailyTotals with data and metadata, or None if database error.
         """
-        # Get first activity date for new user boundary
-        first_activity_date = self._get_first_activity_date(tenant_id)
+        try:
+            # Get first activity date for new user boundary
+            first_activity_date = self._get_first_activity_date(tenant_id)
 
-        # Adjust window if first activity date is after window start
-        actual_start = window.start_date
-        actual_end = window.end_date
-        actual_days = window.days
+            # Adjust window if first activity date is after window start
+            actual_start = window.start_date
+            actual_end = window.end_date
+            actual_days = window.days
 
-        # Only apply first activity date boundary if it's a valid date string
-        if first_activity_date and isinstance(first_activity_date, str):
-            try:
-                first_activity_dt = datetime.strptime(first_activity_date, "%Y-%m-%d")
-                start_dt = datetime.strptime(actual_start, "%Y-%m-%d")
-                if first_activity_dt > start_dt:
-                    actual_start = first_activity_date
-                    # Recalculate actual days
-                    end_dt = datetime.strptime(actual_end, "%Y-%m-%d")
-                    actual_days = (end_dt - first_activity_dt).days + 1
-            except (ValueError, TypeError):
-                # Invalid date format, ignore first activity date
-                pass
+            # Only apply first activity date boundary if it's a valid date string
+            if first_activity_date and isinstance(first_activity_date, str):
+                try:
+                    first_activity_dt = datetime.strptime(first_activity_date, "%Y-%m-%d")
+                    start_dt = datetime.strptime(actual_start, "%Y-%m-%d")
+                    if first_activity_dt > start_dt:
+                        actual_start = first_activity_date
+                        # Recalculate actual days
+                        end_dt = datetime.strptime(actual_end, "%Y-%m-%d")
+                        actual_days = (end_dt - first_activity_dt).days + 1
+                except (ValueError, TypeError):
+                    # Invalid date format, ignore first activity date
+                    pass
 
-        # Query database for existing records
-        if tenant_id is not None:
-            query = """
-                SELECT
-                    date,
-                    SUM(total_tokens) as tokens,
-                    SUM(message_count) as requests
-                FROM daily_stats
-                WHERE date >= ? AND date <= ? AND tenant_id = ?
-                GROUP BY date
-            """
-            rows = self.db.fetch_all(query, (actual_start, actual_end, tenant_id))
-        else:
-            query = """
-                SELECT
-                    date,
-                    SUM(total_tokens) as tokens,
-                    SUM(message_count) as requests
-                FROM daily_stats
-                WHERE date >= ? AND date <= ?
-                GROUP BY date
-            """
-            rows = self.db.fetch_all(query, (actual_start, actual_end))
-
-        # Build lookup dict from database results
-        data_lookup: dict[str, tuple[int, int]] = {}
-        for row in rows:
-            date = str(row["date"])
-            tokens = row.get("tokens", 0) or 0
-            requests = row.get("requests", 0) or 0
-            data_lookup[date] = (tokens, requests)
-
-        # Generate continuous date spine and fill missing days with zeros
-        date_spine = generate_date_spine(actual_start, actual_end)
-        result_data: list[tuple[str, int, int]] = []
-        missing_days = 0
-
-        for date in date_spine:
-            if date in data_lookup:
-                tokens, requests = data_lookup[date]
-                result_data.append((date, tokens, requests))
+            # Query database for existing records
+            if tenant_id is not None:
+                query = """
+                    SELECT
+                        date,
+                        SUM(total_tokens) as tokens,
+                        SUM(message_count) as requests
+                    FROM daily_stats
+                    WHERE date >= ? AND date <= ? AND tenant_id = ?
+                    GROUP BY date
+                """
+                rows = self.db.fetch_all(query, (actual_start, actual_end, tenant_id))
             else:
-                result_data.append((date, 0, 0))
-                missing_days += 1
+                query = """
+                    SELECT
+                        date,
+                        SUM(total_tokens) as tokens,
+                        SUM(message_count) as requests
+                    FROM daily_stats
+                    WHERE date >= ? AND date <= ?
+                    GROUP BY date
+                """
+                rows = self.db.fetch_all(query, (actual_start, actual_end))
 
-        return ContinuousDailyTotals(
-            data=result_data,
-            start_date=actual_start,
-            end_date=actual_end,
-            total_days=actual_days,
-            missing_days=missing_days,
-            first_activity_date=first_activity_date,
-        )
+            # Build lookup dict from database results
+            data_lookup: dict[str, tuple[int, int]] = {}
+            for row in rows:
+                date = str(row["date"])
+                tokens = row.get("tokens", 0) or 0
+                requests = row.get("requests", 0) or 0
+                data_lookup[date] = (tokens, requests)
+
+            # Generate continuous date spine and fill missing days with zeros
+            date_spine = generate_date_spine(actual_start, actual_end)
+            result_data: list[tuple[str, int, int]] = []
+            missing_days = 0
+
+            for date in date_spine:
+                if date in data_lookup:
+                    tokens, requests = data_lookup[date]
+                    result_data.append((date, tokens, requests))
+                else:
+                    result_data.append((date, 0, 0))
+                    missing_days += 1
+
+            return ContinuousDailyTotals(
+                data=result_data,
+                start_date=actual_start,
+                end_date=actual_end,
+                total_days=actual_days,
+                missing_days=missing_days,
+                first_activity_date=first_activity_date,
+            )
+        except Exception as e:
+            logger.error(f"Failed to get continuous daily totals: {e}")
+            return None
 
     def _detect_anomalies(self, start_date: str, end_date: str) -> list[Anomaly]:
         """Detect usage anomalies."""
@@ -662,7 +666,12 @@ class UsageAnalytics:
         }
 
     @cached(ttl=120, key_prefix="analytics", skip_args=[0])
-    def get_forecast(self, days: int = 7, tenant_id: int | None = None) -> dict[str, Any]:
+    def get_forecast(
+        self,
+        days: int = 7,
+        tenant_id: int | None = None,
+        business_date: str | None = None,
+    ) -> dict[str, Any]:
         """
         Get usage forecast based on historical data.
 
@@ -672,18 +681,31 @@ class UsageAnalytics:
         Args:
             days: Number of days to forecast (default 7).
             tenant_id: Optional tenant ID for isolation.
+            business_date: Optional business date for cache key (YYYY-MM-DD).
+                If None, current UTC date is used. This parameter is primarily
+                for cache key generation to ensure cross-day cache invalidation.
 
         Returns:
             Dict with forecast data including history_window metadata.
         """
-        # Get business date (current UTC date)
-        business_date = get_business_date()
+        # Get business date (current UTC date) if not provided
+        # This ensures the cache key includes the date for proper invalidation
+        if business_date is None:
+            business_date = get_business_date()
 
         # Calculate forecast window (excludes current incomplete day)
         window = get_forecast_window(business_date, days)
 
         # Get continuous daily totals with missing days filled as zeros
         continuous_data = self._get_continuous_daily_totals(window, tenant_id)
+
+        # Handle database error
+        if continuous_data is None:
+            return {
+                "forecast_available": False,
+                "reason": "Database temporarily unavailable",
+                "algorithm_version": FORECAST_ALGORITHM_VERSION,
+            }
 
         # Check for new user: if actual days < requested days
         if continuous_data.total_days < days:

@@ -520,3 +520,20 @@ class TestForecastAlgorithm:
 
         result = analytics.get_forecast(days=7)
         assert result["forecast_available"] is False
+
+    @patch("app.modules.analytics.usage_analytics.get_business_date")
+    def test_forecast_database_error(self, mock_get_business_date):
+        """Test forecast handles database errors gracefully."""
+        mock_get_business_date.return_value = "2026-08-31"
+
+        analytics, mock_db, _ = self._make_analytics()
+
+        # Simulate database error
+        def mock_fetch_one(query, params=None):
+            raise Exception("Database connection error")
+
+        mock_db.fetch_one = mock_fetch_one
+
+        result = analytics.get_forecast(days=7)
+        assert result["forecast_available"] is False
+        assert "Database temporarily unavailable" in result["reason"]
