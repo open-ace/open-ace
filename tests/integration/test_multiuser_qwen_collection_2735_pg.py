@@ -71,14 +71,24 @@ def _insert_user(pg_db, username, system_account=None, tenant_id=None):
 
 
 def _entry(
-    uuid, entry_type, ts, *, parent=None, model=None, usage=None, message_id=None, session_id=None
+    uuid,
+    entry_type,
+    ts,
+    *,
+    parent=None,
+    model=None,
+    usage=None,
+    message_id=None,
+    session_id="sess-fixture-1",
 ):
+    """One entry; a real qwen session file shares ONE sessionId across its
+    entries, so the default pins every fixture entry to a single session."""
     entry = {
         "uuid": uuid,
         "parentUuid": parent,
         "type": entry_type,
         "timestamp": ts,
-        "sessionId": session_id or f"sess-{uuid[:6]}",
+        "sessionId": session_id,
         "message": {"message_id": message_id or uuid, "parts": []},
     }
     if model:
@@ -127,7 +137,7 @@ class TestMultiUserQwenCollection:
             project, "host1", "alice", aggregated, all_messages, user_id=77
         )
         assert files_scanned == 1  # one JSONL fixture file
-        assert len(all_messages) >= 2  # user + assistant entries collected
+        assert len(all_messages) == 2  # exactly the user + assistant entries
         assert all(m["host_name"] == "host1" for m in all_messages)
         assert all(m.get("user_id") == 77 for m in all_messages)
 
