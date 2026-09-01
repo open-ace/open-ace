@@ -76,6 +76,7 @@ export interface StatCardProps {
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'secondary';
   className?: string;
   helpTooltip?: string;
+  subtitle?: React.ReactNode;
 }
 
 const statVariantClasses: Record<string, string> = {
@@ -96,7 +97,10 @@ export const StatCard: React.FC<StatCardProps> = ({
   variant = 'default',
   className,
   helpTooltip,
+  subtitle,
 }) => {
+  const isColoredVariant = variant !== 'default';
+
   return (
     <div className={cn('card stat-card', statVariantClasses[variant], className)}>
       <div className="card-body">
@@ -114,6 +118,11 @@ export const StatCard: React.FC<StatCardProps> = ({
               )}
             </h6>
             <h3 className="card-title mb-0">{value}</h3>
+            {subtitle && (
+              <small className={cn(isColoredVariant ? 'text-white-50' : 'text-muted')}>
+                {subtitle}
+              </small>
+            )}
             {trend && (
               <small
                 className={cn(
