@@ -70,10 +70,17 @@ def api_usage_report():
 @analytics_bp.route("/analysis/forecast", methods=["GET"])
 @admin_required
 def api_usage_forecast():
-    """Get usage forecast."""
+    """Get usage forecast.
+
+    Issue #3244: Updated to use continuous calendar days algorithm
+    and return history_window metadata.
+    """
     days = request.args.get("days", default=7, type=int)
 
-    forecast = usage_analytics.get_forecast(days=days)
+    # Issue #3244: Support tenant isolation
+    tenant_id = g.user.get("tenant_id") if hasattr(g, "user") and g.user else None
+
+    forecast = usage_analytics.get_forecast(days=days, tenant_id=tenant_id)
 
     return jsonify(forecast)
 

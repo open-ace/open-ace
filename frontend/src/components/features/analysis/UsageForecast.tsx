@@ -6,6 +6,7 @@
  * - Historical + forecast trend chart
  * - Day selector (7/14/30 days)
  * - Method explanation card
+ * - Issue #3244: Display history window info and quality status
  *
  * Error handling priority:
  * 1. If forecast API fails: Show Error component
@@ -64,6 +65,9 @@ export const UsageForecast: React.FC = () => {
 
   // Check if forecast is available
   const forecastAvailable = forecastData?.forecast_available === true;
+
+  // Issue #3244: Check quality status
+  const isDegraded = forecastData?.quality === 'degraded';
 
   // Chart colors
   const historicalColor = 'rgba(13, 110, 253, 1)';
@@ -175,6 +179,14 @@ export const UsageForecast: React.FC = () => {
         </div>
       )}
 
+      {/* Issue #3244: Degraded quality warning */}
+      {isDegraded && (
+        <div className="alert alert-warning mb-4" role="alert">
+          <i className="bi bi-exclamation-triangle me-2" />
+          {t('forecastQualityDegraded', language)}
+        </div>
+      )}
+
       {/* Key Metrics Cards */}
       <div className="row g-3 mb-4">
         <div className="col-md-3">
@@ -230,14 +242,30 @@ export const UsageForecast: React.FC = () => {
         </div>
       </div>
 
-      {/* Method Explanation Card */}
+      {/* Method Explanation Card - Issue #3244: Show history window info */}
       <div className="row mb-4">
         <div className="col-12">
           <Card title={t('forecastMethod', language)}>
             <div className="mb-3">
               <strong>{t('movingAverage', language)}</strong>
             </div>
-            <p className="text-muted mb-0">{t('forecastExplanation', language)}</p>
+            <p className="text-muted mb-3">{t('forecastExplanation', language)}</p>
+            {/* Show history window info if available */}
+            {forecastData?.history_window && (
+              <div className="text-muted small">
+                <span>
+                  {t('historyWindowInfo', language)
+                    .replace('{start}', forecastData.history_window.start_date)
+                    .replace('{end}', forecastData.history_window.end_date)
+                    .replace('{days}', String(forecastData.history_window.days))}
+                  {forecastData.history_window.missing_days > 0 && (
+                    <span className="ms-2 text-warning">
+                      ({forecastData.history_window.missing_days} {t('missingDays', language)})
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
           </Card>
         </div>
       </div>

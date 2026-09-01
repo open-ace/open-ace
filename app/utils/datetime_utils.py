@@ -1,10 +1,106 @@
 """Datetime utilities for timestamp handling."""
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
+
 
 # Pre-compile regex pattern for better performance in batch operations
 _TZ_PATTERN = re.compile(r"[+-]\d{2}:\d{2}$")
+
+
+class ForecastWindow(NamedTuple):
+    """Forecast window parameters for Issue #3244.
+
+    Attributes:
+        start_date: Start date of the window (inclusive, YYYY-MM-DD string).
+        end_date: End date of the window (inclusive, YYYY-MM-DD string).
+        days: Number of days in the window.
+    """
+
+    start_date: str
+    end_date: str
+    days: int
+
+
+def get_business_date() -> str:
+    """Get current business date in UTC.
+
+    Returns:
+        Current UTC date as YYYY-MM-DD string.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def get_forecast_window(
+    business_date: str,
+    days: int = 7,
+    first_activity_date: str | None = None,
+) -> ForecastWindow:
+    """Calculate forecast window boundaries.
+
+    The window excludes the current incomplete day (business_date) and covers
+    the previous `days` completed calendar days.
+
+    Args:
+        business_date: Current business date in UTC (YYYY-MM-DD).
+        days: Number of days for the window (default 7).
+        first_activity_date: Optional first activity date to bound the window start.
+            The window start will not be earlier than this date.
+
+    Returns:
+        ForecastWindow with start_date, end_date, and actual days count.
+
+    Examples:
+        >>> get_forecast_window("2026-08-31", days=7)
+        ForecastWindow(start_date='2026-08-24', end_date='2026-08-30', days=7)
+        >>> get_forecast_window("2026-08-31", days=7, first_activity_date="2026-08-28")
+        ForecastWindow(start_date='2026-08-28', end_date='2026-08-30', days=3)
+    """
+    # Parse business date
+    business_dt = datetime.strptime(business_date, "%Y-%m-%d")
+
+    # End date is the day before business date (exclude incomplete current day)
+    end_date_dt = business_dt - timedelta(days=1)
+
+    # Start date is `days` before end date
+    start_date_dt = end_date_dt - timedelta(days=days - 1)
+
+    # Apply first activity date boundary if provided
+    if first_activity_date:
+        first_activity_dt = datetime.strptime(first_activity_date, "%Y-%m-%d")
+        if first_activity_dt > start_date_dt:
+            start_date_dt = first_activity_dt
+
+    # Calculate actual days in window
+    actual_days = (end_date_dt - start_date_dt).days + 1
+
+    return ForecastWindow(
+        start_date=start_date_dt.strftime("%Y-%m-%d"),
+        end_date=end_date_dt.strftime("%Y-%m-%d"),
+        days=actual_days,
+    )
+
+
+def generate_date_spine(start_date: str, end_date: str) -> list[str]:
+    """Generate a continuous sequence of dates between start and end (inclusive).
+
+    Args:
+        start_date: Start date (YYYY-MM-DD).
+        end_date: End date (YYYY-MM-DD).
+
+    Returns:
+        List of date strings from start to end inclusive.
+
+    Examples:
+        >>> generate_date_spine("2026-08-01", "2026-08-03")
+        ['2026-08-01', '2026-08-02', '2026-08-03']
+    """
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+    days = (end_dt - start_dt).days + 1
+    return [(start_dt + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
 
 
 def ensure_utc_suffix(timestamp: str | datetime | None) -> str | None:

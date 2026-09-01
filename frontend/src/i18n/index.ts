@@ -1471,10 +1471,13 @@ export const translations: Record<Language, Translations> = {
     forecastDailyAvg: 'Daily Average Forecast',
     confidenceScore: 'Confidence Score',
     forecastExplanation:
-      'Forecast is calculated using moving average based on the past 7 days of historical data',
+      'Forecast is calculated using moving average based on the past 7 completed calendar days of historical data',
     historicalData: 'Historical Data',
     predictedData: 'Predicted Data',
     historicalDataUnavailable: 'Historical data unavailable, showing forecast only',
+    forecastQualityDegraded: 'Forecast quality is degraded due to missing historical data',
+    historyWindowInfo: 'Based on data from {start} to {end} ({days} days)',
+    missingDays: 'days with no data',
 
     // ROI Analysis
     totalCost: 'Total Cost',
@@ -3775,10 +3778,13 @@ export const translations: Record<Language, Translations> = {
     forecastTotalRequests: '预测总请求数',
     forecastDailyAvg: '日均预测',
     confidenceScore: '置信度得分',
-    forecastExplanation: '预测基于过去7天的历史数据使用移动平均方法计算',
+    forecastExplanation: '预测基于最近7个已完成自然日的历史数据使用移动平均方法计算',
     historicalData: '历史数据',
     predictedData: '预测数据',
     historicalDataUnavailable: '历史数据不可用，仅显示预测数据',
+    forecastQualityDegraded: '由于历史数据缺失，预测质量已降级',
+    historyWindowInfo: '基于 {start} 至 {end} 的数据（{days} 天）',
+    missingDays: '天无数据',
 
     // ROI Analysis
     totalCost: '总成本',
@@ -5942,10 +5948,13 @@ export const translations: Record<Language, Translations> = {
     forecastTotalRequests: '予測総リクエスト数',
     forecastDailyAvg: '日平均予測',
     confidenceScore: '信頼度スコア',
-    forecastExplanation: '過去7日間の履歴データに基づいて移動平均で予測を計算しています',
+    forecastExplanation: '過去7日間の完了したカレンダー日の履歴データに基づいて移動平均で予測を計算しています',
     historicalData: '履歴データ',
     predictedData: '予測データ',
     historicalDataUnavailable: '履歴データが利用できません。予測データのみを表示しています',
+    forecastQualityDegraded: '履歴データが不足しているため、予測品質が低下しています',
+    historyWindowInfo: '{start}から{end}までのデータに基づいています（{days}日間）',
+    missingDays: '日間データなし',
 
     // ROI Analysis
     roiAnalysis: 'ROI 分析',
@@ -8066,10 +8075,13 @@ export const translations: Record<Language, Translations> = {
     forecastTotalRequests: '예측 총 요청',
     forecastDailyAvg: '일일 평균 예측',
     confidenceScore: '신뢰도 점수',
-    forecastExplanation: '지난 7일간의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
+    forecastExplanation: '지난 7개의 완료된 달력일의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
     historicalData: '과거 데이터',
     predictedData: '예측 데이터',
     historicalDataUnavailable: '과거 데이터를 사용할 수 없습니다. 예측 데이터만 표시합니다',
+    forecastQualityDegraded: '과거 데이터가 누락되어 예측 품질이 저하되었습니다',
+    historyWindowInfo: '{start}부터 {end}까지의 데이터를 기반으로 합니다 ({days}일)',
+    missingDays: '일 데이터 없음',
 
     // ROI Analysis
     roiAnalysis: 'ROI 분석',
