@@ -97,10 +97,6 @@ class UserToolAccountRepository:
                       SELECT 1 FROM user_tool_accounts uta
                       WHERE uta.tool_account = dm.sender_name
                   )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM users u
-                      WHERE u.username = dm.sender_name
-                  )
                   AND EXISTS (
                       SELECT 1 FROM users u
                       WHERE u.tenant_id = ?
