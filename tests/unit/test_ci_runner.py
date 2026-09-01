@@ -96,8 +96,9 @@ def test_min_supported_python_runs_the_full_unit_suite():
 def test_python_min_timeout_budget_absorbs_runner_variance():
     """#3240: python-min's suite budget must absorb GitHub-hosted runner variance.
 
-    Evidence: the SAME commit ran 183s and 652s on the 3.10 lane (PR #3205,
-    run 33410540459 rerun), and main run 33384495716 was budget-killed at
+    Evidence: the SAME commit ran 183s and 652s on the 3.10 lane (PR #3205
+    run 33410540459 first attempt vs same-commit rerun), and main run
+    33384495716 was budget-killed at
     599s ("Command exceeded 599s") with ZERO test failures. The lane is a
     required check, so the kill randomly blocked merges. The 600s budget was
     shared by compileall + the whole pytest run. 1200s keeps ~1.8x headroom
