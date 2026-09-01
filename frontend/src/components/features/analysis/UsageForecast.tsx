@@ -275,7 +275,10 @@ export const UsageForecast: React.FC = () => {
                   <span className="fs-5 fw-bold">{qualityMetrics.sample_days}</span>
                   {qualityMetrics.missing_days > 0 && (
                     <small className="text-muted d-block">
-                      {t('missingDaysCount', language).replace('{count}', String(qualityMetrics.missing_days))}
+                      {t('missingDaysCount', language).replace(
+                        '{count}',
+                        String(qualityMetrics.missing_days)
+                      )}
                     </small>
                   )}
                 </div>
