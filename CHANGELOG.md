@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Fixed the required `test (3.11)` CI lane intermittently dying with "Command exceeded 599s" on healthy runs: the `python-core` suite budget is raised 600s→1200s (matching `python-min`, #3240) because GitHub-hosted runner variance swings the same suite between ~289s and ~535s, so the old budget sat inside the variance band; both unit lanes now also run pytest with `--timeout 300 --timeout-method thread --durations 20` so a hung test dumps its stacks and fails loudly in bounded time instead of burning the whole suite budget undiagnosably (Issue #3280)
 - Fixed the remote LLM-proxy failover loop deadlocking when a key resolver ignores `exclude_key_ids` and keeps returning an already-excluded key (e.g. a non-quota upstream 429): the handler now treats that as failover-pool exhaustion and returns 502 instead of retrying the same key forever, which could hang the process (Issue #2466)
 - Fixed configuration persistence in docker-compose.multi-user.yml by adding `OPENACE_CONFIG_DIR` environment variable to ensure config persists to mounted volume when running as root (Issue #2235)
 - Fixed install.sh script to automatically add required multi-user mode configurations (`user: "0"`, `OPENACE_ALLOW_ROOT_MULTI_USER=1`, `OPENACE_CONFIG_DIR`) when `WORKSPACE_MULTI_USER_MODE=true`
