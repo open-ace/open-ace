@@ -39,7 +39,14 @@ DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600
 # is a trusted path fragment. Anything that is not a plain component is refused
 # rather than sanitised — silently rewriting a key would make two different
 # workflows share one slot.
-_SAFE_KEY = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+#
+# The leading class is NOT the same as the rest: it excludes `.`, which is what
+# makes the dot segments unrepresentable. An earlier version allowed them, and
+# `purge("..")` then resolved to `_root/..` — in production
+# `/run/openace-agent-tasks` — where `shutil.rmtree` would take out every live
+# agent's per-task HOME/TMP/XDG and every `.claude-preserve` directory with it.
+# Verified destructive against a temp tree modelling that layout.
+_SAFE_KEY = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
 
 
 class AgentStateError(Exception):

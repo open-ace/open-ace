@@ -184,3 +184,98 @@ def test_a_transcript_at_the_cap_is_still_returned(sandbox):
     api.uploaded[handle.sandbox_id][f"{_AGENT_STATE_DIR}/{_SID}.jsonl"] = blob
 
     assert provider.export_agent_state(handle, cli_session_id=_SID) == blob
+
+
+# ── the bounded download, at the client boundary ──────────────────────
+
+
+class _FakeResponse:
+    """Minimal stand-in for a streaming requests.Response."""
+
+    def __init__(self, body: bytes, *, declared: str | None = None):
+        self.content = body
+        self.headers = {} if declared is None else {"Content-Length": declared}
+        self._body = body
+        self.closed = False
+        self.read_bytes = 0
+
+    def iter_content(self, chunk_size=8192):
+        for i in range(0, len(self._body), chunk_size):
+            chunk = self._body[i : i + chunk_size]
+            self.read_bytes += len(chunk)
+            yield chunk
+
+    def close(self):
+        self.closed = True
+
+
+def _client_with(response, monkeypatch):
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
+
+    api = HttpOpenSandboxApi.__new__(HttpOpenSandboxApi)
+    monkeypatch.setattr(
+        HttpOpenSandboxApi, "_execd_request", lambda self, *a, **k: response, raising=False
+    )
+    return api
+
+
+def test_a_bounded_download_refuses_on_content_length_without_reading(monkeypatch):
+    """The point of the bound: refuse BEFORE the body is resident.
+
+    Reading first and measuring second is what could OOM-kill the scheduler,
+    whose pod limit is smaller than the sandbox's 1Gi HOME.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    response = _FakeResponse(b"x" * 100, declared="100")
+    api = _client_with(response, monkeypatch)
+
+    with pytest.raises(OpenSandboxApiError, match="over the"):
+        api.download_file("sb-1", "/p", max_bytes=10)
+
+    assert response.read_bytes == 0, "the body was read despite an oversized Content-Length"
+
+
+def test_a_bounded_download_still_counts_when_the_header_lies(monkeypatch):
+    """The header is a shortcut; the counter is the guarantee.
+
+    A server may send no Content-Length, or a wrong one. Trusting it alone
+    would leave the cap unenforced exactly when the server misbehaves.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    response = _FakeResponse(b"x" * 500_000, declared="1")
+    api = _client_with(response, monkeypatch)
+
+    with pytest.raises(OpenSandboxApiError, match="mid-transfer"):
+        api.download_file("sb-1", "/p", max_bytes=1000)
+
+
+def test_a_bounded_download_with_no_length_header_still_bounds(monkeypatch):
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    response = _FakeResponse(b"x" * 500_000)
+    api = _client_with(response, monkeypatch)
+
+    with pytest.raises(OpenSandboxApiError, match="mid-transfer"):
+        api.download_file("sb-1", "/p", max_bytes=1000)
+
+
+def test_a_bounded_download_returns_a_body_within_the_limit(monkeypatch):
+    response = _FakeResponse(b"small", declared="5")
+    api = _client_with(response, monkeypatch)
+
+    assert api.download_file("sb-1", "/p", max_bytes=1000) == b"small"
+
+
+def test_an_unbounded_download_is_unchanged(monkeypatch):
+    """The ChangeSet path must keep its existing behaviour.
+
+    Its sizes are pre-declared in a manifest and bounded there, so it has no
+    need of the streaming path and must not pay for it.
+    """
+    response = _FakeResponse(b"whatever", declared="8")
+    api = _client_with(response, monkeypatch)
+
+    assert api.download_file("sb-1", "/p") == b"whatever"
+    assert response.read_bytes == 0, "the unbounded path should use .content"

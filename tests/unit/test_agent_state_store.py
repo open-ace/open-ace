@@ -125,12 +125,65 @@ def test_the_file_is_private(store):
         ("wf/1", "main"),
         ("", "main"),
         ("wf-1", ""),
+        # Dot segments. `..` matched the first version of this validator, and
+        # purge("..") then rmtree'd _root/.. — in production
+        # /run/openace-agent-tasks, taking every live agent's per-task HOME and
+        # every .claude-preserve directory with it.
+        ("..", "main"),
+        (".", "main"),
+        ("...", "main"),
+        ("wf-1", ".."),
+        ("wf-1", "."),
     ],
 )
 def test_keys_that_are_not_plain_components_are_refused(store, workflow_id, line_id):
     """Both ids reach this from the database; neither is a trusted path fragment."""
     with pytest.raises(ValueError):
         store.put(workflow_id, line_id, b"nope")
+
+
+@pytest.mark.parametrize("op", ["purge", "discard", "get", "path_for"])
+def test_no_operation_can_address_a_dot_segment(store, op):
+    """Every entry point must refuse them, not just put().
+
+    purge() is the dangerous one — it is the only operation that deletes a
+    DIRECTORY tree rather than a file, so a `..` reaching it escapes the store
+    entirely.
+    """
+    store.put("wf-1", "main", b"keep me")
+    if op == "purge":
+        store.purge("..")
+    elif op == "discard":
+        store.discard("..", "main")
+    elif op == "get":
+        with pytest.raises(ValueError):
+            store.get("..", "main")
+    else:
+        with pytest.raises(ValueError):
+            store.path_for("..", "main")
+    # Nothing above the root was touched, and the real slot survives.
+    assert store.path_for("wf-1", "main").parent.parent.exists()
+    assert store.get("wf-1", "main") == b"keep me"
+
+
+def test_purge_of_a_dot_segment_does_not_escape_the_root(tmp_path):
+    """Models the production layout: the store is a SIBLING of live task trees.
+
+    _root defaults to /run/openace-agent-tasks/agent-state, so escaping one
+    level reaches the per-task HOME/TMP/XDG directories of every running agent.
+    """
+    task_root = tmp_path / "openace-agent-tasks"
+    (task_root / "task-abc" / "home").mkdir(parents=True)
+    (task_root / "task-abc.claude-preserve").mkdir(parents=True)
+    store = AgentStateStore(root=str(task_root / "agent-state"))
+    store.put("wf-1", "main", b"data")
+
+    store.purge("..")
+
+    assert (
+        task_root / "task-abc" / "home"
+    ).exists(), "purge escaped the store root and destroyed a live agent's HOME"
+    assert (task_root / "task-abc.claude-preserve").exists()
 
 
 def test_no_temp_file_is_left_behind(store):
@@ -320,3 +373,123 @@ def test_a_failed_write_leaves_no_temp_file_behind(tmp_path, monkeypatch):
     leftovers = [p.name for p in store.path_for("wf-1", "main").parent.iterdir()]
     assert leftovers == ["main.jsonl"], leftovers
     assert store.get("wf-1", "main") == b"first", "the previous slot was destroyed"
+
+
+# ── the retention CALL SITES, not just the functions ──────────────────
+#
+# Round 1 caught an entire feature whose functions were tested while nothing
+# asserted they were CALLED. The fix for that finding then shipped with the
+# same hole: deleting both scheduler call sites left the whole suite green.
+# These close it.
+
+
+def test_the_scheduler_purges_after_writing_a_terminal_recovery_status(monkeypatch):
+    """autonomous_scheduler writes `status: failed` via repo.update_workflow.
+
+    That bypasses WorkflowOrchestrator._update_workflow and therefore the purge
+    hooked there, so this path has to purge itself.
+    """
+    from app.services import autonomous_scheduler as sched
+
+    purged: list[str] = []
+    monkeypatch.setattr(sched, "purge_agent_state_if_terminal", None, raising=False)
+
+    class _Store:
+        def purge(self, workflow_id):
+            purged.append(workflow_id)
+
+    from app.modules.workspace.autonomous import orchestrator as orch
+
+    monkeypatch.setattr(orch, "AgentStateStore", lambda *a, **k: _Store(), raising=False)
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    sched._purge_agent_state("wf-recovered")
+
+    assert purged == ["wf-recovered"], (
+        "the recovery sweep wrote a terminal status without dropping the "
+        "workflow's carried transcripts"
+    )
+
+
+def test_scheduler_purge_never_raises(monkeypatch):
+    """Cleanup must not break the sweep that walks many rows."""
+    from app.services import autonomous_scheduler as sched
+
+    def _boom(*a, **k):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore", _boom
+    )
+    sched._purge_agent_state("wf-1")
+
+
+def test_the_scheduler_reaps_orphans_at_startup(monkeypatch, tmp_path):
+    """The reaper is the backstop for rows that never reach a terminal status.
+
+    Without a caller it is decoration, and the spec promised one. Asserted on
+    the CALL, because that is the part that was missing.
+    """
+    from app.services import autonomous_scheduler as sched
+
+    reaped: list[int] = []
+
+    class _Store:
+        def reap(self, *a, **k):
+            reaped.append(1)
+            return 3
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    assert sched._reap_agent_state() == 3
+    assert reaped, "the reaper was never invoked"
+
+
+def test_scheduler_reap_never_raises(monkeypatch):
+    """A bounded leak beats a scheduler that will not start."""
+    from app.services import autonomous_scheduler as sched
+
+    def _boom(*a, **k):
+        raise OSError("no such directory")
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore", _boom
+    )
+    assert sched._reap_agent_state() == 0
+
+
+def test_scheduler_startup_wires_the_reaper():
+    """Pins the CALL SITE, not the function.
+
+    Deleting `_reap_agent_state()` from init_autonomous_scheduler left 10,274
+    tests green. Reading the source is the cheap way to assert a call in a
+    function whose other work needs a live database.
+    """
+    import inspect
+
+    from app.services import autonomous_scheduler as sched
+
+    source = inspect.getsource(sched.init_autonomous_scheduler)
+    assert "_reap_agent_state()" in source, (
+        "scheduler startup no longer reaps orphaned transcripts; the store is "
+        "on tmpfs and a restart is exactly when stale entries accumulate"
+    )
+
+
+def test_the_recovery_sweep_wires_the_purge():
+    """Same shape as above, for the terminal-status write that bypasses the hook."""
+    import inspect
+
+    from app.services import autonomous_scheduler as sched
+
+    source = inspect.getsource(sched._reconcile_pending_transitions)
+    assert "_purge_agent_state(" in source, (
+        "the recovery sweep writes a terminal status without purging; that path "
+        "does not go through _update_workflow"
+    )

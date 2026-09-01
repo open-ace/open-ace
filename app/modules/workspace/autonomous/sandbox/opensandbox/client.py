@@ -33,6 +33,7 @@ of it is forwarded.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Iterator, Mapping
@@ -148,7 +149,7 @@ class OpenSandboxApi(Protocol):
 
     # Execd
     def upload_file(self, sandbox_id: str, path: str, data: bytes, mode: int) -> None: ...
-    def download_file(self, sandbox_id: str, path: str) -> bytes: ...
+    def download_file(self, sandbox_id: str, path: str, *, max_bytes: int = 0) -> bytes: ...
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]: ...
     def command_status(self, sandbox_id: str, command_id: str) -> dict | None: ...
     def interrupt_command(self, sandbox_id: str, command_id: str) -> None: ...
@@ -398,13 +399,52 @@ class HttpOpenSandboxApi:
             ],
         )
 
-    def download_file(self, sandbox_id: str, path: str) -> bytes:
-        return cast(
-            "bytes",
-            self._execd_request(
-                sandbox_id, "GET", "/files/download", params={"path": path}
-            ).content,
+    def download_file(self, sandbox_id: str, path: str, *, max_bytes: int = 0) -> bytes:
+        """Fetch a file. With ``max_bytes``, refuse an oversized one UNREAD.
+
+        Without the bound this reads ``.content``, which materialises the whole
+        body before anything can measure it. That is fine for the ChangeSet
+        path, whose sizes are pre-declared in a manifest — but the agent-state
+        transcript (#3237) is written by the agent into a 1Gi ``emptyDir``,
+        while the scheduler pod runs with a 512Mi limit. One runaway transcript
+        would OOM-kill the control plane.
+
+        Bounded mode streams: it checks ``Content-Length`` first, then still
+        counts delivered bytes, because a server may send no length header or a
+        wrong one and the header is not the guarantee — the counter is.
+        """
+        if max_bytes <= 0:
+            return cast(
+                "bytes",
+                self._execd_request(
+                    sandbox_id, "GET", "/files/download", params={"path": path}
+                ).content,
+            )
+        response = self._execd_request(
+            sandbox_id, "GET", "/files/download", params={"path": path}, stream=True
         )
+        with contextlib.closing(response):
+            declared = response.headers.get("Content-Length")
+            if declared is not None:
+                with contextlib.suppress(ValueError):
+                    if int(declared) > max_bytes:
+                        raise OpenSandboxApiError(
+                            f"{path} is {declared} bytes, over the {max_bytes} limit",
+                            status_code=0,
+                            code="FILE_TOO_LARGE",
+                        )
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise OpenSandboxApiError(
+                        f"{path} exceeded the {max_bytes} byte limit mid-transfer",
+                        status_code=0,
+                        code="FILE_TOO_LARGE",
+                    )
+                chunks.append(chunk)
+            return b"".join(chunks)
 
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:
         response = self._execd_request(sandbox_id, "POST", "/command", json=body, stream=True)

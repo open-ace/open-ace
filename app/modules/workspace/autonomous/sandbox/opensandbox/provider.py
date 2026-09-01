@@ -174,19 +174,26 @@ def _agent_state_path(cli_session_id: str) -> str | None:
 
     ``AgentStateStore`` already applies exactly this reasoning to the same class
     of database-sourced id ("neither is a trusted path fragment"); this is the
-    one place that had not. Refused rather than sanitised, for the same reason:
-    rewriting an id silently changes which file is addressed.
+    one place that had not.
+
+    The id is matched AS GIVEN, with no trimming. An earlier version stripped
+    whitespace first, so an id with a trailing newline was quietly accepted with
+    the newline removed — sanitising, the very thing the store refuses to do, in
+    a function whose docstring said it did not.
     """
-    candidate = str(cli_session_id or "").strip()
-    if not _SAFE_SESSION_ID.match(candidate):
+    if not _SAFE_SESSION_ID.match(str(cli_session_id or "")):
         return None
-    return f"{_AGENT_STATE_DIR}/{candidate}.jsonl"
+    return f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl"
 
 
 # Session ids are uuids in practice; this is deliberately a little wider so a
 # CLI that changes its id format does not silently stop carrying history, while
 # still admitting no separator, no dot-segment and no absolute path.
-_SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+#
+# `\Z`, not `$`: Python's `$` also matches immediately before a trailing
+# newline, so `"abc\n"` would pass and produce a filename with an embedded
+# newline in it.
+_SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 _GIT_SYNTHESIS = (
     f"git {_SAFE_DIR} init -q && git {_SAFE_DIR} add -A && "
@@ -536,20 +543,28 @@ class OpenSandboxProvider:
         """
         path = _agent_state_path(cli_session_id)
         if path is None:
+            # Emitted, not silently dropped. This is the FIRST place a hostile
+            # id surfaces: the sandbox prints it during its own turn and the
+            # export at the end of that turn is what tries to address it. The
+            # import refusal only fires a turn later, and only if the id
+            # survived to the database — so without this the security-relevant
+            # event is the one nothing records. An empty id is the ordinary
+            # "no session" case and is not worth an event.
+            if str(cli_session_id or "").strip():
+                self._emit(
+                    "agent_state_id_refused",
+                    {"sandbox_id": handle.sandbox_id, "phase": "export"},
+                )
             return None
         try:
-            blob = self._api.download_file(handle.sandbox_id, path)
+            # BOUNDED, so an oversized transcript is refused unread rather than
+            # buffered and then rejected. HOME is a 1Gi emptyDir while the
+            # scheduler pod runs with a 512Mi limit, so reading first and
+            # measuring second could OOM-kill the control plane.
+            blob = self._api.download_file(handle.sandbox_id, path, max_bytes=MAX_AGENT_STATE_BYTES)
         except SandboxError:
-            return None
-        # The cap is re-checked at the store, but a blob that never fits must
-        # not be handed onward either. HOME is an emptyDir with a 1Gi
-        # sizeLimit, so a runaway transcript is bounded by the pod, not by
-        # anything here — and `download_file` buffers the whole body.
-        if len(blob) > MAX_AGENT_STATE_BYTES:
-            self._emit(
-                "agent_state_too_large",
-                {"sandbox_id": handle.sandbox_id, "bytes": len(blob)},
-            )
+            # Covers "no transcript there" and "too large" alike: both mean
+            # nothing is carried, and neither may cost a finished milestone.
             return None
         return blob
 

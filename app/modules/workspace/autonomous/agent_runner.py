@@ -2703,7 +2703,14 @@ class AutonomousAgentRunner:
         launches a different binary, or none.
 
         ``previous_cmd`` supplies that already-resolved argv[0] rather than
-        re-running ``which``: it is what this run actually started from.
+        re-running ``which``: it is what this run actually started from. The
+        first build passes the freshly resolved executable; the re-derivation
+        passes the ``cmd`` it is replacing. Both go through here so the two
+        cannot drift — the duplication is what the extraction exists to remove.
+
+        The bare-name fallback for an empty ``previous_cmd`` is unreachable
+        from either call site (the first build has just resolved one, and the
+        re-derivation runs only after it succeeded); it is a floor, not a path.
         """
         if adapter.provides_full_command():
             return list(adapter_args)
@@ -2926,7 +2933,7 @@ class AutonomousAgentRunner:
         # executable. Use those args verbatim; otherwise resolve the executable
         # via PATH and prepend it.
         if adapter.provides_full_command():
-            cmd = adapter_args
+            cmd = self._resolve_agent_command(adapter, adapter_args, [])
         else:
             exe_name = adapter.get_executable_name()
             executable = shutil.which(exe_name)
@@ -2941,7 +2948,10 @@ class AutonomousAgentRunner:
                     success=False,
                     error=f"CLI tool '{exe_name}' not found",
                 )
-            cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
+            # Same helper the #3237 re-derivation uses, so the two builds cannot
+            # drift. `which` stays here: it is the resolution itself, and its
+            # failure is a run-ending error rather than something to repeat.
+            cmd = self._resolve_agent_command(adapter, adapter_args, [executable])
 
         # #2022 P3b: spawn through the SandboxProvider. The orchestrator no
         # longer touches sudo/_wrap_agent_cmd/Popen directly for spawn; the
@@ -3204,11 +3214,16 @@ class AutonomousAgentRunner:
         # next turn starts fresh cleanly instead of resuming half a history.
         if hasattr(provider, "export_agent_state"):
             # Prefer the id the stream reported; fall back to the id this turn
-            # actually resumed. The stream capture is gated on
-            # _uses_sidebar_session_source, so on a resumed turn where that
-            # capture missed, `resumed_with` is still the file the CLI has been
-            # appending to — and without this fallback the line would silently
-            # stop carrying history from that turn on.
+            # actually resumed, which is the file the CLI has been appending to.
+            #
+            # The fallback is DEFENSIVE, not load-bearing: reaching it needs
+            # `resume=True` with a falsy `cli_session_id`, and
+            # `_resolve_session_line` never returns that shape — it yields
+            # `(id, None, False)` when the mapping is missing and `(id, id,
+            # True)` for non-Claude tools. Kept because the alternative failure
+            # is silent (the line simply stops carrying history), and because
+            # the stream capture is gated on `_uses_sidebar_session_source`,
+            # which is a condition this code does not control.
             captured = getattr(session, "cli_session_id", "") or resumed_with
             try:
                 blob = provider.export_agent_state(sandbox_handle, cli_session_id=captured)

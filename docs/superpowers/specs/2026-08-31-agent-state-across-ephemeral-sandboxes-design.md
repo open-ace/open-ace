@@ -145,11 +145,17 @@ settings. Credentials must never round-trip through the control plane, and
 `build_env` already mints the proxy token fresh each turn.
 
 A blob larger than `MAX_AGENT_STATE_BYTES` (16 MB — an order of magnitude over
-the measured max, matching the shape of `ChangesetLimits`) is refused. The
-ordering, stated honestly: execd's download API returns a whole body, so an
-oversized transcript **is** buffered before it can be measured. The check stops
-it going any further; it does not stop the read. HOME is a 1Gi `emptyDir`, so
-that buffer is bounded by the pod rather than by anything here.
+the measured max, matching the shape of `ChangesetLimits`) is refused **unread**.
+That wording is load-bearing and was not true in the first draft: `download_file`
+returned `.content`, which materialises the whole body before anything can
+measure it. HOME is a 1 GB `emptyDir` while the scheduler pod runs with a 512 MB
+limit, so reading first and measuring second could OOM-kill the control plane.
+
+`download_file` therefore takes an optional `max_bytes`. In bounded mode it
+streams: it refuses on `Content-Length` before reading a byte, and *also* counts
+delivered bytes, because a server may send no length header or a wrong one —
+the header is a shortcut, the counter is the guarantee. The unbounded default
+keeps the ChangeSet path unchanged, where sizes are pre-declared in a manifest.
 
 ### 5.3 The store
 
