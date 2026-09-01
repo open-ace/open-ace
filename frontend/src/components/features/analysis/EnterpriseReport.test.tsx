@@ -365,8 +365,8 @@ describe('EnterpriseReport Component', () => {
       render(<EnterpriseReport />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        // Should display peak usage period label
-        expect(screen.getByText('峰值使用时段')).toBeInTheDocument();
+        // Should display the peak-day card label (zh i18n key peakDay)
+        expect(screen.getByText('高峰日')).toBeInTheDocument();
         // Should display peak day value
         expect(screen.getByText('2024-01-15')).toBeInTheDocument();
         // Should display peak tokens subtitle with label
@@ -414,8 +414,8 @@ describe('EnterpriseReport Component', () => {
       render(<EnterpriseReport />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        // Should display peak usage period label
-        expect(screen.getByText('峰值使用时段')).toBeInTheDocument();
+        // Should display the peak-day card label (zh i18n key peakDay)
+        expect(screen.getByText('高峰日')).toBeInTheDocument();
         // Should display dash when no peak day
         expect(screen.getByText('-')).toBeInTheDocument();
       });
