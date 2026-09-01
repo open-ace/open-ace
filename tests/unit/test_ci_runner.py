@@ -158,9 +158,10 @@ def test_unit_lanes_fail_fast_on_hung_tests():
     cites) burned the ENTIRE suite budget and died with a bare
     "Command exceeded 599s" plus undiagnosable "OSError: cannot send". A
     300s per-test bound with the thread method dumps every thread's stack
-    and kills the hung worker loudly: 300s is 2x the slowest healthy suite
-    runtime ever observed for a single test on record, while a hang surfaces
-    in bounded time with a stack trace instead of at the suite ceiling.
+    and kills the hung worker loudly: 300s is ~6x the slowest single test
+    on record (46.7s, full-suite --durations measurement on 2026-09-01),
+    so it cannot falsely kill a healthy test, while a hang surfaces in
+    bounded time with a stack trace instead of at the suite ceiling.
     --durations=20 prints the slowest tests on every run so a shrinking
     budget margin is visible in the log before it becomes a timeout.
     """
