@@ -140,3 +140,8 @@ class TestUsageService:
         ]
         result = svc.get_trend_data("2026-01-01", "2026-01-31")
         assert len(result) == 1
+        # Verify field name alignment with frontend (Issue #3230)
+        assert "tool" in result[0], "Result should have 'tool' field"
+        assert "tool_name" not in result[0], "Result should not have 'tool_name' field"
+        assert result[0]["tool"] == "qwen"
+        assert result[0]["tokens"] == 100
