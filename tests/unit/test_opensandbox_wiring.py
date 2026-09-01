@@ -126,8 +126,10 @@ def test_sweep_survives_a_provider_failure_on_one_row(api, monkeypatch):
         "sandbox_id": "sb-1",
         "sandbox_remote_session_id": None,
     }
-    # One bad row must never abort a sweep that walks many.
-    _destroy_orphan_sandbox(wf, remote_session_manager=None)
+    # One bad row must never abort a sweep that walks many — and the caller
+    # must LEARN the teardown failed (False) so it keeps the persisted ids
+    # for a retry instead of stranding a live sandbox.
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is False
 
 
 # ── agent-runner wiring (spec §6.5, §6.6) ─────────────────────────────
@@ -264,8 +266,7 @@ def test_select_sandbox_provider_returns_the_injected_one_without_config(monkeyp
 
     monkeypatch.delenv("OPENACE_SANDBOX_BACKENDS", raising=False)
     monkeypatch.setattr(
-        "app.modules.workspace.autonomous.sandbox.opensandbox.config."
-        "DEFAULT_BACKEND_CONFIG_PATH",
+        "app.modules.workspace.autonomous.sandbox.opensandbox.config.DEFAULT_BACKEND_CONFIG_PATH",
         str(tmp_path / "etc.json"),
     )
     monkeypatch.setattr(
@@ -785,6 +786,6 @@ def test_a_failing_destroy_does_not_replace_the_original_error(api, tmp_path, mo
 
     result = _run_local_against(_DestroyRaises(inner), worktree, monkeypatch)
     assert result.success is False
-    assert "upgrade refused" in (
-        result.error or ""
-    ), f"the destroy failure replaced the original error: {result.error!r}"
+    assert "upgrade refused" in (result.error or ""), (
+        f"the destroy failure replaced the original error: {result.error!r}"
+    )

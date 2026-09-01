@@ -86,7 +86,9 @@ class TestParseDateRange:
         app.config["TESTING"] = True
 
         @app.route("/test")
-        def test_route():
+        def _parse_route():
+            # Not a test: a Flask view registered only so this helper's
+            # request context can exercise parse_date_range() directly.
             return parse_date_range()
 
         return app

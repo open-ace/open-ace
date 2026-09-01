@@ -272,8 +272,14 @@ def test_apply_sets_the_declared_mode(tmp_path):
 
 def test_apply_deleting_a_missing_path_is_not_an_error(tmp_path):
     apply_changeset(
-        [], root=str(tmp_path), limits=_limits(), fetch=lambda p: b"", deleted=["nope.py"]
+        [ChangeSetEntry(path="real.py", mode=0o644, size=3)],
+        root=str(tmp_path),
+        limits=_limits(),
+        fetch=lambda path: b"new",
+        deleted=["nope.py"],
     )
+    # The tolerated missing deletion must not poison the rest of the changeset.
+    assert (tmp_path / "real.py").read_text(encoding="utf-8") == "new"
 
 
 # ── apply verifies delivered bytes, not the manifest's self-report (B6) ──
