@@ -88,7 +88,13 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分工（#2868）：
 
 - **3.11（生产运行时）**：`python-core`——全量 `pytest tests/`（含 integration）
-  + 覆盖率，每个非文档改动都跑。
+  + 覆盖率，每个非文档改动都跑。该 suite 的预算同样已因 GitHub runner 方差
+  从 600s 抬至 1200s——同分支健康运行曾 289s↔535s 波动，慢 runner 的长尾
+  会直接撞穿 600s（#3280）。`python-core` 与 `python-min` 的 pytest 命令均
+  带 `--timeout 300 --timeout-method thread --durations 20`：单个测试 hang
+  时在 300s 处 dump 全部线程堆栈并大声失败，而不是烧光整个 suite 预算后
+  只留一句不可诊断的 "Command exceeded"；`--durations` 让预算余量的收缩
+  在日志里先于超时可见。
 - **false-positive-scan**：测试代码假阳性扫描（Issue #2189，Scope #6），
   每个非文档改动都跑，独立于 `python-core` 以避免超时。
 - **3.10（最低支持版本）**：`python-min`——`compileall` + 全量 `pytest tests/unit/`，
