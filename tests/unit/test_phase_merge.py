@@ -13,13 +13,13 @@ import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import merge as merge_phase
-
-import pytest
 
 
 def _ctx(workflow: dict) -> WorkflowContext:

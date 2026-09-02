@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.modules.workspace.autonomous.github_ops import parse_github_iso_datetime
-
 import pytest
+
+from app.modules.workspace.autonomous.github_ops import parse_github_iso_datetime
 
 pytestmark = [pytest.mark.regression]
 # No original issue: guards the Python-3.10 fromisoformat("Z") behavior that

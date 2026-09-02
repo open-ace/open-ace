@@ -25,11 +25,11 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import development as development_phase
-
-import pytest
 
 
 def _ctx(workflow: dict) -> WorkflowContext:
