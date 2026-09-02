@@ -2058,17 +2058,17 @@ REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 _TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
-def purge_agent_state_if_terminal(
-    workflow_id: str, updates: dict, store: object | None = None
-) -> None:
-    """Drop a finished workflow's carried CLI transcripts (#3237).
+def purge_agent_state(workflow_id: str, store: object | None = None) -> None:
+    """Drop one workflow's carried CLI transcripts, unconditionally (#3237).
 
-    Called from ``_update_workflow``, the one place every status write passes
-    through. Best-effort by design: failing to tidy up must never turn a
-    completed workflow into a failed one.
+    Best-effort by design: failing to tidy up must never turn a completed
+    workflow into a failed one, nor a successful delete into a 500.
+
+    Separate from the status-gated wrapper below because the DELETE routes have
+    no status to inspect — the row is simply gone, and once it is gone nothing
+    can ever identify it again. That makes an unconditional purge the only
+    chance to remove the transcript at all.
     """
-    if str((updates or {}).get("status") or "") not in _TERMINAL_WORKFLOW_STATUSES:
-        return
     try:
         if store is None:
             from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
@@ -2077,6 +2077,23 @@ def purge_agent_state_if_terminal(
         store.purge(workflow_id)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 - cleanup must not fail a finished workflow
         logger.warning("Failed to purge agent state for %s", workflow_id, exc_info=True)
+
+
+def purge_agent_state_if_terminal(
+    workflow_id: str, updates: dict, store: object | None = None
+) -> None:
+    """Drop a finished workflow's carried CLI transcripts (#3237).
+
+    Hooked into ``_update_workflow``, which covers every status write the
+    ORCHESTRATOR makes. It is not the only way a workflow reaches a terminal
+    state, and an earlier version of this docstring wrongly claimed it was:
+    ``stop_workflow`` and the acceptance override both write through the
+    repository directly, and the delete routes remove the row with no terminal
+    write at all. Those call :func:`purge_agent_state` themselves.
+    """
+    if str((updates or {}).get("status") or "") not in _TERMINAL_WORKFLOW_STATUSES:
+        return
+    purge_agent_state(workflow_id, store)
 
 
 SESSION_LINE_FIELDS = {

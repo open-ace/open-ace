@@ -21,6 +21,10 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT
 
@@ -180,13 +184,36 @@ class AgentStateStore:
                 exc_info=True,
             )
 
-    def reap(self, max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS) -> int:
-        """Drop slots older than the window. Returns how many were removed."""
+    def reap(
+        self,
+        max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS,
+        *,
+        keep_workflow_ids: Collection[str] = (),
+    ) -> int:
+        """Drop orphaned slots older than the window. Returns how many went.
+
+        ``keep_workflow_ids`` is NOT an optimisation — it is the correctness
+        condition. Age alone does not mean orphaned: a ``paused`` workflow
+        resumes later and still needs its history (which is why "paused" is
+        deliberately absent from ``_TERMINAL_WORKFLOW_STATUSES``), and a
+        long-running workflow may not have touched its review line in weeks.
+        Reaping on mtime alone silently deleted both, and the next turn then
+        started fresh with no sign anything had been lost — the more so
+        because the docs recommend a PERSISTENT root, which is exactly the
+        deployment where a >7-day pause survives to meet this sweep.
+
+        The caller passes every workflow that is not known-terminal, so an
+        unrecognised or brand-new status is KEPT rather than reaped. Retaining
+        a transcript costs disk; deleting a live one costs history.
+        """
         if not self._root.exists():
             return 0
+        keep = {str(w) for w in keep_workflow_ids}
         cutoff = time.time() - max_age_seconds
         removed = 0
         for path in self._root.glob("*/*.jsonl"):
+            if path.parent.name in keep:
+                continue
             try:
                 if path.stat().st_mtime < cutoff:
                     path.unlink()

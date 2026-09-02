@@ -582,6 +582,24 @@ def test_scheduler_purge_never_raises(monkeypatch):
     assert attempted, "the store was never constructed, so nothing was swallowed"
 
 
+def _patch_live_workflows(monkeypatch, live, *, boom=False):
+    """Stand in for the workflow rows the reaper consults."""
+
+    class _Repo:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_live_workflow_ids(self, terminal_statuses):
+            if boom:
+                raise RuntimeError("database unavailable")
+            return set(live)
+
+    monkeypatch.setattr(
+        "app.repositories.autonomous_repo.AutonomousWorkflowRepository", _Repo, raising=False
+    )
+    monkeypatch.setattr("app.repositories.database.Database", lambda *a, **k: None, raising=False)
+
+
 def test_the_scheduler_reaps_orphans_at_startup(monkeypatch, tmp_path):
     """The reaper is the backstop for rows that never reach a terminal status.
 
@@ -590,13 +608,14 @@ def test_the_scheduler_reaps_orphans_at_startup(monkeypatch, tmp_path):
     """
     from app.services import autonomous_scheduler as sched
 
-    reaped: list[int] = []
+    reaped: list[dict] = []
 
     class _Store:
         def reap(self, *a, **k):
-            reaped.append(1)
+            reaped.append(k)
             return 3
 
+    _patch_live_workflows(monkeypatch, set())
     monkeypatch.setattr(
         "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
         lambda *a, **k: _Store(),
@@ -604,6 +623,82 @@ def test_the_scheduler_reaps_orphans_at_startup(monkeypatch, tmp_path):
 
     assert sched._reap_agent_state() == 3
     assert reaped, "the reaper was never invoked"
+
+
+def test_a_paused_workflows_transcript_survives_the_age_reaper(store):
+    """Age is not orphanhood, and this is the case that proves it.
+
+    A paused workflow resumes later and still needs its history — which is why
+    "paused" is deliberately absent from _TERMINAL_WORKFLOW_STATUSES. Reaping
+    on mtime alone deleted it silently and the next turn started fresh, and
+    the docs recommend a PERSISTENT state root, which is exactly the
+    deployment where a >7-day pause survives to meet this sweep.
+    """
+    store.put("wf-paused", "main", b"PAUSED HISTORY")
+    store.put("wf-orphan", "main", b"NOBODY OWNS THIS")
+
+    old = time.time() - (30 * 24 * 3600)
+    for wf in ("wf-paused", "wf-orphan"):
+        os.utime(store.path_for(wf, "main"), (old, old))
+
+    removed = store.reap(keep_workflow_ids={"wf-paused"})
+
+    assert store.get("wf-paused", "main") == b"PAUSED HISTORY", (
+        "a live workflow's transcript was age-reaped; its next turn would "
+        "silently start fresh with no history"
+    )
+    assert store.get("wf-orphan", "main") is None, "the orphan was not reaped"
+    assert removed == 1
+
+
+def test_the_reaper_keeps_everything_when_the_live_set_is_unknown(monkeypatch):
+    """Failing to resolve live workflows must reap NOTHING.
+
+    An empty keep-set is indistinguishable from "no workflow is live", so
+    treating a database failure as an empty set would delete every transcript
+    on the box. The fail-safe direction is to skip the sweep entirely.
+    """
+    from app.services import autonomous_scheduler as sched
+
+    reaped: list[dict] = []
+
+    class _Store:
+        def reap(self, *a, **k):
+            reaped.append(k)
+            return 99
+
+    _patch_live_workflows(monkeypatch, set(), boom=True)
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    assert sched._reap_agent_state() == 0
+    assert not reaped, "the reaper ran with an unknown live set and could delete live history"
+
+
+def test_the_scheduler_passes_the_live_set_to_the_reaper(monkeypatch):
+    """The keep-set has to actually reach reap(), not merely be computed."""
+    from app.services import autonomous_scheduler as sched
+
+    seen: list[dict] = []
+
+    class _Store:
+        def reap(self, *a, **k):
+            seen.append(k)
+            return 0
+
+    _patch_live_workflows(monkeypatch, {"wf-live"})
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    sched._reap_agent_state()
+
+    assert seen and seen[0].get("keep_workflow_ids") == {
+        "wf-live"
+    }, f"the live set never reached reap(): {seen}"
 
 
 def test_scheduler_reap_never_raises(monkeypatch):

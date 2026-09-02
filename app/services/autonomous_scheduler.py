@@ -1731,9 +1731,27 @@ def _reap_agent_state() -> int:
     the spec promised one.
     """
     try:
+        from app.modules.workspace.autonomous.orchestrator import _TERMINAL_WORKFLOW_STATUSES
         from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.repositories.database import Database
 
-        removed = AgentStateStore().reap()
+        # Age is not orphanhood. A paused workflow resumes later and still
+        # needs its history, and a long-running one may not have touched its
+        # review line in weeks — reaping on mtime alone deleted both silently.
+        # Resolved FIRST and deliberately OUTSIDE the reap: if the workflow
+        # rows cannot be read we must reap NOTHING, because an empty keep-set
+        # here would look exactly like "no workflows are live" and delete
+        # every transcript on the box.
+        live = AutonomousWorkflowRepository(Database()).get_live_workflow_ids(
+            sorted(_TERMINAL_WORKFLOW_STATUSES)
+        )
+    except Exception:  # noqa: BLE001 - never reap on an unknown live set
+        logger.warning("Agent-state reap skipped: could not resolve live workflows", exc_info=True)
+        return 0
+
+    try:
+        removed = AgentStateStore().reap(keep_workflow_ids=live)
         if removed:
             logger.info("Reaped %d orphaned agent-state transcript(s)", removed)
         return removed

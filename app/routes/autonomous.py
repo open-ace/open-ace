@@ -1037,6 +1037,11 @@ def delete_workflow(workflow_id):
 
     try:
         _get_repo().delete_workflow(workflow_id)
+        # #3237: AFTER the row is gone, and this is the last chance. No status
+        # hook can ever identify a deleted workflow again, and the age reaper
+        # only runs at scheduler startup - so skipping this leaves the
+        # transcript on disk indefinitely.
+        _purge_agent_state_safe(workflow_id)
         return jsonify({"success": True})
     except Exception as e:
         logger.error("Failed to delete workflow: %s", e)
@@ -1056,8 +1061,13 @@ def delete_batch(batch_id):
             if workflow.get("user_id") != g.user_id:
                 return jsonify({"error": "Access denied"}), 403
 
+    # Captured BEFORE the delete: afterwards the rows are gone and there is
+    # nothing left to enumerate.
+    deleted_ids = [w.get("workflow_id") for w in workflows if w.get("workflow_id")]
     try:
         deleted_count = _get_repo().delete_batch(batch_id)
+        for deleted_id in deleted_ids:
+            _purge_agent_state_safe(deleted_id)
         return jsonify({"success": True, "deleted_count": deleted_count})
     except Exception as e:
         logger.error("Failed to delete batch %s: %s", batch_id, e)
@@ -1153,6 +1163,11 @@ def stop_workflow(workflow_id):
         },
     )
 
+    # #3237: this write goes straight to the repository, so it never reaches
+    # the orchestrator's _update_workflow hook. Without this the workflow is
+    # cancelled while its whole transcript directory stays on disk.
+    _purge_agent_state_safe(workflow_id)
+
     _emit_event_safe(workflow_id, "status_change", {"status": "cancelled"})
 
     batch_id = workflow.get("batch_id")
@@ -1165,6 +1180,9 @@ def stop_workflow(workflow_id):
                     or sibling.get("status") != "cancelled"
                 ):
                     continue
+                # The siblings were just cancelled by the same call and reach
+                # a terminal state the same way - through the repository.
+                _purge_agent_state_safe(sibling["workflow_id"])
                 _emit_event_safe(sibling["workflow_id"], "status_change", {"status": "cancelled"})
 
     return jsonify({"success": True})
@@ -1497,6 +1515,10 @@ def acceptance_verification_override(workflow_id):
             ),
         }
     )
+    # #3237: same bypass as stop_workflow - a direct repository write to a
+    # terminal status, so the orchestrator's hook never sees it.
+    _purge_agent_state_safe(workflow_id)
+
     _emit_event_safe(
         workflow_id,
         "status_change",
@@ -2267,6 +2289,27 @@ def _emit_event_safe(workflow_id: str, event_type: str, data: dict):
         _get_event_emitter().emit(workflow_id, event_type, data)
     except Exception:
         pass
+
+
+def _purge_agent_state_safe(workflow_id: str) -> None:
+    """Drop a workflow's carried CLI transcripts without failing the request (#3237).
+
+    The orchestrator's ``_update_workflow`` hook covers the status writes IT
+    makes, but these routes reach a terminal state without going through it:
+    ``stop_workflow`` and the acceptance override write to the repository
+    directly, and the delete routes remove the row with no status write at
+    all. Deletion is the one that cannot be recovered from later — once the
+    row is gone no status hook can identify the workflow again, so this is the
+    only remaining chance to remove its transcripts.
+    """
+    if not workflow_id:
+        return
+    try:
+        from app.modules.workspace.autonomous.orchestrator import purge_agent_state
+
+        purge_agent_state(workflow_id)
+    except Exception:  # noqa: BLE001 - tidying up must not fail the request
+        logger.warning("Failed to purge agent state for %s", workflow_id, exc_info=True)
 
 
 def _cancel_running_task(workflow_id: str):
