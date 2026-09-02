@@ -1503,6 +1503,28 @@ CREATE TABLE user_daily_stats (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+-- Issue #3307: Session daily usage for accurate per-day quota display.
+-- Records incremental usage per session per day, avoiding the incorrect
+-- attribution of session lifetime totals to the session creation date.
+CREATE TABLE session_daily_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    date TEXT NOT NULL,
+    tokens INTEGER DEFAULT 0 NOT NULL,
+    requests INTEGER DEFAULT 0 NOT NULL,
+    input_tokens INTEGER DEFAULT 0 NOT NULL,
+    output_tokens INTEGER DEFAULT 0 NOT NULL,
+    cache_read_tokens INTEGER DEFAULT 0 NOT NULL,
+    cache_write_tokens INTEGER DEFAULT 0 NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date),
+    CONSTRAINT fk_session_daily_usage_session FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+    CONSTRAINT fk_session_daily_usage_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE user_permissions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -2229,6 +2251,11 @@ CREATE INDEX idx_usage_tool_name ON daily_usage (tool_name);
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats (date DESC);
 
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats (user_id, date DESC);
+
+-- Issue #3307: Indexes for session_daily_usage queries
+CREATE INDEX idx_session_daily_usage_date ON session_daily_usage (date DESC);
+
+CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage (user_id, date DESC);
 
 CREATE INDEX idx_user_projects_project ON user_projects (project_id);
 
