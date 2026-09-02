@@ -483,6 +483,52 @@ def run_collection_suite(
     )
 
 
+# A suite that finishes above this fraction of its budget is eating into the
+# headroom that absorbs GitHub-hosted runner variance (#3280's root cause).
+# #3281 replaced the old 600s hard tripwire with generous budgets plus
+# per-test timeouts, which stopped the flake but lost the gradual-slowdown
+# signal; this warning restores it as a visible (non-fatal) log line.
+SUITE_BUDGET_WARNING_FRACTION = 0.75
+
+
+def warn_on_suite_budget_erosion(
+    name: str,
+    *,
+    elapsed: float,
+    timeout_seconds: int,
+    metrics: MetricsRecorder | None = None,
+    invocation_id: str = "",
+) -> None:
+    """Warn loudly when a successful suite consumes most of its budget.
+
+    Prints to stderr (visible in every CI log, with or without metrics
+    enabled) and, when the nightly metrics stream is active, records a
+    suite_budget_warning event alongside the existing suite_terminal record.
+    Never raises: a budget observation must not fail a green run.
+    """
+    threshold = timeout_seconds * SUITE_BUDGET_WARNING_FRACTION
+    if elapsed < threshold:
+        return
+    fraction = elapsed / timeout_seconds
+    print(
+        f"WARNING: {name} completed in {elapsed:.1f}s, {fraction:.0%} of its "
+        f"{timeout_seconds}s budget. Healthy runs should stay well below this; "
+        "check the --durations output and re-derive the budget from variance "
+        "evidence before this turns into intermittent timeouts (#3282)",
+        file=sys.stderr,
+        flush=True,
+    )
+    if metrics:
+        metrics.record(
+            "suite_budget_warning",
+            invocation_id=invocation_id,
+            suite=name,
+            elapsed_seconds=round(elapsed, 6),
+            timeout_seconds=timeout_seconds,
+            budget_fraction=round(fraction, 4),
+        )
+
+
 def run_suite(
     name: str,
     config: dict[str, Any],
@@ -572,6 +618,7 @@ def run_suite(
                 timeout_seconds=suite["timeout_seconds"],
             )
         raise
+    elapsed = time.monotonic() - suite_started
     if metrics:
         metrics.record(
             "suite_terminal",
@@ -579,10 +626,17 @@ def run_suite(
             suite=name,
             started_at=suite_started_at,
             completed_at=utc_now(),
-            duration_seconds=round(time.monotonic() - suite_started, 6),
+            duration_seconds=round(elapsed, 6),
             outcome="success",
             timeout_seconds=suite["timeout_seconds"],
         )
+    warn_on_suite_budget_erosion(
+        name,
+        elapsed=elapsed,
+        timeout_seconds=suite["timeout_seconds"],
+        metrics=metrics,
+        invocation_id=invocation_id,
+    )
 
 
 def write_github_outputs(selected: list[str]) -> None:

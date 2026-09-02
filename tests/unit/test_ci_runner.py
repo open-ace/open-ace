@@ -196,6 +196,99 @@ def test_unit_lanes_fail_fast_on_hung_tests():
         ), f"{lane} pytest command must pass --durations (got {command})"
 
 
+def test_db_and_compat_lanes_fail_fast_on_hung_tests():
+    """#3282: postgres and compatibility-smoke get the same hang protection as
+    the unit lanes.
+
+    postgres runs single-process against the CI DB service with no per-test
+    bound, so a hung connection burned its whole 480s budget and died with
+    the same bare "Command exceeded" that motivated #3280 (the lane measured
+    306.5s for 101 tests on run 33565365098 — 64% of budget on a healthy
+    run, so a hang has even less room than the unit lanes had). The same
+    300s/thread bound as the unit lanes applies: measured per-test cost is
+    ~3s average single-threaded, so 300s cannot clip a healthy test.
+    compatibility-smoke runs a 7-file unit subset, where the identical
+    flags are trivially safe. performance stays unbounded on purpose:
+    wall-clock benchmarks are slow by design and a per-test cap would
+    reject the very thing that suite measures.
+    """
+    for lane in ("postgres", "compatibility-smoke"):
+        command = _pytest_command(lane)
+        for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
+            pair = (flag, value)
+            assert _has_flag_pair(
+                command, pair
+            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
+        assert (
+            "--durations" in command
+        ), f"{lane} pytest command must pass --durations (got {command})"
+    performance_cmd = _pytest_command("performance")
+    assert (
+        "--timeout" not in performance_cmd
+    ), "performance benchmarks are slow by design and must not carry a per-test timeout"
+
+
+def test_slow_lane_warns_on_budget_erosion(capsys):
+    """#3282: a successful suite that eats most of its budget must say so.
+
+    #3281 retired the 600s "tripwire" in favor of generous budgets plus
+    per-test timeouts, which stops the flake but loses the gradual-slowdown
+    signal: a uniform 2x slowdown passes every per-test bound and only
+    shows up as a shrinking margin nobody watches. The wrapper therefore
+    prints a loud warning once a suite closes above 75% of its budget, so
+    erosion is visible in every CI log (and in the nightly metrics stream)
+    before it becomes an intermittent timeout that looks like a flake.
+    """
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=400.0, timeout_seconds=480, metrics=metrics, invocation_id="inv-1"
+    )
+
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+    assert "postgres" in captured.err
+    assert "400.0s" in captured.err
+    assert "480" in captured.err
+    metrics.record.assert_called_once()
+    assert metrics.record.call_args.args == ("suite_budget_warning",)
+
+
+def test_healthy_lane_stays_silent_on_budget(capsys):
+    """The warning must stay quiet while a suite is comfortably inside its
+    budget, otherwise it is noise and gets ignored — the exact failure mode
+    that let the 600s tripwire rot into a flake source."""
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "python-core", elapsed=340.0, timeout_seconds=1200, metrics=metrics, invocation_id="inv-1"
+    )
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+    metrics.record.assert_not_called()
+
+
+def test_budget_warning_threshold_is_75_percent(capsys):
+    """Pin the exact trip point: at the threshold the warning fires; one
+    second below it does not. Changing the fraction is a policy decision
+    that must be re-derived, not drifted."""
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=359.9, timeout_seconds=480, metrics=metrics, invocation_id=""
+    )
+    assert capsys.readouterr().err == ""
+    metrics.record.assert_not_called()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=360.0, timeout_seconds=480, metrics=metrics, invocation_id=""
+    )
+    assert "WARNING" in capsys.readouterr().err
+    metrics.record.assert_called_once()
+
+
 def test_backend_change_runs_the_min_version_unit_lane():
     """End-to-end of the #2868 fix: an app/** change selects python-min, and the
     matrix runs python-min on the minimum supported interpreter -- so the full
