@@ -1175,7 +1175,9 @@ class UsageAnalytics:
             quality_desc = "缺失天数过多，无法提供可靠预测"
         elif continuous_data.missing_days >= MISSING_DAYS_THRESHOLD_DEGRADED:
             quality_level = "fair"
-            quality_desc = f"数据部分缺失（{continuous_data.missing_days}天无记录），预测精度可能降低"
+            quality_desc = (
+                f"数据部分缺失（{continuous_data.missing_days}天无记录），预测精度可能降低"
+            )
         else:
             quality_level = "quality"
             quality_desc = "基于连续日历日的移动平均预测"
@@ -1192,9 +1194,7 @@ class UsageAnalytics:
         business_dt = datetime.strptime(business_date, "%Y-%m-%d")
         forecast_dates = []
         for i in range(1, days + 1):
-            forecast_dates.append(
-                (business_dt + timedelta(days=i)).strftime("%Y-%m-%d")
-            )
+            forecast_dates.append((business_dt + timedelta(days=i)).strftime("%Y-%m-%d"))
 
         result = {
             "forecast_available": True,
@@ -1227,7 +1227,9 @@ class UsageAnalytics:
                 "first_activity_date": continuous_data.first_activity_date,
             },
             # Backward compatibility (deprecated)
-            "confidence": 0.9 if quality_level == "quality" else 0.7 if quality_level == "fair" else None,
+            "confidence": (
+                0.9 if quality_level == "quality" else 0.7 if quality_level == "fair" else None
+            ),
             "_deprecated_note": "confidence 字段将废弃，请迁移至 quality_level 和 quality_metrics",
         }
 
