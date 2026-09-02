@@ -18,7 +18,17 @@ def _insert_daily_messages(tmp_db, date: str, tokens: int, tenant_id: int = 1) -
         (date, tool_name, host_name, message_id, role, tokens_used, input_tokens, output_tokens, tenant_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (date, "qwen-code", "localhost", f"msg-{date}-1", "user", tokens // 2, tokens // 2, 0, tenant_id),
+        (
+            date,
+            "qwen-code",
+            "localhost",
+            f"msg-{date}-1",
+            "user",
+            tokens // 2,
+            tokens // 2,
+            0,
+            tenant_id,
+        ),
     )
     tmp_db.execute(
         """
@@ -26,16 +36,27 @@ def _insert_daily_messages(tmp_db, date: str, tokens: int, tenant_id: int = 1) -
         (date, tool_name, host_name, message_id, role, tokens_used, input_tokens, output_tokens, tenant_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (date, "qwen-code", "localhost", f"msg-{date}-2", "assistant", tokens // 2, 0, tokens // 2, tenant_id),
+        (
+            date,
+            "qwen-code",
+            "localhost",
+            f"msg-{date}-2",
+            "assistant",
+            tokens // 2,
+            0,
+            tokens // 2,
+            tenant_id,
+        ),
     )
 
 
 def test_forecast_uses_daily_messages_source(tmp_db):
     """Verify forecast API uses daily_messages data source (Issue #3243)."""
     # Prepare test data for 14 days (7 for training + 7 for backtest)
-    today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
     for i in range(14):
-        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime("%Y-%m-%d")
+        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
+            "%Y-%m-%d"
+        )
         _insert_daily_messages(tmp_db, date, tokens=1000 + i * 100, tenant_id=1)
 
     # Call forecast API
@@ -56,12 +77,16 @@ def test_forecast_tenant_isolation_with_daily_messages(tmp_db):
     """Verify forecast API tenant isolation uses daily_messages data (Issue #3243)."""
     # Insert data for tenant 1
     for i in range(14):
-        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime("%Y-%m-%d")
+        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
+            "%Y-%m-%d"
+        )
         _insert_daily_messages(tmp_db, date, tokens=1000, tenant_id=1)
 
     # Insert data for tenant 2 (different token count)
     for i in range(14):
-        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime("%Y-%m-%d")
+        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
+            "%Y-%m-%d"
+        )
         tmp_db.execute(
             """
             INSERT INTO daily_messages
@@ -91,7 +116,9 @@ def test_forecast_returns_message_count_not_request_count(tmp_db):
     """Verify forecast API returns message_count, not request_count (Issue #3243)."""
     # Insert 3 messages per day (more messages than typical requests)
     for i in range(14):
-        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime("%Y-%m-%d")
+        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
+            "%Y-%m-%d"
+        )
         for j in range(3):
             tmp_db.execute(
                 """
@@ -116,7 +143,9 @@ def test_forecast_insufficient_data_returns_unavailable(tmp_db):
     """Verify forecast returns unavailable when daily_messages has insufficient data."""
     # Insert only 5 days of data (below minimum of 7)
     for i in range(5):
-        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime("%Y-%m-%d")
+        date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
+            "%Y-%m-%d"
+        )
         _insert_daily_messages(tmp_db, date, tokens=1000, tenant_id=1)
 
     analytics = UsageAnalytics(db=tmp_db)
