@@ -215,12 +215,18 @@ class UsageAnalytics:
             report.anomalies = self._detect_anomalies(start_date, end_date, tenant_id=tenant_id)
 
         # Add breakdowns
-        report.breakdown_by_tool = self._get_tool_breakdown(start_date, end_date, tenant_id=tenant_id)
-        report.breakdown_by_host = self._get_host_breakdown(start_date, end_date, tenant_id=tenant_id)
+        report.breakdown_by_tool = self._get_tool_breakdown(
+            start_date, end_date, tenant_id=tenant_id
+        )
+        report.breakdown_by_host = self._get_host_breakdown(
+            start_date, end_date, tenant_id=tenant_id
+        )
 
         return report
 
-    def _get_usage_data(self, start_date: str, end_date: str, tenant_id: int | None = None) -> list[dict]:
+    def _get_usage_data(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[dict]:
         """Get usage data for date range with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -362,7 +368,9 @@ class UsageAnalytics:
             "peak_tokens": peak_tokens,
         }
 
-    def _analyze_trends(self, start_date: str, end_date: str, tenant_id: int | None = None) -> list[TrendAnalysis]:
+    def _analyze_trends(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[TrendAnalysis]:
         """Analyze usage trends with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -435,7 +443,9 @@ class UsageAnalytics:
 
         return trends
 
-    def _get_daily_totals(self, start_date: str, end_date: str, tenant_id: int | None = None) -> list[dict]:
+    def _get_daily_totals(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[dict]:
         """Get daily totals for a period with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -473,7 +483,9 @@ class UsageAnalytics:
             """
             return self.db.fetch_all(query, (start_date, end_date))
 
-    def _detect_anomalies(self, start_date: str, end_date: str, tenant_id: int | None = None) -> list[Anomaly]:
+    def _detect_anomalies(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[Anomaly]:
         """Detect usage anomalies with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -565,7 +577,9 @@ class UsageAnalytics:
 
         return anomalies
 
-    def _get_tool_breakdown(self, start_date: str, end_date: str, tenant_id: int | None = None) -> dict[str, dict]:
+    def _get_tool_breakdown(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, dict]:
         """Get usage breakdown by tool with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -621,7 +635,9 @@ class UsageAnalytics:
             if row.get("tool_name")
         }
 
-    def _get_host_breakdown(self, start_date: str, end_date: str, tenant_id: int | None = None) -> dict[str, dict]:
+    def _get_host_breakdown(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, dict]:
         """Get usage breakdown by host with optional tenant isolation.
 
         Issue #3245: Added tenant_id parameter for data isolation.
@@ -1029,7 +1045,9 @@ class UsageAnalytics:
         return result
 
     @cached(ttl=60, key_prefix="analytics", skip_args=[0])
-    def get_efficiency_metrics(self, start_date: str, end_date: str, tenant_id: int | None = None) -> dict[str, Any]:
+    def get_efficiency_metrics(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, Any]:
         """
         Calculate efficiency metrics with optional tenant isolation.
 
