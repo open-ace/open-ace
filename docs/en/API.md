@@ -841,6 +841,12 @@ Get usage forecast.
 For backward compatibility, `GET /api/analysis/forecast` remains available as a
 deprecated alias. New integrations should use the canonical endpoint above.
 
+**Authorization (Issue #3245):**
+- `tenant_admin`: Returns forecast for own tenant only
+- `platform_admin`: Returns forecast for all tenants (global data)
+- `admin` (legacy): Same as platform_admin
+- Returns 403 if tenant_admin has no tenant_id
+
 **Query Parameters:**
 - `days` - Forecast days (default: 7, range: 1-90, integer only)
   - Invalid values return 400 Bad Request with error details:

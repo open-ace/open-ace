@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import any_admin_required, resolve_admin_tenant_scope
 from app.modules.analytics.usage_analytics import UsageAnalytics
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
@@ -105,21 +105,30 @@ def parse_date_range():
 
 
 @analytics_bp.route("/analytics/report", methods=["GET"])
-@admin_required
+@any_admin_required
 def api_usage_report():
-    """Generate a comprehensive usage report."""
+    """Generate a comprehensive usage report.
+
+    Issue #3245: Tenant isolation for report.
+    """
     # Get date range using shared parser
     start_date, end_date, days = parse_date_range()
 
     include_trends = request.args.get("trends", "true").lower() == "true"
     include_anomalies = request.args.get("anomalies", "true").lower() == "true"
 
-    # Generate report
+    # Resolve tenant scope for data isolation
+    tenant_id, denial = resolve_admin_tenant_scope()
+    if denial:
+        return denial  # 403 for tenant_admin without tenant_id
+
+    # Generate report with tenant isolation
     report = usage_analytics.generate_report(
         start_date=start_date,
         end_date=end_date,
         include_trends=include_trends,
         include_anomalies=include_anomalies,
+        tenant_id=tenant_id,
     )
 
     # Log the action
@@ -129,7 +138,12 @@ def api_usage_report():
         user_id=g.user_id,
         username=g.user.get("username"),
         resource_type="analytics_report",
-        details={"start_date": start_date, "end_date": end_date, "days": days},
+        details={
+            "start_date": start_date,
+            "end_date": end_date,
+            "days": days,
+            "tenant_id": tenant_id,
+        },
         **client_info,
     )
 
@@ -138,41 +152,92 @@ def api_usage_report():
 
 @analytics_bp.route("/analytics/forecast", methods=["GET"])
 @analytics_bp.route("/analysis/forecast", methods=["GET"])
-@admin_required
+@any_admin_required
 def api_usage_forecast():
-    """Get usage forecast."""
+    """Get usage forecast.
+
+    Issue #3245: Tenant isolation for forecast API.
+
+    Authorization:
+    - tenant_admin: Only sees data for own tenant
+    - platform_admin: Sees global data (all tenants)
+    - admin (legacy): Same as platform_admin
+    """
     days, error = validate_forecast_days(request.args.get("days"))
     if error:
         return jsonify(error), 400
 
-    forecast = usage_analytics.get_forecast(days=days)
+    # Resolve tenant scope for data isolation
+    tenant_id, denial = resolve_admin_tenant_scope()
+    if denial:
+        return denial  # 403 for tenant_admin without tenant_id
+
+    # tenant_id is None for platform_admin (global access)
+    # tenant_id is int for tenant_admin (tenant-scoped access)
+    forecast = usage_analytics.get_forecast(days=days, tenant_id=tenant_id)
+
+    # Log platform admin global access for audit
+    if tenant_id is None and g.user_role in ("admin", "platform_admin"):
+        audit_logger.log_action(
+            action=AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="forecast",
+            details={
+                "days": days,
+                "scope": "global",
+                "actor_tenant_id": g.tenant_id,
+            },
+        )
 
     return jsonify(forecast)
 
 
 @analytics_bp.route("/analytics/efficiency", methods=["GET"])
-@admin_required
+@any_admin_required
 def api_efficiency_metrics():
-    """Get efficiency metrics."""
+    """Get efficiency metrics.
+
+    Issue #3245: Tenant isolation for efficiency metrics.
+    """
     # Get date range using shared parser
     start_date, end_date, days = parse_date_range()
 
-    metrics = usage_analytics.get_efficiency_metrics(start_date, end_date)
+    # Resolve tenant scope for data isolation
+    tenant_id, denial = resolve_admin_tenant_scope()
+    if denial:
+        return denial  # 403 for tenant_admin without tenant_id
+
+    # tenant_id is None for platform_admin (global access)
+    # tenant_id is int for tenant_admin (tenant-scoped access)
+    metrics = usage_analytics.get_efficiency_metrics(start_date, end_date, tenant_id=tenant_id)
 
     return jsonify(metrics)
 
 
 @analytics_bp.route("/analytics/export", methods=["GET"])
-@admin_required
+@any_admin_required
 def api_export_analytics():
-    """Export analytics data."""
+    """Export analytics data.
+
+    Issue #3245: Tenant isolation for export.
+    """
     # Get date range using shared parser
     start_date, end_date, days = parse_date_range()
     format_type = request.args.get("format", "json")
 
-    # Generate report
+    # Resolve tenant scope for data isolation
+    tenant_id, denial = resolve_admin_tenant_scope()
+    if denial:
+        return denial  # 403 for tenant_admin without tenant_id
+
+    # Generate report with tenant isolation
     report = usage_analytics.generate_report(
-        start_date=start_date, end_date=end_date, include_trends=True, include_anomalies=True
+        start_date=start_date,
+        end_date=end_date,
+        include_trends=True,
+        include_anomalies=True,
+        tenant_id=tenant_id,
     )
 
     # Log the export
@@ -182,7 +247,12 @@ def api_export_analytics():
         user_id=g.user_id,
         username=g.user.get("username"),
         resource_type="analytics",
-        details={"format": format_type, "start_date": start_date, "end_date": end_date},
+        details={
+            "format": format_type,
+            "start_date": start_date,
+            "end_date": end_date,
+            "tenant_id": tenant_id,
+        },
         **client_info,
     )
 
