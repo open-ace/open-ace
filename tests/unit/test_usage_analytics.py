@@ -562,7 +562,10 @@ class TestHistoricalDataForBacktest:
 
 
 class TestForecastQualityMetrics:
-    """Test complete forecast with quality metrics."""
+    """Test complete forecast with quality metrics.
+
+    Issue #3244: Quality metrics now based on missing days ratio.
+    """
 
     def _make_analytics(self):
         mock_db = MagicMock()
@@ -576,62 +579,175 @@ class TestForecastQualityMetrics:
         """Forecast should include quality metrics."""
         analytics, mock_db = self._make_analytics()
 
-        # Mock 30 days of stable historical data (excluding today)
+        # Mock 7 days of continuous historical data
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50} for i in range(1, 31)
+            {"date": f"2026-08-{i:02d}", "tokens": 1000, "requests": 50} for i in range(24, 31)
         ]
         mock_db.fetch_all.return_value = daily_data
 
-        result = analytics.get_forecast(days=7)
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
         assert result["forecast_available"] is True
         assert "quality_level" in result
         assert "quality_description" in result
         assert "quality_metrics" in result
-        assert "backtest_wape" in result["quality_metrics"]
-        assert "horizon_adjusted_wape" in result["quality_metrics"]
         assert "sample_days" in result["quality_metrics"]
+        assert "missing_days" in result["quality_metrics"]
 
     def test_forecast_backward_compatible(self):
         """Forecast should include backward-compatible confidence."""
         analytics, mock_db = self._make_analytics()
 
         daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 1000, "requests": 50} for i in range(1, 31)
+            {"date": f"2026-08-{i:02d}", "tokens": 1000, "requests": 50} for i in range(24, 31)
         ]
         mock_db.fetch_all.return_value = daily_data
 
-        result = analytics.get_forecast(days=7)
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
         assert "confidence" in result
         assert "_deprecated_note" in result
-        assert "_confidence_mapping" in result
 
-    def test_forecast_horizon_30_vs_7(self):
-        """30-day forecast should have higher adjusted WAPE than 7-day."""
+    def test_forecast_with_missing_days_degraded_quality(self):
+        """Forecast with 2+ missing days should have degraded quality."""
         analytics, mock_db = self._make_analytics()
 
-        # Create 30 days of data with dates in the past (not including today)
-        # Use 2025 dates to ensure they are historical
+        # 5 days of data out of 7 day window (2 missing)
         daily_data = [
-            {"date": f"2025-12-{i:02d}", "tokens": 1000 + i * 10, "requests": 50}
-            for i in range(1, 31)
+            {"date": "2026-08-24", "tokens": 1000, "requests": 50},
+            {"date": "2026-08-25", "tokens": 1000, "requests": 50},
+            # 2026-08-26 missing
+            {"date": "2026-08-27", "tokens": 1000, "requests": 50},
+            # 2026-08-28 missing
+            {"date": "2026-08-29", "tokens": 1000, "requests": 50},
+            {"date": "2026-08-30", "tokens": 1000, "requests": 50},
         ]
         mock_db.fetch_all.return_value = daily_data
 
-        get_cache().clear()
-        result_7 = analytics.get_forecast(days=7)
-        get_cache().clear()
-        result_30 = analytics.get_forecast(days=30)
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        wape_7 = result_7["quality_metrics"]["horizon_adjusted_wape"]
-        wape_30 = result_30["quality_metrics"]["horizon_adjusted_wape"]
+        assert result["forecast_available"] is True
+        assert result["quality_level"] == "fair"
+        assert result["quality_metrics"]["missing_days"] == 2
 
-        # If WAPE is not None, verify 30-day has higher error
-        if wape_7 is not None and wape_30 is not None:
-            assert wape_30 > wape_7  # 30-day should have higher error
-        else:
-            # If WAPE is None, the test data doesn't support backtest
-            # Just verify the structure is correct
-            assert "quality_level" in result_7
-            assert "quality_level" in result_30
+
+class TestIssue3244ContinuousCalendarDays:
+    """Test forecast with continuous calendar days.
+
+    Issue #3244: Forecast algorithm should use continuous calendar days,
+    exclude incomplete current day, and return history window metadata.
+    """
+
+    def _make_analytics(self):
+        mock_db = MagicMock()
+        mock_repo = MagicMock()
+        return UsageAnalytics(db=mock_db, usage_repo=mock_repo), mock_db
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_forecast_uses_continuous_calendar_days(self):
+        """Forecast should use continuous calendar days, not just active days."""
+        analytics, mock_db = self._make_analytics()
+
+        # Mock data with gaps (missing 2026-08-25)
+        daily_data = [
+            {"date": "2026-08-24", "tokens": 100, "requests": 10},
+            # 2026-08-25 is missing
+            {"date": "2026-08-26", "tokens": 100, "requests": 10},
+            {"date": "2026-08-27", "tokens": 100, "requests": 10},
+            {"date": "2026-08-28", "tokens": 100, "requests": 10},
+            {"date": "2026-08-29", "tokens": 100, "requests": 10},
+            {"date": "2026-08-30", "tokens": 100, "requests": 10},
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Should fill missing day with zero
+        assert result["forecast_available"] is True
+        assert result["quality_metrics"]["missing_days"] == 1
+        assert result["history_window"]["total_days"] == 7
+
+    def test_forecast_excludes_current_day(self):
+        """Forecast should exclude the incomplete current day."""
+        analytics, mock_db = self._make_analytics()
+
+        # Data includes the current day (2026-08-31)
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 32)
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Window should be 2026-08-24 to 2026-08-30 (excluding 2026-08-31)
+        assert result["history_window"]["end_date"] == "2026-08-30"
+        assert result["history_window"]["start_date"] == "2026-08-24"
+
+    def test_forecast_returns_history_window_metadata(self):
+        """Forecast should return history window metadata."""
+        analytics, mock_db = self._make_analytics()
+
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        assert "history_window" in result
+        assert "start_date" in result["history_window"]
+        assert "end_date" in result["history_window"]
+        assert "total_days" in result["history_window"]
+        assert "missing_days" in result["history_window"]
+
+    def test_forecast_with_explicit_business_date(self):
+        """Forecast with explicit business_date should use it for cache key."""
+        analytics, mock_db = self._make_analytics()
+
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        # Call with same business_date twice - should hit cache
+        result1 = analytics.get_forecast(days=7, business_date="2026-08-31")
+        result2 = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Both should be identical
+        assert result1["history_window"] == result2["history_window"]
+
+    def test_forecast_database_error_returns_degraded(self):
+        """Database error should return degraded result, not crash."""
+        analytics, mock_db = self._make_analytics()
+
+        # First call is for _get_first_activity_date
+        # Second call is for _get_continuous_daily_totals
+        mock_db.fetch_one.side_effect = [None, Exception("Database connection failed")]
+        mock_db.fetch_all.side_effect = Exception("Database connection failed")
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Should return degraded result with all days as missing
+        assert result["history_window"]["missing_days"] == 7
+        assert result["quality_metrics"]["missing_ratio"] == 1.0
+
+    def test_forecast_new_user_boundary(self):
+        """New user with recent first activity should have bounded window."""
+        analytics, mock_db = self._make_analytics()
+
+        # First activity on 2026-08-28
+        mock_db.fetch_one.return_value = {"first_date": "2026-08-28"}
+        daily_data = [
+            {"date": "2026-08-28", "tokens": 100, "requests": 10},
+            {"date": "2026-08-29", "tokens": 100, "requests": 10},
+            {"date": "2026-08-30", "tokens": 100, "requests": 10},
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Window should start at first activity date
+        assert result["history_window"]["start_date"] == "2026-08-28"
+        assert result["history_window"]["total_days"] == 3
