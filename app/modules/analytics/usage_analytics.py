@@ -9,10 +9,10 @@ excludes incomplete current day, and returns history window metadata.
 """
 
 import logging
-import statistics
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, NamedTuple
 
@@ -65,11 +65,11 @@ class ContinuousDailyTotals(NamedTuple):
     first_activity_date: str | None
 
 
-def calculate_moving_average(values: list[float], window: int = 7) -> float | None:
+def calculate_moving_average(values: Sequence[int | float], window: int = 7) -> float | None:
     """Calculate moving average for Issue #3244.
 
     Args:
-        values: List of numerical values.
+        values: Sequence of numerical values (int or float).
         window: Window size for averaging.
 
     Returns:

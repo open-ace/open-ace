@@ -333,7 +333,8 @@ export const UsageForecast: React.FC = () => {
                     .replace('{days}', String((forecastData as any).history_window.days))}
                   {(forecastData as any).history_window.missing_days > 0 && (
                     <span className="ms-2 text-warning">
-                      ({(forecastData as any).history_window.missing_days} {t('missingDays', language)})
+                      ({(forecastData as any).history_window.missing_days}{' '}
+                      {t('missingDays', language)})
                     </span>
                   )}
                 </span>

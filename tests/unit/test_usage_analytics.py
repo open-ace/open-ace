@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.modules.analytics.usage_analytics import (
+    MISSING_DAYS_THRESHOLD_DEGRADED,
+    MISSING_DAYS_THRESHOLD_UNAVAILABLE,
     Anomaly,
     AnomalyType,
     TrendAnalysis,
@@ -13,8 +15,6 @@ from app.modules.analytics.usage_analytics import (
     UsageAnalytics,
     UsageReport,
     calculate_moving_average,
-    MISSING_DAYS_THRESHOLD_DEGRADED,
-    MISSING_DAYS_THRESHOLD_UNAVAILABLE,
 )
 from app.utils.cache import get_cache
 from app.utils.datetime_utils import (
