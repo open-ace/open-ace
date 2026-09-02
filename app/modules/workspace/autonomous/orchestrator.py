@@ -2617,6 +2617,13 @@ def _extract_verifier_json(text: str) -> dict | None:
     return None
 
 
+# Extracts the trailing "owner/repo" slug from any repo URL form (github.com
+# or a GHES host, https or SSH) for explicitly targeting issue creation at the
+# right repository. (#3075: the original pattern only matched github.com, so
+# GHES URLs slipped through and issues landed in the cwd-inferred repo.)
+_ISSUE_REPO_SLUG_RE = re.compile(r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
+
+
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
 
@@ -10101,10 +10108,7 @@ class AutonomousOrchestrator:
                 # matched github.com, so GHES repo URLs slipped through and
                 # issue_repo stayed None, causing the issue to be created in
                 # the wrong repository.)
-                match = re.search(
-                    r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$",
-                    issue_repo_url,
-                )
+                match = _ISSUE_REPO_SLUG_RE.search(issue_repo_url)
                 if match:
                     issue_repo = match.group(1)
 
