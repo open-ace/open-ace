@@ -94,7 +94,20 @@ def test_discard_removes_one_line_only(store):
 
 
 def test_discard_is_idempotent(store):
+    """A second discard is a no-op, not an error and not collateral damage.
+
+    Reaching for a slot that was never written happens on the first turn of
+    every session line. Asserting only "it did not raise" would also pass for
+    a discard that created the path, or removed a sibling line.
+    """
+    store.put("wf-1", "main", b"KEEP")
+
     store.discard("wf-1", "never-written")
+    store.discard("wf-1", "never-written")
+
+    assert not store.path_for("wf-1", "never-written").exists()
+    assert store.get("wf-1", "never-written") is None
+    assert store.get("wf-1", "main") == b"KEEP", "discard took out an unrelated line"
 
 
 def test_purge_removes_the_whole_workflow(store):
@@ -323,13 +336,23 @@ def test_cleanup_failure_never_propagates(tmp_path):
     """Tidying up must not turn a completed workflow into a failed one."""
     from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
 
+    attempted: list[str] = []
+
     class Exploding(AgentStateStore):
         def purge(self, workflow_id):
+            attempted.append(workflow_id)
             raise OSError("disk gone")
 
     purge_agent_state_if_terminal(
         "wf-1", {"status": "completed"}, store=Exploding(root=str(tmp_path))
     )
+
+    # Observing the ATTEMPT is the point. "It did not raise" is equally true
+    # of a purge_agent_state_if_terminal that never calls purge at all, which
+    # would pass this test while silently retaining every transcript forever.
+    assert attempted == [
+        "wf-1"
+    ], f"the purge was never attempted, so the swallow proves nothing: {attempted}"
 
 
 # ── hardening found by independent review ─────────────────────────────
@@ -389,6 +412,11 @@ def test_concurrent_writers_on_one_key_cannot_tear_the_slot(tmp_path):
             for _ in range(20):
                 store.put("wf-1", "main", blob)
         except BaseException as exc:  # noqa: BLE001 - surfaced below
+            # allow-swallow: collect errors across threads
+            #
+            # Raising here would die with the worker thread and leave the main
+            # thread asserting on silence. The list is re-raised below by
+            # `assert not errors`, so nothing is actually swallowed.
             errors.append(exc)
 
     threads = [
@@ -467,13 +495,22 @@ def test_scheduler_purge_never_raises(monkeypatch):
     """Cleanup must not break the sweep that walks many rows."""
     from app.services import autonomous_scheduler as sched
 
+    attempted: list[tuple] = []
+
     def _boom(*a, **k):
+        attempted.append((a, k))
         raise OSError("disk gone")
 
     monkeypatch.setattr(
         "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore", _boom
     )
+
     sched._purge_agent_state("wf-1")
+
+    # As above: a _purge_agent_state that returns early and never touches the
+    # store also "never raises". The attempt is what distinguishes a swallowed
+    # failure from an absent call.
+    assert attempted, "the store was never constructed, so nothing was swallowed"
 
 
 def test_the_scheduler_reaps_orphans_at_startup(monkeypatch, tmp_path):
