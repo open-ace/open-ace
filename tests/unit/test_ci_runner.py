@@ -246,12 +246,19 @@ def test_slow_lane_warns_on_budget_erosion(capsys):
     )
 
     captured = capsys.readouterr()
-    assert "WARNING" in captured.err
+    assert "::warning::" in captured.err
     assert "postgres" in captured.err
     assert "400.0s" in captured.err
     assert "480" in captured.err
     metrics.record.assert_called_once()
     assert metrics.record.call_args.args == ("suite_budget_warning",)
+    assert metrics.record.call_args.kwargs == {
+        "invocation_id": "inv-1",
+        "suite": "postgres",
+        "elapsed_seconds": 400.0,
+        "timeout_seconds": 480,
+        "budget_fraction": 0.8333,
+    }
 
 
 def test_healthy_lane_stays_silent_on_budget(capsys):
@@ -285,7 +292,7 @@ def test_budget_warning_threshold_is_75_percent(capsys):
     ci.warn_on_suite_budget_erosion(
         "postgres", elapsed=360.0, timeout_seconds=480, metrics=metrics, invocation_id=""
     )
-    assert "WARNING" in capsys.readouterr().err
+    assert "::warning::" in capsys.readouterr().err
     metrics.record.assert_called_once()
 
 

@@ -510,8 +510,11 @@ def warn_on_suite_budget_erosion(
     if elapsed < threshold:
         return
     fraction = elapsed / timeout_seconds
+    # "::warning::" turns the line into a Checks-UI annotation on GitHub
+    # Actions (same convention as scripts/ci/create_audit_issue.py) while
+    # staying a readable plain-text warning in local runs.
     print(
-        f"WARNING: {name} completed in {elapsed:.1f}s, {fraction:.0%} of its "
+        f"::warning::{name} completed in {elapsed:.1f}s, {fraction:.0%} of its "
         f"{timeout_seconds}s budget. Healthy runs should stay well below this; "
         "check the --durations output and re-derive the budget from variance "
         "evidence before this turns into intermittent timeouts (#3282)",

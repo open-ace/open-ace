@@ -115,10 +115,10 @@ GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分�
   不再只属于 unit lane；`performance` lane 有意**不带** per-test timeout——
   墙钟基准慢是设计意图。另有一个非致命的**预算侵蚀警告**（#3282）：任何
   suite 成功结束时若消耗超过其预算的 75%，`scripts/ci.py` 会在日志打印
-  `WARNING: ... completed in ...s, ...% of its ...s budget` 并（当 nightly
-  metrics 流启用时）记录 `suite_budget_warning` 事件——这是 #3281 退役
-  600s 硬绊线后恢复的渐进慢化信号，让预算余量的收缩在变成间歇超时之前
-  被看见。
+  `::warning::...completed in ...s, ...% of its ...s budget`（GitHub Actions
+  上同时成为 Checks UI 注解）并（当 nightly metrics 流启用时）记录
+  `suite_budget_warning` 事件——这是 #3281 退役 600s 硬绊线后恢复的渐进
+  慢化信号，让预算余量的收缩在变成间歇超时之前被看见。
 
 `python-min` 与 `python-core` 都对每个代码改动生效，故 `app/**` 改动必在最低支持
 版本真跑全量单元。Python 3.13 仍是声明支持版本但不在 PR 矩阵中。定时工作流在
