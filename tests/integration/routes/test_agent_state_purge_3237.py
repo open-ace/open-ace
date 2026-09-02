@@ -212,3 +212,39 @@ def test_a_purge_failure_never_breaks_the_route(client, monkeypatch):
         resp = client.post("/api/autonomous/workflows/wf-stop/stop")
 
     assert resp.status_code == 200
+
+
+def test_the_override_purges_even_when_the_audit_insert_fails(client, purged):
+    """Ordering, not just presence: the purge must precede every fallible step.
+
+    `repo.update_workflow` commits "completed" in its own transaction, but the
+    audit `create_event` that follows is NOT best-effort. Sequencing the purge
+    after it meant an audit failure returned 500 with the workflow already
+    terminal and its whole transcript directory still on disk — a retention
+    leak reachable through an ordinary database hiccup.
+    """
+    repo = MagicMock()
+    repo.get_workflow.return_value = {
+        "workflow_id": "wf-override",
+        "user_id": 1,
+        "status": "paused",
+        "current_phase": "acceptance_verification",
+        "verification_status": "indeterminate",
+        "verification_merge_sha": "abc123",
+        "github_issue_number": 7,
+    }
+    repo.create_event.side_effect = RuntimeError("audit insert failed")
+
+    with _mock_auth(), patch("app.routes.autonomous.auto_repo", repo):
+        client.post(
+            "/api/autonomous/workflows/wf-override/verification_override",
+            json={"reason": "verified by hand"},
+        )
+
+    # However the request ends, the workflow was already written terminal, so
+    # its transcripts must be gone.
+    assert repo.update_workflow.called, "the fixture never reached the terminal write"
+    assert "wf-override" in purged, (
+        "the workflow was marked completed but the audit failure skipped the "
+        "purge, leaving its transcripts on disk"
+    )

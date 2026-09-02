@@ -1496,6 +1496,13 @@ def acceptance_verification_override(workflow_id):
         },
     )
 
+    # #3237: same bypass as stop_workflow - a direct repository write to a
+    # terminal status, so the orchestrator's hook never sees it. Placed
+    # immediately after the update and BEFORE the audit insert: create_event is
+    # not best-effort, so purging after it would leave the workflow completed
+    # with its transcripts retained whenever that insert fails.
+    _purge_agent_state_safe(workflow_id)
+
     # Audit trail: record the override as a workflow event so it shows up in
     # the timeline alongside the phase transitions.
     repo.create_event(
@@ -1515,10 +1522,6 @@ def acceptance_verification_override(workflow_id):
             ),
         }
     )
-    # #3237: same bypass as stop_workflow - a direct repository write to a
-    # terminal status, so the orchestrator's hook never sees it.
-    _purge_agent_state_safe(workflow_id)
-
     _emit_event_safe(
         workflow_id,
         "status_change",

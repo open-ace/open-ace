@@ -743,3 +743,83 @@ def test_the_recovery_sweep_wires_the_purge():
         "the recovery sweep writes a terminal status without purging; that path "
         "does not go through _update_workflow"
     )
+
+
+def test_the_orchestrator_purges_before_emitting_the_terminal_event(monkeypatch):
+    """Ordering on the hook that covers ~20 terminal paths at once.
+
+    `_persist_workflow_update` commits the terminal status in its own
+    transaction, but `_emit` that follows is NOT best-effort — it does its own
+    `repo.create_event` write with no guard. Sequencing the purge after `_emit`
+    meant any event-persistence failure left the workflow terminal with its
+    whole transcript directory retained, on every one of those paths.
+
+    Driven through the REAL `_update_workflow` rather than by calling
+    `purge_agent_state_if_terminal` directly, because calling the helper
+    directly is exactly what cannot observe the ordering.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    calls: list[str] = []
+
+    class _Boom(Exception):
+        pass
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-term"
+
+    def _persist(updates):
+        calls.append("persisted")
+        return dict(updates)
+
+    def _emit(event_type, data):
+        calls.append("emit")
+        raise _Boom("event persistence failed")
+
+    monkeypatch.setattr(orch, "_persist_workflow_update", _persist, raising=False)
+    monkeypatch.setattr(orch, "_emit", _emit, raising=False)
+
+    purged: list[str] = []
+
+    class _Store:
+        def purge(self, workflow_id):
+            purged.append(workflow_id)
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    with pytest.raises(_Boom):
+        orch._update_workflow({"status": "completed"})
+
+    assert purged == ["wf-term"], (
+        "the event write failed after the workflow was already committed "
+        f"terminal, and the purge never ran: calls={calls}"
+    )
+    assert calls == ["persisted", "emit"], calls
+
+
+def test_the_orchestrator_still_does_not_purge_a_non_terminal_update(monkeypatch):
+    """Moving the purge earlier must not make it fire on ordinary progress."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-running"
+    monkeypatch.setattr(orch, "_persist_workflow_update", lambda u: dict(u), raising=False)
+    monkeypatch.setattr(orch, "_emit", lambda *a, **k: None, raising=False)
+
+    purged: list[str] = []
+
+    class _Store:
+        def purge(self, workflow_id):
+            purged.append(workflow_id)
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    orch._update_workflow({"status": "developing"})
+
+    assert not purged, "a running workflow lost the history it still needs"

@@ -6434,17 +6434,27 @@ class AutonomousOrchestrator:
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
         self._persist_workflow_update(updates)
-        self._emit("workflow_updated", updates)
         # #3237: a finished workflow's carried CLI transcripts are dead weight.
         # Hooked HERE rather than after each terminal status write: there are
         # ~20 of those in this module, and one added per site would be missed on
         # the next edit.
         #
+        # Ordered BEFORE _emit deliberately. _emit is not best-effort — it does
+        # its own `repo.create_event` write with no guard — so running the purge
+        # after it means any event-persistence failure leaves the workflow
+        # terminal AND its whole transcript directory on disk, across all ~20
+        # of those paths at once. The status is already committed by the line
+        # above, so this is the first point at which the transcripts are
+        # certainly dead weight.
+        #
         # Not the only path, though — `autonomous_scheduler` writes a terminal
         # status straight through `repo.update_workflow` in its worktree
-        # recovery sweep, and calls the purge itself. The scheduler also reaps
-        # orphans at startup for rows that never reach a terminal status at all.
+        # recovery sweep, and calls the purge itself. The routes in
+        # `app/routes/autonomous.py` do the same for stop/override/delete. The
+        # scheduler also reaps orphans at startup for rows that never reach a
+        # terminal status at all.
         purge_agent_state_if_terminal(self._workflow_id, updates)
+        self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(
         self,
