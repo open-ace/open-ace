@@ -363,7 +363,9 @@ class TestAnalysisService:
 
         drop_anomaly = next((a for a in result["anomalies"] if a["type"] == "drop"), None)
         assert drop_anomaly is not None, "Drop anomaly should be detected"
-        assert drop_anomaly["severity"] == "high", f"99.96% drop should be 'high', got {drop_anomaly['severity']}"
+        assert (
+            drop_anomaly["severity"] == "high"
+        ), f"99.96% drop should be 'high', got {drop_anomaly['severity']}"
         assert drop_anomaly["deviation"] >= 90.0, "Deviation should be >= 90%"
 
     def test_drop_severity_medium_for_moderate_drop(self):
@@ -382,7 +384,10 @@ class TestAnalysisService:
         assert drop_anomaly is not None, "Drop anomaly should be detected"
         # 80% drop is >= 70% threshold, so should be at least medium
         # (could be high if z-score is also high)
-        assert drop_anomaly["severity"] in ["medium", "high"], f"80% drop should be at least 'medium', got {drop_anomaly['severity']}"
+        assert drop_anomaly["severity"] in [
+            "medium",
+            "high",
+        ], f"80% drop should be at least 'medium', got {drop_anomaly['severity']}"
 
     def test_drop_severity_low_for_minor_drop(self):
         """Issue #3257: ~55% drop should have low severity (percentage-based)."""
@@ -401,7 +406,11 @@ class TestAnalysisService:
         assert drop_anomaly is not None, "Drop anomaly should be detected"
         # ~55% drop is < 70% threshold, so percentage-based severity is low
         # But z-score might elevate it; check it's at least not hard-coded 'low'
-        assert drop_anomaly["severity"] in ["low", "medium", "high"], f"Drop severity should be determined by logic, got {drop_anomaly['severity']}"
+        assert drop_anomaly["severity"] in [
+            "low",
+            "medium",
+            "high",
+        ], f"Drop severity should be determined by logic, got {drop_anomaly['severity']}"
 
     def test_drop_severity_z_score_based(self):
         """Issue #3257: Drop severity also considers z-score."""
@@ -419,7 +428,11 @@ class TestAnalysisService:
         drop_anomaly = next((a for a in result["anomalies"] if a["type"] == "drop"), None)
         assert drop_anomaly is not None, "Drop anomaly should be detected"
         # Severity should be calculated, not hard-coded 'low'
-        assert drop_anomaly["severity"] in ["low", "medium", "high"], f"Severity should be calculated, got {drop_anomaly['severity']}"
+        assert drop_anomaly["severity"] in [
+            "low",
+            "medium",
+            "high",
+        ], f"Severity should be calculated, got {drop_anomaly['severity']}"
 
     def test_get_data_range(self):
         """get_data_range passes through the daily_stats repo result."""

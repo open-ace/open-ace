@@ -424,30 +424,25 @@ class UsageAnalytics:
                 # Drop detection
                 elif value < mean_tokens * self.DROP_THRESHOLD:
                     deviation_pct = (
-                        ((mean_tokens - value) / mean_tokens) * 100
-                        if mean_tokens > 0
-                        else 0
+                        ((mean_tokens - value) / mean_tokens) * 100 if mean_tokens > 0 else 0
                     )
 
                     # Calculate severity based on z-score (symmetric with spike)
                     z_based_severity = (
-                        "high" if abs(z_score) > 3
-                        else "medium" if abs(z_score) > 2
-                        else "low"
+                        "high" if abs(z_score) > 3 else "medium" if abs(z_score) > 2 else "low"
                     )
 
                     # Calculate severity based on drop percentage
                     pct_based_severity = (
-                        "high" if deviation_pct >= self.DROP_SEVERITY_HIGH_PCT
-                        else "medium" if deviation_pct >= self.DROP_SEVERITY_MEDIUM_PCT
-                        else "low"
+                        "high"
+                        if deviation_pct >= self.DROP_SEVERITY_HIGH_PCT
+                        else "medium" if deviation_pct >= self.DROP_SEVERITY_MEDIUM_PCT else "low"
                     )
 
                     # Take the more severe level
                     severity_map = {"low": 0, "medium": 1, "high": 2}
                     severity = max(
-                        z_based_severity, pct_based_severity,
-                        key=lambda s: severity_map[s]
+                        z_based_severity, pct_based_severity, key=lambda s: severity_map[s]
                     )
 
                     anomalies.append(

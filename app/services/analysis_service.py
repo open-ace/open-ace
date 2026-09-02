@@ -1320,23 +1320,20 @@ class AnalysisService:
                     # Calculate severity based on z-score (symmetric with spike)
                     z_score_abs = abs(std_deviation)
                     z_based_severity = (
-                        "high" if z_score_abs > 3
-                        else "medium" if z_score_abs > 2
-                        else "low"
+                        "high" if z_score_abs > 3 else "medium" if z_score_abs > 2 else "low"
                     )
 
                     # Calculate severity based on drop percentage
                     pct_based_severity = (
-                        "high" if deviation_pct >= 90.0
-                        else "medium" if deviation_pct >= 70.0
-                        else "low"
+                        "high"
+                        if deviation_pct >= 90.0
+                        else "medium" if deviation_pct >= 70.0 else "low"
                     )
 
                     # Take the more severe level
                     severity_map = {"low": 0, "medium": 1, "high": 2}
                     drop_severity = max(
-                        z_based_severity, pct_based_severity,
-                        key=lambda s: severity_map[s]
+                        z_based_severity, pct_based_severity, key=lambda s: severity_map[s]
                     )
 
                     anomaly = {
