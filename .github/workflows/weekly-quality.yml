@@ -87,6 +87,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     continue-on-error: true
+    env:
+      # #3290: the qwen wall-clock tests skip unless this is truthy — without
+      # the wiring the lane reported green while never executing them.
+      RUN_PERFORMANCE_TESTS: '1'
     steps:
       - uses: actions/checkout@v6
         with:
