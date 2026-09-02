@@ -118,7 +118,7 @@ class TestSessionDailyUsageUpsert:
         sm._get_connection = get_new_connection
 
         # Increment usage
-        result = sm.increment_session_usage(
+        sm.increment_session_usage(
             session_id="test-session-1",
             request_delta=1,
             total_tokens_delta=100,
