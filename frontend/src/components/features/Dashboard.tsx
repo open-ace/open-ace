@@ -24,7 +24,7 @@ import {
   StatCard,
   DatePicker,
 } from '@/components/common';
-import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES, getDefaultDateRange, toLocalDateString } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -61,33 +61,26 @@ const DATE_RANGE_PRESET_VALUES = [
   { value: 'custom', labelKey: 'dateRangeCustom' },
 ] as const;
 
-// Helper to get date string N days ago
-const getDaysAgo = (days: number): string => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().split('T')[0];
-};
-
 // Helper to get first day of current month
 const getFirstDayOfMonth = (): string => {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().split('T')[0];
+  return toLocalDateString(new Date(date.getFullYear(), date.getMonth(), 1));
 };
 
 // Helper to get first day of last month
 const getFirstDayOfLastMonth = (): string => {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth() - 1, 1).toISOString().split('T')[0];
+  return toLocalDateString(new Date(date.getFullYear(), date.getMonth() - 1, 1));
 };
 
 // Helper to get last day of last month
 const getLastDayOfLastMonth = (): string => {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth(), 0).toISOString().split('T')[0];
+  return toLocalDateString(new Date(date.getFullYear(), date.getMonth(), 0));
 };
 
 const getToday = (): string => {
-  return new Date().toISOString().split('T')[0];
+  return toLocalDateString(new Date());
 };
 
 // Date validation error type
@@ -101,8 +94,9 @@ export const Dashboard: React.FC = () => {
 
   // Date range state
   const [dateRangePreset, setDateRangePreset] = useState('30');
-  const [customStartDate, setCustomStartDate] = useState(getDaysAgo(30));
-  const [customEndDate, setCustomEndDate] = useState(getToday());
+  const initialRange = getDefaultDateRange(30);
+  const [customStartDate, setCustomStartDate] = useState(initialRange.start);
+  const [customEndDate, setCustomEndDate] = useState(initialRange.end);
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [dateError, setDateError] = useState<DateErrorType>(null);
 
@@ -147,16 +141,22 @@ export const Dashboard: React.FC = () => {
       return { startDate: customStartDate, endDate: customEndDate };
     }
     switch (dateRangePreset) {
-      case '7':
-        return { startDate: getDaysAgo(7), endDate: getToday() };
-      case '30':
-        return { startDate: getDaysAgo(30), endDate: getToday() };
+      case '7': {
+        const range = getDefaultDateRange(7);
+        return { startDate: range.start, endDate: range.end };
+      }
+      case '30': {
+        const range = getDefaultDateRange(30);
+        return { startDate: range.start, endDate: range.end };
+      }
       case 'month':
         return { startDate: getFirstDayOfMonth(), endDate: getToday() };
       case 'last_month':
         return { startDate: getFirstDayOfLastMonth(), endDate: getLastDayOfLastMonth() };
-      default:
-        return { startDate: getDaysAgo(30), endDate: getToday() };
+      default: {
+        const range = getDefaultDateRange(30);
+        return { startDate: range.start, endDate: range.end };
+      }
     }
   }, [dateRangePreset, useCustomRange, customStartDate, customEndDate]);
 

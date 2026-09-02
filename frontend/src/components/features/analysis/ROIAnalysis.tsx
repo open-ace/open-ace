@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { cn, createMatcherConfig } from '@/utils';
+import { cn, createMatcherConfig, getDefaultDateRange } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -235,12 +235,11 @@ export const ROIAnalysis: React.FC = () => {
     onRefresh: () => fetchData(true),
   });
 
-  // Initialize dates
+  // Initialize dates with exactly 30 calendar days
   useEffect(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    setEndDate(end.toISOString().split('T')[0]);
-    setStartDate(start.toISOString().split('T')[0]);
+    const range = getDefaultDateRange(30);
+    setStartDate(range.start);
+    setEndDate(range.end);
   }, []);
 
   // Seed the baseline assumptions from a dedicated, non-overridden call so the

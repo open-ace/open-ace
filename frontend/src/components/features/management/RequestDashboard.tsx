@@ -31,7 +31,7 @@ import {
   type RequestTrendByToolData,
   type RequestStatsByUser,
 } from '@/api/request';
-import { formatNumber, createMatcherConfig } from '@/utils';
+import { formatNumber, createMatcherConfig, getDefaultDateRange } from '@/utils';
 
 // Date range preset values for the selector
 const DATE_RANGE_PRESET_VALUES = [
@@ -41,17 +41,6 @@ const DATE_RANGE_PRESET_VALUES = [
   { value: '60', labelKey: 'dateRangeLast60Days' },
   { value: '90', labelKey: 'dateRangeLast90Days' },
 ] as const;
-
-// Helper to get date string N days ago
-const getDaysAgo = (days: number): string => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().split('T')[0];
-};
-
-const getToday = (): string => {
-  return new Date().toISOString().split('T')[0];
-};
 
 export const RequestDashboard: React.FC = () => {
   const language = useLanguage();
@@ -65,8 +54,9 @@ export const RequestDashboard: React.FC = () => {
 
   // Date range
   const [dateRange, setDateRange] = useState('30');
-  const [customStartDate, setCustomStartDate] = useState(getDaysAgo(30));
-  const [customEndDate, setCustomEndDate] = useState(getToday());
+  const initialRange = getDefaultDateRange(30);
+  const [customStartDate, setCustomStartDate] = useState(initialRange.start);
+  const [customEndDate, setCustomEndDate] = useState(initialRange.end);
   const [useCustomRange, setUseCustomRange] = useState(false);
 
   // Fetch data
@@ -75,8 +65,17 @@ export const RequestDashboard: React.FC = () => {
     setError(null);
 
     try {
-      const startDate = useCustomRange ? customStartDate : getDaysAgo(parseInt(dateRange));
-      const endDate = useCustomRange ? customEndDate : getToday();
+      let startDate: string;
+      let endDate: string;
+
+      if (useCustomRange) {
+        startDate = customStartDate;
+        endDate = customEndDate;
+      } else {
+        const range = getDefaultDateRange(parseInt(dateRange));
+        startDate = range.start;
+        endDate = range.end;
+      }
 
       const [todayData, trendResult, userResult] = await Promise.all([
         requestApi.getTodayStats(),

@@ -28,7 +28,7 @@ import {
   Modal,
   useToast,
 } from '@/components/common';
-import { formatTokens } from '@/utils';
+import { formatTokens, getDefaultDateRange } from '@/utils';
 import {
   getTrendDirectionLabel,
   getAnomalyTypeLabel,
@@ -613,14 +613,8 @@ export const EnterpriseReport: React.FC = () => {
 
   // Date range state
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90'>('30');
-  const initialDateRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
+  // Uses getDefaultDateRange to ensure exactly 30 calendar days with proper local date handling
+  const initialDateRange = useMemo(() => getDefaultDateRange(30), []);
 
   const [startDate, setStartDate] = useState(initialDateRange.start);
   const [endDate, setEndDate] = useState(initialDateRange.end);
@@ -647,14 +641,12 @@ export const EnterpriseReport: React.FC = () => {
   const [jsonModalOpen, setJsonModalOpen] = useState(false);
   const [jsonData, setJsonData] = useState<object | null>(null);
 
-  // Handle quick range change
+  // Handle quick range change with exactly N calendar days
   const handleQuickRangeChange = (range: '7' | '30' | '90') => {
     setQuickRange(range);
-    const end = new Date();
-    const days = parseInt(range);
-    const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    setStartDate(start.toISOString().split('T')[0]);
-    setEndDate(end.toISOString().split('T')[0]);
+    const dateRange = getDefaultDateRange(parseInt(range));
+    setStartDate(dateRange.start);
+    setEndDate(dateRange.end);
   };
 
   // Handle refresh
