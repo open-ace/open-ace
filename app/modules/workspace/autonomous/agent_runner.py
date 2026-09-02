@@ -2622,6 +2622,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         tracking_session_id: str,
         resume: bool,
+        cli_tool: str = "claude-code",
     ) -> _AgentStatePlan:
         """Decide whether this turn can resume, before anything is created.
 
@@ -2650,6 +2651,39 @@ class AutonomousAgentRunner:
             return _AgentStatePlan(resume=False)
 
         mode = agent_state_persistence(provider)
+        # A carrying provider still only carries the tools it knows how to
+        # address. OpenSandbox writes and reads `.claude/projects/-workspace`,
+        # and `_capture_cli_session_id` only yields an id for claude-code — so
+        # for qwen-code-cli the export got an empty id, discarded the slot, and
+        # the next turn found nothing and started cold. That is the silent
+        # continuity loss this whole change exists to remove, surviving for a
+        # tool the sandbox genuinely supports. Refuse instead: the turn costs
+        # nothing yet, and a stated refusal is recoverable where a silent cold
+        # start is not.
+        #
+        # INTERIM, and the reason is scope rather than feasibility — #3319
+        # implements the real carry. Qwen supports `--resume`, its directory
+        # encoding is the same one Claude uses, and its session id is already
+        # on the wire; the only genuine unknown is that its transcript may sit
+        # at either `<encoded>/chats/<id>.jsonl` or `<encoded>/<id>.jsonl`, and
+        # that is discoverable by probing on export rather than guessing.
+        #
+        # qwen-code-cli is the ONLY other tool this can reach: ZCode and the
+        # single-shot tools (codex, openclaw) return from _run_local before
+        # `_select_sandbox_provider` and spawn locally, so they have no
+        # ephemeral HOME to carry anything across.
+        if mode == AGENT_STATE_CARRIED and not self._uses_sidebar_session_source(cli_tool, "local"):
+            return _AgentStatePlan(
+                resume=False,
+                refuse=True,
+                reason_code="agent_state_unavailable",
+                detail=(
+                    f"{type(provider).__name__} does not yet carry agent state for "
+                    f"{cli_tool!r}: its transcript location and session-id capture are "
+                    "claude-code specific (see #3319). Refusing rather than resuming "
+                    "into an empty HOME."
+                ),
+            )
         if mode == AGENT_STATE_PERSISTS:
             return _AgentStatePlan(resume=True)
 
@@ -2898,6 +2932,7 @@ class AutonomousAgentRunner:
             workflow_id=workflow_id,
             tracking_session_id=session_id,
             resume=resume,
+            cli_tool=cli_tool,
         )
         if state_plan.refuse:
             return AgentTaskResult(
@@ -3221,7 +3256,32 @@ class AutonomousAgentRunner:
         # completed milestone because its transcript could not be saved trades a
         # quality loss for a correctness loss. The stale slot is dropped so the
         # next turn starts fresh cleanly instead of resuming half a history.
-        if hasattr(provider, "export_agent_state"):
+        # A turn that was STOPPED from outside must not write state back.
+        #
+        # `stop_workflow` and `delete_workflow` do not wait for this thread:
+        # `_stop_running_task` sets `_stopped`, returns, and the route then
+        # writes the terminal status and purges the workflow's directory —
+        # while this thread is still unwinding through apply_changes and the
+        # export below. Without this guard the export re-created the directory
+        # that had just been purged, and because the reaper only runs at
+        # scheduler startup (and only reaps by age) the resurrected transcript
+        # of a cancelled or DELETED workflow could sit there indefinitely.
+        #
+        # The race was unreachable while the routes and the scheduler had
+        # separate per-pod directories — the route purge was hitting an
+        # unrelated empty tree. Putting them on shared storage is what makes it
+        # real, so the two land together.
+        #
+        # Skipping is right rather than merely convenient: the workflow is on
+        # its way to cancelled or deleted, so there is no next turn that could
+        # want this history.
+        stopped = getattr(session, "_stopped", None)
+        if stopped is not None and stopped.is_set():
+            logger.info(
+                "Agent state export skipped for %s: the turn was stopped externally",
+                session_id[:8],
+            )
+        elif hasattr(provider, "export_agent_state"):
             # Prefer the id the stream reported; fall back to the id this turn
             # actually resumed, which is the file the CLI has been appending to.
             #

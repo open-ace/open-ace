@@ -64,6 +64,10 @@ spec:
           env:
             - name: SCHEDULER_MODE
               value: "web"
+            # #3237: must match the scheduler deployment exactly, or the two
+            # roles operate on different directories.
+            - name: OPENACE_AGENT_STATE_ROOT
+              value: "/var/lib/openace/agent-state"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -121,6 +125,14 @@ spec:
               mountPath: /tmp
             - name: agent-tasks
               mountPath: /run/openace-agent-tasks
+            # #3237: carried CLI transcripts. MUST be the same storage the
+            # scheduler sees — this pod runs the stop/delete/override routes
+            # that purge the state, while the scheduler pod is what writes it.
+            # On the per-pod emptyDir above, those purges deleted an unrelated
+            # empty directory and the real transcripts were retained forever.
+            - name: agent-state
+              mountPath: /var/lib/openace/agent-state
+              subPath: agent-state
             - name: config
               mountPath: /home/open-ace/.open-ace
               subPath: config
@@ -136,6 +148,12 @@ spec:
             sizeLimit: 64Mi
         - name: agent-tasks
           emptyDir: {}
+        # Same RWX claim as `data`, distinct subPath. RWX is already required
+        # by this deployment (see k8s/storage.yaml), so this adds no new
+        # storage requirement — only a shared location.
+        - name: agent-state
+          persistentVolumeClaim:
+            claimName: open-ace-data
         - name: config
           persistentVolumeClaim:
             claimName: open-ace-data

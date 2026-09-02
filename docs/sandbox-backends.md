@@ -442,11 +442,55 @@ inherited, and a credential must not round-trip through the control plane. A
 real CLI confirms that this one file is sufficient for `--resume` to resolve,
 with the original session id preserved.
 
+**Carry is claude-code only today.** The transcript path above and the
+session-id capture that feeds it are both claude-code specific, so a resuming
+`qwen-code-cli` turn is *refused* with `agent_state_unavailable` before the
+sandbox is created rather than allowed to start cold and silently lose its
+history. That is an interim state — #3319 implements the real Qwen carry — and
+it is a scoping decision, not a limitation: Qwen supports `--resume`, shares
+Claude's directory encoding, and already puts its session id on the wire.
+
+No other tool is affected, because no other tool reaches this path. ZCode
+speaks its own app-server protocol and the single-shot tools (codex, openclaw)
+have no stdin protocol, so both return from `_run_local` before a sandbox
+provider is selected and spawn a local process instead — there is no ephemeral
+`HOME` for them to carry anything across.
+
 Transcripts rest on the control plane under `OPENACE_AGENT_STATE_ROOT`
 (default: alongside the per-task runtime directories), keyed by the session
 line's stable tracking id, and are purged when the workflow reaches a terminal
 state. That default is on `/run`, which is tmpfs — point the override at
 persistent storage if you want transcripts to survive a reboot.
+
+> **Deployment requirement: the state root must be shared by every process
+> that runs a workflow, and by the web role.**
+>
+> This is not a tuning knob. Two independent facts make it a correctness
+> requirement rather than a preference:
+>
+> * **The web role purges what the scheduler role writes.** `stop_workflow`,
+>   the acceptance override, and both delete routes drop a workflow's
+>   transcripts, and they run in the web process — while the transcripts are
+>   written by the scheduler process. On split storage those purges delete an
+>   unrelated empty directory and the real transcripts are retained
+>   indefinitely, because nothing can identify a deleted workflow afterwards.
+> * **The autonomous scheduler is not leader-gated.** `_run_loop` polls on
+>   every replica and arbitrates per workflow with a database lock, so
+>   ownership of a workflow legitimately moves between replicas across
+>   milestones. On per-replica storage, turn N's transcript is invisible to
+>   whichever replica takes turn N+1, and the resume silently starts cold —
+>   the exact failure this feature exists to remove.
+>
+> The shipped manifests configure this: `k8s/deployment.yaml` and
+> `k8s/scheduler-deployment.yaml` both mount the RWX `open-ace-data` claim at
+> `/var/lib/openace/agent-state` (subPath `agent-state`) and set
+> `OPENACE_AGENT_STATE_ROOT` to it, and `docker-compose.yml` shares one
+> `agent-state` volume between the `open-ace` and `scheduler` services. RWX is
+> already required by this deployment (see `k8s/storage.yaml`), so this adds a
+> shared *location*, not a new storage class.
+>
+> A single-process deployment (one systemd unit running both roles) needs
+> nothing extra.
 
 A line whose stored transcript is **absent** — its first turn, or a control
 plane restart that cleared tmpfs — simply starts a fresh session. That is not a

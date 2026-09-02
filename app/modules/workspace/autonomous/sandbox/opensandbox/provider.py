@@ -566,14 +566,25 @@ class OpenSandboxProvider:
             # measuring second could OOM-kill the control plane.
             blob = self._api.download_file(handle.sandbox_id, path, max_bytes=MAX_AGENT_STATE_BYTES)
         except OpenSandboxApiError as exc:
-            # Both outcomes return None, but they are NOT the same event and
-            # must not look the same in the audit trail. A missing transcript is
-            # routine — a turn that never started a session. An oversized one
-            # means this line has silently stopped carrying history and will
-            # keep doing so every turn, and it is the only place the real size
-            # distribution is observable. An earlier revision folded the two
-            # together: the same silent-refusal defect fixed twenty lines above
-            # for hostile ids, reintroduced by the fix for the size bound.
+            # Three outcomes, and only ONE of them is "there is nothing here".
+            #
+            # NOT_FOUND is routine: a turn that never started a conversation.
+            # Returning None is right, and the caller discards the slot.
+            #
+            # FILE_TOO_LARGE means this line has silently stopped carrying
+            # history and will keep doing so every turn. It is the only place
+            # the real size distribution is observable, so it gets its own
+            # event. An earlier revision folded it into the routine case: the
+            # same silent-refusal defect fixed twenty lines above for hostile
+            # ids, reintroduced by the fix for the size bound.
+            #
+            # ANYTHING ELSE — 401, 500, a transient execd fault — is an
+            # infrastructure failure, NOT an absent transcript. Returning None
+            # for those told the caller "no history to carry", so it discarded
+            # a perfectly good previous slot and logged nothing: silent
+            # continuity loss, and precisely the outcome the log-and-drop
+            # export contract promises never to produce quietly. Re-raised so
+            # the runner's warning path actually runs.
             if exc.code == "FILE_TOO_LARGE":
                 self._emit(
                     "agent_state_too_large",
@@ -583,9 +594,10 @@ class OpenSandboxProvider:
                         "detail": str(exc),
                     },
                 )
-            return None
-        except SandboxError:
-            return None
+                return None
+            if exc.code == "NOT_FOUND" or exc.status_code == 404:
+                return None
+            raise
         return blob
 
     def import_agent_state(

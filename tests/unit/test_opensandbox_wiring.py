@@ -385,6 +385,7 @@ def _run_local_against(
     agent_state_store=None,
     session_id="s-1",
     uses_sidebar=False,
+    runner_spy=None,
 ):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
@@ -443,6 +444,8 @@ def _run_local_against(
     # carrying the transcript inject their own.
     if agent_state_store is not None:
         runner._agent_state_store = agent_state_store
+    if runner_spy is not None:
+        runner_spy(runner)
     return runner._run_local(
         session_id=session_id,
         cli_tool="claude-code",
@@ -1194,3 +1197,75 @@ def test_two_turns_on_one_line_carry_the_conversation(api, tmp_path, monkeypatch
         "the transcript was stored under the CLI session id; that id changes on "
         "every force-fresh, so the line would lose its history"
     )
+
+
+def test_a_stopped_turn_does_not_resurrect_the_purged_state(api, tmp_path, monkeypatch):
+    """The stop/delete race, driven through the real window.
+
+    `stop_workflow` does not wait for the runner: `_stop_running_task` sets
+    `_stopped` and returns, the route writes the terminal status and purges the
+    workflow's directory, and only then does the runner thread finish unwinding
+    through `apply_changes` and reach its export. Without a guard that export
+    re-created the directory that had just been purged — and since the reaper
+    runs only at scheduler startup and only by age, a cancelled or DELETED
+    workflow's transcript could sit there indefinitely.
+
+    The stop is injected from inside `apply_changes`, which IS the window the
+    route lands in: the session is registered by then, and the export is the
+    very next thing the runner does.
+
+    This race was unreachable while the routes and the scheduler owned separate
+    per-pod directories, because the route's purge hit an unrelated empty tree.
+    Putting them on shared storage is what makes it real, so the two land
+    together.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"EARLIER TURN\n")
+
+    seen: dict = {}
+    put_attempted: list[bytes] = []
+    real_put = store.put
+
+    def _recording_put(workflow_id, line_id, blob):
+        put_attempted.append(blob)
+        return real_put(workflow_id, line_id, blob)
+
+    store.put = _recording_put
+
+    real_apply = provider.apply_changes
+
+    def _apply_then_stop_and_purge(handle, project_path):
+        result = real_apply(handle, project_path)
+        # Give the export something real to find, so this test fails for the
+        # right reason rather than because the fake sandbox happened to be
+        # empty.
+        provider.import_agent_state(
+            handle, cli_session_id="cli-1", blob=b"TRANSCRIPT WRITTEN THIS TURN\n"
+        )
+        # Now the route's half, in its order: stop the session, then purge —
+        # without waiting for this thread.
+        for sess in list(seen["runner"]._local_sessions.values()):
+            sess._stopped.set()
+        store.purge("wf-1")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply_then_stop_and_purge)
+
+    _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        uses_sidebar=True,
+        runner_spy=lambda r: seen.__setitem__("runner", r),
+    )
+
+    assert not put_attempted, (
+        "a stopped turn wrote state back AFTER the route purged it, so a "
+        f"cancelled or deleted workflow keeps its transcript: {put_attempted}"
+    )
+    assert (
+        store.get("wf-1", "s-1") is None
+    ), "the purged slot was re-created by the stopped turn's export"

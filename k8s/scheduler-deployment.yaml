@@ -80,6 +80,10 @@ spec:
             - secretRef:
                 name: open-ace-secrets
           env:
+            # #3237: must match the web deployment exactly, or the two roles
+            # operate on different directories.
+            - name: OPENACE_AGENT_STATE_ROOT
+              value: "/var/lib/openace/agent-state"
             - name: SCHEDULER_MODE
               value: "scheduler"
             - name: POD_NAME
@@ -136,6 +140,17 @@ spec:
               mountPath: /tmp
             - name: agent-tasks
               mountPath: /run/openace-agent-tasks
+            # #3237: carried CLI transcripts, on storage SHARED with the other
+            # scheduler replica and with the web pods. This deployment runs 2
+            # replicas and the autonomous loop is NOT leader-gated — it polls
+            # on both and arbitrates per workflow with a DB lock — so ownership
+            # of a workflow legitimately moves between pods across milestones.
+            # On the per-pod emptyDir above, turn N's transcript was invisible
+            # to whichever pod took turn N+1, and the resume silently started
+            # cold: exactly the defect #3237 exists to remove.
+            - name: agent-state
+              mountPath: /var/lib/openace/agent-state
+              subPath: agent-state
             - name: config
               mountPath: /home/open-ace/.open-ace
               subPath: config
@@ -151,6 +166,11 @@ spec:
             sizeLimit: 64Mi
         - name: agent-tasks
           emptyDir: {}
+        # Same RWX claim as `data`, distinct subPath — no new storage
+        # requirement, only a shared location.
+        - name: agent-state
+          persistentVolumeClaim:
+            claimName: open-ace-data
         - name: config
           persistentVolumeClaim:
             claimName: open-ace-data

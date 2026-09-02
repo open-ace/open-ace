@@ -365,7 +365,7 @@ def test_terminal_status_purges_the_workflows_transcripts(tmp_path):
     assert store.get("wf-done", "review") is None
 
 
-@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
 def test_every_terminal_status_drops_the_transcripts(tmp_path, status):
     from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
 
@@ -552,12 +552,38 @@ def test_the_scheduler_purges_after_writing_a_terminal_recovery_status(monkeypat
         lambda *a, **k: _Store(),
     )
 
-    sched._purge_agent_state("wf-recovered")
+    # A genuinely terminal status still purges through this seam.
+    sched._purge_agent_state("wf-recovered", "cancelled")
 
     assert purged == ["wf-recovered"], (
         "the recovery sweep wrote a terminal status without dropping the "
         "workflow's carried transcripts"
     )
+
+
+def test_the_recovery_sweep_does_not_purge_a_retryable_failure(monkeypatch):
+    """The sweep writes "failed", and a failed workflow is retryable.
+
+    `POST /workflows/<id>/retry` resumes it on the same session lines, so
+    dropping the transcripts here would make every recovered-then-retried
+    workflow restart cold. The age reaper reclaims them instead.
+    """
+    from app.services import autonomous_scheduler as sched
+
+    purged: list[str] = []
+
+    class _Store:
+        def purge(self, workflow_id):
+            purged.append(workflow_id)
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore",
+        lambda *a, **k: _Store(),
+    )
+
+    sched._purge_agent_state("wf-recovered", "failed")
+
+    assert not purged, "the recovery sweep dropped the transcripts a retry would have resumed from"
 
 
 def test_scheduler_purge_never_raises(monkeypatch):
@@ -574,7 +600,9 @@ def test_scheduler_purge_never_raises(monkeypatch):
         "app.modules.workspace.autonomous.sandbox.agent_state_store.AgentStateStore", _boom
     )
 
-    sched._purge_agent_state("wf-1")
+    # A terminal status, so the purge is genuinely attempted and its failure
+    # is what gets swallowed.
+    sched._purge_agent_state("wf-1", "cancelled")
 
     # As above: a _purge_agent_state that returns early and never touches the
     # store also "never raises". The attempt is what distinguishes a swallowed
@@ -823,3 +851,47 @@ def test_the_orchestrator_still_does_not_purge_a_non_terminal_update(monkeypatch
     orch._update_workflow({"status": "developing"})
 
     assert not purged, "a running workflow lost the history it still needs"
+
+
+def test_a_failed_workflow_keeps_its_state_because_retry_resumes_it(tmp_path):
+    """`failed` is NOT terminal for this purpose, and that is load-bearing.
+
+    `POST /workflows/<id>/retry` accepts `status == "failed"`, keeps the
+    existing main/review/test session-line ids, and resumes from the current
+    phase. Purging on failure made every retry silently cold: the sandbox
+    found an absent slot, `_plan_agent_state` cleared `resume`, and the run
+    restarted with no prior context — the exact defect #3237 exists to fix,
+    reintroduced through its own cleanup. It also diverged from Legacy/Remote
+    retry, where the CLI HOME still holds the session.
+    """
+    from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+    store = AgentStateStore(root=str(tmp_path / "state"))
+    store.put("wf-failed", "main", b"HISTORY THE RETRY NEEDS")
+
+    purge_agent_state_if_terminal("wf-failed", {"status": "failed"}, store=store)
+
+    assert store.get("wf-failed", "main") == b"HISTORY THE RETRY NEEDS", (
+        "a failed workflow lost the transcripts its retry resumes from, so the "
+        "retry would restart cold with no prior context"
+    )
+
+
+def test_failed_state_is_still_reclaimable_by_age(tmp_path):
+    """Retryable is not "kept forever".
+
+    Retry is bounded (MAX_RETRY_COUNT, and in practice a short window), so a
+    failed workflow's transcripts must still age out rather than pin disk
+    indefinitely. The reaper's set is a SUPERSET of the immediate-purge set for
+    exactly this reason.
+    """
+    from app.modules.workspace.autonomous.orchestrator import (
+        _REAPABLE_WORKFLOW_STATUSES,
+        _TERMINAL_WORKFLOW_STATUSES,
+    )
+
+    assert "failed" not in _TERMINAL_WORKFLOW_STATUSES, "a failed workflow is still retryable"
+    assert (
+        "failed" in _REAPABLE_WORKFLOW_STATUSES
+    ), "failed state would be pinned forever; retry is bounded, so it must age out"
+    assert _TERMINAL_WORKFLOW_STATUSES < _REAPABLE_WORKFLOW_STATUSES

@@ -2052,10 +2052,27 @@ REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 #           pr_updated → pr_review_summary
 #   review: plan_reviewed → pr_reviewed
 #   test:   tests_run (reused across dev rounds)
-# Workflow statuses after which no further turn will run, so the session lines'
-# carried CLI transcripts (#3237) are no longer needed. "paused" is deliberately
-# absent — a paused workflow resumes later and still needs its history.
-_TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# Workflow statuses after which no further turn will EVER run, so the session
+# lines' carried CLI transcripts (#3237) can be dropped at once.
+#
+# "paused" is deliberately absent — a paused workflow resumes later and still
+# needs its history.
+#
+# "failed" is deliberately absent too, and that is NOT an oversight:
+# `POST /workflows/<id>/retry` accepts `status == "failed"`, keeps the existing
+# main/review/test session-line ids, and resumes from the current phase. An
+# immediate purge there made every retry silently cold — the sandbox found an
+# absent slot, `_plan_agent_state` cleared `resume`, and the run restarted with
+# no prior context. That is the very defect #3237 exists to fix, reintroduced
+# through its own cleanup, and it also diverged from Legacy/Remote retry, where
+# the CLI HOME still holds the session.
+_TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "cancelled"})
+
+# Statuses whose state may be reclaimed BY AGE. Superset of the above: a failed
+# workflow is retryable, but only for a bounded window (and only up to
+# MAX_RETRY_COUNT), so its transcripts should not be pinned forever — they age
+# out through the reaper instead of being dropped the instant it fails.
+_REAPABLE_WORKFLOW_STATUSES = _TERMINAL_WORKFLOW_STATUSES | {"failed"}
 
 
 def purge_agent_state(workflow_id: str, store: object | None = None) -> None:

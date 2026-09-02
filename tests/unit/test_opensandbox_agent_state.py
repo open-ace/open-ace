@@ -313,8 +313,42 @@ def test_a_non_api_sandbox_error_is_handled_without_touching_code(audited):
 
     api.download_file = _boom
 
-    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+    # It PROPAGATES now rather than returning None: an infrastructure fault is
+    # not an absent transcript, and the runner's log-and-discard path is what
+    # must see it. What is being pinned here is that the handler does not blow
+    # up reading `.code` off an exception that has none — the failure the
+    # caller sees must be the real one, not an AttributeError from the handler.
+    with pytest.raises(SandboxError, match="execd went away"):
+        provider.export_agent_state(handle, cli_session_id=_SID)
     assert not [n for n, _ in events if n == "agent_state_too_large"]
+
+
+def test_an_infrastructure_error_is_not_reported_as_an_absent_transcript(audited):
+    """A 500 is not "there is no history here".
+
+    Returning None told the caller the line had nothing to carry, so it
+    discarded a perfectly good previous slot and logged nothing — silent
+    continuity loss, which is the exact failure #3237 exists to prevent, and
+    contrary to the log-and-drop contract the export path documents.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    provider, api, handle, _events = audited
+
+    def _boom(*_a, **_k):
+        raise OpenSandboxApiError("execd exploded", status_code=500, code="INTERNAL")
+
+    api.download_file = _boom
+
+    with pytest.raises(OpenSandboxApiError):
+        provider.export_agent_state(handle, cli_session_id=_SID)
+
+
+def test_a_missing_transcript_is_still_an_ordinary_none(audited):
+    """NOT_FOUND remains the one API error that means "nothing to carry"."""
+    provider, _api, handle, _events = audited
+
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
 
 
 # ── the bounded download, at the client boundary ──────────────────────

@@ -107,6 +107,8 @@ services:
       # Auto-detected from hostname -I if not set
       # Override via .env file if needed (e.g., SERVER_IP=192.168.1.169)
       - SERVER_IP=${SERVER_IP:-}
+      # #3237: must match the scheduler service exactly.
+      - OPENACE_AGENT_STATE_ROOT=/var/lib/openace/agent-state
     # Allow container to access host network (Issue #1260)
     # Required for host.docker.internal on Linux Docker 20.10+
     extra_hosts:
@@ -123,6 +125,12 @@ services:
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
+      # #3237: carried CLI transcripts. SHARED with the scheduler service on
+      # purpose — the scheduler writes them, but the stop/delete/override
+      # routes that purge them run here. Two separate volumes meant those
+      # purges deleted an unrelated empty directory while the real transcripts
+      # were retained forever.
+      - agent-state:/var/lib/openace/agent-state
       # SSH credentials for remote host access (optional, uncomment if needed)
       # SECURITY WARNING: Mounting SSH keys exposes private keys to container processes
       # Recommend using dedicated SSH keys with restricted commands in authorized_keys
@@ -169,10 +177,14 @@ services:
       - SCHEDULER_HEARTBEAT_TIMEOUT=${SCHEDULER_HEARTBEAT_TIMEOUT:-60}
       - SCHEDULER_LOCK_TIMEOUT=${SCHEDULER_LOCK_TIMEOUT:-1800}
       - SCHEDULER_METRICS_PORT=9090
+      # #3237: must match the app service exactly.
+      - OPENACE_AGENT_STATE_ROOT=/var/lib/openace/agent-state
     volumes:
       - config-data:/home/open-ace/.open-ace
       - ./logs:/app/logs
       - workspace-data:/workspace
+      # #3237: the same volume the app service mounts, at the same path.
+      - agent-state:/var/lib/openace/agent-state
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
       interval: 30s
@@ -233,6 +245,9 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
+  # #3237: carried CLI transcripts, shared by the app and scheduler services.
+  agent-state:
+    driver: local
   config-data:
     driver: local
   postgres-data:

@@ -1571,12 +1571,19 @@ def _reconcile_pending_transitions():
                 except Exception:  # noqa: BLE001
                     logger.error("Could not persist recovery_failed for %s", (wf_id or "")[:8])
                 else:
-                    # #3237: this writes a terminal status WITHOUT going through
+                    # #3237: this writes a status WITHOUT going through
                     # WorkflowOrchestrator._update_workflow, so the purge hooked
-                    # there does not fire. Called explicitly rather than left to
-                    # the reaper, which only bounds the leak rather than closing
-                    # it.
-                    _purge_agent_state(wf_id)
+                    # there does not fire, and the sweep has to decide for
+                    # itself.
+                    #
+                    # The status written here is "failed", which is RETRYABLE:
+                    # `POST /workflows/<id>/retry` resumes it on the same
+                    # session lines. So this call deliberately does nothing
+                    # today — the shared rule declines it — and the transcripts
+                    # are reclaimed by the age reaper instead. Kept (rather
+                    # than deleted) so the sweep stays correct if it ever
+                    # writes a genuinely terminal status here.
+                    _purge_agent_state(wf_id, "failed")
 
         logger.info("Reconciled %d interrupted worktree transition(s)", len(pending))
     except Exception as e:  # noqa: BLE001
@@ -1706,17 +1713,24 @@ def _parse_epoch(value: Any) -> float | None:
             return None
 
 
-def _purge_agent_state(workflow_id: str) -> None:
+def _purge_agent_state(workflow_id: str, status: str = "failed") -> None:
     """Drop a terminal workflow's carried CLI transcripts (#3237).
 
-    The orchestrator purges from ``_update_workflow``, but this module writes a
-    terminal status directly through ``repo.update_workflow`` in the worktree
-    recovery path, bypassing it. Best-effort, like every other cleanup here.
+    The orchestrator purges from ``_update_workflow``, but this module writes
+    statuses directly through ``repo.update_workflow`` in the worktree recovery
+    path, bypassing it. Best-effort, like every other cleanup here.
+
+    Takes the status it is actually reacting to rather than hardcoding one, so
+    the shared terminal-status rule decides. That matters now that "failed" is
+    NOT immediately purgeable — a failed workflow is retryable and its
+    transcripts are what the retry resumes from — which makes this a deliberate
+    no-op at the recovery-sweep call site. Hardcoding "failed" here would have
+    hidden that behind a call that looks like cleanup and never is.
     """
     try:
         from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
 
-        purge_agent_state_if_terminal(workflow_id, {"status": "failed"})
+        purge_agent_state_if_terminal(workflow_id, {"status": status})
     except Exception:  # noqa: BLE001 - cleanup must not break the sweep
         logger.warning("Could not purge agent state for %s", (workflow_id or "")[:8])
 
@@ -1731,7 +1745,7 @@ def _reap_agent_state() -> int:
     the spec promised one.
     """
     try:
-        from app.modules.workspace.autonomous.orchestrator import _TERMINAL_WORKFLOW_STATUSES
+        from app.modules.workspace.autonomous.orchestrator import _REAPABLE_WORKFLOW_STATUSES
         from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
         from app.repositories.autonomous_repo import AutonomousWorkflowRepository
         from app.repositories.database import Database
@@ -1744,7 +1758,7 @@ def _reap_agent_state() -> int:
         # here would look exactly like "no workflows are live" and delete
         # every transcript on the box.
         live = AutonomousWorkflowRepository(Database()).get_live_workflow_ids(
-            sorted(_TERMINAL_WORKFLOW_STATUSES)
+            sorted(_REAPABLE_WORKFLOW_STATUSES)
         )
     except Exception:  # noqa: BLE001 - never reap on an unknown live set
         logger.warning("Agent-state reap skipped: could not resolve live workflows", exc_info=True)

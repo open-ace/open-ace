@@ -308,3 +308,50 @@ def test_recovery_returns_empty_without_ids(tmp_path):
     session = _session_at(0.0)
     assert runner._recover_response_text_from_store(session, "", "sid-1") == ""
     assert runner._recover_response_text_from_store(session, "wf-1", "") == ""
+
+
+# ── carry is claude-code-specific, and must say so (#3237 review) ──────
+
+
+def test_a_resume_for_a_tool_the_provider_cannot_carry_is_refused():
+    """qwen-code-cli runs on OpenSandbox, but its transcript is not `.claude`.
+
+    `_AGENT_STATE_DIR` is claude-code specific and `_capture_cli_session_id`
+    only yields an id for claude-code, so on Qwen the export received an empty
+    id and discarded the slot, and the next turn found nothing and started
+    cold. Silent continuity loss for a tool the sandbox genuinely supports —
+    the exact defect this change exists to remove. Refusing costs nothing at
+    this point: no sandbox has been created and no tokens spent.
+    """
+    plan = _runner()._plan_agent_state(
+        _Carried(),
+        workflow_id="wf-1",
+        tracking_session_id="s-1",
+        resume=True,
+        cli_tool="qwen-code-cli",
+    )
+
+    assert plan.refuse, "a Qwen resume was allowed to proceed into an empty HOME"
+    assert plan.resume is False
+    assert plan.reason_code == "agent_state_unavailable"
+    assert "qwen-code-cli" in plan.detail
+
+
+def test_claude_code_still_carries(tmp_path):
+    """The refusal must not catch the tool the carry was built for."""
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+    runner = _runner(tmp_path)
+    AgentStateStore(root=str(tmp_path)).put("wf-1", "s-1", b"HISTORY\n")
+
+    plan = runner._plan_agent_state(
+        _Carried(),
+        workflow_id="wf-1",
+        tracking_session_id="s-1",
+        resume=True,
+        cli_tool="claude-code",
+    )
+
+    assert not plan.refuse, plan.detail
+    assert plan.resume is True
+    assert plan.blob == b"HISTORY\n"
