@@ -156,6 +156,10 @@ class UsageAnalytics:
     SPIKE_THRESHOLD = 2.0  # Standard deviations
     DROP_THRESHOLD = 0.5  # Ratio of expected
 
+    # Drop severity thresholds (percentage-based)
+    DROP_SEVERITY_HIGH_PCT = 90.0  # Drop >= 90% -> high severity
+    DROP_SEVERITY_MEDIUM_PCT = 70.0  # Drop >= 70% -> medium severity
+
     def __init__(self, db: Database | None = None, usage_repo: UsageRepository | None = None):
         """
         Initialize analytics service.
@@ -191,7 +195,7 @@ class UsageAnalytics:
         usage_data = self._get_usage_data(start_date, end_date)
 
         # Calculate summary statistics
-        summary = self._calculate_summary(usage_data)
+        summary = self._calculate_summary(usage_data, start_date, end_date)
 
         # Create report
         report = UsageReport(period_start=start_date, period_end=end_date, **summary)
@@ -228,8 +232,23 @@ class UsageAnalytics:
         """
         return self.db.fetch_all(query, (start_date, end_date))
 
-    def _calculate_summary(self, usage_data: list[dict]) -> dict[str, Any]:
-        """Calculate summary statistics from usage data in a single pass."""
+    def _calculate_summary(
+        self,
+        usage_data: list[dict],
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Calculate summary statistics from usage data in a single pass.
+
+        Args:
+            usage_data: List of usage records from the database.
+            start_date: Optional start date (YYYY-MM-DD) for period calculation.
+            end_date: Optional end date (YYYY-MM-DD) for period calculation.
+
+        Returns:
+            Dictionary with summary statistics including daily averages calculated
+            over the full report period (not just active days).
+        """
         if not usage_data:
             return {
                 "total_tokens": 0,
@@ -274,8 +293,18 @@ class UsageAnalytics:
                     date = date.strftime("%Y-%m-%d")
                 daily_totals[date] = daily_totals.get(date, 0) + d.get("tokens", 0)
 
-        # Calculate averages
-        num_days = len(daily_totals) if daily_totals else 1
+        # Calculate number of days in the report period for daily averages
+        # Use the full period (start_date to end_date inclusive) rather than
+        # just the active days with data. This ensures missing days are treated
+        # as zero usage, giving accurate daily averages.
+        if start_date and end_date:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            num_days = (end - start).days + 1
+        else:
+            # Fallback to active days if dates not provided
+            num_days = len(daily_totals) if daily_totals else 1
+
         daily_avg_tokens = total_tokens / num_days
         daily_avg_requests = total_requests / num_days
 
@@ -419,6 +448,28 @@ class UsageAnalytics:
 
                 # Drop detection
                 elif value < mean_tokens * self.DROP_THRESHOLD:
+                    deviation_pct = (
+                        ((mean_tokens - value) / mean_tokens) * 100 if mean_tokens > 0 else 0
+                    )
+
+                    # Calculate severity based on z-score (symmetric with spike)
+                    z_based_severity = (
+                        "high" if abs(z_score) > 3 else "medium" if abs(z_score) > 2 else "low"
+                    )
+
+                    # Calculate severity based on drop percentage
+                    pct_based_severity = (
+                        "high"
+                        if deviation_pct >= self.DROP_SEVERITY_HIGH_PCT
+                        else "medium" if deviation_pct >= self.DROP_SEVERITY_MEDIUM_PCT else "low"
+                    )
+
+                    # Take the more severe level
+                    severity_map = {"low": 0, "medium": 1, "high": 2}
+                    severity = max(
+                        z_based_severity, pct_based_severity, key=lambda s: severity_map[s]
+                    )
+
                     anomalies.append(
                         Anomaly(
                             type="drop",
@@ -426,12 +477,8 @@ class UsageAnalytics:
                             date=str(date or ""),
                             expected_value=mean_tokens,
                             actual_value=value,
-                            deviation_percentage=(
-                                ((mean_tokens - value) / mean_tokens) * 100
-                                if mean_tokens > 0
-                                else 0
-                            ),
-                            severity="low",
+                            deviation_percentage=deviation_pct,
+                            severity=severity,
                             description=f"Token usage drop on {date}: {value:,} tokens (expected ~{mean_tokens:,.0f})",
                         )
                     )
