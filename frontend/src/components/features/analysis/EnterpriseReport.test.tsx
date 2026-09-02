@@ -601,7 +601,7 @@ describe('EnterpriseReport Component', () => {
       });
 
       // Check for spike badge with danger color
-      const spikeBadge = screen.getByText('spike');
+      const spikeBadge = screen.getByText('突增'); // Translated 'spike'
       expect(spikeBadge).toHaveClass('bg-danger');
 
       // Check for up arrow and danger text color in deviation
@@ -667,7 +667,7 @@ describe('EnterpriseReport Component', () => {
       });
 
       // Check for drop badge with info color
-      const dropBadge = screen.getByText('drop');
+      const dropBadge = screen.getByText('骤降'); // Translated 'drop'
       expect(dropBadge).toHaveClass('bg-info');
 
       // Check for down arrow and info text color in deviation
@@ -733,7 +733,7 @@ describe('EnterpriseReport Component', () => {
       });
 
       // Check for unusual_pattern badge with warning color
-      const patternBadge = screen.getByText('unusual_pattern');
+      const patternBadge = screen.getByText('异常模式'); // Translated 'unusual_pattern'
       expect(patternBadge).toHaveClass('bg-warning');
 
       // Check for no arrow and warning text color in deviation
