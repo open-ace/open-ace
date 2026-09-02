@@ -841,7 +841,17 @@ GET /api/analytics/forecast
 为保持向后兼容，`GET /api/analysis/forecast` 仍作为已弃用别名提供。新接入应使用上方的规范端点。
 
 **查询参数：**
-- `days` - 预测天数（默认：7）
+- `days` - 预测天数（默认：7，范围：1-90，仅限整数）
+  - 非法值返回 400 Bad Request 并包含错误详情：
+    ```json
+    {
+      "error": "invalid_parameter",
+      "message": "days must be an integer between 1 and 90",
+      "parameter": "days",
+      "received": <实际值>,
+      "valid_range": "1-90"
+    }
+    ```
 
 ---
 

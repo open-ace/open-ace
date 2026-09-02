@@ -842,7 +842,17 @@ For backward compatibility, `GET /api/analysis/forecast` remains available as a
 deprecated alias. New integrations should use the canonical endpoint above.
 
 **Query Parameters:**
-- `days` - Forecast days (default: 7)
+- `days` - Forecast days (default: 7, range: 1-90, integer only)
+  - Invalid values return 400 Bad Request with error details:
+    ```json
+    {
+      "error": "invalid_parameter",
+      "message": "days must be an integer between 1 and 90",
+      "parameter": "days",
+      "received": <actual_value>,
+      "valid_range": "1-90"
+    }
+    ```
 
 ---
 

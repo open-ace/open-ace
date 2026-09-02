@@ -165,6 +165,24 @@ class TestUsageAnalytics:
         assert "daily_forecast" in result
         assert "total_forecast" in result
 
+    def test_get_forecast_invalid_days_negative(self):
+        """Test get_forecast rejects negative days."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=-1)
+
+    def test_get_forecast_invalid_days_zero(self):
+        """Test get_forecast rejects zero days."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=0)
+
+    def test_get_forecast_invalid_days_exceeds_max(self):
+        """Test get_forecast rejects days > 90."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=91)
+
     def test_get_efficiency_metrics_no_data(self):
         analytics, mock_db, _ = self._make_analytics()
         mock_db.fetch_all.return_value = []
