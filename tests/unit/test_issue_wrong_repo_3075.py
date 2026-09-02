@@ -14,23 +14,49 @@ cross-user (sudo) deployment is the orchestrator's own repo (open-ace/open-ace).
 3. No error guard — silently creating the issue in the wrong repo.
 
 Tests:
-1. Regex matches github.com, GHES, and SSH URLs.
-2. Fallback to gh.get_repo_name() when regex returns None.
-3. Error raised when issue_repo cannot be resolved for new-project workflows.
+1. Regex matches github.com, GHES, and SSH URLs (drives the product's own
+   `_ISSUE_REPO_SLUG_RE`, not a copy).
+2. Fallback to gh.get_repo_name() when the regex fails (drives the real
+   _do_preparation fallback, end to end).
+3. Unresolvable issue_repo raises the guard error (drives the real guard).
 4. End-to-end _do_preparation: create_issue called with correct repo parameter.
 5. End-to-end _do_preparation: GHES repo URL still targets the correct repo.
+
+#3296 converted the mock-self fallback tests into real _do_preparation drivers
+and removed the ErrorGuard replays (tests that re-implemented the guard
+condition and raised on their own; both arms are covered by the real drivers
+above).
 """
 
-import os
-import re
 import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+from app.modules.workspace.autonomous.orchestrator import _ISSUE_REPO_SLUG_RE
 from app.modules.workspace.autonomous.phase_contract import WorkflowContext
 from app.modules.workspace.autonomous.phase_host import PhaseDeps
+
+
+def _setup_orchestrator(wf, mock_gh):
+    """Create a partially-mocked orchestrator driving the real _do_preparation."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    repo = MagicMock()
+    repo.get_workflow.return_value = wf
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch.repo = repo
+    orch._workflow_id = wf.get("workflow_id", "wf-3075-test")
+    orch._gh = None
+    orch._shutdown_requested = threading.Event()
+    orch._session_usage_offsets = {}
+    orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+    orch.emit_phase_change = MagicMock()
+    orch._get_gh = MagicMock(return_value=mock_gh)
+    return orch, repo
 
 
 def _make_test_workflow():
@@ -54,10 +80,12 @@ def _make_test_workflow():
 
 
 class TestIssueRepoRegex:
-    """Test the owner/repo extraction regex supports all URL formats."""
+    """The product's owner/repo extraction regex supports all URL formats.
 
-    # This is the regex used in orchestrator.py _do_preparation
-    REGEX = r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$"
+    Drives the real ``_ISSUE_REPO_SLUG_RE`` used by ``_do_preparation`` for
+    issue targeting (imported, not copied — #3296: an inline copy of the
+    pattern was immune to product drift).
+    """
 
     @pytest.mark.parametrize(
         "url,expected",
@@ -70,13 +98,16 @@ class TestIssueRepoRegex:
             ("https://gh.example.com/owner/repo.git", "owner/repo"),
             ("git@github.com:owner/repo.git", "owner/repo"),
             ("ssh://git@github.com/owner/repo.git", "owner/repo"),
+            # A host-only URL carries no owner/repo tail: the slug stays None
+            # and _do_preparation falls back to gh.get_repo_name().
+            ("https://example.com", None),
             ("123", None),
             ("", None),
         ],
     )
     def test_regex_extracts_owner_repo(self, url, expected):
         """Verify the regex extracts owner/repo from all common URL formats."""
-        match = re.search(self.REGEX, url)
+        match = _ISSUE_REPO_SLUG_RE.search(url)
         result = match.group(1) if match else None
         assert result == expected
 
@@ -85,28 +116,103 @@ class TestIssueRepoRegex:
 
 
 class TestIssueRepoFallback:
-    """Test fallback to gh.get_repo_name() when regex fails."""
+    """Fallback to gh.get_repo_name() when the regex fails.
 
-    def test_fallback_to_get_repo_name(self):
+    Both tests drive the real ``_do_preparation`` on a re-entry workflow whose
+    checkpointed ``project_repo_url`` is a host-only URL: it passes the
+    resolved-URL re-entry gate but yields no slug from the product regex, so
+    the fallback at orchestrator.py (_do_preparation) must fire. (#3296: the
+    previous tests asserted a mock's return value against itself.)
+    """
+
+    def _make_reentry_workflow(self, tmp_path):
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-3075-fallback",
+                "user_id": 1,
+                "project_repo_url": "https://example.com",  # Resolved URL, no slug
+                "project_path": str(tmp_path),  # Real (empty) directory
+                "branch_strategy": "current",
+                "github_issue_number": None,  # Force the issue-creation block
+            }
+        )
+        return wf
+
+    def _make_boundary_gh(self):
+        gh = MagicMock(name="gh")
+        gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._needs_sudo.return_value = False
+        gh.get_current_branch.return_value = "main"
+        gh.get_repo_url.return_value = "https://example.com"
+        return gh
+
+    def _run_preparation(self, wf, gh):
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+                return_value=gh,
+            ),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            orch, repo = _setup_orchestrator(wf, gh)
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+            result = orch._do_preparation(ctx, deps)
+        return orch, result
+
+    def test_fallback_to_get_repo_name(self, tmp_path):
         """When the regex doesn't match, gh.get_repo_name() provides the slug."""
-        # Simulate a URL that the regex can't parse (e.g. bare name)
-        issue_repo_url = "123"
-        match = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url)
-        issue_repo = match.group(1) if match else None
-        assert issue_repo is None
+        wf = self._make_reentry_workflow(tmp_path)
+        gh = self._make_boundary_gh()
+        gh.get_repo_name.return_value = "acme/resolved"
+        gh.create_issue.return_value = {
+            "number": 9,
+            "url": "https://example.com/issues/9",
+        }
 
-        # Fallback: gh.get_repo_name() returns owner/repo from local remote
-        mock_gh = MagicMock()
-        mock_gh.get_repo_name.return_value = "blueberry521/123"
-        resolved = mock_gh.get_repo_name()
-        assert resolved == "blueberry521/123"
+        orch, result = self._run_preparation(wf, gh)
 
-    def test_fallback_returns_empty_string(self):
-        """When gh.get_repo_name() returns empty, issue_repo stays None."""
-        mock_gh = MagicMock()
-        mock_gh.get_repo_name.return_value = ""
-        resolved = mock_gh.get_repo_name()
-        assert not resolved
+        # The real fallback resolved the repo from the local remote and the
+        # issue was created in that repo (not the cwd-inferred one).
+        gh.get_repo_name.assert_called()
+        gh.create_issue.assert_called_once()
+        assert gh.create_issue.call_args.kwargs.get("repo") == "acme/resolved"
+        assert result.next_phase == "planning"
+
+    def test_fallback_returns_empty_string(self, tmp_path):
+        """An empty get_repo_name() answer hits the unresolved-repo guard."""
+        wf = self._make_reentry_workflow(tmp_path)
+        gh = self._make_boundary_gh()
+        gh.get_repo_name.return_value = ""
+
+        with pytest.raises(GitHubOpsError, match="Cannot determine target repository"):
+            self._run_preparation(wf, gh)
+
+        # The fallback DID fire (unlike the empty-repo_url guard test) but
+        # its empty answer must not fall through to a cwd-inferred repo.
+        gh.get_repo_name.assert_called()
+        gh.create_issue.assert_not_called()
 
     def test_owner_repo_resolution_returns_none_without_remote(self, tmp_path):
         """No-origin resolution: GitHubOps catches the REAL git failure.
@@ -137,59 +243,11 @@ class TestIssueRepoFallback:
         assert ops._resolve_owner_repo() is None
 
 
-# ── Error guard tests ──────────────────────────────────────────────
-
-
-class TestIssueRepoErrorGuard:
-    """Test that an error is raised when issue_repo cannot be resolved."""
-
-    def test_error_raised_for_new_project_without_repo(self):
-        """For is_new_project workflows, unresolved issue_repo raises an error."""
-        wf = {"is_new_project": True}
-        issue_repo = None
-        repo_url = ""
-        issue_repo_url = ""
-
-        if not issue_repo and wf.get("is_new_project"):
-            with pytest.raises(GitHubOpsError, match="Cannot determine target repository"):
-                raise GitHubOpsError(
-                    "Cannot determine target repository for issue creation. "
-                    f"repo_url={repo_url!r}, issue_repo_url={issue_repo_url!r}"
-                )
-
-    def test_no_error_for_non_new_project(self):
-        """For non-new-project workflows, the error guard is skipped."""
-        wf = {"is_new_project": False}
-        issue_repo = None
-        # The guard condition: if not issue_repo and wf.get("is_new_project")
-        # For non-new-project, this is False, so no error
-        assert not (not issue_repo and wf.get("is_new_project"))
-
-
 # ── End-to-end _do_preparation tests ──────────────────────────────
 
 
 class TestPreparationIssueCreation:
     """End-to-end tests for _do_preparation issue creation path."""
-
-    def _setup_orchestrator(self, wf, mock_gh):
-        """Helper to create a partially-mocked orchestrator."""
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        repo = MagicMock()
-        repo.get_workflow.return_value = wf
-
-        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-        orch.repo = repo
-        orch._workflow_id = wf.get("workflow_id", "wf-3075-test")
-        orch._gh = None
-        orch._shutdown_requested = threading.Event()
-        orch._session_usage_offsets = {}
-        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
-        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
-        orch.emit_phase_change = MagicMock()
-        orch._get_gh = MagicMock(return_value=mock_gh)
-        return orch, repo
 
     def test_create_issue_called_with_correct_repo(self, tmp_path):
         """Verify create_issue is called with the correct repo parameter."""
@@ -217,7 +275,11 @@ class TestPreparationIssueCreation:
         mock_gh.get_repo_url.return_value = repo_url
         mock_gh.get_current_branch.return_value = "main"
 
-        orch, repo = self._setup_orchestrator(wf, mock_gh)
+        orch, repo = _setup_orchestrator(wf, mock_gh)
+        # Plain MagicMock (no wf-mutating side_effect): the post-run wf sync
+        # assertions below can then only be satisfied by the product's own
+        # in-memory sync lines in _do_preparation (#2963 测试点1, #3296).
+        orch._update_workflow = MagicMock()
 
         with (
             patch(
@@ -266,6 +328,13 @@ class TestPreparationIssueCreation:
             call_kwargs.kwargs.get("repo") == "blueberry521/123"
         ), f"Expected repo='blueberry521/123', got repo={call_kwargs.kwargs.get('repo')!r}"
         assert result.next_phase == "planning"
+        # The in-memory wf must be synced with the resolved URL and the local
+        # project path right after create_repo/clone (product sync lines), so
+        # later phases and re-entries never observe the stale input name.
+        assert wf["project_repo_url"] == repo_url
+        assert wf["project_path"] == str(tmp_path)
+        orch._update_workflow.assert_any_call({"project_repo_url": repo_url})
+        orch._update_workflow.assert_any_call({"project_path": str(tmp_path)})
 
     def test_create_issue_with_ghes_url(self, tmp_path):
         """Verify GHES repo URLs are correctly resolved for issue creation."""
@@ -294,7 +363,7 @@ class TestPreparationIssueCreation:
         mock_gh.get_repo_url.return_value = repo_url
         mock_gh.get_current_branch.return_value = "main"
 
-        orch, repo = self._setup_orchestrator(wf, mock_gh)
+        orch, repo = _setup_orchestrator(wf, mock_gh)
 
         with (
             patch(
@@ -366,7 +435,7 @@ class TestPreparationIssueCreation:
         mock_gh.get_repo_name.return_value = ""
         mock_gh.get_current_branch.return_value = "main"
 
-        orch, repo = self._setup_orchestrator(wf, mock_gh)
+        orch, repo = _setup_orchestrator(wf, mock_gh)
 
         with (
             patch(
@@ -437,25 +506,6 @@ class TestIssue3199ExistingProject:
             "title": "Test Existing Project",
         }
 
-    def _setup_orchestrator(self, wf, mock_gh):
-        """Helper to create a partially-mocked orchestrator."""
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        repo = MagicMock()
-        repo.get_workflow.return_value = wf
-
-        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-        orch.repo = repo
-        orch._workflow_id = wf.get("workflow_id", "wf-3199-test")
-        orch._gh = None
-        orch._shutdown_requested = threading.Event()
-        orch._session_usage_offsets = {}
-        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
-        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
-        orch.emit_phase_change = MagicMock()
-        orch._get_gh = MagicMock(return_value=mock_gh)
-        return orch, repo
-
     def test_existing_project_resolves_repo_from_local_remote(self, tmp_path):
         """Verify existing project resolves owner/repo from local git remote.
 
@@ -502,7 +552,7 @@ class TestIssue3199ExistingProject:
 
         mock_gh._run_git.side_effect = mock_run_git
 
-        orch, repo = self._setup_orchestrator(wf, mock_gh)
+        orch, repo = _setup_orchestrator(wf, mock_gh)
 
         with (
             patch(
@@ -566,7 +616,7 @@ class TestIssue3199ExistingProject:
         mock_gh.get_current_branch.return_value = "main"
         mock_gh.list_worktrees.return_value = []
 
-        orch, repo = self._setup_orchestrator(wf, mock_gh)
+        orch, repo = _setup_orchestrator(wf, mock_gh)
 
         with (
             patch(
