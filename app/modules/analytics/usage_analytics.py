@@ -156,6 +156,10 @@ class UsageAnalytics:
     SPIKE_THRESHOLD = 2.0  # Standard deviations
     DROP_THRESHOLD = 0.5  # Ratio of expected
 
+    # Drop severity thresholds (percentage-based)
+    DROP_SEVERITY_HIGH_PCT = 90.0  # Drop >= 90% -> high severity
+    DROP_SEVERITY_MEDIUM_PCT = 70.0  # Drop >= 70% -> medium severity
+
     def __init__(self, db: Database | None = None, usage_repo: UsageRepository | None = None):
         """
         Initialize analytics service.
@@ -419,6 +423,28 @@ class UsageAnalytics:
 
                 # Drop detection
                 elif value < mean_tokens * self.DROP_THRESHOLD:
+                    deviation_pct = (
+                        ((mean_tokens - value) / mean_tokens) * 100 if mean_tokens > 0 else 0
+                    )
+
+                    # Calculate severity based on z-score (symmetric with spike)
+                    z_based_severity = (
+                        "high" if abs(z_score) > 3 else "medium" if abs(z_score) > 2 else "low"
+                    )
+
+                    # Calculate severity based on drop percentage
+                    pct_based_severity = (
+                        "high"
+                        if deviation_pct >= self.DROP_SEVERITY_HIGH_PCT
+                        else "medium" if deviation_pct >= self.DROP_SEVERITY_MEDIUM_PCT else "low"
+                    )
+
+                    # Take the more severe level
+                    severity_map = {"low": 0, "medium": 1, "high": 2}
+                    severity = max(
+                        z_based_severity, pct_based_severity, key=lambda s: severity_map[s]
+                    )
+
                     anomalies.append(
                         Anomaly(
                             type="drop",
@@ -426,12 +452,8 @@ class UsageAnalytics:
                             date=str(date or ""),
                             expected_value=mean_tokens,
                             actual_value=value,
-                            deviation_percentage=(
-                                ((mean_tokens - value) / mean_tokens) * 100
-                                if mean_tokens > 0
-                                else 0
-                            ),
-                            severity="low",
+                            deviation_percentage=deviation_pct,
+                            severity=severity,
                             description=f"Token usage drop on {date}: {value:,} tokens (expected ~{mean_tokens:,.0f})",
                         )
                     )
