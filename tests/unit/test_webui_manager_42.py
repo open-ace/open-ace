@@ -115,9 +115,12 @@ def test_webui_instance(monkeypatch):
 
     # Alive branch: the pid is signalable and the health cache is fresh, so
     # is_alive() returns True from the TTL cache without any HTTP traffic.
+    # The failure-count guard pins that: any HTTP probe (success or failure)
+    # mutates the counter, so it staying 0 proves the cache path was taken.
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     instance._last_health_check = time.time()
     assert instance.is_alive() is True
+    assert instance._consecutive_health_failures == 0
 
     # No pid at all.
     assert WebUIInstance(user_id=2, system_account="other", port=9002).is_alive() is False
