@@ -414,10 +414,7 @@ class TestForecastAlgorithm:
         # Mock fetch_all for daily stats - return 7 days of continuous data
         def mock_fetch_all(query, params=None):
             # Return 7 days: 2026-08-24 to 2026-08-30
-            return [
-                {"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10}
-                for i in range(7)
-            ]
+            return [{"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)]
 
         mock_db.fetch_one = mock_fetch_one
         mock_db.fetch_all = mock_fetch_all
@@ -532,10 +529,7 @@ class TestForecastAlgorithm:
 
         # Return data for days 24-30 (7 days before 31)
         def mock_fetch_all(query, params=None):
-            return [
-                {"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10}
-                for i in range(7)
-            ]
+            return [{"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)]
 
         mock_db.fetch_one = mock_fetch_one
         mock_db.fetch_all = mock_fetch_all
@@ -559,10 +553,7 @@ class TestForecastAlgorithm:
 
         # Return 7 days with zero usage
         def mock_fetch_all(query, params=None):
-            return [
-                {"date": f"2026-08-{24+i}", "tokens": 0, "requests": 0}
-                for i in range(7)
-            ]
+            return [{"date": f"2026-08-{24+i}", "tokens": 0, "requests": 0} for i in range(7)]
 
         mock_db.fetch_one = mock_fetch_one
         mock_db.fetch_all = mock_fetch_all
@@ -594,8 +585,7 @@ class TestForecastAlgorithm:
             if "tenant_id" in query and params and len(params) == 3:
                 # Tenant-specific query
                 return [
-                    {"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10}
-                    for i in range(7)
+                    {"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)
                 ]
             return []
 

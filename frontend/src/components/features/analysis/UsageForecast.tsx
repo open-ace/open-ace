@@ -80,11 +80,14 @@ export const UsageForecast: React.FC = () => {
   // Check if forecast is available
   const forecastAvailable = forecastData?.forecast_available === true;
 
-  // Issue #3244: Check quality status
-  const isDegraded = forecastData?.quality === 'degraded';
+  // Issue #3244: Check quality status (only when forecast is available)
+  const isDegraded = forecastAvailable && (forecastData as any)?.quality === 'degraded';
 
   // Get quality configuration
-  const qualityLevel = (forecastData?.quality_level as QualityLevel) || 'unavailable';
+  const qualityLevel =
+    forecastAvailable && (forecastData as any)?.quality_level
+      ? ((forecastData as any).quality_level as QualityLevel)
+      : 'unavailable';
   const qualityConfig = QUALITY_CONFIG[qualityLevel] || QUALITY_CONFIG.unavailable;
 
   // Chart colors
@@ -321,16 +324,16 @@ export const UsageForecast: React.FC = () => {
             </div>
             <p className="text-muted mb-3">{t('forecastExplanation', language)}</p>
             {/* Show history window info if available */}
-            {forecastData?.history_window && (
+            {forecastAvailable && (forecastData as any)?.history_window && (
               <div className="text-muted small">
                 <span>
                   {t('historyWindowInfo', language)
-                    .replace('{start}', forecastData.history_window.start_date)
-                    .replace('{end}', forecastData.history_window.end_date)
-                    .replace('{days}', String(forecastData.history_window.days))}
-                  {forecastData.history_window.missing_days > 0 && (
+                    .replace('{start}', (forecastData as any).history_window.start_date)
+                    .replace('{end}', (forecastData as any).history_window.end_date)
+                    .replace('{days}', String((forecastData as any).history_window.days))}
+                  {(forecastData as any).history_window.missing_days > 0 && (
                     <span className="ms-2 text-warning">
-                      ({forecastData.history_window.missing_days} {t('missingDays', language)})
+                      ({(forecastData as any).history_window.missing_days} {t('missingDays', language)})
                     </span>
                   )}
                 </span>

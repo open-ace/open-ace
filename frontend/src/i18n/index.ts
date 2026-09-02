@@ -5998,7 +5998,8 @@ export const translations: Record<Language, Translations> = {
     forecastTotalRequests: '予測総リクエスト数',
     forecastDailyAvg: '日平均予測',
     confidenceScore: '信頼度スコア', // 非推奨、後方互換性のため維持
-    forecastExplanation: '過去7日間の完了したカレンダー日の履歴データに基づいて移動平均で予測を計算しています',
+    forecastExplanation:
+      '過去7日間の完了したカレンダー日の履歴データに基づいて移動平均で予測を計算しています',
     historicalData: '履歴データ',
     predictedData: '予測データ',
     historicalDataUnavailable: '履歴データが利用できません。予測データのみを表示しています',
@@ -8149,7 +8150,8 @@ export const translations: Record<Language, Translations> = {
     forecastTotalRequests: '예측 총 요청',
     forecastDailyAvg: '일일 평균 예측',
     confidenceScore: '신뢰도 점수', // 사용되지 않음, 이전 버전 호환성 유지
-    forecastExplanation: '지난 7개의 완료된 달력일의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
+    forecastExplanation:
+      '지난 7개의 완료된 달력일의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
     historicalData: '과거 데이터',
     predictedData: '예측 데이터',
     historicalDataUnavailable: '과거 데이터를 사용할 수 없습니다. 예측 데이터만 표시합니다',
