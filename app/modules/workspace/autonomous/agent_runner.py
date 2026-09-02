@@ -3063,6 +3063,15 @@ class AutonomousAgentRunner:
                         ),
                         cmd,
                     )
+                    # Clearing argv is not enough: the flag drives the session
+                    # pre-seed below, which pins `persisted_session_id` to the
+                    # id we are no longer resuming. That pin then SKIPS
+                    # `_resolve_sidebar_session`, so the fresh id the CLI is
+                    # about to mint is never picked up — the turn reports the
+                    # stale id, and the transcript it exports is filed against
+                    # the previous turn's mapping. The turn succeeds while
+                    # quietly breaking the next one's resume.
+                    resume = False
             # The provider decides its own per-turn policy. Passing a literal
             # None here is what kept every OpenSandbox run on the foreground
             # /command branch, whose ExecHandle get_transport() then refuses.

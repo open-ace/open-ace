@@ -1049,6 +1049,47 @@ def test_run_local_drops_resume_when_the_import_fails(api, tmp_path, monkeypatch
     )
 
 
+def test_run_local_reports_the_fresh_id_when_the_import_fails(api, tmp_path, monkeypatch):
+    """Dropping --resume is only half the fallback; the flag drives more than argv.
+
+    `resume` also gates the session pre-seed, which pins
+    `persisted_session_id` to the id being resumed. Leaving it set after a
+    failed import makes the pre-seed claim an id the CLI is not using, and
+    that pin SKIPS `_resolve_sidebar_session` — so the fresh id the CLI mints
+    is never picked up. The turn then SUCCEEDS while reporting the stale id,
+    which is the damaging part: the transcript it exports is filed against the
+    previous turn's mapping, so the next turn resumes from the wrong slot.
+
+    The stream here reports `cli-2` while the caller asked to resume `cli-1`.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames("cli-2")))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"CARRIED\n")
+
+    def _boom(handle, *, cli_session_id, blob):
+        raise RuntimeError("execd upload failed")
+
+    monkeypatch.setattr(provider, "import_agent_state", _boom)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert result.source_session_id == "cli-2", (
+        "the turn reported the id it FAILED to resume rather than the one the "
+        f"CLI actually minted: {result.source_session_id!r}. The next turn "
+        "would resume from a transcript filed under the wrong session."
+    )
+
+
 def test_run_local_survives_an_export_failure_without_losing_the_turn(api, tmp_path, monkeypatch):
     """Export failure is LOG-ONLY. The agent already did the work.
 
