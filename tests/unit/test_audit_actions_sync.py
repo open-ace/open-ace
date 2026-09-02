@@ -17,6 +17,8 @@ import pytest
 
 from app.modules.governance.audit_logger import AuditAction
 
+pytestmark = [pytest.mark.regression]
+
 
 class TestAuditActionsSynchronization:
     """Test that backend audit actions are properly defined and documented."""
