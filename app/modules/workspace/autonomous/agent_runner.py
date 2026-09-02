@@ -196,6 +196,21 @@ class ZCodeSessionError(Exception):
 
 
 @dataclass
+class _AgentStatePlan:
+    """What to do about agent state for one turn, decided BEFORE create (#3237).
+
+    Deciding before the sandbox exists is what makes a refusal free: no pod is
+    started and no tokens are spent on a turn that could not have resumed.
+    """
+
+    resume: bool
+    blob: bytes | None = None
+    refuse: bool = False
+    reason_code: str = ""
+    detail: str = ""
+
+
+@dataclass
 class _LocalSession:
     """Tracks a local CLI subprocess session."""
 
@@ -1940,6 +1955,27 @@ class AutonomousAgentRunner:
                 exc,
             )
             return ""
+        return self._last_assistant_text_in_transcript(content, session, cli_session_id)
+
+    def _last_assistant_text_in_transcript(
+        self, content: str, session: _LocalSession, cli_session_id: str
+    ) -> str:
+        """Extract THIS turn's final assistant text from a transcript (#2640).
+
+        Shared by the host-JSONL reader above and the carried-transcript reader
+        below (#3237), because they must not diverge. Two properties do the
+        work and both matter:
+
+        * records older than ``started_at_epoch`` are skipped — a session
+          line's transcript is cumulative across milestones, so without this a
+          later turn would recover the whole line's history;
+        * only the LAST visible assistant text is kept — concatenating every
+          block would fold intermediate narration ("Let me read the file.")
+          into the deliverable.
+
+        An earlier version of the carried reader did neither, and its own test
+        asserted the concatenation. An independent review caught it.
+        """
         last_text = ""
         try:
             for line in content.splitlines():
@@ -2002,6 +2038,17 @@ class AutonomousAgentRunner:
             source = "transcript_jsonl"
 
         if not recovered:
+            # #3237: the reader above resolves a HOST path
+            # (_claude_projects_root), which is empty for a run that happened
+            # inside a sandbox — so this net silently no-opped on exactly the
+            # large-context turns it exists for. Carried source, same parsing:
+            # both go through _last_assistant_text_in_transcript.
+            recovered = self._recover_response_text_from_store(
+                session, session.workflow_id, session.session_id
+            )
+            source = "carried_transcript"
+
+        if not recovered:
             return
 
         session.event_log.append(
@@ -2018,6 +2065,39 @@ class AutonomousAgentRunner:
             source,
             session.session_id[:8],
             len(recovered),
+        )
+
+    def _recover_response_text_from_store(
+        self, session: _LocalSession, workflow_id: str, tracking_session_id: str
+    ) -> str:
+        """Recover THIS turn's assistant text from the CARRIED transcript (#3237).
+
+        The sibling ``_recover_response_text_from_jsonl`` reads the host's
+        ``~/.claude/projects``, which is empty for a run that happened inside a
+        sandbox — the transcript lived in the pod and left with it. Different
+        source, IDENTICAL parsing: both delegate to
+        ``_last_assistant_text_in_transcript``, so the turn filter and the
+        last-message rule cannot drift between them.
+
+        That sharing is load-bearing here rather than merely tidy. The carried
+        blob is the whole session line's transcript, appended across every
+        milestone, so a reader without the ``started_at_epoch`` filter would
+        hand back milestones 1-N concatenated and the caller would persist it
+        as this milestone's deliverable.
+
+        Never raises: this is a recovery net, and a net that can fail the run
+        it is catching is worse than no net.
+        """
+        if not workflow_id or not tracking_session_id:
+            return ""
+        try:
+            blob = self._agent_state_store.get(workflow_id, tracking_session_id)
+        except Exception:  # noqa: BLE001 - recovery must never raise
+            return ""
+        if not blob:
+            return ""
+        return self._last_assistant_text_in_transcript(
+            blob.decode("utf-8", errors="replace"), session, tracking_session_id
         )
 
     def _finalize_local_completed_result(
@@ -2514,6 +2594,233 @@ class AutonomousAgentRunner:
                 error=str(e),
             )
 
+    @property
+    def _agent_state_store(self) -> Any:
+        """Holds one CLI transcript per session line between turns (#3237).
+
+        Lazy rather than set in ``__init__`` deliberately: the runner is
+        legitimately built with ``__new__`` in tests and helper paths, and an
+        attribute that only exists when ``__init__`` ran would make the export
+        hook fail there — turning a storage detail into a broken run.
+        """
+        from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+        existing = self.__dict__.get("_agent_state_store_instance")
+        if existing is None:
+            existing = AgentStateStore()
+            self.__dict__["_agent_state_store_instance"] = existing
+        return existing
+
+    @_agent_state_store.setter
+    def _agent_state_store(self, store: Any) -> None:
+        self.__dict__["_agent_state_store_instance"] = store
+
+    @staticmethod
+    def _workflow_no_longer_wants_state(workflow_id: str, session: Any) -> bool:
+        """Whether this turn's transcript is already dead weight (#3237).
+
+        Asked of the DATABASE, not of a ``threading.Event``. An earlier version
+        gated only on ``session._stopped``, which cannot work in the shipped
+        topology: the routes run in the web process and the runner in the
+        scheduler process, so `_stop_running_task` — whose three strategies all
+        resolve through the in-process ``AutonomousScheduler`` singleton or a
+        local PID — never reaches this session's Event at all. `delete_workflow`
+        and `delete_batch` do not even call it. The flag stayed false, the
+        export ran, and the just-purged directory came back.
+
+        The Event is still consulted first, because when it IS set it is both
+        correct and free. The row is the authority behind it.
+
+        Fail-safe direction on an unreadable database: **export anyway**. A
+        resurrected transcript is bounded — the reaper and the next delete both
+        reclaim it — whereas a skipped export loses history the next turn needs
+        and starts it cold, which is the failure this whole change exists to
+        remove.
+        """
+        stopped = getattr(session, "_stopped", None)
+        if stopped is not None and stopped.is_set():
+            return True
+        if not workflow_id:
+            return False
+        try:
+            from app.modules.workspace.autonomous.orchestrator import _TERMINAL_WORKFLOW_STATUSES
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+            workflow = AutonomousWorkflowRepository().get_workflow(workflow_id)
+        except Exception:  # noqa: BLE001 - unknown means export, see above
+            return False
+        if workflow is None:
+            # The row is gone: deleted while this turn was unwinding. Nothing
+            # will ever resume it, and the delete route's purge already ran.
+            return True
+        return str(workflow.get("status") or "") in _TERMINAL_WORKFLOW_STATUSES
+
+    def _plan_agent_state(
+        self,
+        provider: object,
+        *,
+        workflow_id: str,
+        tracking_session_id: str,
+        resume: bool,
+        cli_tool: str = "claude-code",
+    ) -> _AgentStatePlan:
+        """Decide whether this turn can resume, before anything is created.
+
+        Mirrors ``scripts/openace-run-as.sh`` point for point rather than
+        applying one blanket policy — the launcher fails closed only where
+        failing is free and continuing would corrupt:
+
+        * an ``ephemeral`` provider asked to resume -> refuse, the ``exit 70``
+          analogue. Nothing has run, so aborting costs nothing, and continuing
+          would burn a whole invocation on a ``--resume`` that cannot work.
+        * a slot present but unreadable -> refuse, same reasoning: we cannot
+          tell "no history" from "broken history".
+        * a slot simply ABSENT -> start fresh. That is the launcher's
+          ``if [ -d "$preserve_claude_dir" ]`` guard around its restore, and it
+          is why a control-plane reboot that clears tmpfs does not kill
+          in-flight workflows.
+        """
+        from app.modules.workspace.autonomous.sandbox.agent_state_store import CorruptAgentState
+        from app.modules.workspace.autonomous.sandbox.provider import (
+            AGENT_STATE_CARRIED,
+            AGENT_STATE_PERSISTS,
+            agent_state_persistence,
+        )
+
+        if not resume:
+            return _AgentStatePlan(resume=False)
+
+        mode = agent_state_persistence(provider)
+        # A carrying provider still only carries the tools it knows how to
+        # address. OpenSandbox writes and reads `.claude/projects/-workspace`,
+        # and `_capture_cli_session_id` only yields an id for claude-code — so
+        # for qwen-code-cli the export got an empty id, discarded the slot, and
+        # the next turn found nothing and started cold. That is the silent
+        # continuity loss this whole change exists to remove, surviving for a
+        # tool the sandbox genuinely supports. Refuse instead: the turn costs
+        # nothing yet, and a stated refusal is recoverable where a silent cold
+        # start is not.
+        #
+        # INTERIM, and the reason is scope rather than feasibility — #3319
+        # implements the real carry. Qwen supports `--resume`, its directory
+        # encoding is the same one Claude uses, and its session id is already
+        # on the wire; the only genuine unknown is that its transcript may sit
+        # at either `<encoded>/chats/<id>.jsonl` or `<encoded>/<id>.jsonl`, and
+        # that is discoverable by probing on export rather than guessing.
+        #
+        # qwen-code-cli is the ONLY other tool this can reach: ZCode and the
+        # single-shot tools (codex, openclaw) return from _run_local before
+        # `_select_sandbox_provider` and spawn locally, so they have no
+        # ephemeral HOME to carry anything across.
+        if mode == AGENT_STATE_CARRIED and not self._uses_sidebar_session_source(cli_tool, "local"):
+            return _AgentStatePlan(
+                resume=False,
+                refuse=True,
+                reason_code="agent_state_unavailable",
+                detail=(
+                    f"{type(provider).__name__} does not yet carry agent state for "
+                    f"{cli_tool!r}: its transcript location and session-id capture are "
+                    "claude-code specific (see #3319). Refusing rather than resuming "
+                    "into an empty HOME."
+                ),
+            )
+        if mode == AGENT_STATE_PERSISTS:
+            return _AgentStatePlan(resume=True)
+
+        if mode != AGENT_STATE_CARRIED:
+            return _AgentStatePlan(
+                resume=False,
+                refuse=True,
+                reason_code="agent_state_unavailable",
+                detail=(
+                    f"provider {type(provider).__name__} does not carry agent state "
+                    "between turns, so --resume would be sent into an empty HOME and "
+                    "the whole invocation wasted. Refusing before the sandbox is created."
+                ),
+            )
+
+        try:
+            blob = self._agent_state_store.get(workflow_id, tracking_session_id)
+        except CorruptAgentState as exc:
+            return _AgentStatePlan(
+                resume=False,
+                refuse=True,
+                reason_code="agent_state_unavailable",
+                detail=str(exc),
+            )
+        except ValueError as exc:
+            # An id that is not a plain path component. Refuse rather than
+            # silently run without history under a key we could not form.
+            return _AgentStatePlan(
+                resume=False,
+                refuse=True,
+                reason_code="agent_state_unavailable",
+                detail=f"cannot address agent state: {exc}",
+            )
+
+        if blob is None:
+            # Absent, not broken: first turn on this line, or tmpfs cleared.
+            return _AgentStatePlan(resume=False)
+        return _AgentStatePlan(resume=True, blob=blob)
+
+    @staticmethod
+    def _resolve_agent_command(
+        adapter: Any, adapter_args: list[str], previous_cmd: list[str]
+    ) -> list[str]:
+        """Turn adapter args into a launchable command, reusing argv[0] (#3237).
+
+        The first build resolves the executable through ``shutil.which`` for
+        adapters whose ``provides_full_command()`` is False. A re-derivation
+        later in the run must land on the SAME argv[0] — taking the adapter
+        args verbatim would silently swap a resolved path for a bare name, so
+        a merely degraded turn (no ``--resume``) would become a turn that
+        launches a different binary, or none.
+
+        ``previous_cmd`` supplies that already-resolved argv[0] rather than
+        re-running ``which``: it is what this run actually started from. The
+        first build passes the freshly resolved executable; the re-derivation
+        passes the ``cmd`` it is replacing. Both go through here so the two
+        cannot drift — the duplication is what the extraction exists to remove.
+
+        The bare-name fallback for an empty ``previous_cmd`` is unreachable
+        from either call site (the first build has just resolved one, and the
+        re-derivation runs only after it succeeded); it is a floor, not a path.
+        """
+        if adapter.provides_full_command():
+            return list(adapter_args)
+        head = previous_cmd[0] if previous_cmd else adapter.get_executable_name()
+        return [head] + (list(adapter_args[1:]) if len(adapter_args) > 1 else [])
+
+    def _build_agent_argv(
+        self,
+        adapter: Any,
+        resume_target: str,
+        project_path: str,
+        model: str,
+        permission_mode: str | None,
+        allowed_tools: list[str] | None,
+        *,
+        resume: bool,
+    ) -> list[str]:
+        """Build the adapter's argv. PURE — no I/O, no side effects.
+
+        Extracted so the sandbox path can re-derive argv once it knows whether
+        the agent state actually landed (#3237). ``cmd`` is otherwise built
+        before the sandbox exists, which bakes ``--resume`` in before anything
+        could know whether the transcript is there to resume from.
+        """
+        return cast(
+            "list[str]",
+            adapter.build_start_args(
+                resume_target,
+                project_path,
+                model,
+                permission_mode=permission_mode,
+                allowed_tools=allowed_tools,
+                resume=resume,
+            ),
+        )
+
     def _run_local(
         self,
         session_id: str,
@@ -2633,17 +2940,66 @@ class AutonomousAgentRunner:
             )
         )
 
+        # #2023: resolve the provider per run through the isolation gate rather
+        # than reaching for the constructor-injected one.
+        # #3237: resolved HERE, above argv, because the agent-state plan decides
+        # whether `--resume` goes into argv at all. Selecting it twice would
+        # double-emit audit events and re-run the boot probes, so there is
+        # exactly one call and `provider` is reused by the create block below.
+        # A fail-closed refusal (a missing attestation, a probe mismatch) and a
+        # malformed backend config are both SandboxError, not OSError — without
+        # this they would escape _run_local with no AgentTaskResult at all.
+        try:
+            provider = self._select_sandbox_provider(
+                "local",
+                tenant_id=tenant_id,
+                project_path=project_path,
+                generation=self._resolve_sandbox_generation(workflow_id),
+            )
+        except SandboxError as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
+
+        # #3237: decide agent state BEFORE argv and before anything is created,
+        # so a turn that could not have resumed costs no sandbox and no tokens.
+        state_plan = self._plan_agent_state(
+            provider,
+            workflow_id=workflow_id,
+            tracking_session_id=session_id,
+            resume=resume,
+            cli_tool=cli_tool,
+        )
+        if state_plan.refuse:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=state_plan.detail,
+                error_code=state_plan.reason_code,
+            )
+        resume = state_plan.resume
+        # The CLI session id this turn actually resumed, set only once the
+        # transcript is really in place. The export below falls back to it when
+        # the stream capture missed.
+        resumed_with = ""
+
         # Build command
         # When resuming an established session, pass the real CLI session_id
         # so the adapter emits `--resume <id>`; otherwise let the CLI mint a new
         # session and capture its id from the control_response.
         resume_target = resume_session_id if (resume and resume_session_id) else session_id
-        adapter_args = adapter.build_start_args(
+        adapter_args = self._build_agent_argv(
+            adapter,
             resume_target,
             project_path,
             model,
-            permission_mode=permission_mode,
-            allowed_tools=allowed_tools,
+            permission_mode,
+            allowed_tools,
             resume=resume,
         )
 
@@ -2652,7 +3008,7 @@ class AutonomousAgentRunner:
         # executable. Use those args verbatim; otherwise resolve the executable
         # via PATH and prepend it.
         if adapter.provides_full_command():
-            cmd = adapter_args
+            cmd = self._resolve_agent_command(adapter, adapter_args, [])
         else:
             exe_name = adapter.get_executable_name()
             executable = shutil.which(exe_name)
@@ -2667,7 +3023,10 @@ class AutonomousAgentRunner:
                     success=False,
                     error=f"CLI tool '{exe_name}' not found",
                 )
-            cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
+            # Same helper the #3237 re-derivation uses, so the two builds cannot
+            # drift. `which` stays here: it is the resolution itself, and its
+            # failure is a run-ending error rather than something to repeat.
+            cmd = self._resolve_agent_command(adapter, adapter_args, [executable])
 
         # #2022 P3b: spawn through the SandboxProvider. The orchestrator no
         # longer touches sudo/_wrap_agent_cmd/Popen directly for spawn; the
@@ -2687,20 +3046,11 @@ class AutonomousAgentRunner:
                 self._resolve_home_dir(system_account) / ".cache" / "pre-commit"
             )
             self._validate_cross_user_guard_bin(env)
-        # #2023: resolve the provider per run through the isolation gate rather
-        # than reaching for the constructor-injected one. _select_sandbox_provider
-        # had exactly one caller (inside _run_remote), so routing only that method
-        # would have left this path on Legacy forever.
-        # A fail-closed refusal (a missing attestation, a probe mismatch) and a
-        # malformed backend config are both SandboxError, not OSError — without
-        # this they would escape _run_local with no AgentTaskResult at all.
+        # `provider` was resolved above, before argv, so the agent-state plan
+        # could decide whether `--resume` belongs in the command (#3237). Do NOT
+        # re-select it here: a second call double-emits audit events and re-runs
+        # the boot probes.
         try:
-            provider = self._select_sandbox_provider(
-                "local",
-                tenant_id=tenant_id,
-                project_path=project_path,
-                generation=self._resolve_sandbox_generation(workflow_id),
-            )
             sandbox_handle = provider.create(
                 SandboxSpec(
                     task_id=session_id,
@@ -2748,6 +3098,55 @@ class AutonomousAgentRunner:
             # agent starts. Legacy no-ops (the worktree is already there); an
             # ephemeral backend would otherwise hand the agent an empty /workspace.
             provider.upload_workspace(sandbox_handle, None)
+            # #3237: place the CLI transcript before the agent starts, so
+            # `--resume` finds a conversation instead of an empty HOME.
+            #
+            # Restore is BEST EFFORT — openace-run-as.sh's own restore is
+            # `mv ... || true` — because the fallback (a fresh session) is
+            # correct, merely worse. On failure we re-derive argv without
+            # `--resume`, which _build_agent_argv makes cheap and safe.
+            if state_plan.blob is not None and hasattr(provider, "import_agent_state"):
+                try:
+                    provider.import_agent_state(
+                        sandbox_handle,
+                        cli_session_id=resume_target,
+                        blob=state_plan.blob,
+                    )
+                    resumed_with = resume_target
+                except Exception as exc:  # noqa: BLE001 - degrade, never fail the turn
+                    logger.warning(
+                        "Agent state import failed for %s, starting a fresh session: %s",
+                        resume_target[:8],
+                        exc,
+                    )
+                    # Rebuild through the SAME executable-resolution branch the
+                    # first build used. Taking the adapter args verbatim here
+                    # would silently change argv[0] from the resolved path to a
+                    # bare name for every adapter whose provides_full_command()
+                    # is False — which is claude-code, the only tool this path
+                    # carries state for.
+                    cmd = self._resolve_agent_command(
+                        adapter,
+                        self._build_agent_argv(
+                            adapter,
+                            resume_target,
+                            project_path,
+                            model,
+                            permission_mode,
+                            allowed_tools,
+                            resume=False,
+                        ),
+                        cmd,
+                    )
+                    # Clearing argv is not enough: the flag drives the session
+                    # pre-seed below, which pins `persisted_session_id` to the
+                    # id we are no longer resuming. That pin then SKIPS
+                    # `_resolve_sidebar_session`, so the fresh id the CLI is
+                    # about to mint is never picked up — the turn reports the
+                    # stale id, and the transcript it exports is filed against
+                    # the previous turn's mapping. The turn succeeds while
+                    # quietly breaking the next one's resume.
+                    resume = False
             # The provider decides its own per-turn policy. Passing a literal
             # None here is what kept every OpenSandbox run on the foreground
             # /command branch, whose ExecHandle get_transport() then refuses.
@@ -2887,6 +3286,76 @@ class AutonomousAgentRunner:
             if not session.error:
                 session.error = f"Sandbox work product could not be applied: {e}"
                 session.error_code = getattr(e, "reason_code", "") or "changeset_apply_failed"
+
+        # #3237: capture the CLI transcript before the pod goes, so the next
+        # turn on this session line can resume.
+        #
+        # LOG ONLY on failure. openace-run-as.sh's exit-trap capture logs rather
+        # than exits for exactly this reason — the agent has already done the
+        # work, and an exit here "would rewrite the status". Discarding a
+        # completed milestone because its transcript could not be saved trades a
+        # quality loss for a correctness loss. The stale slot is dropped so the
+        # next turn starts fresh cleanly instead of resuming half a history.
+        # A turn whose workflow has already gone terminal must not write state
+        # back. The routes do not wait for this thread: they write the terminal
+        # status and purge the workflow's directory while this thread is still
+        # unwinding through apply_changes, so without a gate the export
+        # re-creates the directory that was just purged — and since the reaper
+        # runs only at scheduler startup and only by age, the resurrected
+        # transcript of a cancelled or DELETED workflow can sit there
+        # indefinitely.
+        #
+        # The race was unreachable while the routes and the scheduler owned
+        # separate per-pod directories, because the purge hit an unrelated
+        # empty tree. Sharing the storage is what makes it real.
+        if self._workflow_no_longer_wants_state(workflow_id, session):
+            logger.info(
+                "Agent state export skipped for %s: the workflow is terminal or gone",
+                session_id[:8],
+            )
+        elif hasattr(provider, "export_agent_state"):
+            # Prefer the id the stream reported; fall back to the id this turn
+            # actually resumed, which is the file the CLI has been appending to.
+            #
+            # The fallback is DEFENSIVE, not load-bearing: reaching it needs
+            # `resume=True` with a falsy `cli_session_id`, and
+            # `_resolve_session_line` never returns that shape — it yields
+            # `(id, None, False)` when the mapping is missing and `(id, id,
+            # True)` for non-Claude tools. Kept because the alternative failure
+            # is silent (the line simply stops carrying history), and because
+            # the stream capture is gated on `_uses_sidebar_session_source`,
+            # which is a condition this code does not control.
+            captured = getattr(session, "cli_session_id", "") or resumed_with
+            try:
+                blob = provider.export_agent_state(sandbox_handle, cli_session_id=captured)
+                if blob is not None:
+                    self._agent_state_store.put(workflow_id, session_id, blob)
+                else:
+                    self._agent_state_store.discard(workflow_id, session_id)
+            except Exception as exc:  # noqa: BLE001 - never discard finished work
+                logger.warning("Agent state export failed for %s: %s", (captured or "?")[:8], exc)
+                self._agent_state_store.discard(workflow_id, session_id)
+
+            # CONVERGENCE, not a second guard. The check above is
+            # check-then-act: the route can write the terminal status and purge
+            # in the window between it returning False and the `put` landing,
+            # and the put would then re-create the directory the route had just
+            # removed. Re-reading afterwards closes every ordering:
+            #
+            #   route acts before this re-read -> we see terminal and purge, so
+            #     ours is the last write;
+            #   route acts after this re-read  -> its own purge runs after our
+            #     put, so its write is the last one.
+            #
+            # Either way the directory ends up gone, which is the only outcome
+            # a cancelled or deleted workflow may have. The purge is idempotent
+            # and best-effort, so the redundant case costs nothing.
+            if self._workflow_no_longer_wants_state(workflow_id, session):
+                logger.info(
+                    "Agent state purged after export for %s: the workflow went terminal mid-turn",
+                    session_id[:8],
+                )
+                self._agent_state_store.purge(workflow_id)
 
         # #2022 P3b: release the provider sandbox (reap any stragglers the
         # process-group signal missed + clear its _procs so a shared provider

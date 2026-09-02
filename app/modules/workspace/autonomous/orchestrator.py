@@ -2052,6 +2052,87 @@ REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 #           pr_updated → pr_review_summary
 #   review: plan_reviewed → pr_reviewed
 #   test:   tests_run (reused across dev rounds)
+# Workflow statuses after which no further turn will EVER run, so the session
+# lines' carried CLI transcripts (#3237) can be dropped at once.
+#
+# "paused" is deliberately absent — a paused workflow resumes later and still
+# needs its history.
+#
+# "failed" is deliberately absent too, and that is NOT an oversight:
+# `POST /workflows/<id>/retry` accepts `status == "failed"`, keeps the existing
+# main/review/test session-line ids, and resumes from the current phase. An
+# immediate purge there made every retry silently cold — the sandbox found an
+# absent slot, `_plan_agent_state` cleared `resume`, and the run restarted with
+# no prior context. That is the very defect #3237 exists to fix, reintroduced
+# through its own cleanup, and it also diverged from Legacy/Remote retry, where
+# the CLI HOME still holds the session.
+_TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "cancelled"})
+
+# Statuses whose state may be reclaimed BY AGE.
+#
+# Deliberately EQUAL to the set above rather than a superset, and the reason is
+# a contract that does not exist: there is no bounded retry window.
+# `retry_workflow` gates on `retry_count < MAX_RETRY_COUNT` and nothing else —
+# it never looks at how old the failure is — so a workflow can legitimately be
+# retried weeks after it failed. An earlier revision here made "failed" age-
+# reapable after 7 days, which meant a still-valid retry could find an absent
+# slot, clear `resume`, and restart cold: the silent context loss this module
+# spends so much effort avoiding, reintroduced on a timer.
+#
+# `MAX_RETRY_COUNT` bounds how MANY retries there are, not how long the first
+# one stays available, so it cannot stand in for an expiry.
+#
+# The cost is retention: a failed workflow that is never retried and never
+# deleted keeps its transcripts. That is bounded by deletion rather than by
+# time — the delete routes purge — and it is the right side to err on, because
+# stale bytes are recoverable and lost history is not. If retention does become
+# a problem the fix is an explicit, persisted retry expiry with a clear refusal
+# once it lapses (a product decision), NOT quietly eating the history a retry
+# still has the right to resume from.
+#
+# The reaper keeps everything NOT in this set, so it still does its real job:
+# reclaiming state for rows that were deleted or never existed.
+_REAPABLE_WORKFLOW_STATUSES = frozenset(_TERMINAL_WORKFLOW_STATUSES)
+
+
+def purge_agent_state(workflow_id: str, store: object | None = None) -> None:
+    """Drop one workflow's carried CLI transcripts, unconditionally (#3237).
+
+    Best-effort by design: failing to tidy up must never turn a completed
+    workflow into a failed one, nor a successful delete into a 500.
+
+    Separate from the status-gated wrapper below because the DELETE routes have
+    no status to inspect — the row is simply gone, and once it is gone nothing
+    can ever identify it again. That makes an unconditional purge the only
+    chance to remove the transcript at all.
+    """
+    try:
+        if store is None:
+            from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+            store = AgentStateStore()
+        store.purge(workflow_id)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - cleanup must not fail a finished workflow
+        logger.warning("Failed to purge agent state for %s", workflow_id, exc_info=True)
+
+
+def purge_agent_state_if_terminal(
+    workflow_id: str, updates: dict, store: object | None = None
+) -> None:
+    """Drop a finished workflow's carried CLI transcripts (#3237).
+
+    Hooked into ``_update_workflow``, which covers every status write the
+    ORCHESTRATOR makes. It is not the only way a workflow reaches a terminal
+    state, and an earlier version of this docstring wrongly claimed it was:
+    ``stop_workflow`` and the acceptance override both write through the
+    repository directly, and the delete routes remove the row with no terminal
+    write at all. Those call :func:`purge_agent_state` themselves.
+    """
+    if str((updates or {}).get("status") or "") not in _TERMINAL_WORKFLOW_STATUSES:
+        return
+    purge_agent_state(workflow_id, store)
+
+
 SESSION_LINE_FIELDS = {
     "main": "main_session_id",
     "review": "review_session_id",
@@ -6397,6 +6478,26 @@ class AutonomousOrchestrator:
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
         self._persist_workflow_update(updates)
+        # #3237: a finished workflow's carried CLI transcripts are dead weight.
+        # Hooked HERE rather than after each terminal status write: there are
+        # ~20 of those in this module, and one added per site would be missed on
+        # the next edit.
+        #
+        # Ordered BEFORE _emit deliberately. _emit is not best-effort — it does
+        # its own `repo.create_event` write with no guard — so running the purge
+        # after it means any event-persistence failure leaves the workflow
+        # terminal AND its whole transcript directory on disk, across all ~20
+        # of those paths at once. The status is already committed by the line
+        # above, so this is the first point at which the transcripts are
+        # certainly dead weight.
+        #
+        # Not the only path, though — `autonomous_scheduler` writes a terminal
+        # status straight through `repo.update_workflow` in its worktree
+        # recovery sweep, and calls the purge itself. The routes in
+        # `app/routes/autonomous.py` do the same for stop/override/delete. The
+        # scheduler also reaps orphans at startup for rows that never reach a
+        # terminal status at all.
+        purge_agent_state_if_terminal(self._workflow_id, updates)
         self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(

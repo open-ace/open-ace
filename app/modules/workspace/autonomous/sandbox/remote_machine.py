@@ -35,6 +35,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     derive_terminal_reason,
 )
 from app.modules.workspace.autonomous.sandbox.provider import (
+    AGENT_STATE_PERSISTS,
     SandboxError,
     validate_spec_capabilities,
 )
@@ -83,6 +84,10 @@ class RemoteTurnSpec:
 
 class RemoteMachineProvider:
     """SandboxProvider over autonomous remote-agent execution."""
+
+    # The remote machine's HOME is durable between turns, so the CLI transcript
+    # is already where `--resume` looks for it (#3237).
+    agent_state_persistence = AGENT_STATE_PERSISTS
 
     def __init__(
         self,

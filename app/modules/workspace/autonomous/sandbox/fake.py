@@ -17,7 +17,10 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
+from app.modules.workspace.autonomous.sandbox.provider import (
+    AGENT_STATE_PERSISTS,
+    validate_spec_capabilities,
+)
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -43,6 +46,11 @@ _LEGACY_CAPS = frozenset(
 
 class FakeSandboxProvider:
     """In-memory provider satisfying the :class:`SandboxProvider` contract."""
+
+    # Models a durable HOME so tests exercising --resume through it keep
+    # working. A test wanting the ephemeral behaviour overrides this on the
+    # instance (#3237).
+    agent_state_persistence = AGENT_STATE_PERSISTS
 
     def __init__(self, capabilities: frozenset[SandboxCapability] | None = None) -> None:
         self._capabilities: frozenset[SandboxCapability] = (

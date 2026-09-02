@@ -373,7 +373,20 @@ def _load_config():
     return config
 
 
-def _run_local_against(provider, worktree, monkeypatch, gate_spy=None, on_sandbox_created=None):
+def _run_local_against(
+    provider,
+    worktree,
+    monkeypatch,
+    gate_spy=None,
+    on_sandbox_created=None,
+    *,
+    resume=False,
+    resume_session_id=None,
+    agent_state_store=None,
+    session_id="s-1",
+    uses_sidebar=False,
+    runner_spy=None,
+):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
     Only the boundaries are faked — the lifecycle/execd API and the PTY
@@ -393,11 +406,25 @@ def _run_local_against(provider, worktree, monkeypatch, gate_spy=None, on_sandbo
     runner._on_sandbox_created = on_sandbox_created
     runner._sandbox_provider = provider
     runner.session_manager = None
-    runner._resolve_sidebar_session = lambda *a, **k: ""
+
+    # Under uses_sidebar the runner insists on a resolved sidebar session, and
+    # there is no real ~/.claude tree here — so stand in for the id the stream
+    # already reported. What is under test is the transcript's journey, not
+    # claude-code's own JSONL discovery.
+    def _resolve_sidebar(session_obj, **_kw):
+        # It SETS persisted_session_id; it does not return one.
+        if uses_sidebar:
+            session_obj.persisted_session_id = session_obj.cli_session_id or "cli-1"
+        return ""
+
+    runner._resolve_sidebar_session = _resolve_sidebar
     # Sidebar JSONL discovery is claude-code's own session-id mechanism and is
     # orthogonal to the sandbox lifecycle under test; without a real ~/.claude
     # tree it fails and masks every assertion below it.
-    runner._uses_sidebar_session_source = lambda *a, **k: False
+    # #3237: claude-code's real value here is True, and that is what gates
+    # `_capture_cli_session_id` — so a test about carrying the transcript has to
+    # run in the production shape or the export silently has no id to export.
+    runner._uses_sidebar_session_source = lambda *a, **k: uses_sidebar
     # The agent CLI binary is not installed on CI runners, and _run_local
     # returns "CLI tool not found" before it reaches the provider at all —
     # which makes this test silently vacuous there rather than red. Whether
@@ -412,8 +439,15 @@ def _run_local_against(provider, worktree, monkeypatch, gate_spy=None, on_sandbo
     runner._load_task_policy = lambda: None
     runner._resource_policy_configured = lambda: False
     runner._build_agent_env = lambda *a, **k: {"HOME": "/home/agent"}
+    # #3237: the agent-state store is a lazy property, so a test that does not
+    # care simply gets the real one pointed nowhere in particular. Tests about
+    # carrying the transcript inject their own.
+    if agent_state_store is not None:
+        runner._agent_state_store = agent_state_store
+    if runner_spy is not None:
+        runner_spy(runner)
     return runner._run_local(
-        session_id="s-1",
+        session_id=session_id,
         cli_tool="claude-code",
         model="claude-sonnet-4",
         project_path=str(worktree),
@@ -423,6 +457,8 @@ def _run_local_against(provider, worktree, monkeypatch, gate_spy=None, on_sandbo
         workflow_id="wf-1",
         user_id=None,
         workspace_type="local",
+        resume=resume,
+        resume_session_id=resume_session_id,
     )
 
 
@@ -789,3 +825,608 @@ def test_a_failing_destroy_does_not_replace_the_original_error(api, tmp_path, mo
     assert "upgrade refused" in (
         result.error or ""
     ), f"the destroy failure replaced the original error: {result.error!r}"
+
+
+# ── #3237: carrying the CLI transcript across the sandbox boundary ────
+#
+# These drive the REAL _run_local. The unit tests elsewhere cover
+# _plan_agent_state, _build_agent_argv, the store and the provider methods in
+# isolation — all of which passed while the wiring in _run_local was absent.
+# An independent review proved that by deleting the import block, the export
+# block and `resume = state_plan.resume` and watching all 10,250 tests stay
+# green. These are the tests that fail when that happens.
+
+
+def _agent_state_store(tmp_path):
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+    return AgentStateStore(root=str(tmp_path / "agent-state"))
+
+
+def _provider_for(api, worktree, conn):
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: conn,
+    )
+    api.set_manifest({"app.py": b"edited\n"})
+    return provider
+
+
+def _turn_frames(session_id="cli-1"):
+    return [
+        _stdout_frame({"type": "system", "subtype": "init", "session_id": session_id}),
+        _stdout_frame(
+            {"type": "result", "subtype": "success", "result": "done", "is_error": False}
+        ),
+    ]
+
+
+def _worktree_at(tmp_path, name="wt"):
+    worktree = tmp_path / name
+    worktree.mkdir()
+    (worktree / "app.py").write_text("original\n", encoding="utf-8")
+    return worktree
+
+
+def test_run_local_exports_the_transcript_before_destroy(api, tmp_path, monkeypatch):
+    """Turn 1 must leave the next turn something to resume from.
+
+    Deleting the export block in _run_local passes every other test in the
+    repository. This is the one that notices.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    order: list[str] = []
+    real_export = provider.export_agent_state
+    real_destroy = provider.destroy
+
+    def _export(handle, *, cli_session_id):
+        order.append("export")
+        # Stand in for the CLI having written its transcript during the turn.
+        provider.import_agent_state(
+            handle, cli_session_id=cli_session_id, blob=b"TURN-ONE-TRANSCRIPT\n"
+        )
+        return real_export(handle, cli_session_id=cli_session_id)
+
+    def _destroy(handle):
+        order.append("destroy")
+        return real_destroy(handle)
+
+    monkeypatch.setattr(provider, "export_agent_state", _export)
+    monkeypatch.setattr(provider, "destroy", _destroy)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        session_id="s-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert order == ["export", "destroy"], (
+        f"export must run BEFORE destroy — after destroy the pod is gone and the "
+        f"transcript with it. Got {order}"
+    )
+    assert store.get("wf-1", "s-1") == b"TURN-ONE-TRANSCRIPT\n", (
+        "the transcript was never written to the control-plane store, so the "
+        "next turn on this line has nothing to resume from"
+    )
+
+
+def test_run_local_imports_the_transcript_and_emits_resume(api, tmp_path, monkeypatch):
+    """Turn 2: the stored transcript is placed, and --resume goes into argv.
+
+    Both halves matter. Placing the file without --resume resumes nothing;
+    --resume without the file is the #3237 defect itself.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames("cli-1")))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"CARRIED\n")
+
+    imported: list = []
+    real_import = provider.import_agent_state
+
+    def _import(handle, *, cli_session_id, blob):
+        imported.append((cli_session_id, blob))
+        return real_import(handle, cli_session_id=cli_session_id, blob=blob)
+
+    monkeypatch.setattr(provider, "import_agent_state", _import)
+
+    seen_cmd: list = []
+    real_exec = provider.exec
+
+    def _exec(handle, command, env, exec_policy):
+        seen_cmd.append(list(command))
+        return real_exec(handle, command=command, env=env, exec_policy=exec_policy)
+
+    monkeypatch.setattr(provider, "exec", _exec)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert imported and imported[0][1] == b"CARRIED\n", "the stored transcript was never placed"
+    assert imported[0][0] == "cli-1", (
+        "the transcript must land under the id --resume will look for, not the "
+        f"tracking id; got {imported[0][0]!r}"
+    )
+    assert "--resume" in seen_cmd[0], f"--resume missing from argv: {seen_cmd[0]}"
+    assert "cli-1" in seen_cmd[0]
+
+
+def test_run_local_drops_resume_when_nothing_is_stored(api, tmp_path, monkeypatch):
+    """An ABSENT slot starts a fresh session — it is not a failure.
+
+    First turn on a line, or a control-plane restart that cleared tmpfs. This
+    is openace-run-as.sh's `if [ -d "$preserve_claude_dir" ]` guard: skip the
+    restore and carry on. Sending --resume here would produce exactly the
+    wasted invocation #3237 exists to remove.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)  # empty
+
+    seen_cmd: list = []
+    real_exec = provider.exec
+
+    def _exec(handle, command, env, exec_policy):
+        seen_cmd.append(list(command))
+        return real_exec(handle, command=command, env=env, exec_policy=exec_policy)
+
+    monkeypatch.setattr(provider, "exec", _exec)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert "--resume" not in seen_cmd[0], (
+        "--resume was sent with no transcript in place; the CLI would answer "
+        f"'No conversation found with session ID' and waste the turn: {seen_cmd[0]}"
+    )
+
+
+def test_run_local_drops_resume_when_the_import_fails(api, tmp_path, monkeypatch):
+    """Restore is best-effort, and the fallback argv must still be launchable.
+
+    openace-run-as.sh's restore is `mv ... || true`. Dropping --resume is the
+    right response — but the rebuilt argv has to keep the resolved executable,
+    or the turn dies on argv[0] instead.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"CARRIED\n")
+
+    def _boom(handle, *, cli_session_id, blob):
+        raise RuntimeError("execd upload failed")
+
+    monkeypatch.setattr(provider, "import_agent_state", _boom)
+
+    seen_cmd: list = []
+    real_exec = provider.exec
+
+    def _exec(handle, command, env, exec_policy):
+        seen_cmd.append(list(command))
+        return real_exec(handle, command=command, env=env, exec_policy=exec_policy)
+
+    monkeypatch.setattr(provider, "exec", _exec)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert "--resume" not in seen_cmd[0], f"--resume survived a failed import: {seen_cmd[0]}"
+    assert seen_cmd[0][0] == "/usr/local/bin/claude", (
+        "the fallback rebuilt argv without the resolved executable, so argv[0] "
+        f"changed from the normal path: {seen_cmd[0][0]!r}"
+    )
+
+
+def test_run_local_reports_the_fresh_id_when_the_import_fails(api, tmp_path, monkeypatch):
+    """Dropping --resume is only half the fallback; the flag drives more than argv.
+
+    `resume` also gates the session pre-seed, which pins
+    `persisted_session_id` to the id being resumed. Leaving it set after a
+    failed import makes the pre-seed claim an id the CLI is not using, and
+    that pin SKIPS `_resolve_sidebar_session` — so the fresh id the CLI mints
+    is never picked up. The turn then SUCCEEDS while reporting the stale id,
+    which is the damaging part: the transcript it exports is filed against the
+    previous turn's mapping, so the next turn resumes from the wrong slot.
+
+    The stream here reports `cli-2` while the caller asked to resume `cli-1`.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames("cli-2")))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"CARRIED\n")
+
+    def _boom(handle, *, cli_session_id, blob):
+        raise RuntimeError("execd upload failed")
+
+    monkeypatch.setattr(provider, "import_agent_state", _boom)
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert result.success, result.error
+    assert result.source_session_id == "cli-2", (
+        "the turn reported the id it FAILED to resume rather than the one the "
+        f"CLI actually minted: {result.source_session_id!r}. The next turn "
+        "would resume from a transcript filed under the wrong session."
+    )
+
+
+def test_run_local_survives_an_export_failure_without_losing_the_turn(api, tmp_path, monkeypatch):
+    """Export failure is LOG-ONLY. The agent already did the work.
+
+    openace-run-as.sh's exit-trap capture logs rather than exits, because "an
+    exit here would rewrite the status". Discarding a completed milestone
+    because its transcript could not be saved trades a quality loss for a
+    correctness loss.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"STALE-FROM-A-PREVIOUS-TURN\n")
+
+    def _boom(handle, *, cli_session_id):
+        raise RuntimeError("execd download failed")
+
+    monkeypatch.setattr(provider, "export_agent_state", _boom)
+
+    result = _run_local_against(
+        provider, worktree, monkeypatch, agent_state_store=store, uses_sidebar=True
+    )
+
+    assert result.success, f"an export failure must not fail the turn: {result.error}"
+    assert store.get("wf-1", "s-1") is None, (
+        "the stale slot survived a failed export, so the next turn would resume "
+        "a transcript that no longer matches the session"
+    )
+
+
+def test_two_turns_on_one_line_carry_the_conversation(api, tmp_path, monkeypatch):
+    """The #3237 regression, end to end: turn 1 captures, turn 2 resumes it.
+
+    This is the chain the issue describes. Before this change turn 2 sent
+    --resume into an empty HOME, the CLI answered "No conversation found with
+    session ID", and the #2035 recovery burned the invocation and retried cold.
+    """
+    store = _agent_state_store(tmp_path)
+
+    # ── turn 1 ──
+    wt1 = _worktree_at(tmp_path, "wt1")
+    p1 = _provider_for(api, wt1, _ScriptedPtyConnection(_turn_frames("cli-1")))
+    real_export = p1.export_agent_state
+
+    def _export(handle, *, cli_session_id):
+        p1.import_agent_state(handle, cli_session_id=cli_session_id, blob=b"HISTORY\n")
+        return real_export(handle, cli_session_id=cli_session_id)
+
+    monkeypatch.setattr(p1, "export_agent_state", _export)
+    r1 = _run_local_against(p1, wt1, monkeypatch, agent_state_store=store, uses_sidebar=True)
+    assert r1.success, r1.error
+
+    # ── turn 2, same session line ──
+    wt2 = _worktree_at(tmp_path, "wt2")
+    p2 = _provider_for(api, wt2, _ScriptedPtyConnection(_turn_frames("cli-1")))
+
+    placed: list = []
+    real_import = p2.import_agent_state
+
+    def _import(handle, *, cli_session_id, blob):
+        placed.append(blob)
+        return real_import(handle, cli_session_id=cli_session_id, blob=blob)
+
+    monkeypatch.setattr(p2, "import_agent_state", _import)
+
+    seen_cmd: list = []
+    real_exec = p2.exec
+
+    def _exec(handle, command, env, exec_policy):
+        seen_cmd.append(list(command))
+        return real_exec(handle, command=command, env=env, exec_policy=exec_policy)
+
+    monkeypatch.setattr(p2, "exec", _exec)
+
+    r2 = _run_local_against(
+        p2,
+        wt2,
+        monkeypatch,
+        agent_state_store=store,
+        resume=True,
+        resume_session_id="cli-1",
+        uses_sidebar=True,
+    )
+
+    assert r2.success, r2.error
+    assert placed == [b"HISTORY\n"], (
+        "turn 2 did not receive turn 1's transcript — the conversation did not "
+        f"survive the sandbox boundary: {placed}"
+    )
+    assert "--resume" in seen_cmd[0], "turn 2 did not resume the carried session"
+
+    # A RESUMED turn must store under the tracking id, not the CLI id. Turn 1
+    # cannot distinguish the two (resume_target == session_id when not
+    # resuming); turn 2 can, because resume_target is "cli-1" and the tracking
+    # id is "s-1". Keying on the CLI id would make turn 3 look up "s-1", find
+    # nothing, and silently start cold — the exact bug this feature removes.
+    assert store.get("wf-1", "s-1") is not None, (
+        "after a resumed turn the transcript is not under the tracking id, so "
+        "the next turn on this line would find nothing"
+    )
+    assert store.get("wf-1", "cli-1") is None, (
+        "the transcript was stored under the CLI session id; that id changes on "
+        "every force-fresh, so the line would lose its history"
+    )
+
+
+def _route_side(store, workflow_id, status, rows):
+    """Do what the web process does: write the terminal status, then purge.
+
+    It does NOT touch the runner's in-memory session, because in the shipped
+    topology it cannot: the routes run in the web process and the runner in the
+    scheduler process. Modelling the stop by setting `_stopped` directly is
+    what hid this failure the first time.
+    """
+    rows[workflow_id] = None if status is None else {"workflow_id": workflow_id, "status": status}
+    store.purge(workflow_id)
+
+
+def _patch_workflow_rows(monkeypatch, rows):
+    class _Repo:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_workflow(self, workflow_id):
+            return rows.get(workflow_id)
+
+    monkeypatch.setattr(
+        "app.repositories.autonomous_repo.AutonomousWorkflowRepository", _Repo, raising=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [("cancelled", "stopped from the web pod"), (None, "deleted from the web pod")],
+)
+def test_a_terminal_turn_does_not_resurrect_the_purged_state(
+    api, tmp_path, monkeypatch, status, label
+):
+    """The cross-process shape: the route never touches this thread's Event.
+
+    `_stop_running_task`'s three strategies all resolve through the in-process
+    `AutonomousScheduler` singleton or a local PID, so a web-pod stop cannot
+    reach a scheduler-pod session — and `delete_workflow` / `delete_batch` do
+    not call it at all. The Event therefore stays FALSE in production while the
+    route purges the shared directory, and the still-unwinding turn exports on
+    top of it.
+
+    So this test deliberately never sets `_stopped`. The only signal is the
+    workflow row, which is what the gate must actually consult.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+    store.put("wf-1", "s-1", b"EARLIER TURN\n")
+
+    rows = {"wf-1": {"workflow_id": "wf-1", "status": "developing"}}
+    _patch_workflow_rows(monkeypatch, rows)
+
+    put_attempted: list[bytes] = []
+    real_put = store.put
+
+    def _recording_put(workflow_id, line_id, blob):
+        put_attempted.append(blob)
+        return real_put(workflow_id, line_id, blob)
+
+    store.put = _recording_put
+
+    real_apply = provider.apply_changes
+
+    def _apply_then_route_acts(handle, project_path):
+        result = real_apply(handle, project_path)
+        # Give the export something real to find, so a pass here means the gate
+        # held rather than that there was nothing to write.
+        provider.import_agent_state(
+            handle, cli_session_id="cli-1", blob=b"TRANSCRIPT WRITTEN THIS TURN\n"
+        )
+        _route_side(store, "wf-1", status, rows)
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply_then_route_acts)
+
+    _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        uses_sidebar=True,
+    )
+
+    assert not put_attempted, (
+        f"a turn {label} wrote state back AFTER the route purged it, so the "
+        f"workflow keeps a transcript nothing will ever reclaim: {put_attempted}"
+    )
+    assert (
+        store.get("wf-1", "s-1") is None
+    ), "the purged slot was re-created by the terminal turn's export"
+
+
+def test_a_live_workflow_still_exports(api, tmp_path, monkeypatch):
+    """The gate must not swallow the ordinary case it sits in front of.
+
+    Gating on workflow state is only safe if a RUNNING workflow still writes
+    its transcript — otherwise every turn would start cold and the gate would
+    have replaced one silent failure with a worse one.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    _patch_workflow_rows(monkeypatch, {"wf-1": {"workflow_id": "wf-1", "status": "developing"}})
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"KEEP ME\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    _run_local_against(provider, worktree, monkeypatch, agent_state_store=store, uses_sidebar=True)
+
+    assert store.get("wf-1", "s-1") == b"KEEP ME\n", (
+        "a running workflow's transcript was not carried, so its next turn " "would start cold"
+    )
+
+
+def test_an_unreadable_workflow_row_still_exports(api, tmp_path, monkeypatch):
+    """Fail-safe direction: unknown means export.
+
+    A resurrected transcript is bounded — the reaper and the next delete both
+    reclaim it. A skipped export is not: it loses history the next turn needs
+    and starts it cold, which is the failure this change exists to remove. So a
+    database that cannot be read must not silently disable the carry.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    class _BrokenRepo:
+        def __init__(self, *a, **k):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+        _BrokenRepo,
+        raising=False,
+    )
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"KEEP ME\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    _run_local_against(provider, worktree, monkeypatch, agent_state_store=store, uses_sidebar=True)
+
+    assert store.get("wf-1", "s-1") == b"KEEP ME\n", (
+        "an unreadable workflow row disabled the carry, turning a database "
+        "blip into a silent cold start"
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [("cancelled", "stopped from the web pod"), (None, "deleted from the web pod")],
+)
+def test_the_route_can_win_the_window_after_the_check(api, tmp_path, monkeypatch, status, label):
+    """The TOCTOU window the pre-export check cannot close on its own.
+
+    Reading the row before exporting is check-then-act: the scheduler sees
+    `developing`, and the web process then writes the terminal status and
+    purges the shared directory BEFORE the `put` lands. The put re-creates the
+    directory the route had just removed, and since the reaper runs only at
+    scheduler startup and only by age, a cancelled or deleted workflow keeps a
+    transcript nothing will ever reclaim.
+
+    The route side is fired from inside the check itself, immediately after it
+    decides `False` — which is exactly the interleaving, made deterministic
+    rather than raced.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    rows = {"wf-1": {"workflow_id": "wf-1", "status": "developing"}}
+    _patch_workflow_rows(monkeypatch, rows)
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"NEW TURN\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    real_check = AutonomousAgentRunner._workflow_no_longer_wants_state
+    fired: list[str] = []
+
+    def _check_then_route_acts(workflow_id, session):
+        verdict = real_check(workflow_id, session)
+        # The FIRST check is the vulnerable one: the route slips in right after
+        # it answers "still live". Later calls (the post-export convergence
+        # re-read) must see the terminal row this leaves behind.
+        if not verdict and not fired:
+            fired.append("route")
+            _route_side(store, "wf-1", status, rows)
+        return verdict
+
+    monkeypatch.setattr(
+        AutonomousAgentRunner,
+        "_workflow_no_longer_wants_state",
+        staticmethod(_check_then_route_acts),
+    )
+
+    _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        uses_sidebar=True,
+    )
+
+    assert fired, "the fixture never reproduced the window"
+    assert store.get("wf-1", "s-1") is None, (
+        f"a turn {label} in the window after the check left its transcript in "
+        "the purged slot, so the workflow keeps history nothing will reclaim"
+    )
+    assert not store.path_for(
+        "wf-1", "s-1"
+    ).parent.exists(), "the workflow directory was re-created after the route purged it"

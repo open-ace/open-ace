@@ -27,6 +27,7 @@ obvious reading, and getting them wrong is silent rather than loud:
 from __future__ import annotations
 
 import itertools
+import re
 import shlex
 import time
 import uuid
@@ -42,13 +43,21 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     compute_output_digest,
     derive_terminal_reason,
 )
+from app.modules.workspace.autonomous.sandbox.agent_state_store import MAX_AGENT_STATE_BYTES
 from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as workspace_mod
-from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
+from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
+    HttpOpenSandboxApi,
+    OpenSandboxApiError,
+)
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 from app.modules.workspace.autonomous.sandbox.opensandbox.transport import PtyWebSocketTransport
-from app.modules.workspace.autonomous.sandbox.provider import SandboxError, is_current_generation
+from app.modules.workspace.autonomous.sandbox.provider import (
+    AGENT_STATE_CARRIED,
+    SandboxError,
+    is_current_generation,
+)
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -144,6 +153,51 @@ print('OPENACE_CLUSTER=' + probe('kubernetes.default.svc.cluster.local', 443))
 # `-c` rather than relying on the entrypoint's global config so this works even
 # if that line did not: it is the one command whose failure has no fallback.
 _SAFE_DIR = f"-c safe.directory={_WORKSPACE}"
+# Where the CLI keeps its conversation transcript inside the sandbox (#3237).
+#
+# The directory name is the CLI's encoding of its own cwd, and inside the
+# sandbox that cwd is always _WORKSPACE — `_exec_command` passes it — so this
+# is a constant rather than a host-derived path. Verified against a real CLI
+# (2.1.170): the directory it created matched
+# `AutonomousAgentRunner._encode_project_path("/workspace")` exactly, and
+# test_the_transcript_dir_matches_what_the_cli_really_writes pins both halves
+# so they cannot drift apart.
+_AGENT_STATE_DIR = "/home/agent/.claude/projects/-workspace"
+
+
+def _agent_state_path(cli_session_id: str) -> str | None:
+    """The transcript path for *cli_session_id*, or ``None`` if unusable.
+
+    The id is NOT trusted. It reaches here from ``agent_sessions.cli_session_id``,
+    which ``_extract_stream_session_id`` fills with whatever the sandbox printed
+    on its own stdout — and under this backend the sandbox is the untrusted
+    party by construction. Without this, a compromised sandbox could name
+    ``../../../../workspace/.git/hooks/pre-commit`` and have the NEXT turn's
+    sandbox receive attacker-chosen bytes at that path.
+
+    ``AgentStateStore`` already applies exactly this reasoning to the same class
+    of database-sourced id ("neither is a trusted path fragment"); this is the
+    one place that had not.
+
+    The id is matched AS GIVEN, with no trimming. An earlier version stripped
+    whitespace first, so an id with a trailing newline was quietly accepted with
+    the newline removed — sanitising, the very thing the store refuses to do, in
+    a function whose docstring said it did not.
+    """
+    if not _SAFE_SESSION_ID.match(str(cli_session_id or "")):
+        return None
+    return f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl"
+
+
+# Session ids are uuids in practice; this is deliberately a little wider so a
+# CLI that changes its id format does not silently stop carrying history, while
+# still admitting no separator, no dot-segment and no absolute path.
+#
+# `\Z`, not `$`: Python's `$` also matches immediately before a trailing
+# newline, so `"abc\n"` would pass and produce a filename with an embedded
+# newline in it.
+_SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
 _GIT_SYNTHESIS = (
     f"git {_SAFE_DIR} init -q && git {_SAFE_DIR} add -A && "
     f"git {_SAFE_DIR} -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
@@ -207,6 +261,11 @@ class _SandboxState:
 
 class OpenSandboxProvider:
     """SandboxProvider over OpenSandbox's Kubernetes runtime."""
+
+    # HOME is an emptyDir that dies with the pod, so the CLI transcript has to
+    # be moved in and out by hand or `--resume` finds nothing. See
+    # export_agent_state / import_agent_state below (#3237).
+    agent_state_persistence = AGENT_STATE_CARRIED
 
     def __init__(
         self,
@@ -476,6 +535,91 @@ class OpenSandboxProvider:
             deleted=deleted,
         )
         self._emit("changeset_applied", {"sandbox_id": handle.sandbox_id})
+
+    def export_agent_state(self, handle: SandboxHandle, *, cli_session_id: str) -> bytes | None:
+        """Read the CLI transcript out before the sandbox is destroyed (#3237).
+
+        Returns ``None`` when there is nothing to carry — no session id (the
+        stream never yielded one) or no transcript at that path (the turn never
+        started a conversation). Neither is an error, and neither should cost
+        the caller a completed milestone.
+        """
+        path = _agent_state_path(cli_session_id)
+        if path is None:
+            # Emitted, not silently dropped. This is the FIRST place a hostile
+            # id surfaces: the sandbox prints it during its own turn and the
+            # export at the end of that turn is what tries to address it. The
+            # import refusal only fires a turn later, and only if the id
+            # survived to the database — so without this the security-relevant
+            # event is the one nothing records. An empty id is the ordinary
+            # "no session" case and is not worth an event.
+            if str(cli_session_id or "").strip():
+                self._emit(
+                    "agent_state_id_refused",
+                    {"sandbox_id": handle.sandbox_id, "phase": "export"},
+                )
+            return None
+        try:
+            # BOUNDED, so an oversized transcript is refused unread rather than
+            # buffered and then rejected. HOME is a 1Gi emptyDir while the
+            # scheduler pod runs with a 512Mi limit, so reading first and
+            # measuring second could OOM-kill the control plane.
+            blob = self._api.download_file(handle.sandbox_id, path, max_bytes=MAX_AGENT_STATE_BYTES)
+        except OpenSandboxApiError as exc:
+            # Three outcomes, and only ONE of them is "there is nothing here".
+            #
+            # NOT_FOUND is routine: a turn that never started a conversation.
+            # Returning None is right, and the caller discards the slot.
+            #
+            # FILE_TOO_LARGE means this line has silently stopped carrying
+            # history and will keep doing so every turn. It is the only place
+            # the real size distribution is observable, so it gets its own
+            # event. An earlier revision folded it into the routine case: the
+            # same silent-refusal defect fixed twenty lines above for hostile
+            # ids, reintroduced by the fix for the size bound.
+            #
+            # ANYTHING ELSE — 401, 500, a transient execd fault — is an
+            # infrastructure failure, NOT an absent transcript. Returning None
+            # for those told the caller "no history to carry", so it discarded
+            # a perfectly good previous slot and logged nothing: silent
+            # continuity loss, and precisely the outcome the log-and-drop
+            # export contract promises never to produce quietly. Re-raised so
+            # the runner's warning path actually runs.
+            if exc.code == "FILE_TOO_LARGE":
+                self._emit(
+                    "agent_state_too_large",
+                    {
+                        "sandbox_id": handle.sandbox_id,
+                        "limit_bytes": MAX_AGENT_STATE_BYTES,
+                        "detail": str(exc),
+                    },
+                )
+                return None
+            if exc.code == "NOT_FOUND" or exc.status_code == 404:
+                return None
+            raise
+        return blob
+
+    def import_agent_state(
+        self, handle: SandboxHandle, *, cli_session_id: str, blob: bytes
+    ) -> None:
+        """Place the transcript where ``--resume`` will look for it (#3237).
+
+        Only this one file. Not ``.claude.json``, not ``.credentials.json``,
+        not settings: the sandbox environment is constructed, never inherited,
+        and a credential must not round-trip through the control plane.
+        Verified against a real CLI that restoring this file alone into an
+        otherwise empty HOME is sufficient for ``--resume`` to resolve, with
+        the original session id preserved.
+        """
+        path = _agent_state_path(cli_session_id)
+        if path is None:
+            raise self._refuse(
+                f"agent state id {cli_session_id!r} is not a plain path component; "
+                "refusing to build a transcript path from it",
+                "agent_state_unavailable",
+            )
+        self._api.upload_file(handle.sandbox_id, path, blob, 0o600)
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         state = self._state.get(handle.sandbox_id)

@@ -87,6 +87,41 @@ def implied_required_capabilities(spec: SandboxSpec) -> frozenset[SandboxCapabil
     return frozenset(implied)
 
 
+# ── Agent-state persistence across turns (#3237) ──────────────────────
+#
+# NOT a SandboxCapability: that enum is the frozen #2022 contract and must not
+# grow. This is a provider attribute the runner reads defensively, in the same
+# duck-typed style as ``agent_turn_policy`` and ``apply_changes``.
+#
+#   persists  — HOME is durable between turns (Legacy's host HOME, Remote's
+#               machine). Nothing to carry.
+#   carried   — HOME is ephemeral, but the provider can export/import the CLI
+#               transcript (OpenSandbox).
+#   ephemeral — HOME is ephemeral and nothing carries it. A resuming turn is
+#               refused rather than sent into an empty HOME, where the CLI
+#               answers "No conversation found with session ID: <id>" and the
+#               whole invocation is wasted.
+AGENT_STATE_PERSISTS = "persists"
+AGENT_STATE_CARRIED = "carried"
+AGENT_STATE_EPHEMERAL = "ephemeral"
+
+_AGENT_STATE_MODES = frozenset({AGENT_STATE_PERSISTS, AGENT_STATE_CARRIED, AGENT_STATE_EPHEMERAL})
+
+
+def agent_state_persistence(provider: object) -> str:
+    """How *provider*'s agent state behaves between turns.
+
+    Defaults to ``ephemeral`` for a provider that declares nothing, and for one
+    whose declaration is not a recognised mode. An absent or misspelled
+    declaration must REMOVE the ability to resume, never grant it — the #2023
+    attestation rule, where a capability nothing enforces is the defect.
+    """
+    declared = getattr(provider, "agent_state_persistence", AGENT_STATE_EPHEMERAL)
+    if declared in _AGENT_STATE_MODES:
+        return str(declared)
+    return AGENT_STATE_EPHEMERAL
+
+
 def validate_spec_capabilities(available: frozenset[SandboxCapability], spec: SandboxSpec) -> None:
     """Fail-closed gate combining explicit + field-implied requirements.
 
