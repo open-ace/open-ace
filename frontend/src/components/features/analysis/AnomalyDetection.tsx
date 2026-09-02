@@ -30,6 +30,7 @@ import {
   DatePicker,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
+import { getSeverityLabel } from '@/utils/enumTranslations';
 import {
   useAnomalyDetection,
   useAnomalyTrend,
@@ -416,7 +417,7 @@ export const AnomalyDetection: React.FC = () => {
                                     : 'info'
                               }
                             >
-                              {anomaly.severity}
+                              {getSeverityLabel(anomaly.severity, language)}
                             </Badge>
                           </div>
                         </li>

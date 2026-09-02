@@ -29,6 +29,12 @@ import {
   useToast,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
+import {
+  getTrendDirectionLabel,
+  getAnomalyTypeLabel,
+  getMetricLabel,
+  getSeverityLabel,
+} from '@/utils/enumTranslations';
 import { useEnterpriseReport, useEfficiencyMetrics, useAuth } from '@/hooks';
 import { analysisApi } from '@/api';
 import { isAdmin } from '@/utils/permissions';
@@ -388,11 +394,11 @@ const TrendsTable: React.FC<TrendsTableProps> = ({ trends, language }) => {
           <tbody>
             {trends.map((trend, index) => (
               <tr key={index}>
-                <td>{trend.metric}</td>
+                <td>{getMetricLabel(trend.metric, language)}</td>
                 <td>
                   <span className={cn('badge', getDirectionBadge(trend.direction))}>
                     <i className={cn('bi', getDirectionIcon(trend.direction), 'me-1')} />
-                    {trend.direction}
+                    {getTrendDirectionLabel(trend.direction, language)}
                   </span>
                 </td>
                 <td className="text-end">
@@ -480,9 +486,11 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
               <tr key={index}>
                 <td>{anomaly.date}</td>
                 <td>
-                  <span className={cn('badge', getTypeBadge(anomaly.type))}>{anomaly.type}</span>
+                  <span className={cn('badge', getTypeBadge(anomaly.type))}>
+                    {getAnomalyTypeLabel(anomaly.type, language)}
+                  </span>
                 </td>
-                <td>{anomaly.metric}</td>
+                <td>{getMetricLabel(anomaly.metric, language)}</td>
                 <td className="text-end">{anomaly.expected_value.toLocaleString()}</td>
                 <td className="text-end">{anomaly.actual_value.toLocaleString()}</td>
                 <td className="text-end">
@@ -493,7 +501,7 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
                 </td>
                 <td>
                   <span className={cn('badge', getSeverityBadge(anomaly.severity))}>
-                    {anomaly.severity}
+                    {getSeverityLabel(anomaly.severity, language)}
                   </span>
                 </td>
               </tr>

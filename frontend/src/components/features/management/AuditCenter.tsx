@@ -28,6 +28,7 @@ import {
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDate, formatDateTime, createMatcherConfig } from '@/utils';
+import { getSeverityLabel } from '@/utils/enumTranslations';
 import {
   complianceApi,
   type AuditPattern,
@@ -969,7 +970,7 @@ export const AuditCenter: React.FC = () => {
                             <span
                               className={cn('badge', `bg-${getSeverityVariant(anomaly.severity)}`)}
                             >
-                              {anomaly.severity}
+                              {getSeverityLabel(anomaly.severity, language)}
                             </span>
                           </td>
                           <td>

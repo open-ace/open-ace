@@ -21,6 +21,7 @@ import {
   DatePicker,
 } from '@/components/common';
 import { formatTokens, formatToolName, formatHourRange, getQuickRangeDateRange } from '@/utils';
+import { getSeverityLabel } from '@/utils/enumTranslations';
 import {
   useKeyMetrics,
   useDailyHourlyUsage,
@@ -728,7 +729,7 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
                             : 'bg-info'
                       )}
                     >
-                      {anomaly.severity}
+                      {getSeverityLabel(anomaly.severity, language)}
                     </span>
                   </td>
                 </tr>
