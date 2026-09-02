@@ -56,6 +56,11 @@ def test_phase_handler_protocol_has_handle_taking_ctx_deps():
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 _PHASES_DIR = (
     Path(__file__).resolve().parents[2] / "app" / "modules" / "workspace" / "autonomous" / "phases"
 )
