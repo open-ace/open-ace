@@ -790,7 +790,10 @@ def test_an_allowlisted_proxy_url_passes():
     from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
 
     cfg = _cfg()
-    assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"}, _endpoint(cfg))
+    endpoint = _endpoint(cfg)
+    # The host is admitted BY THE ALLOWLIST, not by skipping the check.
+    assert "api.anthropic.com" in endpoint.egress_allow_hosts
+    assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"}, endpoint)
 
 
 def test_a_cni_tier_accepts_any_public_proxy_host():
@@ -802,6 +805,8 @@ def test_a_cni_tier_accepts_any_public_proxy_host():
     from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
 
     endpoint = _endpoint(_cni_cfg())
+    # Premise: this tier genuinely has no allowlist to consult.
+    assert endpoint.egress_allow_hosts == ()
     assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://proxy.example.com/api"}, endpoint)
 
 

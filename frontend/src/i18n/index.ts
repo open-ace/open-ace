@@ -8,6 +8,7 @@ import type { Language as LanguageType } from '@/types';
 export type Language = LanguageType;
 
 type TranslationKey = string;
+export type { TranslationKey };
 type Translations = Record<TranslationKey, string>;
 
 // Exported so the completeness test can assert four-language key-set symmetry
@@ -714,6 +715,7 @@ export const translations: Record<Language, Translations> = {
     less: 'Less',
     more: 'More',
     peakUsagePeriods: 'Peak Usage Periods',
+    peakTokens: 'Peak Tokens',
     topActiveUsers: 'Top 10 Active Users',
     anomalyDetection: 'Anomaly Detection',
     recommendations: 'Recommendations',
@@ -1003,11 +1005,20 @@ export const translations: Record<Language, Translations> = {
     trendAnalysis: 'Trend Analysis',
     noTrendData: 'No trend data available',
     direction: 'Direction',
+    directionUp: 'Up',
+    directionDown: 'Down',
+    directionStable: 'Stable',
     changePercentage: 'Change %',
     current: 'Current',
     metric: 'Metric',
+    metricTokens: 'Tokens',
+    metricRequests: 'Requests',
     expected: 'Expected',
     actual: 'Actual',
+    // Anomaly types
+    anomalyTypeSpike: 'Spike',
+    anomalyTypeDrop: 'Drop',
+    anomalyTypeUnusualPattern: 'Unusual Pattern',
     breakdownByTool: 'Breakdown by Tool',
     breakdownByHost: 'Breakdown by Host',
     daysActive: 'Days Active',
@@ -1469,7 +1480,7 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: 'Forecast Total Tokens',
     forecastTotalRequests: 'Forecast Total Requests',
     forecastDailyAvg: 'Daily Average Forecast',
-    confidenceScore: 'Confidence Score',
+    confidenceScore: 'Confidence Score', // Deprecated, kept for backward compatibility
     forecastExplanation:
       'Forecast is calculated using moving average based on the past 7 completed calendar days of historical data',
     historicalData: 'Historical Data',
@@ -1478,6 +1489,20 @@ export const translations: Record<Language, Translations> = {
     forecastQualityDegraded: 'Forecast quality is degraded due to missing historical data',
     historyWindowInfo: 'Based on data from {start} to {end} ({days} days)',
     missingDays: 'days with no data',
+
+    // Forecast Quality Metrics
+    forecastQuality: 'Forecast Quality',
+    qualityMetrics: 'Quality Metrics',
+    qualityLevelQuality: 'High Quality',
+    qualityLevelSatisfactory: 'Good',
+    qualityLevelFair: 'Fair',
+    qualityLevelPoor: 'Low',
+    qualityLevelUnavailable: 'Unavailable',
+    backtestError: 'Backtest Error',
+    adjustedError: 'Adjusted Error',
+    sampleDays: 'Sample Days',
+    missingDaysCount: '{count} days missing',
+    forDays: 'For {days}-day forecast',
 
     // ROI Analysis
     totalCost: 'Total Cost',
@@ -3052,6 +3077,7 @@ export const translations: Record<Language, Translations> = {
     less: '少',
     more: '多',
     peakUsagePeriods: '峰值使用时段',
+    peakTokens: '峰值 Tokens',
     topActiveUsers: '活跃用户 Top 10',
     anomalyDetection: '异常检测',
     recommendations: '推荐建议',
@@ -3331,11 +3357,20 @@ export const translations: Record<Language, Translations> = {
     trendAnalysis: '趋势分析',
     noTrendData: '暂无趋势数据',
     direction: '方向',
+    directionUp: '上升',
+    directionDown: '下降',
+    directionStable: '稳定',
     changePercentage: '变化百分比',
     current: '当前',
     metric: '指标',
+    metricTokens: 'Tokens',
+    metricRequests: '请求数',
     expected: '预期',
     actual: '实际',
+    // Anomaly types
+    anomalyTypeSpike: '突增',
+    anomalyTypeDrop: '骤降',
+    anomalyTypeUnusualPattern: '异常模式',
     breakdownByTool: '工具维度统计',
     breakdownByHost: '主机维度统计',
     daysActive: '活跃天数',
@@ -3777,7 +3812,7 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '预测总 Token',
     forecastTotalRequests: '预测总请求数',
     forecastDailyAvg: '日均预测',
-    confidenceScore: '置信度得分',
+    confidenceScore: '置信度得分', // 已废弃，保留向后兼容
     forecastExplanation: '预测基于最近7个已完成自然日的历史数据使用移动平均方法计算',
     historicalData: '历史数据',
     predictedData: '预测数据',
@@ -3785,6 +3820,20 @@ export const translations: Record<Language, Translations> = {
     forecastQualityDegraded: '由于历史数据缺失，预测质量已降级',
     historyWindowInfo: '基于 {start} 至 {end} 的数据（{days} 天）',
     missingDays: '天无数据',
+
+    // Forecast Quality Metrics
+    forecastQuality: '预测质量',
+    qualityMetrics: '质量指标',
+    qualityLevelQuality: '高质量',
+    qualityLevelSatisfactory: '良好',
+    qualityLevelFair: '一般',
+    qualityLevelPoor: '较低',
+    qualityLevelUnavailable: '不可用',
+    backtestError: '回测误差',
+    adjustedError: '调整误差',
+    sampleDays: '样本天数',
+    missingDaysCount: '{count} 天缺失',
+    forDays: '{days}天预测',
 
     // ROI Analysis
     totalCost: '总成本',
@@ -5671,6 +5720,7 @@ export const translations: Record<Language, Translations> = {
     less: '少',
     more: '多',
     peakUsagePeriods: 'ピーク使用期間',
+    peakTokens: 'ピークトークン',
     topActiveUsers: 'アクティブユーザー Top 10',
     anomalyDetection: '異常検出',
     recommendations: '推奨事項',
@@ -5947,7 +5997,7 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '予測総トークン数',
     forecastTotalRequests: '予測総リクエスト数',
     forecastDailyAvg: '日平均予測',
-    confidenceScore: '信頼度スコア',
+    confidenceScore: '信頼度スコア', // 非推奨、後方互換性のため維持
     forecastExplanation: '過去7日間の完了したカレンダー日の履歴データに基づいて移動平均で予測を計算しています',
     historicalData: '履歴データ',
     predictedData: '予測データ',
@@ -5955,6 +6005,20 @@ export const translations: Record<Language, Translations> = {
     forecastQualityDegraded: '履歴データが不足しているため、予測品質が低下しています',
     historyWindowInfo: '{start}から{end}までのデータに基づいています（{days}日間）',
     missingDays: '日間データなし',
+
+    // Forecast Quality Metrics
+    forecastQuality: '予測品質',
+    qualityMetrics: '品質指標',
+    qualityLevelQuality: '高品質',
+    qualityLevelSatisfactory: '良好',
+    qualityLevelFair: '普通',
+    qualityLevelPoor: '低い',
+    qualityLevelUnavailable: '利用不可',
+    backtestError: 'バックテスト誤差',
+    adjustedError: '調整誤差',
+    sampleDays: 'サンプル日数',
+    missingDaysCount: '{count}日分のデータが不足',
+    forDays: '{days}日予測',
 
     // ROI Analysis
     roiAnalysis: 'ROI 分析',
@@ -5976,11 +6040,20 @@ export const translations: Record<Language, Translations> = {
     trendAnalysis: 'トレンド分析',
     noTrendData: 'トレンドデータがありません',
     direction: '方向',
+    directionUp: '上昇',
+    directionDown: '下降',
+    directionStable: '安定',
     changePercentage: '変化率',
     current: '現在',
     metric: '指標',
+    metricTokens: 'トークン',
+    metricRequests: 'リクエスト数',
     expected: '予想',
     actual: '実績',
+    // Anomaly types
+    anomalyTypeSpike: '急増',
+    anomalyTypeDrop: '急減',
+    anomalyTypeUnusualPattern: '異常パターン',
     breakdownByTool: 'ツール別内訳',
     breakdownByHost: 'ホスト別内訳',
     daysActive: '稼働日数',
@@ -7795,6 +7868,7 @@ export const translations: Record<Language, Translations> = {
     less: '적음',
     more: '많음',
     peakUsagePeriods: '피크 사용 기간',
+    peakTokens: '피크 토큰',
     topActiveUsers: '활성 사용자 Top 10',
     anomalyDetection: '이상 탐지',
     recommendations: '권장 사항',
@@ -8074,7 +8148,7 @@ export const translations: Record<Language, Translations> = {
     forecastTotalTokens: '예측 총 토큰',
     forecastTotalRequests: '예측 총 요청',
     forecastDailyAvg: '일일 평균 예측',
-    confidenceScore: '신뢰도 점수',
+    confidenceScore: '신뢰도 점수', // 사용되지 않음, 이전 버전 호환성 유지
     forecastExplanation: '지난 7개의 완료된 달력일의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
     historicalData: '과거 데이터',
     predictedData: '예측 데이터',
@@ -8082,6 +8156,20 @@ export const translations: Record<Language, Translations> = {
     forecastQualityDegraded: '과거 데이터가 누락되어 예측 품질이 저하되었습니다',
     historyWindowInfo: '{start}부터 {end}까지의 데이터를 기반으로 합니다 ({days}일)',
     missingDays: '일 데이터 없음',
+
+    // Forecast Quality Metrics
+    forecastQuality: '예측 품질',
+    qualityMetrics: '품질 지표',
+    qualityLevelQuality: '고품질',
+    qualityLevelSatisfactory: '양호',
+    qualityLevelFair: '보통',
+    qualityLevelPoor: '낮음',
+    qualityLevelUnavailable: '사용 불가',
+    backtestError: '백테스트 오차',
+    adjustedError: '조정 오차',
+    sampleDays: '샘플 일수',
+    missingDaysCount: '{count}일 데이터 누락',
+    forDays: '{days}일 예측',
 
     // ROI Analysis
     roiAnalysis: 'ROI 분석',
@@ -8104,11 +8192,20 @@ export const translations: Record<Language, Translations> = {
     trendAnalysis: '트렌드 분석',
     noTrendData: '트렌드 데이터가 없습니다',
     direction: '방향',
+    directionUp: '상승',
+    directionDown: '하락',
+    directionStable: '안정',
     changePercentage: '변화율',
     current: '현재',
     metric: '지표',
+    metricTokens: '토큰',
+    metricRequests: '요청 수',
     expected: '예상',
     actual: '실제',
+    // Anomaly types
+    anomalyTypeSpike: '급증',
+    anomalyTypeDrop: '급감',
+    anomalyTypeUnusualPattern: '비정상 패턴',
     breakdownByTool: '도구별 분석',
     breakdownByHost: '호스트별 분석',
     daysActive: '활성 일수',

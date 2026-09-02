@@ -23,7 +23,7 @@ import {
   DatePicker,
 } from '@/components/common';
 import { complianceApi, type ReportType, type SavedReport } from '@/api';
-import { formatDateTime } from '@/utils';
+import { formatDateTime, getDefaultDateRange } from '@/utils';
 import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 
 const FORMAT_OPTIONS = [
@@ -44,12 +44,11 @@ export const ComplianceReport: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [format, setFormat] = useState('json');
 
-  // Initialize dates
+  // Initialize dates with exactly 30 calendar days
   useEffect(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    setEndDate(end.toISOString().split('T')[0]);
-    setStartDate(start.toISOString().split('T')[0]);
+    const range = getDefaultDateRange(30);
+    setStartDate(range.start);
+    setEndDate(range.end);
   }, []);
 
   // Fetch data

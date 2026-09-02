@@ -37,6 +37,12 @@ _stopped_sessions_cache: dict[str, float] = {}  # session_id -> timestamp
 _stopped_sessions_cache_lock = threading.Lock()
 _STOPPED_SESSION_TTL_SECONDS = 60  # How long to reject requests after stop
 
+# Issue #3227: Deduplication cache for webui aggregate session alerts
+# Tracks last alert time per tenant to avoid alert spam.
+_webui_aggregate_alert_cache: dict[int, float] = {}  # tenant_id -> timestamp
+_webui_aggregate_alert_cache_lock = threading.Lock()
+_WEBUI_AGGREGATE_ALERT_INTERVAL_SECONDS = 3600  # 1 hour between alerts per tenant
+
 
 def mark_session_stopped(session_id: str) -> None:
     """Mark a session as stopped to trigger request circuit breaking."""
@@ -85,6 +91,58 @@ from app.modules.governance.content_filter_singleton import get_content_filter
 
 # Import shared cache function
 from app.modules.workspace.tenant_config_cache import get_tenant_sensitive_keyword_config
+
+
+def _create_webui_aggregate_session_alert(user_id: int, tenant_id: int) -> None:
+    """
+    Create a system alert when requests use webui aggregate session.
+
+    Issue #3227: When upstream webui doesn't send X-Session-Id header,
+    requests are recorded to the webui:<user_id> aggregate session instead
+    of the specific workspace session. This creates a system alert to notify
+    administrators that upstream needs to be upgraded.
+
+    Args:
+        user_id: The user ID from the token.
+        tenant_id: The tenant ID from the token.
+    """
+    global _webui_aggregate_alert_cache
+
+    # Check if we recently created an alert for this tenant
+    with _webui_aggregate_alert_cache_lock:
+        now = time.time()
+        last_alert_time = _webui_aggregate_alert_cache.get(tenant_id, 0)
+        if now - last_alert_time < _WEBUI_AGGREGATE_ALERT_INTERVAL_SECONDS:
+            logger.debug(
+                "Skipping webui aggregate session alert for tenant %d (recently alerted)",
+                tenant_id,
+            )
+            return
+
+        # Update timestamp before creating alert to prevent race conditions
+        _webui_aggregate_alert_cache[tenant_id] = now
+
+    try:
+        from app.modules.governance.alert_notifier import create_system_alert
+
+        create_system_alert(
+            title="WebUI Aggregate Session Warning",
+            message=(
+                "Requests are being recorded to the webui aggregate session "
+                "because the upstream webui is not sending X-Session-Id header. "
+                "Workspace sessions will show zero message/request counts. "
+                "Please upgrade the upstream webui to include X-Session-Id injection."
+            ),
+            severity="warning",
+            tool_name="llm-proxy",
+        )
+        logger.info(
+            "Created webui aggregate session alert for tenant %d, user %d",
+            tenant_id,
+            user_id,
+        )
+    except Exception as e:
+        logger.error("Failed to create webui aggregate session alert: %s", e)
 
 
 def _get_tenant_sensitive_keyword_config_wrapper(tenant_id: int | None) -> dict[str, Any]:
@@ -1377,6 +1435,10 @@ def handle_llm_proxy_request(
                 user_id,
                 tenant_id,
             )
+            # Issue #3227: Create alert for webui aggregate session usage
+            # This indicates upstream webui is not sending X-Session-Id,
+            # causing messages to be recorded to the wrong session.
+            _create_webui_aggregate_session_alert(user_id, tenant_id)
 
     # Issue #2547: Circuit breaking for stopped sessions
     # Reject requests from orphan processes that may still be retrying

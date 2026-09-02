@@ -37,7 +37,7 @@ import {
   type ProjectDailyStats,
 } from '@/api/projects';
 import { listProjectCategories, type ProjectCategory } from '@/api/projectCategories';
-import { formatDateTime, createMatcherConfig } from '@/utils';
+import { formatDateTime, createMatcherConfig, getDefaultDateRange } from '@/utils';
 import { usePageRefresh, useAuth } from '@/hooks';
 import { isAdmin } from '@/utils/permissions';
 import { matchesPatterns } from '@/utils/categoryConflictDetection';
@@ -708,17 +708,6 @@ export const ProjectManagement: React.FC = () => {
   );
 };
 
-// Helper function to get date N days ago
-const getDaysAgo = (days: number): string => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().split('T')[0];
-};
-
-const getToday = (): string => {
-  return new Date().toISOString().split('T')[0];
-};
-
 // Workspace Detail Content Component
 const WorkspaceDetailContent: React.FC<{
   workspace: ProjectStats;
@@ -734,15 +723,14 @@ const WorkspaceDetailContent: React.FC<{
 
   const workspaceName = workspace.project_name ?? workspace.project_path.split(/[/\\]/).pop();
 
-  // Fetch daily stats
+  // Fetch daily stats with exactly N calendar days
   useEffect(() => {
     const fetchDailyStats = async () => {
       setIsLoadingDaily(true);
       setDailyError(null);
       try {
-        const startDate = getDaysAgo(parseInt(dateRange));
-        const endDate = getToday();
-        const response = await getProjectDailyStats(workspace.project_id, startDate, endDate);
+        const range = getDefaultDateRange(parseInt(dateRange));
+        const response = await getProjectDailyStats(workspace.project_id, range.start, range.end);
         setDailyStats(response.stats || []);
       } catch (err: unknown) {
         const errorMessage =

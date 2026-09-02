@@ -39,6 +39,7 @@ jobs:
       default_collection: ${{ steps.select.outputs.default_collection }}
       dependency_audit: ${{ steps.select.outputs.dependency_audit }}
       e2e_governance: ${{ steps.select.outputs.e2e_governance }}
+      false_positive_scan: ${{ steps.select.outputs.false_positive_scan }}
       frontend: ${{ steps.select.outputs.frontend }}
       package: ${{ steps.select.outputs.package }}
       postgres: ${{ steps.select.outputs.postgres }}
@@ -284,6 +285,10 @@ jobs:
       - name: Run PostgreSQL suite
         env:
           DATABASE_URL: postgresql://ace:ace@localhost:5432/ace_test
+          # #3287: the integration conftest reads PG_TEST_URL (NOT DATABASE_URL)
+          # to create per-test throwaway databases. Without this variable every
+          # pg_db test silently skipped -- the lane had never executed a test.
+          PG_TEST_URL: postgresql://ace:ace@localhost:5432/ace_test
           ACE_DATABASE_NAME: ace_test
         run: python scripts/ci.py run postgres
 
@@ -345,6 +350,30 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  false-positive-scan:
+    # #3186 Phase A: the test-code false-positive scanner as a real, gated
+    # lane. Selected for every non-docs change (ci.py select_pr_suites); the
+    # known-debt ledger (ci/false-positive-ledger.json) records today's 77
+    # findings by precise identity, so new or substituted debt is red while
+    # fixes only shrink the ledger (--prune-ledger, removal-only). Deliberately
+    # NOT advisory, no continue-on-error, no skip label: the result must be
+    # able to block merges via PR Gate.
+    name: False-positive scan
+    needs: changes
+    if: needs.changes.outputs.false_positive_scan == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      # The scanner and the shared runner are stdlib-only — no pip install.
+      - name: Scan test code through the shared runner
+        run: python scripts/ci.py run false-positive-scan
+
   security-gate:
     name: Dependency security audit
     needs: changes
@@ -387,7 +416,7 @@ jobs:
         github.event_name == 'pull_request' ||
         (github.event_name == 'workflow_dispatch' && inputs.healed_sha != '')
       )
-    needs: [changes, lint, test, frontend, build, postgres-test, security-gate]
+    needs: [changes, lint, test, frontend, build, postgres-test, false-positive-scan, security-gate]
     runs-on: ubuntu-24.04
     steps:
       - name: Validate required and selected lanes
@@ -398,12 +427,13 @@ jobs:
           FRONTEND: ${{ needs.frontend.result }}
           BUILD: ${{ needs.build.result }}
           POSTGRES: ${{ needs.postgres-test.result }}
+          SCAN: ${{ needs.false-positive-scan.result }}
           SECURITY: ${{ needs.security-gate.result }}
         run: |
           python - <<'PY'
           import os
           required = {name: os.environ[name] for name in ("CHANGES", "LINT", "TEST", "BUILD")}
-          selected = {name: os.environ[name] for name in ("FRONTEND", "POSTGRES", "SECURITY")}
+          selected = {name: os.environ[name] for name in ("FRONTEND", "POSTGRES", "SCAN", "SECURITY")}
           failures = {name: result for name, result in required.items() if result != "success"}
           failures.update(
               {name: result for name, result in selected.items() if result not in {"success", "skipped"}}

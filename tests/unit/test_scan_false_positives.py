@@ -333,3 +333,200 @@ def test_annotation_template_validation() -> None:
 
     # Unknown pattern type
     assert not validate_annotation_content("any reason", "unknown-pattern")
+
+
+# ---- known-debt ledger mode (#3186 Phase A) ----
+#
+# The ledger compares per-finding IDENTITIES (pattern + file + class-qualified
+# function) count-exactly, so new debt is red, fixed debt must be pruned, and
+# pruning can never enroll anything.
+
+
+def _run_ledger(tmp_path: Path, *extra: str, scan: str | None = None):
+    return subprocess.run(
+        [sys.executable, str(SCANNER), str(tmp_path if scan is None else scan), *extra],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _entry(tmp_path: Path, rel: str, pattern: str, function: str, count: int = 1) -> dict:
+    return {
+        "pattern": pattern,
+        "file": str(tmp_path / rel),
+        "function": function,
+        "count": count,
+    }
+
+
+def _write_ledger(tmp_path: Path, entries: list[dict]) -> Path:
+    import json
+
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"version": 1, "entries": entries}, indent=2))
+    return ledger
+
+
+TWO_CLASS_SAME_NAME = """\
+class TestA:
+    def test_foo(self):
+        do_thing()
+
+class TestB:
+    def test_foo(self):
+        do_other()
+"""
+
+MODULE_LEVEL_SWALLOW = """\
+try:
+    setup()
+except Exception:
+    pass
+
+def test_ok():
+    assert setup() is not None
+"""
+
+
+def test_ledger_green_when_exact(tmp_path: Path) -> None:
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(tmp_path, [_entry(tmp_path, "test_x.py", "no_assertion", "test_b")])
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mirrors reality" in proc.stdout
+
+
+def test_ledger_green_covers_known_p0_debt(tmp_path: Path) -> None:
+    """The known P0s must pass under the ledger (early return before the P0 rule)."""
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(tmp_path, [_entry(tmp_path, "test_x.py", "no_assertion", "test_b")])
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_ledger_fails_on_unknown_finding(tmp_path: Path) -> None:
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(tmp_path, [])
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "unknown finding" in proc.stdout
+
+
+def test_ledger_fails_on_stale_entry(tmp_path: Path) -> None:
+    """A fixed finding without ledger pruning is red (ledger mirrors reality)."""
+    ledger = _write_ledger(tmp_path, [_entry(tmp_path, "test_x.py", "no_assertion", "test_b")])
+    _write(tmp_path, "test_clean.py", "def test_ok():\n    assert True\n")
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "stale ledger entry" in proc.stdout
+
+
+def test_ledger_count_exact_same_identity(tmp_path: Path) -> None:
+    """Two hits under one identity need count 2; a second silent hit is red."""
+    two_swallows = (
+        "def test_double():\n"
+        "    try:\n        a()\n    except Exception:\n        pass\n"
+        "    try:\n        b()\n    except Exception:\n        pass\n"
+        "    assert True\n"
+    )
+    _write(tmp_path, "test_double.py", two_swallows)
+    short = _write_ledger(
+        tmp_path, [_entry(tmp_path, "test_double.py", "broad_except_swallow", "test_double", 1)]
+    )
+    proc = _run_ledger(tmp_path, "--ledger", str(short))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    exact = _write_ledger(
+        tmp_path, [_entry(tmp_path, "test_double.py", "broad_except_swallow", "test_double", 2)]
+    )
+    proc = _run_ledger(tmp_path, "--ledger", str(exact))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_ledger_identity_is_class_qualified(tmp_path: Path) -> None:
+    """Same-named methods in different classes are distinct identities."""
+    _write(tmp_path, "test_cls.py", TWO_CLASS_SAME_NAME)
+    half = _write_ledger(
+        tmp_path, [_entry(tmp_path, "test_cls.py", "no_assertion", "TestA.test_foo")]
+    )
+    proc = _run_ledger(tmp_path, "--ledger", str(half))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "TestB.test_foo" in proc.stdout
+    full = _write_ledger(
+        tmp_path,
+        [
+            _entry(tmp_path, "test_cls.py", "no_assertion", "TestA.test_foo"),
+            _entry(tmp_path, "test_cls.py", "no_assertion", "TestB.test_foo"),
+        ],
+    )
+    proc = _run_ledger(tmp_path, "--ledger", str(full))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_ledger_module_level_identity(tmp_path: Path) -> None:
+    _write(tmp_path, "test_mod.py", MODULE_LEVEL_SWALLOW)
+    ledger = _write_ledger(
+        tmp_path, [_entry(tmp_path, "test_mod.py", "broad_except_swallow", "<module>")]
+    )
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_prune_removes_stale_entries(tmp_path: Path) -> None:
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(
+        tmp_path,
+        [
+            _entry(tmp_path, "test_x.py", "no_assertion", "test_b"),
+            _entry(tmp_path, "test_gone.py", "no_assertion", "test_b"),
+        ],
+    )
+    proc = _run_ledger(tmp_path, "--prune-ledger", str(ledger))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    import json
+
+    data = json.loads(ledger.read_text())
+    assert [e["function"] for e in data["entries"]] == ["test_b"]
+    assert "removed (fixed)" in proc.stdout
+
+
+def test_prune_refuses_unknown_finding(tmp_path: Path) -> None:
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(tmp_path, [])
+    proc = _run_ledger(tmp_path, "--prune-ledger", str(ledger))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "cannot enroll" in proc.stdout
+    import json
+
+    assert json.loads(ledger.read_text())["entries"] == []
+
+
+def test_prune_refuses_count_increase(tmp_path: Path) -> None:
+    module_two = (
+        "try:\n    a()\nexcept Exception:\n    pass\n"
+        "try:\n    b()\nexcept Exception:\n    pass\n"
+        "def test_ok():\n    assert True\n"
+    )
+    _write(tmp_path, "test_mod2.py", module_two)
+    ledger = _write_ledger(
+        tmp_path, [_entry(tmp_path, "test_mod2.py", "broad_except_swallow", "<module>", 1)]
+    )
+    proc = _run_ledger(tmp_path, "--prune-ledger", str(ledger))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "cannot raise counts" in proc.stdout
+
+
+def test_prune_noop_when_mirroring(tmp_path: Path) -> None:
+    _write(tmp_path, "test_x.py", NO_ASSERT)
+    ledger = _write_ledger(tmp_path, [_entry(tmp_path, "test_x.py", "no_assertion", "test_b")])
+    before = ledger.read_text()
+    proc = _run_ledger(tmp_path, "--prune-ledger", str(ledger))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert ledger.read_text() == before
+    assert "no changes" in proc.stdout
+
+
+def test_ledger_and_prune_are_mutually_exclusive(tmp_path: Path) -> None:
+    ledger = _write_ledger(tmp_path, [])
+    proc = _run_ledger(tmp_path, "--ledger", str(ledger), "--prune-ledger", str(ledger))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "mutually exclusive" in proc.stdout

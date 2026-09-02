@@ -110,7 +110,7 @@
     },
     "python-core": {
       "description": "Required deterministic Python suite on the production runtime",
-      "timeout_seconds": 600,
+      "timeout_seconds": 1200,
       "commands": [
         [
           "{python}",
@@ -121,6 +121,12 @@
           "-n",
           "auto",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "--cov=scripts/shared",
           "--cov=app/auth",
           "--cov=app/remote_ws_handler",
@@ -143,8 +149,8 @@
           "{python}",
           "scripts/scan_test_false_positives.py",
           "tests",
-          "--baseline",
-          ".false-positive-baseline.json"
+          "--ledger",
+          "ci/false-positive-ledger.json"
         ]
       ]
     },
@@ -171,6 +177,12 @@
           "-n",
           "auto",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "-m",
           "not postgres and not performance"
         ]
@@ -203,6 +215,12 @@
           "tests/unit/test_schema_guard.py",
           "-q",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "-m",
           "not performance"
         ]
@@ -277,6 +295,12 @@
           "tests/integration",
           "-q",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "-m",
           "postgres"
         ]

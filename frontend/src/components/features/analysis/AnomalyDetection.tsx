@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useMemo, useRef } from 'react';
-import { cn, createMatcherConfig } from '@/utils';
+import { cn, createMatcherConfig, getQuickRangeDateRange } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -30,6 +30,7 @@ import {
   DatePicker,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
+import { getSeverityLabel } from '@/utils/enumTranslations';
 import {
   useAnomalyDetection,
   useAnomalyTrend,
@@ -99,36 +100,9 @@ export const AnomalyDetection: React.FC = () => {
   const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
+  // Uses getQuickRangeDateRange to ensure exactly N calendar days with proper local date handling
   const dateRange = useMemo(() => {
-    const end = new Date();
-    let start: Date;
-
-    switch (quickRange) {
-      case '7':
-        start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30':
-        start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90':
-        start = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case 'all':
-      default:
-        // Use the actual data range when available; fall back to 365 days.
-        if (dataRange?.min_date && dataRange?.max_date) {
-          start = new Date(dataRange.min_date);
-          end.setTime(new Date(dataRange.max_date).getTime());
-        } else {
-          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
-        }
-        break;
-    }
-
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
+    return getQuickRangeDateRange(quickRange, dataRange ?? undefined);
   }, [quickRange, dataRange]);
 
   const [startDate, setStartDate] = useState(dateRange.start);
@@ -443,7 +417,7 @@ export const AnomalyDetection: React.FC = () => {
                                     : 'info'
                               }
                             >
-                              {anomaly.severity}
+                              {getSeverityLabel(anomaly.severity, language)}
                             </Badge>
                           </div>
                         </li>

@@ -33,7 +33,14 @@ import {
   Skeleton,
   PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatToolName, createMatcherConfig, formatHourRange } from '@/utils';
+import {
+  formatTokens,
+  formatToolName,
+  createMatcherConfig,
+  formatHourRange,
+  getQuickRangeDateRange,
+  getDefaultDateRange,
+} from '@/utils';
 import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 import { SessionStatisticsCard, calculateHealthScore } from './SessionStatisticsCard';
 
@@ -88,14 +95,8 @@ export const TrendAnalysis: React.FC = () => {
 
   // Initial date range for first render (before batchData is available)
   // This is needed to bootstrap the batch analysis request
-  const initialDateRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default 30 days
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
+  // Uses getDefaultDateRange to ensure exactly 30 calendar days with proper local date handling
+  const initialDateRange = useMemo(() => getDefaultDateRange(30), []);
 
   const [startDate, setStartDate] = useState(initialDateRange.start);
   const [endDate, setEndDate] = useState(initialDateRange.end);
@@ -124,39 +125,9 @@ export const TrendAnalysis: React.FC = () => {
   const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
-  // Uses dataRange for 'all' case, fallback to 365 days if dataRange unavailable
+  // Uses getQuickRangeDateRange to ensure exactly N calendar days with proper local date handling
   const dateRange = useMemo(() => {
-    const end = new Date();
-    let start: Date;
-
-    switch (quickRange) {
-      case '7':
-        start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30':
-        start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90':
-        start = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case 'all':
-      default:
-        // Use actual data range from API if available, otherwise fallback to 365 days
-        if (dataRange?.min_date && dataRange?.max_date) {
-          start = new Date(dataRange.min_date);
-          // Use the actual max date from data range
-          end.setTime(new Date(dataRange.max_date).getTime());
-        } else {
-          // Fallback: 365 days ago when data_range is not available or invalid
-          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
-        }
-        break;
-    }
-
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
+    return getQuickRangeDateRange(quickRange, dataRange ?? undefined);
   }, [quickRange, dataRange]);
 
   // Update date range when quick range changes

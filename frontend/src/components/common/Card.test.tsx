@@ -144,6 +144,51 @@ describe('StatCard', () => {
     });
   });
 
+  describe('subtitle', () => {
+    it('should render subtitle', () => {
+      render(<StatCard label="Peak Usage" value="2024-01-15" subtitle="250.40M tokens" />);
+      expect(screen.getByText('250.40M tokens')).toBeInTheDocument();
+    });
+
+    it('should not render subtitle if not provided', () => {
+      render(<StatCard label="Peak Usage" value="2024-01-15" />);
+      expect(screen.queryByText('tokens')).not.toBeInTheDocument();
+    });
+
+    it('should use text-muted for default variant subtitle', () => {
+      render(<StatCard label="Stat" value={100} subtitle="Subtitle text" />);
+      const subtitleElement = screen.getByText('Subtitle text');
+      expect(subtitleElement).toHaveClass('text-muted');
+    });
+
+    it('should use text-white-50 for colored variant subtitle', () => {
+      render(<StatCard label="Stat" value={100} variant="primary" subtitle="Subtitle text" />);
+      const subtitleElement = screen.getByText('Subtitle text');
+      expect(subtitleElement).toHaveClass('text-white-50');
+    });
+
+    it('should use text-white-50 for secondary variant subtitle', () => {
+      render(<StatCard label="Stat" value={100} variant="secondary" subtitle="Subtitle text" />);
+      const subtitleElement = screen.getByText('Subtitle text');
+      expect(subtitleElement).toHaveClass('text-white-50');
+    });
+
+    it('should render ReactNode subtitle', () => {
+      render(
+        <StatCard
+          label="Stat"
+          value={100}
+          subtitle={
+            <span data-testid="custom-subtitle">
+              <strong>250</strong> tokens
+            </span>
+          }
+        />
+      );
+      expect(screen.getByTestId('custom-subtitle')).toBeInTheDocument();
+    });
+  });
+
   describe('trend', () => {
     it('should render positive trend', () => {
       render(<StatCard label="Growth" value={100} trend={{ value: 15, isPositive: true }} />);

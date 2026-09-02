@@ -15,7 +15,7 @@
       "event": "pull_request",
       "contract_paths": [
         ".github/workflows/ci.yml",
-        ".false-positive-baseline.json",
+        "ci/false-positive-ledger.json",
         ".dockerignore",
         ".pre-commit-config.yaml",
         ".test-baseline.json",
@@ -36,6 +36,7 @@
         "schema/schema-postgres.sql",
         "scripts/check_migration_heads.py",
         "scripts/ci.py",
+        "scripts/scan_test_false_positives.py",
         "scripts/hooks/check_schema_sync.sh",
         "scripts/lint/api_security_scanner.py",
         "scripts/lint/bandit_baseline.json",
@@ -57,7 +58,7 @@
       "branch": "main",
       "contract_paths": [
         ".github/workflows/ci.yml",
-        ".false-positive-baseline.json",
+        "ci/false-positive-ledger.json",
         ".dockerignore",
         ".pre-commit-config.yaml",
         ".test-baseline.json",
@@ -78,6 +79,7 @@
         "schema/schema-postgres.sql",
         "scripts/check_migration_heads.py",
         "scripts/ci.py",
+        "scripts/scan_test_false_positives.py",
         "scripts/hooks/check_schema_sync.sh",
         "scripts/lint/api_security_scanner.py",
         "scripts/lint/bandit_baseline.json",
@@ -111,6 +113,7 @@
         "requirements-ci.lock",
         "schema/schema-sqlite.sql",
         "scripts/ci.py",
+        "scripts/scan_test_false_positives.py",
         "scripts/init_db.py",
         "scripts/run_extended_tests.py",
         "tests/conftest.py"
@@ -135,6 +138,7 @@
         "requirements-ci.lock",
         "schema/schema-sqlite.sql",
         "scripts/ci.py",
+        "scripts/scan_test_false_positives.py",
         "scripts/init_db.py",
         "scripts/run_extended_tests.py"
       ]

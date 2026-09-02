@@ -28,8 +28,9 @@
 | `tests/performance/` | 有时间或资源阈值，可能受 runner 噪声影响 | 独立非阻塞 lane |
 
 路由边界测试和并发测试已分别归入 `tests/integration/routes/` 与
-`tests/integration/concurrency/`。`tests/autonomous/` 和 tests 根目录中的
-历史文件继续按 inventory 逐步迁移；不要再新增新的“按功能域”顶层目录或
+`tests/integration/concurrency/`。tests 根层与 autonomous 域的历史存量已
+全部迁毕（#3185），grandfather inventory 随之退役并由 layout policy 钉住
+终态（根层仅 conftest/`__init__`）；不要再新增新的“按功能域”顶层目录或
 tests 根目录测试文件。
 
 **测试数据库隔离（#2869）**：`tests/unit/conftest.py` 的 `_isolated_unit_db`
@@ -88,9 +89,19 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分工（#2868）：
 
 - **3.11（生产运行时）**：`python-core`——全量 `pytest tests/`（含 integration）
-  + 覆盖率，每个非文档改动都跑。
+  + 覆盖率，每个非文档改动都跑。该 suite 的预算同样已因 GitHub runner 方差
+  从 600s 抬至 1200s——同分支健康运行曾 289s↔535s 波动，慢 runner 的长尾
+  会直接撞穿 600s（#3280）。`python-core` 与 `python-min` 的 pytest 命令均
+  带 `--timeout 300 --timeout-method thread --durations 20`：单个测试 hang
+  时在 300s 处 dump 全部线程堆栈并大声失败，而不是烧光整个 suite 预算后
+  只留一句不可诊断的 "Command exceeded"；`--durations` 让预算余量的收缩
+  在日志里先于超时可见。
 - **false-positive-scan**：测试代码假阳性扫描（Issue #2189，Scope #6），
-  每个非文档改动都跑，独立于 `python-core` 以避免超时。
+  每个非文档改动都跑（`ci.py select_pr_suites` 默认集 + `PR Gate` 消费，#3186
+  Phase A），独立于 `python-core` 以避免超时。已知债务以**精确身份 ledger**
+  （`ci/false-positive-ledger.json`：pattern + 文件 + 类限定函数名）表达——
+  新增/置换 finding 即红；修复只允许**收缩**（`--prune-ledger` 只删不增），
+  且规模由契约测试钉死（只减不增）。旧的按计数 baseline 已退役。
 - **3.10（最低支持版本）**：`python-min`——`compileall` + 全量 `pytest tests/unit/`，
   每个非文档改动都跑。版本特有的回归几乎总先在最老解释器上暴露（例如 3.11 之前
   `datetime.fromisoformat` 不接受 `Z` 后缀），旧矩阵只在 3.10 跑 7 文件 smoke，使
@@ -99,7 +110,15 @@ GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分�
   预算已因 GitHub runner 方差从 600s 抬至 1200s——同 commit 曾 183s↔652s 波动（#3240）
   ——但直接在较慢的 3.10 上跑全量 `tests/` 仍会拉长墙钟并放大 flake）。
 - **3.12、3.14（前向兼容）**：`compatibility-smoke`——`compileall` + 少量关键单元
-  文件，按依赖变更选择。
+  文件，按依赖变更选择。与 `postgres` lane 一样带 `--timeout 300
+  --timeout-method thread --durations 20`（#3282）：hang 防护与慢测试可见性
+  不再只属于 unit lane；`performance` lane 有意**不带** per-test timeout——
+  墙钟基准慢是设计意图。另有一个非致命的**预算侵蚀警告**（#3282）：任何
+  suite 成功结束时若消耗超过其预算的 75%，`scripts/ci.py` 会在日志打印
+  `::warning::...completed in ...s, ...% of its ...s budget`（GitHub Actions
+  上同时成为 Checks UI 注解）并（当 nightly metrics 流启用时）记录
+  `suite_budget_warning` 事件——这是 #3281 退役 600s 硬绊线后恢复的渐进
+  慢化信号，让预算余量的收缩在变成间歇超时之前被看见。
 
 `python-min` 与 `python-core` 都对每个代码改动生效，故 `app/**` 改动必在最低支持
 版本真跑全量单元。Python 3.13 仍是声明支持版本但不在 PR 矩阵中。定时工作流在

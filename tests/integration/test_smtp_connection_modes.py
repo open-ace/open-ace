@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression]
+
 
 class TestSMTPConnectionModes(unittest.TestCase):
     """Test SMTP connection modes for different ports."""

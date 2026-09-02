@@ -162,20 +162,52 @@ export interface BatchAnalysisResponse {
   data_range?: DataRange;
 }
 
+// Quality metrics for forecast
+export interface QualityMetrics {
+  backtest_wape: number | null; // Base WAPE from backtest
+  horizon_adjusted_wape: number | null; // WAPE adjusted for forecast horizon
+  sample_days: number; // Number of historical days used
+  window_days: number; // Moving average window (7)
+  missing_days: number; // Missing days in data
+  coefficient_of_variation: number; // Data volatility measure
+  outlier_count?: number; // Number of outlier days
+  outlier_ratio?: number; // Ratio of outlier days
+}
+
 // Forecast response type
 export interface ForecastAvailableTrue {
   forecast_available: true;
   method: 'moving_average';
   period_days: number;
+  horizon_days: number; // Forecast horizon (same as period_days)
   daily_forecast: { tokens: number; requests: number };
   total_forecast: { tokens: number; requests: number };
   forecast_dates: string[];
-  confidence: number; // Decimal, e.g., 0.7 for 70%
+  // Quality metrics (Issue #3248)
+  quality_level: 'quality' | 'satisfactory' | 'fair' | 'poor' | 'unavailable';
+  quality_description: string;
+  quality_metrics: QualityMetrics;
+  // Backward compatibility (deprecated)
+  confidence: number | null; // Decimal, e.g., 0.7 for 70%, or null if unavailable
+  _confidence_mapping?: {
+    quality: 0.9;
+    satisfactory: 0.7;
+    fair: 0.5;
+    poor: 0.3;
+    unavailable: null;
+  };
+  _deprecated_note?: string;
 }
 
 export interface ForecastAvailableFalse {
   forecast_available: false;
   reason: string;
+  quality_level: 'unavailable';
+  quality_description: string;
+  quality_metrics?: Partial<QualityMetrics>;
+  horizon_days: number;
+  confidence: null;
+  _deprecated_note?: string;
 }
 
 export type ForecastResponse = ForecastAvailableTrue | ForecastAvailableFalse;

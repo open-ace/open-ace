@@ -257,6 +257,9 @@ class AnalysisService:
         for d in daily_data:
             date = d.get("date")
             if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
                 daily_totals[date] = {
                     "date": date,
                     "tokens": d.get("total_tokens", 0) or 0,
@@ -271,15 +274,21 @@ class AnalysisService:
         daily_hourly_usage = {"daily": list(daily_totals.values()), "hourly": hourly_result}
 
         # Peak usage - use pre-aggregated data
-        daily_totals_for_peak = {
-            d.get("date"): d.get("total_tokens", 0) or 0 for d in daily_data if d.get("date")
-        }
+        daily_totals_for_peak = {}
+        for d in daily_data:
+            date = d.get("date")
+            if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
+                daily_totals_for_peak[date] = d.get("total_tokens", 0) or 0
 
         sorted_days = (
             sorted(daily_totals_for_peak.items(), key=lambda x: x[1], reverse=True)
             if daily_totals_for_peak
             else []
         )
+        # peak_days already has normalized dates from daily_totals_for_peak keys
         peak_days = [{"date": d, "tokens": t} for d, t in sorted_days[:5]]
 
         hourly_totals: dict[int, int] = {}
@@ -1306,15 +1315,34 @@ class AnalysisService:
 
                 # Usage drop: has some activity but significantly below average
                 elif token < avg_tokens * 0.5 and avg_tokens > 0:
+                    deviation_pct = round(abs(token - avg_tokens) / avg_tokens * 100, 1)
+
+                    # Calculate severity based on z-score (symmetric with spike)
+                    z_score_abs = abs(std_deviation)
+                    z_based_severity = (
+                        "high" if z_score_abs > 3 else "medium" if z_score_abs > 2 else "low"
+                    )
+
+                    # Calculate severity based on drop percentage
+                    pct_based_severity = (
+                        "high"
+                        if deviation_pct >= 90.0
+                        else "medium" if deviation_pct >= 70.0 else "low"
+                    )
+
+                    # Take the more severe level
+                    severity_map = {"low": 0, "medium": 1, "high": 2}
+                    drop_severity = max(
+                        z_based_severity, pct_based_severity, key=lambda s: severity_map[s]
+                    )
+
                     anomaly = {
                         "date": date,
                         "tokens": token,
                         "expected": round(avg_tokens),
-                        "deviation": round(
-                            abs(token - avg_tokens) / avg_tokens * 100, 1
-                        ),  # Unified: percentage
+                        "deviation": deviation_pct,  # Unified: percentage
                         "type": "drop",
-                        "severity": "low",
+                        "severity": drop_severity,
                     }
                     top_contributor = _build_top_contributor(date, token)
                     if top_contributor:

@@ -7,6 +7,7 @@
  * - Day selector (7/14/30 days)
  * - Method explanation card
  * - Issue #3244: Display history window info and quality status
+ * - Quality metrics display (replaces deprecated confidence)
  *
  * Error handling priority:
  * 1. If forecast API fails: Show Error component
@@ -19,15 +20,34 @@ import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Card, StatCard, Error, EmptyState, LineChart, Loading } from '@/components/common';
-import { formatTokens } from '@/utils';
+import { formatTokens, getDefaultDateRange } from '@/utils';
 import { useUsageForecast, useDailyHourlyUsage } from '@/hooks';
 
 /**
- * Convert confidence decimal to percentage
- * e.g., 0.7 -> 70
+ * Quality level configuration
  */
-function confidenceToPercentage(confidence: number): number {
-  return Math.round(confidence * 100);
+type QualityLevel = 'quality' | 'satisfactory' | 'fair' | 'poor' | 'unavailable';
+
+interface QualityConfig {
+  label: string;
+  variant: 'success' | 'primary' | 'warning' | 'danger' | 'secondary';
+  color: string;
+}
+
+const QUALITY_CONFIG: Record<QualityLevel, QualityConfig> = {
+  quality: { label: 'qualityLevelQuality', variant: 'success', color: '#198754' },
+  satisfactory: { label: 'qualityLevelSatisfactory', variant: 'primary', color: '#0d6efd' },
+  fair: { label: 'qualityLevelFair', variant: 'warning', color: '#ffc107' },
+  poor: { label: 'qualityLevelPoor', variant: 'danger', color: '#dc3545' },
+  unavailable: { label: 'qualityLevelUnavailable', variant: 'secondary', color: '#6c757d' },
+};
+
+/**
+ * Format WAPE value as percentage string
+ */
+function formatWape(wape: number | null | undefined): string {
+  if (wape === null || wape === undefined) return '--';
+  return `${Math.round(wape * 100)}%`;
 }
 
 export const UsageForecast: React.FC = () => {
@@ -45,14 +65,8 @@ export const UsageForecast: React.FC = () => {
   } = useUsageForecast(forecastDays);
 
   // Fetch historical data (past 7 days, matching backend moving average window)
-  const historicalDateRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
+  // Use getDefaultDateRange to ensure exactly 7 calendar days with proper local date handling
+  const historicalDateRange = useMemo(() => getDefaultDateRange(7), []);
 
   const {
     data: historicalData,
@@ -68,6 +82,10 @@ export const UsageForecast: React.FC = () => {
 
   // Issue #3244: Check quality status
   const isDegraded = forecastData?.quality === 'degraded';
+
+  // Get quality configuration
+  const qualityLevel = (forecastData?.quality_level as QualityLevel) || 'unavailable';
+  const qualityConfig = QUALITY_CONFIG[qualityLevel] || QUALITY_CONFIG.unavailable;
 
   // Chart colors
   const historicalColor = 'rgba(13, 110, 253, 1)';
@@ -144,6 +162,12 @@ export const UsageForecast: React.FC = () => {
     );
   }
 
+  // Get quality metrics
+  const qualityMetrics = forecastData.quality_metrics;
+  const backtestWape = qualityMetrics?.backtest_wape;
+  const adjustedWape = qualityMetrics?.horizon_adjusted_wape;
+  const showAdjustedWape = forecastDays > 7 && adjustedWape !== null && adjustedWape !== undefined;
+
   // Forecast available, render content
   return (
     <div className="usage-forecast">
@@ -215,14 +239,60 @@ export const UsageForecast: React.FC = () => {
         </div>
         <div className="col-md-3">
           <StatCard
-            label={t('confidenceScore', language)}
-            value={`${confidenceToPercentage(forecastData.confidence)}%`}
+            label={t('forecastQuality', language)}
+            value={t(qualityConfig.label, language)}
             icon={<i className="bi bi-check-circle fs-4" />}
-            variant="warning"
-            helpTooltip={t('forecastExplanation', language)}
+            variant={qualityConfig.variant}
+            helpTooltip={forecastData.quality_description}
           />
         </div>
       </div>
+
+      {/* Quality Details Card */}
+      {qualityMetrics && (
+        <div className="row mb-4">
+          <div className="col-12">
+            <Card title={t('qualityMetrics', language)}>
+              <div className="row">
+                <div className="col-md-4">
+                  <div className="d-flex align-items-center mb-2">
+                    <i className="bi bi-activity me-2 text-primary" />
+                    <span className="text-muted">{t('backtestError', language)}:</span>
+                  </div>
+                  <span className="fs-5 fw-bold">{formatWape(backtestWape)}</span>
+                </div>
+                {showAdjustedWape && (
+                  <div className="col-md-4">
+                    <div className="d-flex align-items-center mb-2">
+                      <i className="bi bi-graph-up-arrow me-2 text-warning" />
+                      <span className="text-muted">{t('adjustedError', language)}:</span>
+                    </div>
+                    <span className="fs-5 fw-bold">{formatWape(adjustedWape)}</span>
+                    <small className="text-muted d-block">
+                      {t('forDays', language).replace('{days}', String(forecastDays))}
+                    </small>
+                  </div>
+                )}
+                <div className="col-md-4">
+                  <div className="d-flex align-items-center mb-2">
+                    <i className="bi bi-calendar3 me-2 text-info" />
+                    <span className="text-muted">{t('sampleDays', language)}:</span>
+                  </div>
+                  <span className="fs-5 fw-bold">{qualityMetrics.sample_days}</span>
+                  {qualityMetrics.missing_days > 0 && (
+                    <small className="text-muted d-block">
+                      {t('missingDaysCount', language).replace(
+                        '{count}',
+                        String(qualityMetrics.missing_days)
+                      )}
+                    </small>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {/* Trend Chart */}
       <div className="row mb-4">

@@ -437,3 +437,217 @@ class TestWebuiSessionFilter:
         assert resp.status_code == 200
         # Issue #3025: No session lookup for webui:* tokens without X-Session-Id
         mock_sm.get_active_sessions.assert_not_called()
+
+
+# ===================================================================
+# F. Issue #3227: WebUI aggregate session alert
+# ===================================================================
+
+
+class TestWebuiAggregateSessionAlert:
+    """Test alert creation when webui aggregate session is used.
+
+    Issue #3227: When upstream webui doesn't send X-Session-Id header,
+    an alert should be created to notify administrators.
+    """
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
+    @patch("app.modules.governance.alert_notifier.create_system_alert")
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_SESSION_MGR_PATH)
+    @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
+    def test_alert_created_for_webui_aggregate(
+        self,
+        mock_get_proxy,
+        mock_session_mgr,
+        mock_quota_cls,
+        mock_http,
+        mock_create_alert,
+        mock_gateway,
+        workspace_app,
+    ):
+        """Using webui aggregate session should create a system alert."""
+        import app.modules.workspace.llm_proxy_handler as handler
+
+        # Reset the alert cache before test
+        with handler._webui_aggregate_alert_cache_lock:
+            handler._webui_aggregate_alert_cache.clear()
+
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.get_tool_model_pool.return_value = {
+            "models": [{"id": "qwen3"}],
+            "model_key_ids": {"qwen3": [42]},
+            "candidate_keys": [{"key_id": 42}],
+        }
+        mock_proxy.resolve_api_key_from_key_ids.return_value = (
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
+            None,
+            None,
+        )
+        mock_get_proxy.return_value = mock_proxy
+
+        mock_sm = MagicMock()
+        mock_session_mgr.return_value = mock_sm
+
+        mock_quota_cls.return_value = _make_quota_ok()
+        mock_http.return_value = _mock_upstream_response()
+
+        client = workspace_app.test_client()
+        resp = client.post(
+            "/api/workspace/llm-proxy",
+            json={"model": "qwen3", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert resp.status_code == 200
+        # Issue #3227: Alert should be created
+        mock_create_alert.assert_called_once()
+        call_kwargs = mock_create_alert.call_args[1]
+        assert call_kwargs["title"] == "WebUI Aggregate Session Warning"
+        assert call_kwargs["severity"] == "warning"
+        assert call_kwargs["tool_name"] == "llm-proxy"
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
+    @patch("app.modules.governance.alert_notifier.create_system_alert")
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_SESSION_MGR_PATH)
+    @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
+    def test_alert_deduplication(
+        self,
+        mock_get_proxy,
+        mock_session_mgr,
+        mock_quota_cls,
+        mock_http,
+        mock_create_alert,
+        mock_gateway,
+        workspace_app,
+    ):
+        """Alert should not be created twice within the same hour for same tenant."""
+        import app.modules.workspace.llm_proxy_handler as handler
+
+        # Reset the alert cache before test
+        with handler._webui_aggregate_alert_cache_lock:
+            handler._webui_aggregate_alert_cache.clear()
+
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.get_tool_model_pool.return_value = {
+            "models": [{"id": "qwen3"}],
+            "model_key_ids": {"qwen3": [42]},
+            "candidate_keys": [{"key_id": 42}],
+        }
+        mock_proxy.resolve_api_key_from_key_ids.return_value = (
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
+            None,
+            None,
+        )
+        mock_get_proxy.return_value = mock_proxy
+
+        mock_sm = MagicMock()
+        mock_session_mgr.return_value = mock_sm
+
+        mock_quota_cls.return_value = _make_quota_ok()
+        mock_http.return_value = _mock_upstream_response()
+
+        client = workspace_app.test_client()
+
+        # First request should create alert
+        resp1 = client.post(
+            "/api/workspace/llm-proxy",
+            json={"model": "qwen3", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert resp1.status_code == 200
+        assert mock_create_alert.call_count == 1
+
+        # Second request should NOT create alert (deduplication)
+        resp2 = client.post(
+            "/api/workspace/llm-proxy",
+            json={"model": "qwen3", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert resp2.status_code == 200
+        # Call count should still be 1 (no new alert)
+        assert mock_create_alert.call_count == 1
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
+    @patch("app.modules.governance.alert_notifier.create_system_alert")
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_SESSION_MGR_PATH)
+    @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
+    def test_no_alert_with_x_session_id_header(
+        self,
+        mock_get_proxy,
+        mock_session_mgr,
+        mock_quota_cls,
+        mock_http,
+        mock_create_alert,
+        mock_gateway,
+        workspace_app,
+    ):
+        """No alert should be created when X-Session-Id header is present."""
+        import app.modules.workspace.llm_proxy_handler as handler
+
+        # Reset the alert cache before test
+        with handler._webui_aggregate_alert_cache_lock:
+            handler._webui_aggregate_alert_cache.clear()
+
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.get_tool_model_pool.return_value = {
+            "models": [{"id": "qwen3"}],
+            "model_key_ids": {"qwen3": [42]},
+            "candidate_keys": [{"key_id": 42}],
+        }
+        mock_proxy.resolve_api_key_from_key_ids.return_value = (
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
+            None,
+            None,
+        )
+        mock_get_proxy.return_value = mock_proxy
+
+        mock_sm = MagicMock()
+        mock_session_mgr.return_value = mock_sm
+        # Mock session for ownership validation
+        mock_session = MagicMock()
+        mock_session.session_id = "header-session-456"
+        mock_session.user_id = 1
+        mock_session.tenant_id = 1
+        mock_sm.get_session.return_value = mock_session
+
+        mock_quota_cls.return_value = _make_quota_ok()
+        mock_http.return_value = _mock_upstream_response()
+
+        client = workspace_app.test_client()
+        resp = client.post(
+            "/api/workspace/llm-proxy",
+            json={"model": "qwen3", "messages": [{"role": "user", "content": "hi"}]},
+            headers={
+                "Authorization": "Bearer tok",
+                "X-Session-Id": "header-session-456",
+            },
+        )
+        assert resp.status_code == 200
+        # Issue #3227: No alert should be created when X-Session-Id is present
+        mock_create_alert.assert_not_called()

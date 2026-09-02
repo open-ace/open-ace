@@ -1,5 +1,6 @@
 """Unit tests for UsageAnalytics module."""
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -71,6 +72,92 @@ class TestUsageAnalytics:
         assert result["unique_hosts"] == 1
         assert result["peak_day"] == "2026-01-01"
         assert result["peak_tokens"] == 1000
+
+    def test_calculate_summary_normalizes_date_object(self):
+        """PostgreSQL returns datetime.date object; should normalize to YYYY-MM-DD string."""
+        from datetime import date
+
+        analytics, _, _ = self._make_analytics()
+        data = [
+            {
+                "date": date(2026, 1, 1),  # PostgreSQL returns datetime.date
+                "tool_name": "qwen",
+                "host_name": "h1",
+                "tokens": 1000,
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "requests": 10,
+            },
+            {
+                "date": date(2026, 1, 2),
+                "tool_name": "claude",
+                "host_name": "h1",
+                "tokens": 500,
+                "input_tokens": 400,
+                "output_tokens": 100,
+                "requests": 5,
+            },
+        ]
+        result = analytics._calculate_summary(data)
+        # peak_day should be string, not datetime.date object
+        assert result["peak_day"] == "2026-01-01"
+        assert isinstance(result["peak_day"], str)
+
+    def test_calculate_summary_with_missing_days(self):
+        """Daily averages should use full period, not just active days.
+
+        Issue #3256: When a 31-day period has only 19 active days,
+        the average should be total / 31, not total / 19.
+        """
+        analytics, _, _ = self._make_analytics()
+        # 19 days of data in a 31-day period (2026-01-01 to 2026-01-31)
+        data = [
+            {
+                "date": f"2026-01-{i:02d}",
+                "tool_name": "qwen",
+                "host_name": "h1",
+                "tokens": 1000,
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "requests": 10,
+            }
+            for i in range(1, 20)  # Days 1-19 (19 active days)
+        ]
+        total_tokens = 19 * 1000  # 19000 tokens total
+
+        # Without date parameters: should use active days (19)
+        result_no_dates = analytics._calculate_summary(data)
+        assert result_no_dates["daily_average_tokens"] == total_tokens / 19
+
+        # With date parameters: should use full period (31 days)
+        result_with_dates = analytics._calculate_summary(
+            data, start_date="2026-01-01", end_date="2026-01-31"
+        )
+        assert result_with_dates["daily_average_tokens"] == total_tokens / 31
+
+    def test_calculate_summary_single_day_period(self):
+        """Single day period should give same result regardless of method."""
+        analytics, _, _ = self._make_analytics()
+        data = [
+            {
+                "date": "2026-01-15",
+                "tool_name": "qwen",
+                "host_name": "h1",
+                "tokens": 1000,
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "requests": 10,
+            }
+        ]
+
+        # Both methods should give same result for single day
+        result_no_dates = analytics._calculate_summary(data)
+        result_with_dates = analytics._calculate_summary(
+            data, start_date="2026-01-15", end_date="2026-01-15"
+        )
+
+        assert result_no_dates["daily_average_tokens"] == 1000
+        assert result_with_dates["daily_average_tokens"] == 1000
 
     def test_generate_report_no_data(self):
         analytics, mock_db, _ = self._make_analytics()
@@ -149,6 +236,24 @@ class TestUsageAnalytics:
         assert result["method"] == "moving_average"
         assert "daily_forecast" in result
         assert "total_forecast" in result
+
+    def test_get_forecast_invalid_days_negative(self):
+        """Test get_forecast rejects negative days."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=-1)
+
+    def test_get_forecast_invalid_days_zero(self):
+        """Test get_forecast rejects zero days."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=0)
+
+    def test_get_forecast_invalid_days_exceeds_max(self):
+        """Test get_forecast rejects days > 90."""
+        analytics, _, _ = self._make_analytics()
+        with pytest.raises(ValueError, match="days must be an integer between 1 and 90"):
+            analytics.get_forecast(days=91)
 
     def test_get_efficiency_metrics_no_data(self):
         analytics, mock_db, _ = self._make_analytics()

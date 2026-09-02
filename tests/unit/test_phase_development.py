@@ -25,6 +25,8 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import development as development_phase
@@ -83,6 +85,9 @@ def _workflow(**overrides) -> dict:
 
 
 # ── registration ─────────────────────────────────────────────────────────
+
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
 
 
 def test_development_handle_is_registered():

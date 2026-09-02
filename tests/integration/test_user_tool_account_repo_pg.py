@@ -28,9 +28,11 @@ def _insert_user(pg_db, username="testuser", email=None, system_account=None, te
 
 def _insert_tenant(pg_db, name="test_tenant"):
     """Insert a tenant and return the id."""
+    # slug is NOT NULL in both schemas; the helper never supplied it, so this
+    # seeding failed on the lane's first real run (#3287 triage group B).
     row = pg_db.fetch_one(
-        "INSERT INTO tenants (name) VALUES (%s) RETURNING id",
-        (name,),
+        "INSERT INTO tenants (name, slug) VALUES (%s, %s) RETURNING id",
+        (name, name.replace("_", "-")),
         commit=True,
     )
     return row["id"]
@@ -39,9 +41,12 @@ def _insert_tenant(pg_db, name="test_tenant"):
 def _insert_daily_message(pg_db, sender_name, date="2026-01-01", message_source=None):
     """Insert a daily_messages row for testing unmapped accounts."""
     pg_db.fetch_one(
-        "INSERT INTO daily_messages (date, sender_name, message_source, message_count) "
-        "VALUES (%s, %s, %s, 1)",
-        (date, sender_name, message_source),
+        # daily_messages is message-level (no message_count aggregate column);
+        # date/tool_name/message_id/role are NOT NULL without defaults —
+        # supply the required minimum (#3287 triage group B fixture drift).
+        "INSERT INTO daily_messages (date, tool_name, message_id, role, sender_name, message_source) "
+        "VALUES (%s, 'qwen', %s, 'user', %s, %s) RETURNING id",
+        (date, f"msg-{sender_name}-{date}", sender_name, message_source),
         commit=True,
     )
 
@@ -206,25 +211,29 @@ class TestGetUnmappedToolAccountsTenantFilter:
         assert unmapped[0]["sender_name"] == "fallback_user-host-qwen"
 
     def test_cross_tenant_duplicate_names(self, pg_db):
-        """Different tenants can have users with same username.
+        """Tenant isolation holds for lookalike identities across tenants.
 
-        Issue #2760: Tenant isolation ensures each tenant only sees
-        their own unmapped accounts, even with duplicate usernames.
+        Issue #2760: each tenant only sees its own unmapped accounts. The
+        original "duplicate usernames" premise violated the global
+        users_username_key unique constraint (see fixture note below).
         """
         repo = UserToolAccountRepository(db=pg_db)
         tenant_a = _insert_tenant(pg_db, name="tenant_d")
         tenant_b = _insert_tenant(pg_db, name="tenant_e")
 
-        # Both tenants have user with same username
+        # usernames are GLOBALLY unique (users_username_key), so the
+        # duplicate-identity scenario uses distinct usernames with the same
+        # system_account PREFIX SHAPE per tenant (#3287 triage: the original
+        # premise violated the schema and could never have inserted).
         _insert_user(
             pg_db,
-            username="shared_user",
+            username="shared_user_a",
             system_account="shared-acct-a",
             tenant_id=tenant_a,
         )
         _insert_user(
             pg_db,
-            username="shared_user",
+            username="shared_user_b",
             system_account="shared-acct-b",
             tenant_id=tenant_b,
         )

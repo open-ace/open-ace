@@ -146,6 +146,8 @@ def test_delete_sandbox_treats_404_as_success():
     # destroy() must be idempotent per the #2022 contract.
     session = _Session([_Response(404, {"code": "NOT_FOUND", "message": "gone"})])
     _api(session).delete_sandbox("sb-1")
+    # The 404 was consumed by exactly one DELETE: no retry, no other traffic.
+    assert [c["method"] for c in session.calls] == ["DELETE"]
 
 
 def test_get_sandbox_returns_none_on_404():
@@ -666,11 +668,7 @@ def test_a_truncated_tail_is_dropped_in_the_BARE_shape_too():
 
 def test_corruption_mid_stream_is_still_surfaced_in_the_bare_shape():
     """Only the FINAL event may be dropped — a lost middle event is a real signal."""
-    body = (
-        b'{"type":"stdout","text":"a"}\n\n'
-        b"{TRUNCATED-MIDDLE\n\n"
-        b'{"type":"execution_complete"}\n\n'
-    )
+    body = b'{"type":"stdout","text":"a"}\n\n{TRUNCATED-MIDDLE\n\n{"type":"execution_complete"}\n\n'
     types = [e["type"] for e in iter_sse_events(_Response(200, content=body))]
     assert types == ["stdout", "error", "execution_complete"], types
 

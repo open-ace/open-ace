@@ -108,15 +108,33 @@ class TestIssueRepoFallback:
         resolved = mock_gh.get_repo_name()
         assert not resolved
 
-    def test_fallback_raises_githubopserror(self):
-        """When gh.get_repo_name() raises, the exception is caught silently."""
-        mock_gh = MagicMock()
-        mock_gh.get_repo_name.side_effect = GitHubOpsError("no remote")
-        # In the actual code, this is caught with except GitHubOpsError: pass
-        try:
-            mock_gh.get_repo_name()
-        except GitHubOpsError:
-            pass  # This is the expected path
+    def test_owner_repo_resolution_returns_none_without_remote(self, tmp_path):
+        """No-origin resolution: GitHubOps catches the REAL git failure.
+
+        On a git-init'd repo without an origin remote, get_repo_url() raises
+        GitHubOpsError from the real `git remote get-url origin` failure;
+        _resolve_owner_repo() catches it and returns None (the brand-new
+        project pre-create_repo path), caching the negative result so the
+        second call does not re-run git. Previously this test replayed a
+        mock against itself (#3186 batch 5).
+        """
+        import subprocess as _sp
+
+        from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+        repo = tmp_path / "repo-no-origin"
+        repo.mkdir()
+        _sp.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+        ops = GitHubOps(str(repo))
+
+        with pytest.raises(GitHubOpsError):
+            ops.get_repo_url()
+
+        assert ops._owner_repo is None and ops._owner_repo_resolved is False
+        assert ops._resolve_owner_repo() is None
+        assert ops._owner_repo_resolved is True
+        # Cached negative resolution: no second git invocation needed.
+        assert ops._resolve_owner_repo() is None
 
 
 # ── Error guard tests ──────────────────────────────────────────────
@@ -244,9 +262,9 @@ class TestPreparationIssueCreation:
         # Verify create_issue was called with the correct repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "blueberry521/123", (
-            f"Expected repo='blueberry521/123', got " f"repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "blueberry521/123"
+        ), f"Expected repo='blueberry521/123', got repo={call_kwargs.kwargs.get('repo')!r}"
         assert result.next_phase == "planning"
 
     def test_create_issue_with_ghes_url(self, tmp_path):
@@ -321,10 +339,9 @@ class TestPreparationIssueCreation:
         # Verify create_issue was called with the correct GHES repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "owner/my-ghes-project", (
-            f"Expected repo='owner/my-ghes-project', got "
-            f"repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "owner/my-ghes-project"
+        ), f"Expected repo='owner/my-ghes-project', got repo={call_kwargs.kwargs.get('repo')!r}"
 
     def test_error_when_repo_url_empty_for_new_project(self, tmp_path):
         """When repo_url is empty and is_new_project=True, an error is raised."""
@@ -524,10 +541,9 @@ class TestIssue3199ExistingProject:
         # Verify create_issue was called with the correct repo
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
-        assert call_kwargs.kwargs.get("repo") == "user/existing-project", (
-            f"Expected repo='user/existing-project', got "
-            f"repo={call_kwargs.kwargs.get('repo')!r}"
-        )
+        assert (
+            call_kwargs.kwargs.get("repo") == "user/existing-project"
+        ), f"Expected repo='user/existing-project', got repo={call_kwargs.kwargs.get('repo')!r}"
         assert result.next_phase == "planning"
 
     def test_existing_project_no_remote_raises_clear_error(self, tmp_path):

@@ -17,6 +17,7 @@ deterministic (see that test's comment for the full story).
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -76,8 +77,17 @@ def test_workspace_config_from_dict():
     print("✓ Config created from dict correctly")
 
 
-def test_webui_instance():
-    """Test WebUIInstance dataclass."""
+def test_webui_instance(monkeypatch):
+    """Test WebUIInstance dataclass.
+
+    is_alive() must be verified deterministically (#3305): it probes the pid
+    with os.kill(pid, 0), and the hardcoded pid 12345 is genuinely occupied
+    on some busy CI runners, which made this test fail there (the probe
+    succeeds, the HTTP health check fails but stays under the 10-failure
+    death budget, and is_alive() returns True). Stub the signal so each
+    branch of is_alive() is exercised on demand instead of hoping the
+    ambient pid table cooperates.
+    """
     print("\n=== Test: WebUIInstance ===")
 
     instance = WebUIInstance(
@@ -96,8 +106,24 @@ def test_webui_instance():
     assert instance.token == "test-token"
     assert instance.url == "http://localhost:9001"
 
-    # Test is_alive with non-existent process
+    # Dead branch: the signal says no such process.
+    def _no_such_process(pid, sig):
+        raise ProcessLookupError(f"simulated dead pid {pid}")
+
+    monkeypatch.setattr(os, "kill", _no_such_process)
     assert instance.is_alive() is False
+
+    # Alive branch: the pid is signalable and the health cache is fresh, so
+    # is_alive() returns True from the TTL cache without any HTTP traffic.
+    # The failure-count guard pins that: any HTTP probe (success or failure)
+    # mutates the counter, so it staying 0 proves the cache path was taken.
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    instance._last_health_check = time.time()
+    assert instance.is_alive() is True
+    assert instance._consecutive_health_failures == 0
+
+    # No pid at all.
+    assert WebUIInstance(user_id=2, system_account="other", port=9002).is_alive() is False
 
     print("✓ WebUIInstance works correctly")
 

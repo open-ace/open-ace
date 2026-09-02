@@ -35,6 +35,14 @@ from app.utils.security_mode import (
     reset_security_mode_cache,
 )
 
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.security,
+    pytest.mark.issue(1893),
+    pytest.mark.issue(2185),
+    pytest.mark.issue(2331),
+]
+
 
 class TestDetectSecurityMode:
     """Tests for security mode detection."""

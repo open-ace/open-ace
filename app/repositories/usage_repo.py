@@ -2139,16 +2139,13 @@ class UsageRepository:
             pass
 
         # Fallback: agent_sessions.total_tokens with created_at date attribution.
-        # Uses session_messages subquery for requests (same as aggregator) for consistency.
+        # Uses request_count for requests (model turn count, not message rows).
+        # Issue #3267: Use request_count for accurate model turn counting.
         session_row = self.db.fetch_one(
             """
             SELECT
                 COALESCE(SUM(as2.total_tokens), 0) as tokens,
-                COALESCE(SUM((
-                    SELECT COUNT(*) FROM session_messages sm
-                    WHERE sm.session_id = as2.session_id
-                      AND sm.role = 'assistant'
-                )), 0) as requests
+                COALESCE(SUM(as2.request_count), 0) as requests
             FROM agent_sessions as2
             WHERE as2.user_id = ?
               AND as2.workspace_type IN ('local', 'remote', 'terminal')

@@ -30,6 +30,8 @@ import pytest
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1910)]
+
 MAIN_REPO = "/srv/open-ace"
 WORKTREE = "/srv/open-ace/.worktrees/wf-drift"
 
