@@ -1357,3 +1357,76 @@ def test_an_unreadable_workflow_row_still_exports(api, tmp_path, monkeypatch):
         "an unreadable workflow row disabled the carry, turning a database "
         "blip into a silent cold start"
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [("cancelled", "stopped from the web pod"), (None, "deleted from the web pod")],
+)
+def test_the_route_can_win_the_window_after_the_check(api, tmp_path, monkeypatch, status, label):
+    """The TOCTOU window the pre-export check cannot close on its own.
+
+    Reading the row before exporting is check-then-act: the scheduler sees
+    `developing`, and the web process then writes the terminal status and
+    purges the shared directory BEFORE the `put` lands. The put re-creates the
+    directory the route had just removed, and since the reaper runs only at
+    scheduler startup and only by age, a cancelled or deleted workflow keeps a
+    transcript nothing will ever reclaim.
+
+    The route side is fired from inside the check itself, immediately after it
+    decides `False` — which is exactly the interleaving, made deterministic
+    rather than raced.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    rows = {"wf-1": {"workflow_id": "wf-1", "status": "developing"}}
+    _patch_workflow_rows(monkeypatch, rows)
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"NEW TURN\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    real_check = AutonomousAgentRunner._workflow_no_longer_wants_state
+    fired: list[str] = []
+
+    def _check_then_route_acts(workflow_id, session):
+        verdict = real_check(workflow_id, session)
+        # The FIRST check is the vulnerable one: the route slips in right after
+        # it answers "still live". Later calls (the post-export convergence
+        # re-read) must see the terminal row this leaves behind.
+        if not verdict and not fired:
+            fired.append("route")
+            _route_side(store, "wf-1", status, rows)
+        return verdict
+
+    monkeypatch.setattr(
+        AutonomousAgentRunner,
+        "_workflow_no_longer_wants_state",
+        staticmethod(_check_then_route_acts),
+    )
+
+    _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        uses_sidebar=True,
+    )
+
+    assert fired, "the fixture never reproduced the window"
+    assert store.get("wf-1", "s-1") is None, (
+        f"a turn {label} in the window after the check left its transcript in "
+        "the purged slot, so the workflow keeps history nothing will reclaim"
+    )
+    assert not store.path_for(
+        "wf-1", "s-1"
+    ).parent.exists(), "the workflow directory was re-created after the route purged it"

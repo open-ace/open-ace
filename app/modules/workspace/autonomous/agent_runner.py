@@ -3336,6 +3336,27 @@ class AutonomousAgentRunner:
                 logger.warning("Agent state export failed for %s: %s", (captured or "?")[:8], exc)
                 self._agent_state_store.discard(workflow_id, session_id)
 
+            # CONVERGENCE, not a second guard. The check above is
+            # check-then-act: the route can write the terminal status and purge
+            # in the window between it returning False and the `put` landing,
+            # and the put would then re-create the directory the route had just
+            # removed. Re-reading afterwards closes every ordering:
+            #
+            #   route acts before this re-read -> we see terminal and purge, so
+            #     ours is the last write;
+            #   route acts after this re-read  -> its own purge runs after our
+            #     put, so its write is the last one.
+            #
+            # Either way the directory ends up gone, which is the only outcome
+            # a cancelled or deleted workflow may have. The purge is idempotent
+            # and best-effort, so the redundant case costs nothing.
+            if self._workflow_no_longer_wants_state(workflow_id, session):
+                logger.info(
+                    "Agent state purged after export for %s: the workflow went terminal mid-turn",
+                    session_id[:8],
+                )
+                self._agent_state_store.purge(workflow_id)
+
         # #2022 P3b: release the provider sandbox (reap any stragglers the
         # process-group signal missed + clear its _procs so a shared provider
         # instance does not leak across sessions). The reap above already killed
