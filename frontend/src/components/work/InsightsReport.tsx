@@ -20,7 +20,7 @@ import {
   type InsightsReport as InsightsReportData,
   type InsightsHistoryItem,
 } from '@/api/insights';
-import { formatNumber, formatTokens } from '@/utils';
+import { formatNumber, formatTokens, getDefaultDateRange } from '@/utils';
 
 type DateRange = 7 | 14 | 30;
 
@@ -57,11 +57,8 @@ export const InsightsReport: React.FC = () => {
   const generateReport = useCallback(
     async (days?: DateRange) => {
       const range = days ?? dateRange;
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - range);
-      const startDate = start.toISOString().split('T')[0];
-      const endDate = end.toISOString().split('T')[0];
+      // Use getDefaultDateRange to ensure exactly N calendar days with proper local date handling
+      const { start: startDate, end: endDate } = getDefaultDateRange(range);
 
       // Cancel previous request
       if (abortControllerRef.current) {
