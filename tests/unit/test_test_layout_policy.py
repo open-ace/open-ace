@@ -84,12 +84,12 @@ def test_no_new_test_module_is_added_at_the_test_root():
 def test_grandfather_inventories_stay_retired():
     """The legacy-top-level inventories died with the last grandfathered
     item; a stray file would imply an untracked root revival."""
-    assert not LEGACY_TOP_LEVEL_DIRECTORIES.exists(), (
-        "tests/legacy-top-level-directories.txt was retired by #3185; do not recreate."
-    )
-    assert not LEGACY_TOP_LEVEL_FILES.exists(), (
-        "tests/legacy-top-level-files.txt was retired by #3185; do not recreate."
-    )
+    assert (
+        not LEGACY_TOP_LEVEL_DIRECTORIES.exists()
+    ), "tests/legacy-top-level-directories.txt was retired by #3185; do not recreate."
+    assert (
+        not LEGACY_TOP_LEVEL_FILES.exists()
+    ), "tests/legacy-top-level-files.txt was retired by #3185; do not recreate."
 
 
 def test_regression_is_metadata_not_a_top_level_directory():
@@ -112,6 +112,6 @@ def test_purpose_markers_are_not_runtime_directories():
         for path in TESTS_ROOT.rglob("*")
         if path.is_dir() and path.name in {"regression", "security"}
     )
-    assert not prohibited, (
-        f"regression/security must be markers in a runtime directory, not directories: {prohibited}"
-    )
+    assert (
+        not prohibited
+    ), f"regression/security must be markers in a runtime directory, not directories: {prohibited}"
