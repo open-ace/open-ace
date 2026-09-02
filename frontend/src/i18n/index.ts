@@ -8,6 +8,7 @@ import type { Language as LanguageType } from '@/types';
 export type Language = LanguageType;
 
 type TranslationKey = string;
+export type { TranslationKey };
 type Translations = Record<TranslationKey, string>;
 
 // Exported so the completeness test can assert four-language key-set symmetry
