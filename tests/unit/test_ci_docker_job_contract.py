@@ -84,3 +84,35 @@ def test_production_image_precreates_logs_dir_for_non_root_entrypoint():
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     production = dockerfile.split("FROM production AS development")[0]
     assert "mkdir -p /app/logs && chown open-ace:open-ace /app/logs" in production
+
+
+# ── Multi-user deployment smoke wiring (#3289/#3293) ────────────────
+
+
+@pytest.mark.issue(3289)
+@pytest.mark.issue(3293)
+def test_docker_job_runs_the_multiuser_deployment_smoke():
+    """The root+multi-user positive paths (real useradd, permission-700
+    collection, cross-user read regression, 100-user scale, wrapper audit
+    pseudonymization) have no PR-lane coverage by construction — CI has no
+    root. The main-push docker job's smoke step is their only automated
+    verification; removing it (or losing --user 0 / any of the three
+    multi-user envs) silently reintroduces the #3289/#3293 gap."""
+    steps = _docker_job()["steps"]
+    smoke = next((step for step in steps if "multiuser_smoke.py" in str(step.get("run", ""))), None)
+    assert smoke is not None, (
+        "docker job must run scripts/multiuser_smoke.py (the #3289/#3293 "
+        "deployment-level verification)"
+    )
+    run = smoke["run"]
+    assert "docker run" in run and TAG_PATTERN.search(
+        run
+    ), "smoke must docker run the freshly built main-push tag"
+    assert "--user 0" in run, "production target ends at USER 1000 — the smoke needs root"
+    for env in (
+        "OPENACE_SECURITY_MODE=development",
+        "WORKSPACE_MULTI_USER_MODE=true",
+        "OPENACE_ALLOW_ROOT_MULTI_USER=1",
+        "WORKSPACE_BASE_DIR=/workspace",
+    ):
+        assert f"-e {env}" in run, f"smoke step lost -e {env}"

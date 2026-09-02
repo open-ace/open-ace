@@ -478,6 +478,21 @@ jobs:
           # starts the application.
           docker run --rm -e OPENACE_SECURITY_MODE=development \
             open-ace:${{ github.sha }} bash /app/scripts/verify-code-server.sh
+      - name: Multi-user deployment smoke (#3289/#3293)
+        # Deployment-level verification (main-push only, not a PR gate):
+        # the root+multi-user positive paths — real useradd through the
+        # wrapper chain, permission-700 collection with per-user
+        # attribution, cross-user read regression, 100-user scale, and the
+        # wrapper's audit pseudonymization — have no PR-lane coverage by
+        # construction (CI has no root). RUN_USER stays unset: the smoke's
+        # A5 sets it per-invocation.
+        run: |
+          docker run --rm --user 0 \
+            -e OPENACE_SECURITY_MODE=development \
+            -e WORKSPACE_MULTI_USER_MODE=true \
+            -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+            -e WORKSPACE_BASE_DIR=/workspace \
+            open-ace:${{ github.sha }} python /app/scripts/multiuser_smoke.py
       - name: Check image size
         run: |
           echo "=== Checking Docker image size ==="
