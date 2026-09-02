@@ -130,7 +130,7 @@ services:
       # routes that purge them run here. Two separate volumes meant those
       # purges deleted an unrelated empty directory while the real transcripts
       # were retained forever.
-      - agent-state:/var/lib/openace/agent-state
+      - agent-state:/var/lib/openace
       # SSH credentials for remote host access (optional, uncomment if needed)
       # SECURITY WARNING: Mounting SSH keys exposes private keys to container processes
       # Recommend using dedicated SSH keys with restricted commands in authorized_keys
@@ -184,7 +184,7 @@ services:
       - ./logs:/app/logs
       - workspace-data:/workspace
       # #3237: the same volume the app service mounts, at the same path.
-      - agent-state:/var/lib/openace/agent-state
+      - agent-state:/var/lib/openace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
       interval: 30s

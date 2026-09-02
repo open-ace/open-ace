@@ -143,12 +143,23 @@ RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources
 # when docker-compose mounts the `config-data` named volume there: Docker's
 # named-volume init copies existing uid-1000 ownership into the volume on first
 # run, so `mkdir -p`/config generation won't hit Permission denied under uid 1000.
+#
+# /var/lib/openace (#3237) is pre-created for exactly the same reason and must
+# stay that way. docker-compose mounts the `agent-state` named volume there,
+# and Docker only copies uid-1000 ownership into a fresh volume if the image
+# already has a directory at the mount point — otherwise it creates the volume
+# root:root 0755, uid 1000 cannot mkdir inside it, every carried transcript is
+# logged-and-discarded, and every sandbox turn silently starts cold. The mount
+# is the PARENT: the state root itself is created at runtime by uid 1000 so it
+# is owned by the process that has to chmod it.
 RUN groupadd -g 1000 open-ace && \
     useradd -u 1000 -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
     useradd --system --create-home --home-dir /var/lib/openace-agent \
         --shell /usr/sbin/nologin openace-agent && \
     mkdir -p /home/open-ace/.open-ace && \
-    chown -R open-ace:open-ace /home/open-ace
+    chown -R open-ace:open-ace /home/open-ace && \
+    mkdir -p /var/lib/openace && \
+    chown open-ace:open-ace /var/lib/openace
 
 # ============================================================================
 # 【安全加固 Issue #1514】单一配置源原则

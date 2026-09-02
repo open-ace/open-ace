@@ -22,6 +22,7 @@ manifests can express the fix, so only a manifest test can pin it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -53,18 +54,24 @@ def _state_binding(path: Path) -> tuple[str | None, tuple | None, str | None]:
     env = {e["name"]: e.get("value") for e in container.get("env", []) if "value" in e}
     root = env.get(STATE_ROOT_ENV)
 
-    mount = next(
+    # The mount that COVERS the root, which is not necessarily the root itself.
+    # The deployments deliberately mount the PARENT and let uid 1000 create the
+    # state directory inside it: a managed volume root is owned by root (with
+    # fsGroup only granting group access), and POSIX allows chmod solely to the
+    # owner — so a store rooted directly at the mount point could not tighten
+    # its own directory and every write failed. Matching on equality here would
+    # therefore assert the exact layout that does not work.
+    covering = next(
         (
-            (m["mountPath"], m.get("subPath"))
+            m
             for m in container.get("volumeMounts", [])
-            if m.get("mountPath") == root
+            if root
+            and (m.get("mountPath") == root or root.startswith(m.get("mountPath", "") + "/"))
         ),
         None,
     )
-    name = next(
-        (m["name"] for m in container.get("volumeMounts", []) if m.get("mountPath") == root),
-        None,
-    )
+    mount = (covering["mountPath"], covering.get("subPath")) if covering else None
+    name = covering["name"] if covering else None
     claim = next(
         (
             v.get("persistentVolumeClaim", {}).get("claimName")
@@ -93,7 +100,7 @@ def test_both_roles_agree_on_the_same_path():
 def test_the_state_root_is_backed_by_a_persistent_claim(role):
     """An emptyDir here is per-pod, which is exactly the defect."""
     root, mount, claim = _state_binding(_DEPLOYMENTS[role])
-    assert mount is not None, f"{role} sets {STATE_ROOT_ENV}={root} but mounts nothing there"
+    assert mount is not None, f"{role} sets {STATE_ROOT_ENV}={root} but nothing is mounted over it"
     assert claim, (
         f"{role} backs {root} with an emptyDir or nothing; per-pod storage means "
         "the scheduler replicas and the web pods cannot see each other's transcripts"
@@ -133,8 +140,20 @@ def test_compose_shares_one_volume_between_the_two_services():
             entry.split("=", 1) for entry in (svc.get("environment") or []) if "=" in str(entry)
         )
         roots[name] = env.get(STATE_ROOT_ENV)
+        # As above: the volume covers the root, it is not necessarily mounted
+        # at it. Compose needs the parent mounted for a second reason — Docker
+        # only seeds a fresh named volume with the image's ownership when a
+        # directory already exists at the mount point, and the Dockerfile
+        # pre-creates the parent as uid 1000.
         volumes[name] = {
-            v.split(":")[0] for v in (svc.get("volumes") or []) if roots[name] and roots[name] in v
+            spec.split(":")[0]
+            for spec in (svc.get("volumes") or [])
+            if roots[name]
+            and len(spec.split(":")) > 1
+            and (
+                roots[name] == spec.split(":")[1]
+                or roots[name].startswith(spec.split(":")[1] + "/")
+            )
         }
 
     assert roots["open-ace"] and roots["open-ace"] == roots["scheduler"], roots
@@ -143,3 +162,101 @@ def test_compose_shares_one_volume_between_the_two_services():
     ), f"the two services do not share one volume at the state root: {volumes}"
     shared = next(iter(volumes["scheduler"]))
     assert shared in (compose.get("volumes") or {}), f"{shared!r} is not a declared volume"
+
+
+# ── the store under the deployments' permission shapes ────────────────
+#
+# Checking the YAML alone was not enough, and that is exactly how two broken
+# deployments shipped: the wiring was right and the store still could not
+# write. These exercise the store against the ownership the platforms actually
+# produce at the mount point.
+
+
+def _mount_root_for(deployment: str) -> str:
+    """The path the volume is mounted at, per the manifest."""
+    root, mount, _claim = _state_binding(_DEPLOYMENTS[deployment])
+    assert mount is not None, f"{deployment} mounts nothing over {root}"
+    return mount[0]
+
+
+def test_the_state_root_is_created_below_the_mount_point():
+    """The store must own the directory it hardens.
+
+    A managed volume root is owned by root — Kubernetes `fsGroup` grants the
+    GROUP access without transferring ownership, and Docker initialises a fresh
+    named volume `root:root`. POSIX allows chmod only to the owner, so a state
+    root placed AT the mount point could not be tightened and every write
+    failed. Rooting one level below lets uid 1000 create and own it.
+    """
+    for role in _DEPLOYMENTS:
+        root, mount, _claim = _state_binding(_DEPLOYMENTS[role])
+        assert root != mount[0], (
+            f"{role} roots the store at the mount point itself, so it would be "
+            "asked to chmod a directory owned by root"
+        )
+        assert root.startswith(mount[0] + "/"), f"{role}: {root!r} is not under {mount[0]!r}"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can chmod anything, which is the whole point")
+def test_the_store_writes_under_a_mount_root_it_does_not_own(tmp_path):
+    """The Kubernetes shape: writable via group, owned by someone else.
+
+    Modelled by making the mount root read-only to us but still traversable,
+    then rooting the store one level below where we DO own what we create —
+    which is what the manifests now do. The point is that the store must not
+    fail merely because the mount point itself is not ours to chmod.
+    """
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+    mount_root = tmp_path / "mount"
+    mount_root.mkdir()
+    state_root = mount_root / "agent-state"
+    state_root.mkdir()
+    # We own state_root, so hardening it works; the mount root above stays as
+    # the platform left it and is never chmod'ed by the store.
+    before = mount_root.stat().st_mode
+
+    store = AgentStateStore(root=str(state_root))
+    store.put("wf-1", "main", b"CARRIED\n")
+
+    assert store.get("wf-1", "main") == b"CARRIED\n"
+    assert mount_root.stat().st_mode == before, "the store modified the mount point above its root"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can chmod anything, which is the whole point")
+def test_a_state_root_owned_by_someone_else_still_writes(tmp_path, monkeypatch):
+    """Fallback: a pre-provisioned root the store cannot chmod must still work.
+
+    An unconditional `os.chmod` on the root raised PermissionError under
+    Kubernetes fsGroup and failed every single write on an otherwise usable
+    mount. Hardening is now best-effort where we are not the owner; the file
+    itself is still created 0600 by mkstemp, so transcript CONTENTS are never
+    exposed by a looser directory.
+    """
+    from app.modules.workspace.autonomous.sandbox import agent_state_store as mod
+
+    state_root = tmp_path / "provisioned"
+    state_root.mkdir()
+
+    real_chmod = os.chmod
+    refused: list[str] = []
+
+    def _chmod(path, mode, *a, **k):
+        # Stand in for "not the owner": the platform refuses our chmod.
+        if str(path) == str(state_root):
+            refused.append(str(path))
+            raise PermissionError(1, "Operation not permitted")
+        return real_chmod(path, mode, *a, **k)
+
+    monkeypatch.setattr(mod.os, "chmod", _chmod, raising=False)
+    monkeypatch.setattr(mod.Path, "stat", lambda self, *a, **k: os.stat(str(self)), raising=False)
+
+    store = mod.AgentStateStore(root=str(state_root))
+    store.put("wf-1", "main", b"CARRIED\n")
+
+    assert (
+        store.get("wf-1", "main") == b"CARRIED\n"
+    ), "a root the process cannot chmod disabled the carry entirely"
+    assert (
+        store.path_for("wf-1", "main").stat().st_mode & 0o077 == 0
+    ), "the transcript file itself must still be private"

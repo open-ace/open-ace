@@ -877,13 +877,17 @@ def test_a_failed_workflow_keeps_its_state_because_retry_resumes_it(tmp_path):
     )
 
 
-def test_failed_state_is_still_reclaimable_by_age(tmp_path):
-    """Retryable is not "kept forever".
+def test_failed_state_is_not_reclaimable_by_age_either(tmp_path):
+    """There is no retry window to age out against, so nothing may expire.
 
-    Retry is bounded (MAX_RETRY_COUNT, and in practice a short window), so a
-    failed workflow's transcripts must still age out rather than pin disk
-    indefinitely. The reaper's set is a SUPERSET of the immediate-purge set for
-    exactly this reason.
+    `retry_workflow` gates on `retry_count < MAX_RETRY_COUNT` and never looks
+    at how old the failure is, so a workflow can legitimately be retried weeks
+    later. Making failed state age-reapable after 7 days meant a still-valid
+    retry could find an absent slot, clear `resume`, and restart cold — the
+    silent context loss this feature exists to remove, on a timer.
+
+    `MAX_RETRY_COUNT` bounds how MANY retries there are, not how long the first
+    stays available, so it cannot stand in for an expiry.
     """
     from app.modules.workspace.autonomous.orchestrator import (
         _REAPABLE_WORKFLOW_STATUSES,
@@ -891,7 +895,32 @@ def test_failed_state_is_still_reclaimable_by_age(tmp_path):
     )
 
     assert "failed" not in _TERMINAL_WORKFLOW_STATUSES, "a failed workflow is still retryable"
-    assert (
-        "failed" in _REAPABLE_WORKFLOW_STATUSES
-    ), "failed state would be pinned forever; retry is bounded, so it must age out"
-    assert _TERMINAL_WORKFLOW_STATUSES < _REAPABLE_WORKFLOW_STATUSES
+    assert "failed" not in _REAPABLE_WORKFLOW_STATUSES, (
+        "a retry weeks after the failure would find its transcript reaped and "
+        "silently restart with no prior context"
+    )
+
+
+def test_a_failed_workflows_transcript_survives_the_age_reaper(store):
+    """The outcome, not just the set membership.
+
+    Retention is bounded by DELETION rather than by time: the delete routes
+    purge. Erring this way is deliberate — stale bytes are recoverable, lost
+    history is not.
+    """
+    from app.modules.workspace.autonomous.orchestrator import _REAPABLE_WORKFLOW_STATUSES
+
+    store.put("wf-failed", "main", b"HISTORY A RETRY STILL NEEDS")
+    store.put("wf-orphan", "main", b"NOBODY OWNS THIS")
+
+    old = time.time() - (30 * 24 * 3600)
+    for wf in ("wf-failed", "wf-orphan"):
+        os.utime(store.path_for(wf, "main"), (old, old))
+
+    # The scheduler keeps every workflow whose status is not reapable, which
+    # now includes a failed one.
+    live = {"wf-failed"} if "failed" not in _REAPABLE_WORKFLOW_STATUSES else set()
+    store.reap(keep_workflow_ids=live)
+
+    assert store.get("wf-failed", "main") == b"HISTORY A RETRY STILL NEEDS"
+    assert store.get("wf-orphan", "main") is None, "the orphan was not reaped"

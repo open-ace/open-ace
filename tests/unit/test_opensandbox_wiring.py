@@ -1199,32 +1199,58 @@ def test_two_turns_on_one_line_carry_the_conversation(api, tmp_path, monkeypatch
     )
 
 
-def test_a_stopped_turn_does_not_resurrect_the_purged_state(api, tmp_path, monkeypatch):
-    """The stop/delete race, driven through the real window.
+def _route_side(store, workflow_id, status, rows):
+    """Do what the web process does: write the terminal status, then purge.
 
-    `stop_workflow` does not wait for the runner: `_stop_running_task` sets
-    `_stopped` and returns, the route writes the terminal status and purges the
-    workflow's directory, and only then does the runner thread finish unwinding
-    through `apply_changes` and reach its export. Without a guard that export
-    re-created the directory that had just been purged — and since the reaper
-    runs only at scheduler startup and only by age, a cancelled or DELETED
-    workflow's transcript could sit there indefinitely.
+    It does NOT touch the runner's in-memory session, because in the shipped
+    topology it cannot: the routes run in the web process and the runner in the
+    scheduler process. Modelling the stop by setting `_stopped` directly is
+    what hid this failure the first time.
+    """
+    rows[workflow_id] = None if status is None else {"workflow_id": workflow_id, "status": status}
+    store.purge(workflow_id)
 
-    The stop is injected from inside `apply_changes`, which IS the window the
-    route lands in: the session is registered by then, and the export is the
-    very next thing the runner does.
 
-    This race was unreachable while the routes and the scheduler owned separate
-    per-pod directories, because the route's purge hit an unrelated empty tree.
-    Putting them on shared storage is what makes it real, so the two land
-    together.
+def _patch_workflow_rows(monkeypatch, rows):
+    class _Repo:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_workflow(self, workflow_id):
+            return rows.get(workflow_id)
+
+    monkeypatch.setattr(
+        "app.repositories.autonomous_repo.AutonomousWorkflowRepository", _Repo, raising=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [("cancelled", "stopped from the web pod"), (None, "deleted from the web pod")],
+)
+def test_a_terminal_turn_does_not_resurrect_the_purged_state(
+    api, tmp_path, monkeypatch, status, label
+):
+    """The cross-process shape: the route never touches this thread's Event.
+
+    `_stop_running_task`'s three strategies all resolve through the in-process
+    `AutonomousScheduler` singleton or a local PID, so a web-pod stop cannot
+    reach a scheduler-pod session — and `delete_workflow` / `delete_batch` do
+    not call it at all. The Event therefore stays FALSE in production while the
+    route purges the shared directory, and the still-unwinding turn exports on
+    top of it.
+
+    So this test deliberately never sets `_stopped`. The only signal is the
+    workflow row, which is what the gate must actually consult.
     """
     worktree = _worktree_at(tmp_path)
     provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
     store = _agent_state_store(tmp_path)
     store.put("wf-1", "s-1", b"EARLIER TURN\n")
 
-    seen: dict = {}
+    rows = {"wf-1": {"workflow_id": "wf-1", "status": "developing"}}
+    _patch_workflow_rows(monkeypatch, rows)
+
     put_attempted: list[bytes] = []
     real_put = store.put
 
@@ -1236,22 +1262,17 @@ def test_a_stopped_turn_does_not_resurrect_the_purged_state(api, tmp_path, monke
 
     real_apply = provider.apply_changes
 
-    def _apply_then_stop_and_purge(handle, project_path):
+    def _apply_then_route_acts(handle, project_path):
         result = real_apply(handle, project_path)
-        # Give the export something real to find, so this test fails for the
-        # right reason rather than because the fake sandbox happened to be
-        # empty.
+        # Give the export something real to find, so a pass here means the gate
+        # held rather than that there was nothing to write.
         provider.import_agent_state(
             handle, cli_session_id="cli-1", blob=b"TRANSCRIPT WRITTEN THIS TURN\n"
         )
-        # Now the route's half, in its order: stop the session, then purge —
-        # without waiting for this thread.
-        for sess in list(seen["runner"]._local_sessions.values()):
-            sess._stopped.set()
-        store.purge("wf-1")
+        _route_side(store, "wf-1", status, rows)
         return result
 
-    monkeypatch.setattr(provider, "apply_changes", _apply_then_stop_and_purge)
+    monkeypatch.setattr(provider, "apply_changes", _apply_then_route_acts)
 
     _run_local_against(
         provider,
@@ -1259,13 +1280,80 @@ def test_a_stopped_turn_does_not_resurrect_the_purged_state(api, tmp_path, monke
         monkeypatch,
         agent_state_store=store,
         uses_sidebar=True,
-        runner_spy=lambda r: seen.__setitem__("runner", r),
     )
 
     assert not put_attempted, (
-        "a stopped turn wrote state back AFTER the route purged it, so a "
-        f"cancelled or deleted workflow keeps its transcript: {put_attempted}"
+        f"a turn {label} wrote state back AFTER the route purged it, so the "
+        f"workflow keeps a transcript nothing will ever reclaim: {put_attempted}"
     )
     assert (
         store.get("wf-1", "s-1") is None
-    ), "the purged slot was re-created by the stopped turn's export"
+    ), "the purged slot was re-created by the terminal turn's export"
+
+
+def test_a_live_workflow_still_exports(api, tmp_path, monkeypatch):
+    """The gate must not swallow the ordinary case it sits in front of.
+
+    Gating on workflow state is only safe if a RUNNING workflow still writes
+    its transcript — otherwise every turn would start cold and the gate would
+    have replaced one silent failure with a worse one.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    _patch_workflow_rows(monkeypatch, {"wf-1": {"workflow_id": "wf-1", "status": "developing"}})
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"KEEP ME\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    _run_local_against(provider, worktree, monkeypatch, agent_state_store=store, uses_sidebar=True)
+
+    assert store.get("wf-1", "s-1") == b"KEEP ME\n", (
+        "a running workflow's transcript was not carried, so its next turn " "would start cold"
+    )
+
+
+def test_an_unreadable_workflow_row_still_exports(api, tmp_path, monkeypatch):
+    """Fail-safe direction: unknown means export.
+
+    A resurrected transcript is bounded — the reaper and the next delete both
+    reclaim it. A skipped export is not: it loses history the next turn needs
+    and starts it cold, which is the failure this change exists to remove. So a
+    database that cannot be read must not silently disable the carry.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames()))
+    store = _agent_state_store(tmp_path)
+
+    class _BrokenRepo:
+        def __init__(self, *a, **k):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+        _BrokenRepo,
+        raising=False,
+    )
+
+    real_apply = provider.apply_changes
+
+    def _apply(handle, project_path):
+        result = real_apply(handle, project_path)
+        provider.import_agent_state(handle, cli_session_id="cli-1", blob=b"KEEP ME\n")
+        return result
+
+    monkeypatch.setattr(provider, "apply_changes", _apply)
+
+    _run_local_against(provider, worktree, monkeypatch, agent_state_store=store, uses_sidebar=True)
+
+    assert store.get("wf-1", "s-1") == b"KEEP ME\n", (
+        "an unreadable workflow row disabled the carry, turning a database "
+        "blip into a silent cold start"
+    )

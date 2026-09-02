@@ -83,7 +83,7 @@ spec:
             # #3237: must match the web deployment exactly, or the two roles
             # operate on different directories.
             - name: OPENACE_AGENT_STATE_ROOT
-              value: "/var/lib/openace/agent-state"
+              value: "/var/lib/openace/agent-state"  # created and owned by uid 1000
             - name: SCHEDULER_MODE
               value: "scheduler"
             - name: POD_NAME
@@ -148,8 +148,15 @@ spec:
             # On the per-pod emptyDir above, turn N's transcript was invisible
             # to whichever pod took turn N+1, and the resume silently started
             # cold: exactly the defect #3237 exists to remove.
+              # Mounted at the PARENT, not at the state root itself. A managed
+              # volume root is owned by root (Kubernetes fsGroup makes it
+              # group-writable but not owned by uid 1000), and POSIX allows
+              # chmod only to the owner — so a store rooted directly here could
+              # not tighten it and every write failed. Rooting one level down
+              # lets uid 1000 create and own the state directory itself.
+              # (see agent_state_store._harden)
             - name: agent-state
-              mountPath: /var/lib/openace/agent-state
+              mountPath: /var/lib/openace
               subPath: agent-state
             - name: config
               mountPath: /home/open-ace/.open-ace

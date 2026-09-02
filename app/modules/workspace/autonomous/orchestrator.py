@@ -2068,11 +2068,31 @@ REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 # the CLI HOME still holds the session.
 _TERMINAL_WORKFLOW_STATUSES = frozenset({"completed", "cancelled"})
 
-# Statuses whose state may be reclaimed BY AGE. Superset of the above: a failed
-# workflow is retryable, but only for a bounded window (and only up to
-# MAX_RETRY_COUNT), so its transcripts should not be pinned forever — they age
-# out through the reaper instead of being dropped the instant it fails.
-_REAPABLE_WORKFLOW_STATUSES = _TERMINAL_WORKFLOW_STATUSES | {"failed"}
+# Statuses whose state may be reclaimed BY AGE.
+#
+# Deliberately EQUAL to the set above rather than a superset, and the reason is
+# a contract that does not exist: there is no bounded retry window.
+# `retry_workflow` gates on `retry_count < MAX_RETRY_COUNT` and nothing else —
+# it never looks at how old the failure is — so a workflow can legitimately be
+# retried weeks after it failed. An earlier revision here made "failed" age-
+# reapable after 7 days, which meant a still-valid retry could find an absent
+# slot, clear `resume`, and restart cold: the silent context loss this module
+# spends so much effort avoiding, reintroduced on a timer.
+#
+# `MAX_RETRY_COUNT` bounds how MANY retries there are, not how long the first
+# one stays available, so it cannot stand in for an expiry.
+#
+# The cost is retention: a failed workflow that is never retried and never
+# deleted keeps its transcripts. That is bounded by deletion rather than by
+# time — the delete routes purge — and it is the right side to err on, because
+# stale bytes are recoverable and lost history is not. If retention does become
+# a problem the fix is an explicit, persisted retry expiry with a clear refusal
+# once it lapses (a product decision), NOT quietly eating the history a retry
+# still has the right to resume from.
+#
+# The reaper keeps everything NOT in this set, so it still does its real job:
+# reclaiming state for rows that were deleted or never existed.
+_REAPABLE_WORKFLOW_STATUSES = frozenset(_TERMINAL_WORKFLOW_STATUSES)
 
 
 def purge_agent_state(workflow_id: str, store: object | None = None) -> None:

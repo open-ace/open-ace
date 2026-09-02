@@ -2615,6 +2615,46 @@ class AutonomousAgentRunner:
     def _agent_state_store(self, store: Any) -> None:
         self.__dict__["_agent_state_store_instance"] = store
 
+    @staticmethod
+    def _workflow_no_longer_wants_state(workflow_id: str, session: Any) -> bool:
+        """Whether this turn's transcript is already dead weight (#3237).
+
+        Asked of the DATABASE, not of a ``threading.Event``. An earlier version
+        gated only on ``session._stopped``, which cannot work in the shipped
+        topology: the routes run in the web process and the runner in the
+        scheduler process, so `_stop_running_task` — whose three strategies all
+        resolve through the in-process ``AutonomousScheduler`` singleton or a
+        local PID — never reaches this session's Event at all. `delete_workflow`
+        and `delete_batch` do not even call it. The flag stayed false, the
+        export ran, and the just-purged directory came back.
+
+        The Event is still consulted first, because when it IS set it is both
+        correct and free. The row is the authority behind it.
+
+        Fail-safe direction on an unreadable database: **export anyway**. A
+        resurrected transcript is bounded — the reaper and the next delete both
+        reclaim it — whereas a skipped export loses history the next turn needs
+        and starts it cold, which is the failure this whole change exists to
+        remove.
+        """
+        stopped = getattr(session, "_stopped", None)
+        if stopped is not None and stopped.is_set():
+            return True
+        if not workflow_id:
+            return False
+        try:
+            from app.modules.workspace.autonomous.orchestrator import _TERMINAL_WORKFLOW_STATUSES
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+            workflow = AutonomousWorkflowRepository().get_workflow(workflow_id)
+        except Exception:  # noqa: BLE001 - unknown means export, see above
+            return False
+        if workflow is None:
+            # The row is gone: deleted while this turn was unwinding. Nothing
+            # will ever resume it, and the delete route's purge already ran.
+            return True
+        return str(workflow.get("status") or "") in _TERMINAL_WORKFLOW_STATUSES
+
     def _plan_agent_state(
         self,
         provider: object,
@@ -3256,29 +3296,21 @@ class AutonomousAgentRunner:
         # completed milestone because its transcript could not be saved trades a
         # quality loss for a correctness loss. The stale slot is dropped so the
         # next turn starts fresh cleanly instead of resuming half a history.
-        # A turn that was STOPPED from outside must not write state back.
+        # A turn whose workflow has already gone terminal must not write state
+        # back. The routes do not wait for this thread: they write the terminal
+        # status and purge the workflow's directory while this thread is still
+        # unwinding through apply_changes, so without a gate the export
+        # re-creates the directory that was just purged — and since the reaper
+        # runs only at scheduler startup and only by age, the resurrected
+        # transcript of a cancelled or DELETED workflow can sit there
+        # indefinitely.
         #
-        # `stop_workflow` and `delete_workflow` do not wait for this thread:
-        # `_stop_running_task` sets `_stopped`, returns, and the route then
-        # writes the terminal status and purges the workflow's directory —
-        # while this thread is still unwinding through apply_changes and the
-        # export below. Without this guard the export re-created the directory
-        # that had just been purged, and because the reaper only runs at
-        # scheduler startup (and only reaps by age) the resurrected transcript
-        # of a cancelled or DELETED workflow could sit there indefinitely.
-        #
-        # The race was unreachable while the routes and the scheduler had
-        # separate per-pod directories — the route purge was hitting an
-        # unrelated empty tree. Putting them on shared storage is what makes it
-        # real, so the two land together.
-        #
-        # Skipping is right rather than merely convenient: the workflow is on
-        # its way to cancelled or deleted, so there is no next turn that could
-        # want this history.
-        stopped = getattr(session, "_stopped", None)
-        if stopped is not None and stopped.is_set():
+        # The race was unreachable while the routes and the scheduler owned
+        # separate per-pod directories, because the purge hit an unrelated
+        # empty tree. Sharing the storage is what makes it real.
+        if self._workflow_no_longer_wants_state(workflow_id, session):
             logger.info(
-                "Agent state export skipped for %s: the turn was stopped externally",
+                "Agent state export skipped for %s: the workflow is terminal or gone",
                 session_id[:8],
             )
         elif hasattr(provider, "export_agent_state"):

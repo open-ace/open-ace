@@ -106,9 +106,9 @@ class AgentStateStore:
         # 0o700 on BOTH levels. The root holds one directory per workflow, so a
         # mode left to the umask would let any local user enumerate workflow ids.
         self._root.mkdir(parents=True, exist_ok=True)
-        os.chmod(self._root, 0o700)
+        self._harden(self._root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(path.parent, 0o700)
+        self._harden(path.parent)
         # Write-then-rename so a crash mid-write cannot leave a slot that is
         # present but truncated — which get() would have to treat as corrupt,
         # turning a tidy restart into a refused turn.
@@ -221,6 +221,38 @@ class AgentStateStore:
             except OSError:
                 continue
         return removed
+
+    @staticmethod
+    def _harden(path: Path) -> None:
+        """Tighten a directory to 0700, but only where that is permitted.
+
+        POSIX allows chmod only to the owner or root, and a managed volume root
+        is frequently owned by neither the process nor anyone we can become:
+
+        * **Kubernetes** with ``fsGroup`` makes the volume root writable via the
+          GROUP while leaving it owned by root. An unconditional chmod there
+          raised ``PermissionError: Operation not permitted`` and every single
+          state write failed — on a mount that was otherwise perfectly usable.
+        * **Docker** initialises a fresh named volume as ``root:root`` when the
+          image has no pre-existing directory at the mount point.
+
+        So hardening is best effort ON THE PARTS WE DO NOT OWN, and the layout
+        does the real work instead: the deployments mount the shared volume at
+        the PARENT and let this process create the state root itself, so the
+        root and every workflow directory under it are owned by us and this
+        chmod succeeds normally. This branch is the fallback for a
+        pre-provisioned root, not the design.
+
+        Confidentiality does not rest on it either way. Every transcript is
+        written 0600 by ``mkstemp`` before it is renamed into place, so a
+        directory left group-readable exposes file NAMES (workflow ids) to
+        members of that group, never transcript contents.
+        """
+        try:
+            if path.stat().st_uid == os.geteuid():
+                os.chmod(path, 0o700)
+        except OSError as exc:  # noqa: BLE001 - a usable mount must not be fatal
+            logger.debug("Could not tighten permissions on %s: %s", path, exc)
 
     def _workflow_dir(self, workflow_id: str) -> Path:
         return self._root / self._key(workflow_id)
