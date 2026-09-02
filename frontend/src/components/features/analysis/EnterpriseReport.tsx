@@ -283,12 +283,12 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
   if (isError) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
-        <Error message={error?.message || t('error', language)} onRetry={onRetry} />
+        <Error message={error?.message ?? t('error', language)} onRetry={onRetry} />
       </Card>
     );
   }
 
-  if (!efficiency || !efficiency.efficiency_available) {
+  if (!efficiency?.efficiency_available) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
         <EmptyState icon="bi-speedometer" title={t('noEfficiencyData', language)} />
