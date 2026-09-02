@@ -137,6 +137,21 @@ def _is_unique_violation(exc: Exception) -> bool:
     return type(exc).__name__ == "UniqueViolation"
 
 
+def _is_retryable_sqlite_error(exc: Exception) -> bool:
+    """Return True if ``exc`` is a retryable SQLite error.
+
+    Currently covers:
+    - ``sqlite3.OperationalError`` with "database is locked" message
+
+    These errors are transient and can be resolved by retrying after a short
+    delay (SQLite's internal busy handler will block during the retry).
+    """
+    if isinstance(exc, sqlite3.OperationalError):
+        # "database is locked" is the classic concurrent-write backpressure
+        return "database is locked" in str(exc)
+    return False
+
+
 def _params(count: int) -> str:
     p = _param()
     return ", ".join([p] * count)
@@ -2797,8 +2812,8 @@ class RemoteAgentManager:
                     conn.commit()
                 return  # Success
             except Exception as e:
-                if _is_unique_violation(e):
-                    # Lost the event_index race against a concurrent producer
+                # Retry on uniqueness collision or SQLite database lock
+                if _is_unique_violation(e) or _is_retryable_sqlite_error(e):
                     last_exc = e
                     continue
                 logger.warning(
@@ -2934,7 +2949,8 @@ class RemoteAgentManager:
                         conn.commit()
                     return
                 except Exception as e:
-                    if _is_unique_violation(e):
+                    # Retry on uniqueness collision or SQLite database lock
+                    if _is_unique_violation(e) or _is_retryable_sqlite_error(e):
                         # Lost the event_index race against a concurrent producer;
                         # roll back and retry with a freshly re-read index.
                         last_exc = e
