@@ -178,6 +178,7 @@ class UsageAnalytics:
         end_date: str,
         include_trends: bool = True,
         include_anomalies: bool = True,
+        tenant_id: int | None = None,
     ) -> UsageReport:
         """
         Generate a comprehensive usage report.
@@ -187,12 +188,17 @@ class UsageAnalytics:
             end_date: End date (YYYY-MM-DD).
             include_trends: Include trend analysis.
             include_anomalies: Include anomaly detection.
+            tenant_id: Tenant ID for data isolation.
+                None means global access (platform admin).
+                int means tenant-scoped access (tenant admin).
+
+        Issue #3245: Added tenant_id parameter for data isolation.
 
         Returns:
             UsageReport: Comprehensive usage report.
         """
-        # Get raw usage data
-        usage_data = self._get_usage_data(start_date, end_date)
+        # Get raw usage data with tenant isolation
+        usage_data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
 
         # Calculate summary statistics
         summary = self._calculate_summary(usage_data, start_date, end_date)
@@ -202,35 +208,69 @@ class UsageAnalytics:
 
         # Add trends
         if include_trends:
-            report.trends = self._analyze_trends(start_date, end_date)
+            report.trends = self._analyze_trends(start_date, end_date, tenant_id=tenant_id)
 
         # Add anomalies
         if include_anomalies:
-            report.anomalies = self._detect_anomalies(start_date, end_date)
+            report.anomalies = self._detect_anomalies(start_date, end_date, tenant_id=tenant_id)
 
         # Add breakdowns
-        report.breakdown_by_tool = self._get_tool_breakdown(start_date, end_date)
-        report.breakdown_by_host = self._get_host_breakdown(start_date, end_date)
+        report.breakdown_by_tool = self._get_tool_breakdown(
+            start_date, end_date, tenant_id=tenant_id
+        )
+        report.breakdown_by_host = self._get_host_breakdown(
+            start_date, end_date, tenant_id=tenant_id
+        )
 
         return report
 
-    def _get_usage_data(self, start_date: str, end_date: str) -> list[dict]:
-        """Get usage data for date range."""
-        query = """
-            SELECT
-                date,
-                tool_name,
-                host_name,
-                SUM(tokens_used) as tokens,
-                SUM(input_tokens) as input_tokens,
-                SUM(output_tokens) as output_tokens,
-                SUM(request_count) as requests
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY date, tool_name, host_name
-            ORDER BY date
+    def _get_usage_data(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[dict]:
+        """Get usage data for date range with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            List of usage records.
         """
-        return self.db.fetch_all(query, (start_date, end_date))
+        if tenant_id is not None:
+            query = """
+                SELECT
+                    date,
+                    tool_name,
+                    host_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(request_count) as requests
+                FROM daily_usage
+                WHERE date >= ? AND date <= ? AND tenant_id = ?
+                GROUP BY date, tool_name, host_name
+                ORDER BY date
+            """
+            return self.db.fetch_all(query, (start_date, end_date, tenant_id))
+        else:
+            query = """
+                SELECT
+                    date,
+                    tool_name,
+                    host_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(request_count) as requests
+                FROM daily_usage
+                WHERE date >= ? AND date <= ?
+                GROUP BY date, tool_name, host_name
+                ORDER BY date
+            """
+            return self.db.fetch_all(query, (start_date, end_date))
 
     def _calculate_summary(
         self,
@@ -328,8 +368,21 @@ class UsageAnalytics:
             "peak_tokens": peak_tokens,
         }
 
-    def _analyze_trends(self, start_date: str, end_date: str) -> list[TrendAnalysis]:
-        """Analyze usage trends."""
+    def _analyze_trends(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[TrendAnalysis]:
+        """Analyze usage trends with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            List of trend analysis results.
+        """
         trends = []
 
         # Calculate period length
@@ -344,9 +397,9 @@ class UsageAnalytics:
         prev_start_str = prev_start.strftime("%Y-%m-%d")
         prev_end_str = prev_end.strftime("%Y-%m-%d")
 
-        # Get current and previous period data
-        current_data = self._get_daily_totals(start_date, end_date)
-        previous_data = self._get_daily_totals(prev_start_str, prev_end_str)
+        # Get current and previous period data with tenant isolation
+        current_data = self._get_daily_totals(start_date, end_date, tenant_id=tenant_id)
+        previous_data = self._get_daily_totals(prev_start_str, prev_end_str, tenant_id=tenant_id)
 
         # Analyze token trend
         current_tokens = sum(d.get("tokens", 0) for d in current_data)
@@ -390,26 +443,65 @@ class UsageAnalytics:
 
         return trends
 
-    def _get_daily_totals(self, start_date: str, end_date: str) -> list[dict]:
-        """Get daily totals for a period."""
-        query = """
-            SELECT
-                date,
-                SUM(tokens_used) as tokens,
-                SUM(request_count) as requests
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY date
-            ORDER BY date
-        """
-        return self.db.fetch_all(query, (start_date, end_date))
+    def _get_daily_totals(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[dict]:
+        """Get daily totals for a period with optional tenant isolation.
 
-    def _detect_anomalies(self, start_date: str, end_date: str) -> list[Anomaly]:
-        """Detect usage anomalies."""
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            List of daily total records.
+        """
+        if tenant_id is not None:
+            query = """
+                SELECT
+                    date,
+                    SUM(tokens_used) as tokens,
+                    SUM(request_count) as requests
+                FROM daily_usage
+                WHERE date >= ? AND date <= ? AND tenant_id = ?
+                GROUP BY date
+                ORDER BY date
+            """
+            return self.db.fetch_all(query, (start_date, end_date, tenant_id))
+        else:
+            query = """
+                SELECT
+                    date,
+                    SUM(tokens_used) as tokens,
+                    SUM(request_count) as requests
+                FROM daily_usage
+                WHERE date >= ? AND date <= ?
+                GROUP BY date
+                ORDER BY date
+            """
+            return self.db.fetch_all(query, (start_date, end_date))
+
+    def _detect_anomalies(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> list[Anomaly]:
+        """Detect usage anomalies with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            List of detected anomalies.
+        """
         anomalies: list[Anomaly] = []
 
-        # Get daily data
-        daily_data = self._get_daily_totals(start_date, end_date)
+        # Get daily data with tenant isolation
+        daily_data = self._get_daily_totals(start_date, end_date, tenant_id=tenant_id)
 
         if len(daily_data) < 7:
             return anomalies
@@ -485,22 +577,51 @@ class UsageAnalytics:
 
         return anomalies
 
-    def _get_tool_breakdown(self, start_date: str, end_date: str) -> dict[str, dict]:
-        """Get usage breakdown by tool."""
-        query = """
-            SELECT
-                tool_name,
-                SUM(tokens_used) as tokens,
-                SUM(input_tokens) as input_tokens,
-                SUM(output_tokens) as output_tokens,
-                SUM(request_count) as requests,
-                COUNT(DISTINCT date) as days_active
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY tool_name
-            ORDER BY tokens DESC
+    def _get_tool_breakdown(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, dict]:
+        """Get usage breakdown by tool with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            Dictionary mapping tool names to usage statistics.
         """
-        rows = self.db.fetch_all(query, (start_date, end_date))
+        if tenant_id is not None:
+            query = """
+                SELECT
+                    tool_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(request_count) as requests,
+                    COUNT(DISTINCT date) as days_active
+                FROM daily_usage
+                WHERE date >= ? AND date <= ? AND tenant_id = ?
+                GROUP BY tool_name
+                ORDER BY tokens DESC
+            """
+            rows = self.db.fetch_all(query, (start_date, end_date, tenant_id))
+        else:
+            query = """
+                SELECT
+                    tool_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(request_count) as requests,
+                    COUNT(DISTINCT date) as days_active
+                FROM daily_usage
+                WHERE date >= ? AND date <= ?
+                GROUP BY tool_name
+                ORDER BY tokens DESC
+            """
+            rows = self.db.fetch_all(query, (start_date, end_date))
 
         return {
             row["tool_name"]: {
@@ -514,20 +635,47 @@ class UsageAnalytics:
             if row.get("tool_name")
         }
 
-    def _get_host_breakdown(self, start_date: str, end_date: str) -> dict[str, dict]:
-        """Get usage breakdown by host."""
-        query = """
-            SELECT
-                host_name,
-                SUM(tokens_used) as tokens,
-                SUM(request_count) as requests,
-                COUNT(DISTINCT date) as days_active
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY host_name
-            ORDER BY tokens DESC
+    def _get_host_breakdown(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, dict]:
+        """Get usage breakdown by host with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
+
+        Returns:
+            Dictionary mapping host names to usage statistics.
         """
-        rows = self.db.fetch_all(query, (start_date, end_date))
+        if tenant_id is not None:
+            query = """
+                SELECT
+                    host_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(request_count) as requests,
+                    COUNT(DISTINCT date) as days_active
+                FROM daily_usage
+                WHERE date >= ? AND date <= ? AND tenant_id = ?
+                GROUP BY host_name
+                ORDER BY tokens DESC
+            """
+            rows = self.db.fetch_all(query, (start_date, end_date, tenant_id))
+        else:
+            query = """
+                SELECT
+                    host_name,
+                    SUM(tokens_used) as tokens,
+                    SUM(request_count) as requests,
+                    COUNT(DISTINCT date) as days_active
+                FROM daily_usage
+                WHERE date >= ? AND date <= ?
+                GROUP BY host_name
+                ORDER BY tokens DESC
+            """
+            rows = self.db.fetch_all(query, (start_date, end_date))
 
         return {
             row["host_name"]: {
@@ -540,20 +688,23 @@ class UsageAnalytics:
         }
 
     def _get_historical_data_for_backtest(
-        self, start_date: str, end_date: str
+        self, start_date: str, end_date: str, tenant_id: int | None = None
     ) -> tuple[list[dict], int]:
         """
-        Get historical data for backtest, excluding today.
+        Get historical data for backtest, excluding today, with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
 
         Args:
             start_date: Start date (YYYY-MM-DD).
             end_date: End date (YYYY-MM-DD).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
 
         Returns:
             Tuple of (historical_data list, sample_days count).
             Today's data is excluded since it may be incomplete.
         """
-        daily_data = self._get_daily_totals(start_date, end_date)
+        daily_data = self._get_daily_totals(start_date, end_date, tenant_id=tenant_id)
 
         # Exclude today's data (not yet complete)
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
@@ -763,12 +914,15 @@ class UsageAnalytics:
         return quality_level, quality_desc, confidence
 
     @cached(ttl=60, key_prefix="analytics", skip_args=[0])
-    def get_forecast(self, days: int = 7) -> dict[str, Any]:
+    def get_forecast(self, days: int = 7, tenant_id: int | None = None) -> dict[str, Any]:
         """
-        Get usage forecast based on historical data.
+        Get usage forecast based on historical data with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
 
         Args:
             days: Number of days to forecast (must be 1-90).
+            tenant_id: Tenant ID for filtering. None means global (no filter).
 
         Returns:
             Dict with forecast data including quality metrics.
@@ -779,14 +933,16 @@ class UsageAnalytics:
         if not isinstance(days, int) or days < 1 or days > 90:
             raise ValueError(f"days must be an integer between 1 and 90, got {days}")
 
-        # Get last 30 days of data
+        # Get last 30 days of data with tenant isolation
         end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         start_date = (
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         ).strftime("%Y-%m-%d")
 
-        # Get historical data for backtest (excludes today)
-        historical_data, sample_days = self._get_historical_data_for_backtest(start_date, end_date)
+        # Get historical data for backtest (excludes today) with tenant isolation
+        historical_data, sample_days = self._get_historical_data_for_backtest(
+            start_date, end_date, tenant_id=tenant_id
+        )
 
         # Check minimum sample requirement
         if sample_days < FORECAST_MIN_SAMPLE_DAYS:
@@ -889,18 +1045,23 @@ class UsageAnalytics:
         return result
 
     @cached(ttl=60, key_prefix="analytics", skip_args=[0])
-    def get_efficiency_metrics(self, start_date: str, end_date: str) -> dict[str, Any]:
+    def get_efficiency_metrics(
+        self, start_date: str, end_date: str, tenant_id: int | None = None
+    ) -> dict[str, Any]:
         """
-        Calculate efficiency metrics.
+        Calculate efficiency metrics with optional tenant isolation.
+
+        Issue #3245: Added tenant_id parameter for data isolation.
 
         Args:
             start_date: Start date.
             end_date: End date.
+            tenant_id: Tenant ID for filtering. None means global (no filter).
 
         Returns:
             Dict with efficiency metrics.
         """
-        usage_data = self._get_usage_data(start_date, end_date)
+        usage_data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
 
         if not usage_data:
             return {"efficiency_available": False}
