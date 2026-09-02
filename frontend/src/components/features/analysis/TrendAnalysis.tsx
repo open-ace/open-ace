@@ -39,6 +39,7 @@ import {
   createMatcherConfig,
   formatHourRange,
   getQuickRangeDateRange,
+  getDefaultDateRange,
 } from '@/utils';
 import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 import { SessionStatisticsCard, calculateHealthScore } from './SessionStatisticsCard';
@@ -94,14 +95,8 @@ export const TrendAnalysis: React.FC = () => {
 
   // Initial date range for first render (before batchData is available)
   // This is needed to bootstrap the batch analysis request
-  const initialDateRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default 30 days
-    return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-    };
-  }, []);
+  // Uses getDefaultDateRange to ensure exactly 30 calendar days with proper local date handling
+  const initialDateRange = useMemo(() => getDefaultDateRange(30), []);
 
   const [startDate, setStartDate] = useState(initialDateRange.start);
   const [endDate, setEndDate] = useState(initialDateRange.end);

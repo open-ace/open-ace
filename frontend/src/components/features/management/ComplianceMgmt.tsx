@@ -29,7 +29,7 @@ import {
 import { useConfirm } from '@/components/common';
 import { ReportPreviewModal } from './ReportPreviewModal';
 import { CleanupPreviewContent } from '@/components/features/compliance/CleanupPreviewContent';
-import { formatDate, formatDateTime, createMatcherConfig } from '@/utils';
+import { formatDate, formatDateTime, createMatcherConfig, getDefaultDateRange } from '@/utils';
 import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 import {
   complianceApi,
@@ -233,12 +233,11 @@ export const ComplianceMgmt: React.FC = () => {
   const [previewReportId, setPreviewReportId] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  // Initialize dates for reports
+  // Initialize dates for reports with exactly 30 calendar days
   useEffect(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    setEndDate(end.toISOString().split('T')[0]);
-    setStartDate(start.toISOString().split('T')[0]);
+    const range = getDefaultDateRange(30);
+    setStartDate(range.start);
+    setEndDate(range.end);
   }, []);
 
   // --- Fetch Reports Data ---
