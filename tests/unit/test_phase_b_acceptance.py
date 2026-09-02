@@ -8,7 +8,7 @@ run red-then-green; the doc/AST scans pass-on-arrival (their job is to fail
 loudly if a future change regresses the contract).
 
 Naming mirrors the acceptance criteria exactly so a reviewer can map test ↔
-criterion. Mocking follows ``tests/autonomous/test_orchestrator_characterization.py``
+criterion. Mocking follows ``tests/unit/test_orchestrator_characterization.py``
 (patch Database/Repository/SessionManager/Runner at import time; drive
 ``o.repo`` as a MagicMock so no DB/git/agent work runs).
 """

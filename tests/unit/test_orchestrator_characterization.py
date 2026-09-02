@@ -27,7 +27,7 @@ These mirror the acceptance tests #2044 lists for Phase A:
     test_restart_reenters_from_persisted_phase_state
     test_pause_resume_shutdown_contract_survives_phase_adapter
 
-The mocking follows tests/autonomous/test_repo_drift_validation.py: patch
+The mocking follows tests/unit/test_repo_drift_validation.py: patch
 ``Database`` + ``AutonomousWorkflowRepository`` at import time, then drive
 ``o.repo`` as a MagicMock so no DB/git/agent runs.
 """
