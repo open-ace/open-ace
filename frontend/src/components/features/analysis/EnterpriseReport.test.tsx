@@ -543,4 +543,204 @@ describe('EnterpriseReport Component', () => {
       expect(refetchMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('Anomaly Table', () => {
+    it('renders spike anomaly with danger color and up arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'spike' as const,
+            metric: 'tokens',
+            date: '2024-01-15',
+            expected_value: 1000,
+            actual_value: 5000,
+            deviation_percentage: 400.0,
+            severity: 'high' as const,
+            description: 'Token usage spike on 2024-01-15',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for spike badge with danger color
+      const spikeBadge = screen.getByText('spike');
+      expect(spikeBadge).toHaveClass('bg-danger');
+
+      // Check for up arrow and danger text color in deviation
+      const deviationSpan = screen.getByText(
+        (content) => content.includes('↑') && content.includes('400.0%')
+      );
+      expect(deviationSpan).toHaveClass('text-danger');
+    });
+
+    it('renders drop anomaly with info color and down arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'drop' as const,
+            metric: 'tokens',
+            date: '2024-01-20',
+            expected_value: 1000,
+            actual_value: 200,
+            deviation_percentage: 80.0,
+            severity: 'low' as const,
+            description: 'Token usage drop on 2024-01-20',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for drop badge with info color
+      const dropBadge = screen.getByText('drop');
+      expect(dropBadge).toHaveClass('bg-info');
+
+      // Check for down arrow and info text color in deviation
+      const deviationSpan = screen.getByText(
+        (content) => content.includes('↓') && content.includes('80.0%')
+      );
+      expect(deviationSpan).toHaveClass('text-info');
+    });
+
+    it('renders unusual_pattern anomaly with warning color and no arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'unusual_pattern' as const,
+            metric: 'tokens',
+            date: '2024-01-25',
+            expected_value: 1000,
+            actual_value: 500,
+            deviation_percentage: 50.0,
+            severity: 'medium' as const,
+            description: 'Unusual pattern detected on 2024-01-25',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for unusual_pattern badge with warning color
+      const patternBadge = screen.getByText('unusual_pattern');
+      expect(patternBadge).toHaveClass('bg-warning');
+
+      // Check for no arrow and warning text color in deviation
+      const deviationSpan = screen.getByText('50.0%');
+      expect(deviationSpan).toHaveClass('text-warning');
+      expect(deviationSpan.textContent).not.toContain('↑');
+      expect(deviationSpan.textContent).not.toContain('↓');
+    });
+  });
 });

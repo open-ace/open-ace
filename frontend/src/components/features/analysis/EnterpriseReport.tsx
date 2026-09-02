@@ -451,6 +451,15 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
     return badges[type] || 'bg-secondary';
   };
 
+  const getDeviationStyle = (type: string) => {
+    const styles: Record<string, string> = {
+      spike: 'text-danger',
+      drop: 'text-info',
+      unusual_pattern: 'text-warning',
+    };
+    return styles[type] || 'text-muted';
+  };
+
   return (
     <Card title={t('anomalyDetection', language)} className="mb-4">
       <div className="table-responsive">
@@ -477,9 +486,8 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
                 <td className="text-end">{anomaly.expected_value.toLocaleString()}</td>
                 <td className="text-end">{anomaly.actual_value.toLocaleString()}</td>
                 <td className="text-end">
-                  <span
-                    className={cn(anomaly.deviation_percentage > 0 ? 'text-danger' : 'text-info')}
-                  >
+                  <span className={cn(getDeviationStyle(anomaly.type))}>
+                    {anomaly.type === 'spike' ? '↑' : anomaly.type === 'drop' ? '↓' : ''}
                     {anomaly.deviation_percentage.toFixed(1)}%
                   </span>
                 </td>
