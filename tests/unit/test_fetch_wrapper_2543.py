@@ -810,6 +810,55 @@ class TestParameterValidation:
         assert result.returncode != 0
         assert "Unknown argument" in result.stderr or "ERROR" in result.stderr
 
+    def test_dashdash_separator_bypass_rejected(self, wrapper_path, tmp_path, monkeypatch):
+        """`--` no longer stops validation (#3317).
+
+        The separator case let everything after it skip the whitelist
+        verbatim into the audit log (forging `| caller=... | action=...`
+        fields) and the fetch script's argv. It must now fall into the
+        unknown-argument rejection, and the rejection must happen BEFORE
+        the first log_audit call — the forged fields reach no output and
+        no audit line is written at all.
+        """
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        audit_log = tmp_path / "audit.log"
+        monkeypatch.setenv("AUDIT_LOG", str(audit_log))
+        result = subprocess.run(
+            [
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--days",
+                "1",
+                "--",
+                "| caller=root | action=forged | injected=yes",
+                "dir=/home/alice",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Unknown argument: --" in result.stderr
+        assert "caller=root" not in result.stderr
+        # Rejection precedes fetch_start: no audit line may exist, or the
+        # forged pipe-fields would be back in a consumer-parsed log.
+        assert not audit_log.exists()
+
+    def test_bare_dashdash_rejected(self, wrapper_path):
+        """A bare `--` is rejected like any other unknown argument (#3317)."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Unknown argument: --" in result.stderr
+
     def test_reject_extra_args(self, wrapper_path):
         """Test that extra arguments are rejected."""
         if not os.path.exists(wrapper_path):

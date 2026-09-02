@@ -22,6 +22,8 @@
 #
 # Issue #2543: 本地工作区会话数据采集权限修复
 # Issue #3249: 参数校验下划线修复和安全加固
+# Issue #3317: 关闭 `--` 参数分离旁路（post-`--` 曾绕过全部校验进入
+#              审计日志与 fetch 脚本 argv）
 
 set -euo pipefail
 
@@ -126,15 +128,14 @@ sanitize_username() {
 # 结果。终止性：脱敏产物含 '*'，不满足 [a-zA-Z0-9_-]+ 段匹配，不会再
 # 次命中；对已脱敏输入幂等。
 # 覆盖边界（如实声明）：参数白名单（validate_config_path 等）只放行单层
-# home 形状，本函数对这类形状保证脱敏。但 validate_args 对 `--` 之后的
-# 参数不做校验（既有行为，独立跟进），post-`--` 内容可绕过白名单进入
-# details——对其中不匹配 ^/home|/Users/<name>/ 形状的用户名（无尾斜杠、
-# 含非法字符、嵌套段、超过 guard 上限的多次出现）本函数不保证脱敏。
+# home 形状，本函数对这类形状保证脱敏。`--` 参数分离旁路已被 #3317 关闭
+# （validate_args 不再接受 `--`，一切参数经 case 白名单校验后方可进入
+# details）；对不匹配 ^/home|/Users/<name>/ 形状的用户名（无尾斜杠、含
+# 非法字符、嵌套段）本函数不保证脱敏。
 sanitize_details() {
     local details="$1"
     local re='(/(home|Users)/)([a-zA-Z0-9_-]+)/'
-    # 防御性上限：校验过的参数面（单个 --config、拒绝重复）远小于 20 段；
-    # post-`--` 内容可人为超过（见上），届时 20 名之后的段保持原样
+    # 防御性上限：校验过的参数面（单个 --config、拒绝重复）远小于 20 段
     local guard=0
     while [[ "$details" =~ $re && $guard -lt 20 ]]; do
         local prefix="${BASH_REMATCH[1]}"
@@ -493,10 +494,11 @@ validate_args() {
                 # 标志参数，无值
                 shift
                 ;;
-            --)
-                # 参数分隔符，停止解析
-                break
-                ;;
+            # Issue #3317: no `--)` separator case. It let everything after
+            # it skip validation into the audit log and the fetch script's
+            # argv; nothing legitimately needs it (fixed-grammar internal
+            # RPC; validate_arg_value already rejects '-'-leading values),
+            # so `--` falls through to the unknown-argument rejection.
             *)
                 echo "ERROR: Unknown argument: $1" >&2
                 return 1
