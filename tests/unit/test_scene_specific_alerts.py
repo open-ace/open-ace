@@ -23,6 +23,8 @@ from app.modules.governance.alert_notifier import (
     create_suspicious_activity_alert,
 )
 
+pytestmark = [pytest.mark.regression]
+
 
 class TestServiceDownAlert:
     """Tests for create_service_down_alert."""

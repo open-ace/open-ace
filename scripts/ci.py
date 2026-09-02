@@ -181,7 +181,7 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     """Select coarse, fail-safe PR lanes from repository-relative paths."""
     clean = sorted({path.strip().lstrip("./") for path in changed_files if path.strip()})
     if not clean:
-        return ["default-collection", "python-core", "python-min"]
+        return ["default-collection", "false-positive-scan", "python-core", "python-min"]
 
     policy_change = any(matches(path, POLICY_PATTERNS) for path in clean)
     docs_only = all(matches(path, DOC_PATTERNS) for path in clean)
@@ -194,8 +194,11 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     # for every code change (#2868): version-specific regressions surface on the
     # oldest Python first (e.g. datetime.fromisoformat rejecting 'Z' before
     # 3.11), and it is unit-only so it stays fast and deterministic.
+    # false-positive-scan rides along on every non-docs change (#3186 Phase A):
+    # a ~3s AST scan keeping new no-assert/skip debt out of required CI.
     selected = {
         "default-collection",
+        "false-positive-scan",
         "python-core",
         "python-min",
     }
@@ -480,6 +483,55 @@ def run_collection_suite(
     )
 
 
+# A suite that finishes above this fraction of its budget is eating into the
+# headroom that absorbs GitHub-hosted runner variance (#3280's root cause).
+# #3281 replaced the old 600s hard tripwire with generous budgets plus
+# per-test timeouts, which stopped the flake but lost the gradual-slowdown
+# signal; this warning restores it as a visible (non-fatal) log line.
+SUITE_BUDGET_WARNING_FRACTION = 0.75
+
+
+def warn_on_suite_budget_erosion(
+    name: str,
+    *,
+    elapsed: float,
+    timeout_seconds: int,
+    metrics: MetricsRecorder | None = None,
+    invocation_id: str = "",
+) -> None:
+    """Warn loudly when a successful suite consumes most of its budget.
+
+    Prints to stderr (visible in every CI log, with or without metrics
+    enabled) and, when the nightly metrics stream is active, records a
+    suite_budget_warning event alongside the existing suite_terminal record.
+    Never raises: a budget observation must not fail a green run.
+    """
+    threshold = timeout_seconds * SUITE_BUDGET_WARNING_FRACTION
+    if elapsed < threshold:
+        return
+    fraction = elapsed / timeout_seconds
+    # "::warning::" turns the line into a Checks-UI annotation on GitHub
+    # Actions (same convention as scripts/ci/create_audit_issue.py) while
+    # staying a readable plain-text warning in local runs.
+    print(
+        f"::warning::{name} completed in {elapsed:.1f}s, {fraction:.0%} of its "
+        f"{timeout_seconds}s budget. Healthy runs should stay well below this; "
+        "check the --durations output and re-derive the budget from variance "
+        "evidence before this turns into intermittent timeouts (#3282)",
+        file=sys.stderr,
+        flush=True,
+    )
+    if metrics:
+        metrics.record(
+            "suite_budget_warning",
+            invocation_id=invocation_id,
+            suite=name,
+            elapsed_seconds=round(elapsed, 6),
+            timeout_seconds=timeout_seconds,
+            budget_fraction=round(fraction, 4),
+        )
+
+
 def run_suite(
     name: str,
     config: dict[str, Any],
@@ -569,6 +621,7 @@ def run_suite(
                 timeout_seconds=suite["timeout_seconds"],
             )
         raise
+    elapsed = time.monotonic() - suite_started
     if metrics:
         metrics.record(
             "suite_terminal",
@@ -576,10 +629,17 @@ def run_suite(
             suite=name,
             started_at=suite_started_at,
             completed_at=utc_now(),
-            duration_seconds=round(time.monotonic() - suite_started, 6),
+            duration_seconds=round(elapsed, 6),
             outcome="success",
             timeout_seconds=suite["timeout_seconds"],
         )
+    warn_on_suite_budget_erosion(
+        name,
+        elapsed=elapsed,
+        timeout_seconds=suite["timeout_seconds"],
+        metrics=metrics,
+        invocation_id=invocation_id,
+    )
 
 
 def write_github_outputs(selected: list[str]) -> None:

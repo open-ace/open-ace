@@ -13,6 +13,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
@@ -106,6 +108,9 @@ def _policy_exhausted_workflow() -> dict:
 
 
 # ── registration ─────────────────────────────────────────────────────────
+
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
 
 
 def test_merge_handle_is_registered():

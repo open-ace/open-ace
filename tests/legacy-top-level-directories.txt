@@ -1,3 +1,0 @@
-# Grandfathered test-domain directories outside the execution-layer taxonomy.
-# Remove an entry when its final source test has moved; do not add new entries.
-autonomous

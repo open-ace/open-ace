@@ -34,18 +34,60 @@ export function toLocalDateString(date: Date): string {
 }
 
 /**
- * Build a `{ start, end }` range covering the last `days` days through today,
+ * Build a `{ start, end }` range covering exactly `days` calendar days through today,
  * expressed as local YYYY-MM-DD strings.
  *
- * @param days - Number of days to look back (today is the inclusive end).
+ * IMPORTANT: Backend APIs use inclusive date range (date >= start AND date <= end).
+ * To return exactly `days` days, we set start = today - (days - 1).
+ *
+ * Uses toLocalDateString to avoid UTC timezone offset issues.
+ *
+ * @param days - Number of calendar days to include (today is the inclusive end).
  *               Defaults to `DEFAULT_DATE_RANGE_DAYS` (30) to match the default
  *               on other analysis pages.
+ *               Example: days=7 returns start=2024-06-09, end=2024-06-15 (7 days total)
  */
 export function getDefaultDateRange(days: number = DEFAULT_DATE_RANGE_DAYS): DateRange {
+  if (days <= 0) {
+    const today = toLocalDateString(new Date());
+    return { start: today, end: today };
+  }
   const end = new Date();
-  const start = new Date(end.getTime() - days * MS_PER_DAY);
+  const start = new Date(end.getTime() - (days - 1) * MS_PER_DAY);
   return {
     start: toLocalDateString(start),
     end: toLocalDateString(end),
   };
+}
+
+/**
+ * Quick range options type for date range selection.
+ */
+export type QuickRangeOption = '7' | '30' | '90' | 'all';
+
+/**
+ * Get date range for quick range selection.
+ *
+ * @param quickRange - Quick range option ('7', '30', '90', 'all')
+ * @param dataRange - Optional data range for 'all' option (min_date, max_date)
+ * @returns Date range as local date strings
+ */
+export function getQuickRangeDateRange(
+  quickRange: QuickRangeOption,
+  dataRange?: { min_date: string; max_date: string }
+): DateRange {
+  switch (quickRange) {
+    case '7':
+      return getDefaultDateRange(7);
+    case '30':
+      return getDefaultDateRange(30);
+    case '90':
+      return getDefaultDateRange(90);
+    case 'all':
+    default:
+      if (dataRange?.min_date && dataRange?.max_date) {
+        return { start: dataRange.min_date, end: dataRange.max_date };
+      }
+      return getDefaultDateRange(365);
+  }
 }

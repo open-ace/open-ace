@@ -70,7 +70,7 @@ class TestPerformance:
                 {
                     "type": "user",
                     "uuid": f"msg-{i}",
-                    "parentUuid": None if i == 0 else f"msg-{i-1}",
+                    "parentUuid": None if i == 0 else f"msg-{i - 1}",
                     "timestamp": f"2026-08-24T10:{i % 60:02d}:00Z",
                     "message": {
                         "role": "user" if i % 2 == 0 else "assistant",
@@ -106,11 +106,9 @@ class TestPerformance:
         assert elapsed_time < 2, f"Processing took {elapsed_time:.1f}s, expected < 2s"
 
 
-@pytest.mark.performance
-@pytest.mark.skipif(not RUN_PERFORMANCE, reason="Performance tests require RUN_PERFORMANCE_TESTS=1")
-class TestPerformanceWithDatabase:
-    """Performance tests with database persistence."""
-
-    def test_100_session_files_with_db_performance(self, tmp_path):
-        """Test processing 100 session files with database writes."""
-        pytest.skip("Requires PostgreSQL database for this test")
+# TestPerformanceWithDatabase (a pg_db-based placeholder that always skipped)
+# was deleted in #3186 Phase B batch 2b: no lane can execute a
+# postgres-marked performance test (the weekly perf lane filters
+# `-m "performance and not postgres"` and has no PG service; the postgres
+# lane only collects tests/integration). The never-run performance lane as
+# a whole is tracked separately (see #3186 batch 2b follow-up issue).

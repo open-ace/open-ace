@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { EnterpriseReport } from './EnterpriseReport';
@@ -45,6 +45,8 @@ vi.mock('@/hooks', async (importOriginal) => {
     useEfficiencyMetrics: vi.fn(() => ({
       data: null,
       isLoading: false,
+      isError: false,
+      error: null,
       refetch: vi.fn(),
     })),
     useAuth: vi.fn(() => ({
@@ -173,6 +175,8 @@ describe('EnterpriseReport Component', () => {
         input_output_ratio: 1.0,
       },
       isLoading: false,
+      isError: false,
+      error: null,
       refetch: vi.fn(),
     } as ReturnType<typeof useEfficiencyMetrics>);
 
@@ -227,6 +231,8 @@ describe('EnterpriseReport Component', () => {
     vi.mocked(useEfficiencyMetrics).mockReturnValue({
       data: { efficiency_available: false },
       isLoading: false,
+      isError: false,
+      error: null,
       refetch: vi.fn(),
     } as any);
 
@@ -270,6 +276,8 @@ describe('EnterpriseReport Component', () => {
     vi.mocked(useEfficiencyMetrics).mockReturnValue({
       data: { efficiency_available: false },
       isLoading: false,
+      isError: false,
+      error: null,
       refetch: vi.fn(),
     } as any);
 
@@ -313,6 +321,8 @@ describe('EnterpriseReport Component', () => {
     vi.mocked(useEfficiencyMetrics).mockReturnValue({
       data: { efficiency_available: false },
       isLoading: false,
+      isError: false,
+      error: null,
       refetch: vi.fn(),
     } as any);
 
@@ -322,6 +332,415 @@ describe('EnterpriseReport Component', () => {
       expect(screen.getByText('快速日期范围')).toBeInTheDocument();
       expect(screen.getByText('开始日期')).toBeInTheDocument();
       expect(screen.getByText('结束日期')).toBeInTheDocument();
+    });
+  });
+
+  describe('peak_tokens subtitle', () => {
+    it('should display peak_tokens subtitle when peak_tokens > 0', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: '2024-01-15',
+          peak_tokens: 5000,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        // Should display the peak-day card label (zh i18n key peakDay)
+        expect(screen.getByText('高峰日')).toBeInTheDocument();
+        // Should display peak day value
+        expect(screen.getByText('2024-01-15')).toBeInTheDocument();
+        // Should display peak tokens subtitle with label
+        expect(screen.getByText(/峰值 Tokens:/)).toBeInTheDocument();
+        expect(screen.getByText(/5.00K/)).toBeInTheDocument();
+      });
+    });
+
+    it('should not display peak_tokens subtitle when peak_tokens is 0', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        // Should display the peak-day card label (zh i18n key peakDay)
+        expect(screen.getByText('高峰日')).toBeInTheDocument();
+        // Should display dash when no peak day
+        expect(screen.getByText('-')).toBeInTheDocument();
+      });
+
+      // Should NOT display peak tokens subtitle
+      expect(screen.queryByText(/峰值 Tokens:/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Efficiency Metrics Error Handling', () => {
+    it('displays error when efficiency metrics API fails', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error('Efficiency API Error'),
+        refetch: vi.fn(),
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      // Wait for main report to load
+      await waitFor(() => {
+        expect(screen.getByText('总 Tokens')).toBeInTheDocument();
+      });
+
+      // Should display error for efficiency metrics
+      expect(screen.getByText('Efficiency API Error')).toBeInTheDocument();
+      expect(screen.getByText('Retry')).toBeInTheDocument();
+    });
+
+    it('retries efficiency metrics when retry button is clicked', async () => {
+      const refetchMock = vi.fn();
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as any);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error('API Error'),
+        refetch: refetchMock,
+      } as any);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('总 Tokens')).toBeInTheDocument();
+      });
+
+      // Click retry button
+      const retryButton = screen.getByText('Retry');
+      fireEvent.click(retryButton);
+
+      // Verify refetch was called
+      expect(refetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Anomaly Table', () => {
+    it('renders spike anomaly with danger color and up arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'spike' as const,
+            metric: 'tokens',
+            date: '2024-01-15',
+            expected_value: 1000,
+            actual_value: 5000,
+            deviation_percentage: 400.0,
+            severity: 'high' as const,
+            description: 'Token usage spike on 2024-01-15',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for spike badge with danger color
+      const spikeBadge = screen.getByText('突增'); // Translated 'spike'
+      expect(spikeBadge).toHaveClass('bg-danger');
+
+      // Check for up arrow and danger text color in deviation
+      const deviationSpan = screen.getByText(
+        (content) => content.includes('↑') && content.includes('400.0%')
+      );
+      expect(deviationSpan).toHaveClass('text-danger');
+    });
+
+    it('renders drop anomaly with info color and down arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'drop' as const,
+            metric: 'tokens',
+            date: '2024-01-20',
+            expected_value: 1000,
+            actual_value: 200,
+            deviation_percentage: 80.0,
+            severity: 'low' as const,
+            description: 'Token usage drop on 2024-01-20',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for drop badge with info color
+      const dropBadge = screen.getByText('骤降'); // Translated 'drop'
+      expect(dropBadge).toHaveClass('bg-info');
+
+      // Check for down arrow and info text color in deviation
+      const deviationSpan = screen.getByText(
+        (content) => content.includes('↓') && content.includes('80.0%')
+      );
+      expect(deviationSpan).toHaveClass('text-info');
+    });
+
+    it('renders unusual_pattern anomaly with warning color and no arrow', async () => {
+      const mockReportData = {
+        period: { start: '2024-01-01', end: '2024-01-31' },
+        summary: {
+          total_tokens: 100000,
+          total_input_tokens: 50000,
+          total_output_tokens: 50000,
+          total_requests: 1000,
+          unique_tools: 10,
+          unique_hosts: 5,
+          daily_average_tokens: 3333,
+          daily_average_requests: 33,
+          peak_day: null,
+          peak_tokens: 0,
+        },
+        trends: [],
+        anomalies: [
+          {
+            type: 'unusual_pattern' as const,
+            metric: 'tokens',
+            date: '2024-01-25',
+            expected_value: 1000,
+            actual_value: 500,
+            deviation_percentage: 50.0,
+            severity: 'medium' as const,
+            description: 'Unusual pattern detected on 2024-01-25',
+          },
+        ],
+        breakdown_by_tool: {},
+        breakdown_by_host: {},
+      };
+
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('异常检测')).toBeInTheDocument();
+      });
+
+      // Check for unusual_pattern badge with warning color
+      const patternBadge = screen.getByText('异常模式'); // Translated 'unusual_pattern'
+      expect(patternBadge).toHaveClass('bg-warning');
+
+      // Check for no arrow and warning text color in deviation
+      const deviationSpan = screen.getByText('50.0%');
+      expect(deviationSpan).toHaveClass('text-warning');
+      expect(deviationSpan.textContent).not.toContain('↑');
+      expect(deviationSpan.textContent).not.toContain('↓');
     });
   });
 });

@@ -624,8 +624,12 @@ def test_destroy_attribution_works_without_a_live_handle():
 
 
 def test_destroy_attribution_never_raises():
-    provider, _ = _provider()
+    provider, api = _provider()
     provider.destroy_attribution("sb-unknown", None)
+    # Locate-before-delete: an unknown attribution is a reporting no-op — a
+    # blind DELETE whose 404 counts as success would be indistinguishable
+    # from destroying the wrong server's sandbox.
+    assert api.deleted == set()
 
 
 def test_reconcile_orphans_destroys_only_unclaimed_sandboxes():

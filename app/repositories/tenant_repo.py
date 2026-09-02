@@ -66,13 +66,19 @@ def _serialize_json_field(value: Any, is_postgresql: bool) -> Any:
         is_postgresql: Whether the database is PostgreSQL.
 
     Returns:
-        For PostgreSQL: The value as-is (psycopg2 handles JSON serialization).
-        For SQLite: JSON-encoded string.
+        JSON-encoded text for both dialects (the PostgreSQL jsonb column
+        casts it; see the inline note below for why the raw value cannot
+        be passed).
     """
     if value is None:
         return None
-    if is_postgresql:
-        return value  # psycopg2 handles JSON serialization
+    if isinstance(value, str):
+        return value  # already JSON text (e.g. round-tripped from storage)
+    # Both dialects store JSON text: the PG column is jsonb and psycopg2
+    # adapts a Python list to text[] (and cannot adapt a dict at all), so the
+    # value must be JSON-encoded and let PostgreSQL cast it. Passing the raw
+    # list crashed every PG-mode write with "column ... is of type jsonb but
+    # expression is of type text[]" (#3287 first-run finding).
     return json.dumps(value)
 
 
@@ -715,7 +721,6 @@ class TenantRepository:
                 pass
 
             try:
-
                 settings_row = self.db.fetch_one(
                     "SELECT * FROM tenant_settings WHERE tenant_id = ?", (tenant_id,)
                 )

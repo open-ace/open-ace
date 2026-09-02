@@ -52,21 +52,26 @@ def sudo_git_prefix(path: str = "/tmp/repo") -> list[str]:
     ]
 
 
-def assert_allowed(wrapper, argv):
+def check_allowed(wrapper, argv):
+    """Evaluate the wrapper verdict; the caller asserts (inline, scanner-visible)."""
     result = wrapper.validate_git_argv(argv, config=make_config())
-    assert result.allowed, result.reason
+    return result.allowed, result.reason
 
 
-def assert_denied(wrapper, argv):
+def check_denied(wrapper, argv):
     result = wrapper.validate_git_argv(argv, config=make_config())
-    assert not result.allowed
+    return (not result.allowed), result.reason
 
 
 def test_version_and_help_are_only_standalone_passthrough(wrapper):
-    assert_allowed(wrapper, ["--version"])
-    assert_allowed(wrapper, ["--help"])
-    assert_denied(wrapper, ["-c", "alias.pwn=!id", "pwn", "--version"])
-    assert_denied(wrapper, ["status", "--help"])
+    _ok, _reason = check_allowed(wrapper, ["--version"])
+    assert _ok, _reason
+    _ok, _reason = check_allowed(wrapper, ["--help"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["-c", "alias.pwn=!id", "pwn", "--version"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["status", "--help"])
+    assert _ok, _reason
 
 
 def test_main_denies_before_running_git(wrapper, monkeypatch):
@@ -103,15 +108,20 @@ def test_main_runs_absolute_git_binary_after_validation(wrapper, monkeypatch):
 
 
 def test_forbidden_global_options_and_configs_are_denied(wrapper):
-    assert_denied(wrapper, ["--exec-path=/tmp/x", "status"])
-    assert_denied(wrapper, ["-c", "protocol.ext.allow=always", "fetch", "origin"])
-    assert_denied(wrapper, ["-c", "core.fsmonitor=true", "status"])
-    assert_denied(wrapper, ["-c", "core.sshCommand=sh", "fetch", "origin"])
+    _ok, _reason = check_denied(wrapper, ["--exec-path=/tmp/x", "status"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["-c", "protocol.ext.allow=always", "fetch", "origin"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["-c", "core.fsmonitor=true", "status"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["-c", "core.sshCommand=sh", "fetch", "origin"])
+    assert _ok, _reason
 
 
 def test_git_commands_require_hardening_globals(wrapper):
-    assert_denied(wrapper, ["-C", "/tmp/repo", "commit", "-m", "x"])
-    assert_denied(
+    _ok, _reason = check_denied(wrapper, ["-C", "/tmp/repo", "commit", "-m", "x"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(
         wrapper,
         [
             "-c",
@@ -122,7 +132,8 @@ def test_git_commands_require_hardening_globals(wrapper):
             "--porcelain",
         ],
     )
-    assert_denied(
+    assert _ok, _reason
+    _ok, _reason = check_denied(
         wrapper,
         [
             "-c",
@@ -133,6 +144,7 @@ def test_git_commands_require_hardening_globals(wrapper):
             "--porcelain",
         ],
     )
+    assert _ok, _reason
 
 
 def test_git_context_paths_must_be_owned_when_config_requires_it(wrapper, tmp_path, monkeypatch):
@@ -196,18 +208,24 @@ def test_safe_directory_values_do_not_require_target_user_ownership(wrapper, tmp
 
 
 def test_mutating_branches_are_limited_to_workflow_branches(wrapper):
-    assert_denied(wrapper, ["push", "origin", "main", "--force"])
-    assert_denied(wrapper, ["push", "origin", "main", "--force-with-lease"])
-    assert_denied(wrapper, ["branch", "-D", "main"])
-    assert_denied(wrapper, ["checkout", "-b", "main"])
-    assert_allowed(
+    _ok, _reason = check_denied(wrapper, ["push", "origin", "main", "--force"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["push", "origin", "main", "--force-with-lease"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["branch", "-D", "main"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["checkout", "-b", "main"])
+    assert _ok, _reason
+    _ok, _reason = check_allowed(
         wrapper, sudo_git_prefix() + ["push", "origin", "auto-dev/abc", "--force-with-lease"]
     )
+    assert _ok, _reason
 
 
 def test_relative_path_operands_cannot_escape_worktree(wrapper):
-    assert_denied(wrapper, ["reset", "-q", "HEAD", "--", "../secret"])
-    assert_denied(
+    _ok, _reason = check_denied(wrapper, ["reset", "-q", "HEAD", "--", "../secret"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(
         wrapper,
         [
             "grep",
@@ -225,13 +243,18 @@ def test_relative_path_operands_cannot_escape_worktree(wrapper):
             "a/../b",
         ],
     )
+    assert _ok, _reason
 
 
 def test_show_tree_paths_allow_real_filenames_but_not_escapes(wrapper):
-    assert_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:docs/file name.md"])
-    assert_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:src/package[data].py"])
-    assert_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:../secret"])
-    assert_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:/tmp/secret"])
+    _ok, _reason = check_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:docs/file name.md"])
+    assert _ok, _reason
+    _ok, _reason = check_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:src/package[data].py"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:../secret"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:/tmp/secret"])
+    assert _ok, _reason
 
 
 def test_clone_context_must_be_existing_parent_not_missing_target(wrapper, tmp_path):
@@ -367,7 +390,8 @@ def test_clone_context_must_be_existing_parent_not_missing_target(wrapper, tmp_p
     ],
 )
 def test_current_github_ops_git_shapes_are_allowed(wrapper, argv):
-    assert_allowed(wrapper, sudo_git_prefix() + argv)
+    _ok, _reason = check_allowed(wrapper, sudo_git_prefix() + argv)
+    assert _ok, _reason
 
 
 def test_missing_and_writable_config_files_fail_closed(wrapper, tmp_path):

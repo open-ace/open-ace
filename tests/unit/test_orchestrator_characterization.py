@@ -27,7 +27,7 @@ These mirror the acceptance tests #2044 lists for Phase A:
     test_restart_reenters_from_persisted_phase_state
     test_pause_resume_shutdown_contract_survives_phase_adapter
 
-The mocking follows tests/autonomous/test_repo_drift_validation.py: patch
+The mocking follows tests/unit/test_repo_drift_validation.py: patch
 ``Database`` + ``AutonomousWorkflowRepository`` at import time, then drive
 ``o.repo`` as a MagicMock so no DB/git/agent runs.
 """
@@ -99,6 +99,9 @@ def _active_workflow(phase: str = "planning", **overrides) -> dict:
 
 
 # ── 1. advance() dispatch ────────────────────────────────────────────────────
+
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
 
 
 class TestAdvanceDispatch:
@@ -861,10 +864,9 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     assert isinstance(
         result, PhaseResult
     ), f"_do_report must return PhaseResult, got {type(result)}"
-    assert not inline_phase_status_writes, (
-        f"_do_report wrote phase/status/completed_at/paused_at inline: "
-        f"{inline_phase_status_writes}"
-    )
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_report wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
     # Report always advances to "wait" with waiting status — same decision as
     # the legacy inline _update_workflow({"current_phase":"wait","status":"waiting"}).
     assert result.outcome == "completed"
@@ -946,10 +948,9 @@ def test_wait_phase_returns_phase_result_not_inline_commit(monkeypatch):
     result = orch._do_wait(ctx, deps)
 
     assert isinstance(result, PhaseResult), f"_do_wait must return PhaseResult, got {type(result)}"
-    assert not inline_phase_status_writes, (
-        f"_do_wait wrote phase/status/completed_at/paused_at inline: "
-        f"{inline_phase_status_writes}"
-    )
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_wait wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
     # New-requirements branch advances to "planning" for dev_round 2 — same
     # decision as the legacy inline _update_workflow({"current_phase":"planning",
     # "status":"planning","dev_round":2,"current_round":0,...}).
@@ -1275,9 +1276,9 @@ def test_wait_phase_parking_and_auto_merge_paths(monkeypatch, comments, pr_numbe
     result = orch._do_wait(ctx, deps)
 
     assert isinstance(result, PhaseResult)
-    assert not inline_phase_status_writes, (
-        f"_do_wait wrote phase/status inline on {expected}: " f"{inline_phase_status_writes}"
-    )
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_wait wrote phase/status inline on {expected}: {inline_phase_status_writes}"
     if expected == "wait_outcome":
         assert result.outcome == "wait"
         assert result.next_phase is None

@@ -64,7 +64,7 @@ def _iso(moment: datetime) -> str:
 def _make_orchestrator(workflow: dict) -> AutonomousOrchestrator:
     """Build an orchestrator whose repo/emitter are fully mocked.
 
-    Follows tests/autonomous/test_orchestrator_characterization.py: patch the
+    Follows tests/unit/test_orchestrator_characterization.py: patch the
     DB/repo/session constructions at import time so __init__ does no real
     work, then drive ``o.repo`` as a MagicMock.
     """
@@ -154,6 +154,9 @@ def _recorded_metadata(o: AutonomousOrchestrator) -> list[dict]:
 
 
 # ── Cycle accounting ─────────────────────────────────────────────────────────
+
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2673)]
 
 
 class TestZeroCheckRunsCycleAccounting:

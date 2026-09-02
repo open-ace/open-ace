@@ -24,6 +24,8 @@ import pytest
 from app.modules.workspace.autonomous.github_ops import GitHubOps
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1910)]
+
 
 def _git_is_functional() -> bool:
     """Check if git can execute repository operations.
@@ -119,7 +121,6 @@ def _make_orchestrator():
 
 
 @requires_git
-@pytest.mark.regression
 class TestRepoDriftIntegration:
     def test_external_pull_is_allowed(self, tmp_path):
         # main starts at base. A collaborator pushes c2 to origin; the local

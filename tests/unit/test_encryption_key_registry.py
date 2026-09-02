@@ -20,6 +20,8 @@ from app.utils.encryption_key_registry import (
     reset_registry,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.security]
+
 
 @pytest.fixture(autouse=True)
 def reset_singleton():
