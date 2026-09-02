@@ -256,12 +256,22 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
 
 // Efficiency Cards Component
 interface EfficiencyCardsProps {
-  efficiency: EfficiencyMetricsResponse;
+  efficiency: EfficiencyMetricsResponse | undefined;
   isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
   language: Language;
+  onRetry: () => void;
 }
 
-const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({ efficiency, isLoading, language }) => {
+const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
+  efficiency,
+  isLoading,
+  isError,
+  error,
+  language,
+  onRetry,
+}) => {
   if (isLoading) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
@@ -270,7 +280,15 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({ efficiency, isLoading
     );
   }
 
-  if (!efficiency.efficiency_available) {
+  if (isError) {
+    return (
+      <Card title={t('efficiencyMetrics', language)} className="mb-4">
+        <Error message={error?.message ?? t('error', language)} onRetry={onRetry} />
+      </Card>
+    );
+  }
+
+  if (!efficiency?.efficiency_available) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
         <EmptyState icon="bi-speedometer" title={t('noEfficiencyData', language)} />
@@ -603,6 +621,8 @@ export const EnterpriseReport: React.FC = () => {
   const {
     data: efficiencyData,
     isLoading: isEfficiencyLoading,
+    isError: isEfficiencyError,
+    error: efficiencyError,
     refetch: refetchEfficiency,
   } = useEfficiencyMetrics(startDate, endDate);
 
@@ -783,9 +803,12 @@ export const EnterpriseReport: React.FC = () => {
 
       {/* Efficiency Cards */}
       <EfficiencyCards
-        efficiency={efficiencyData ?? { efficiency_available: false }}
+        efficiency={efficiencyData}
         isLoading={isEfficiencyLoading}
+        isError={isEfficiencyError}
+        error={efficiencyError}
         language={language}
+        onRetry={refetchEfficiency}
       />
 
       {/* Trends Table */}

@@ -3,7 +3,7 @@
 Background: batch workflows pin a shared ``base_commit_sha`` so concurrently
 created branches cannot end up on diverged base commits. The behavioral
 branches (locking, timing-issue detection) are asserted in
-``tests/autonomous/phases/test_pr_review.py``; the assertion-free placeholder
+``tests/unit/test_phase_pr_review.py``; the assertion-free placeholder
 tests from the original fix were removed by #2429 batch 5 (34-stub governance).
 """
 
