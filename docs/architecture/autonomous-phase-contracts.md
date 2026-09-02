@@ -4,7 +4,7 @@
 > workflow phase in `AutonomousOrchestrator`. It is the authoritative source for
 > "when a phase commits, and with what result." Code must match this document;
 > changes here require updating the orchestrator and the characterization tests
-> in `tests/autonomous/test_orchestrator_characterization.py`.
+> in `tests/unit/test_orchestrator_characterization.py`.
 
 ## Purpose
 

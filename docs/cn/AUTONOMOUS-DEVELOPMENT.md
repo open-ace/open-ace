@@ -567,7 +567,7 @@ pytest -q tests/integration/subprocess
 cd frontend && npm test -- --run WorkflowTimeline
 ```
 
-再根据改动范围运行 `tests/autonomous/`、相关 issue 回归和项目完整 CI。
+再根据改动范围运行 `tests/unit/`、相关 issue 回归和项目完整 CI。
 
 ## 18. 故障排查
 
