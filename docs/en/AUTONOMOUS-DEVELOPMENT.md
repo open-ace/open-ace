@@ -567,7 +567,7 @@ pytest -q tests/issues/1395
 cd frontend && npm test -- --run WorkflowTimeline
 ```
 
-Then run `tests/autonomous/`, relevant issue regressions, and the repository's full CI as required by the change.
+Then run `tests/unit/`, relevant issue regressions, and the repository's full CI as required by the change.
 
 ## 18. Troubleshooting
 

@@ -126,8 +126,10 @@ def test_sweep_survives_a_provider_failure_on_one_row(api, monkeypatch):
         "sandbox_id": "sb-1",
         "sandbox_remote_session_id": None,
     }
-    # One bad row must never abort a sweep that walks many.
-    _destroy_orphan_sandbox(wf, remote_session_manager=None)
+    # One bad row must never abort a sweep that walks many — and the caller
+    # must LEARN the teardown failed (False) so it keeps the persisted ids
+    # for a retry instead of stranding a live sandbox.
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is False
 
 
 # ── agent-runner wiring (spec §6.5, §6.6) ─────────────────────────────
@@ -264,8 +266,7 @@ def test_select_sandbox_provider_returns_the_injected_one_without_config(monkeyp
 
     monkeypatch.delenv("OPENACE_SANDBOX_BACKENDS", raising=False)
     monkeypatch.setattr(
-        "app.modules.workspace.autonomous.sandbox.opensandbox.config."
-        "DEFAULT_BACKEND_CONFIG_PATH",
+        "app.modules.workspace.autonomous.sandbox.opensandbox.config.DEFAULT_BACKEND_CONFIG_PATH",
         str(tmp_path / "etc.json"),
     )
     monkeypatch.setattr(

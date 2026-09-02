@@ -157,6 +157,9 @@ def _workflow(**overrides) -> dict:
 # ── registration ─────────────────────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 def test_pr_review_handle_is_registered():
     """The pr_review phase must resolve to phases.pr_review.handle in the registry."""
     assert phases_pkg.resolve_phase_handler("pr_review") is pr_review_phase.handle

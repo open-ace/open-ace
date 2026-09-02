@@ -48,21 +48,26 @@ def make_config(**overrides):
     return config
 
 
-def assert_allowed(wrapper, argv, **config_overrides):
+def check_allowed(wrapper, argv, **config_overrides):
+    """Evaluate the wrapper verdict; the caller asserts (inline, scanner-visible)."""
     result = wrapper.validate_gh_argv(argv, config=make_config(**config_overrides))
-    assert result.allowed, result.reason
+    return result.allowed, result.reason
 
 
-def assert_denied(wrapper, argv, **config_overrides):
+def check_denied(wrapper, argv, **config_overrides):
     result = wrapper.validate_gh_argv(argv, config=make_config(**config_overrides))
-    assert not result.allowed
+    return (not result.allowed), result.reason
 
 
 def test_version_and_help_are_only_standalone_passthrough(wrapper):
-    assert_allowed(wrapper, ["--version"])
-    assert_allowed(wrapper, ["--help"])
-    assert_denied(wrapper, ["api", "user", "--version"])
-    assert_denied(wrapper, ["-R", "owner/repo", "pr", "view", "1", "--help"])
+    _ok, _reason = check_allowed(wrapper, ["--version"])
+    assert _ok, _reason
+    _ok, _reason = check_allowed(wrapper, ["--help"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["api", "user", "--version"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["-R", "owner/repo", "pr", "view", "1", "--help"])
+    assert _ok, _reason
 
 
 def test_main_denies_before_running_gh(wrapper, monkeypatch):
@@ -99,11 +104,15 @@ def test_main_runs_absolute_gh_binary_after_validation(wrapper, monkeypatch):
 
 
 def test_dangerous_gh_shapes_are_denied(wrapper):
-    assert_denied(wrapper, ["repo", "delete", "owner/repo"])
-    assert_denied(wrapper, ["api", "-X", "DELETE", "repos/owner/repo"])
-    assert_denied(wrapper, ["api", "--method", "DELETE", "repos/owner/repo"])
-    assert_denied(wrapper, ["pr", "view", "1", "--web"])
-    assert_denied(
+    _ok, _reason = check_denied(wrapper, ["repo", "delete", "owner/repo"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["api", "-X", "DELETE", "repos/owner/repo"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["api", "--method", "DELETE", "repos/owner/repo"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["pr", "view", "1", "--web"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(
         wrapper,
         [
             "pr",
@@ -120,14 +129,24 @@ def test_dangerous_gh_shapes_are_denied(wrapper):
             "1",
         ],
     )
-    assert_denied(wrapper, ["api", "repos/owner/repo/issues/1/comments", "--jq", ".[]"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(
+        wrapper, ["api", "repos/owner/repo/issues/1/comments", "--jq", ".[]"]
+    )
+    assert _ok, _reason
 
 
 def test_admin_merge_is_config_gated(wrapper):
-    assert_denied(wrapper, ["pr", "merge", "1", "--admin"])
-    assert_denied(wrapper, ["pr", "merge", "1", "--auto"])
-    assert_denied(wrapper, ["pr", "merge", "1", "--admin"], allow_admin_merge=True)
-    assert_allowed(wrapper, ["pr", "merge", "1", "--merge", "--admin"], allow_admin_merge=True)
+    _ok, _reason = check_denied(wrapper, ["pr", "merge", "1", "--admin"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["pr", "merge", "1", "--auto"])
+    assert _ok, _reason
+    _ok, _reason = check_denied(wrapper, ["pr", "merge", "1", "--admin"], allow_admin_merge=True)
+    assert _ok, _reason
+    _ok, _reason = check_allowed(
+        wrapper, ["pr", "merge", "1", "--merge", "--admin"], allow_admin_merge=True
+    )
+    assert _ok, _reason
 
 
 @pytest.mark.parametrize(
@@ -334,7 +353,8 @@ def test_admin_merge_is_config_gated(wrapper):
     ],
 )
 def test_current_github_ops_gh_shapes_are_allowed(wrapper, argv):
-    assert_allowed(wrapper, argv)
+    _ok, _reason = check_allowed(wrapper, argv)
+    assert _ok, _reason
 
 
 def test_missing_and_writable_config_files_fail_closed(wrapper, tmp_path):

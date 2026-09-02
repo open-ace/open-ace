@@ -27,19 +27,89 @@ def get_client_info():
     }
 
 
+def validate_forecast_days(days_str: str | None) -> tuple[int, dict | None]:
+    """
+    Validate forecast days parameter.
+
+    Args:
+        days_str: Raw days parameter from request.
+
+    Returns:
+        Tuple of (validated_days, error_response).
+        If validation fails, error_response contains 400 response dict.
+    """
+    if days_str is None:
+        return 7, None
+
+    try:
+        days = int(days_str)
+    except ValueError:
+        return 7, {
+            "error": "invalid_parameter",
+            "message": "days must be an integer",
+            "parameter": "days",
+            "received": days_str,
+            "valid_range": "1-90",
+        }
+
+    if days < 1 or days > 90:
+        return 7, {
+            "error": "invalid_parameter",
+            "message": "days must be between 1 and 90",
+            "parameter": "days",
+            "received": days,
+            "valid_range": "1-90",
+        }
+
+    return days, None
+
+
+def parse_date_range():
+    """
+    Parse date range from request parameters.
+
+    Priority:
+    1. Explicit start_date + end_date
+    2. end_date + days (calculated from end_date backwards)
+    3. Default: end_date=today, days=30
+
+    Returns:
+        tuple: (start_date: str, end_date: str, days: int)
+    """
+    # Get end_date (default to today)
+    end_date = request.args.get(
+        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+    )
+
+    # Get days parameter with validation
+    days = request.args.get("days", default=30, type=int)
+    if days <= 0:
+        days = 1
+    if days > 365:
+        days = 365
+
+    # Priority: use explicit start_date if provided
+    start_date = request.args.get("start_date")
+
+    if start_date:
+        # Validate start_date <= end_date, swap if needed
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
+    else:
+        # No start_date provided: calculate from end_date - days
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        start_dt = end_dt - timedelta(days=days)
+        start_date = start_dt.strftime("%Y-%m-%d")
+
+    return start_date, end_date, days
+
+
 @analytics_bp.route("/analytics/report", methods=["GET"])
 @admin_required
 def api_usage_report():
     """Generate a comprehensive usage report."""
-    # Get date range
-    end_date = request.args.get(
-        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-    )
-    days = request.args.get("days", default=30, type=int)
-
-    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y-%m-%d"
-    )
+    # Get date range using shared parser
+    start_date, end_date, days = parse_date_range()
 
     include_trends = request.args.get("trends", "true").lower() == "true"
     include_anomalies = request.args.get("anomalies", "true").lower() == "true"
@@ -71,7 +141,9 @@ def api_usage_report():
 @admin_required
 def api_usage_forecast():
     """Get usage forecast."""
-    days = request.args.get("days", default=7, type=int)
+    days, error = validate_forecast_days(request.args.get("days"))
+    if error:
+        return jsonify(error), 400
 
     forecast = usage_analytics.get_forecast(days=days)
 
@@ -82,15 +154,8 @@ def api_usage_forecast():
 @admin_required
 def api_efficiency_metrics():
     """Get efficiency metrics."""
-    # Get date range
-    end_date = request.args.get(
-        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-    )
-    days = request.args.get("days", default=30, type=int)
-
-    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y-%m-%d"
-    )
+    # Get date range using shared parser
+    start_date, end_date, days = parse_date_range()
 
     metrics = usage_analytics.get_efficiency_metrics(start_date, end_date)
 
@@ -101,16 +166,9 @@ def api_efficiency_metrics():
 @admin_required
 def api_export_analytics():
     """Export analytics data."""
-    # Get parameters
-    end_date = request.args.get(
-        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-    )
-    days = request.args.get("days", default=30, type=int)
+    # Get date range using shared parser
+    start_date, end_date, days = parse_date_range()
     format_type = request.args.get("format", "json")
-
-    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y-%m-%d"
-    )
 
     # Generate report
     report = usage_analytics.generate_report(

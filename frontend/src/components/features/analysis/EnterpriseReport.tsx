@@ -177,6 +177,24 @@ interface SummaryCardsProps {
   language: Language;
 }
 
+/**
+ * Format peak day value for display.
+ * Handles both ISO format (YYYY-MM-DD) and legacy RFC 1123 format from historical data.
+ */
+const formatPeakDay = (value: string | null): string => {
+  if (!value) return '-';
+  // Handle RFC 1123 format (e.g., "Tue, 25 Aug 2026 00:00:00 GMT")
+  if (value.includes('GMT') || value.includes(', ')) {
+    try {
+      const date = new Date(value);
+      return date.toISOString().split('T')[0];
+    } catch {
+      return value;
+    }
+  }
+  return value;
+};
+
 const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
   <div className="row g-3 mb-4">
     <div className="col-md-2">
@@ -213,14 +231,16 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
     </div>
     <div className="col-md-2">
       <StatCard
-        label={t('peakUsagePeriods', language)}
-        value={summary.peak_day ?? '-'}
+        label={t('peakDay', language)}
+        value={formatPeakDay(summary.peak_day)}
         icon={<i className="bi bi-calendar-check fs-4" />}
         variant="secondary"
+        subtitle={
+          summary.peak_tokens > 0
+            ? `${t('peakTokens', language)}: ${formatTokens(summary.peak_tokens)}`
+            : undefined
+        }
       />
-      {summary.peak_tokens > 0 && (
-        <small className="text-muted">{formatTokens(summary.peak_tokens)}</small>
-      )}
     </div>
     <div className="col-md-2">
       <StatCard
@@ -236,12 +256,22 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
 
 // Efficiency Cards Component
 interface EfficiencyCardsProps {
-  efficiency: EfficiencyMetricsResponse;
+  efficiency: EfficiencyMetricsResponse | undefined;
   isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
   language: Language;
+  onRetry: () => void;
 }
 
-const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({ efficiency, isLoading, language }) => {
+const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
+  efficiency,
+  isLoading,
+  isError,
+  error,
+  language,
+  onRetry,
+}) => {
   if (isLoading) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
@@ -250,7 +280,15 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({ efficiency, isLoading
     );
   }
 
-  if (!efficiency.efficiency_available) {
+  if (isError) {
+    return (
+      <Card title={t('efficiencyMetrics', language)} className="mb-4">
+        <Error message={error?.message ?? t('error', language)} onRetry={onRetry} />
+      </Card>
+    );
+  }
+
+  if (!efficiency?.efficiency_available) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
         <EmptyState icon="bi-speedometer" title={t('noEfficiencyData', language)} />
@@ -413,6 +451,15 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
     return badges[type] || 'bg-secondary';
   };
 
+  const getDeviationStyle = (type: string) => {
+    const styles: Record<string, string> = {
+      spike: 'text-danger',
+      drop: 'text-info',
+      unusual_pattern: 'text-warning',
+    };
+    return styles[type] || 'text-muted';
+  };
+
   return (
     <Card title={t('anomalyDetection', language)} className="mb-4">
       <div className="table-responsive">
@@ -439,9 +486,8 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
                 <td className="text-end">{anomaly.expected_value.toLocaleString()}</td>
                 <td className="text-end">{anomaly.actual_value.toLocaleString()}</td>
                 <td className="text-end">
-                  <span
-                    className={cn(anomaly.deviation_percentage > 0 ? 'text-danger' : 'text-info')}
-                  >
+                  <span className={cn(getDeviationStyle(anomaly.type))}>
+                    {anomaly.type === 'spike' ? '↑' : anomaly.type === 'drop' ? '↓' : ''}
                     {anomaly.deviation_percentage.toFixed(1)}%
                   </span>
                 </td>
@@ -583,6 +629,8 @@ export const EnterpriseReport: React.FC = () => {
   const {
     data: efficiencyData,
     isLoading: isEfficiencyLoading,
+    isError: isEfficiencyError,
+    error: efficiencyError,
     refetch: refetchEfficiency,
   } = useEfficiencyMetrics(startDate, endDate);
 
@@ -763,9 +811,12 @@ export const EnterpriseReport: React.FC = () => {
 
       {/* Efficiency Cards */}
       <EfficiencyCards
-        efficiency={efficiencyData ?? { efficiency_available: false }}
+        efficiency={efficiencyData}
         isLoading={isEfficiencyLoading}
+        isError={isEfficiencyError}
+        error={efficiencyError}
         language={language}
+        onRetry={refetchEfficiency}
       />
 
       {/* Trends Table */}

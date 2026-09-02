@@ -6,6 +6,7 @@ Analyzes trends, detects anomalies, and generates reports.
 """
 
 import logging
+import statistics
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# Forecast quality constants
+FORECAST_WINDOW_DAYS = 7  # Moving average window
+FORECAST_DECAY_RATE = 0.02  # Horizon decay rate per day
+FORECAST_MIN_SAMPLE_DAYS = 7  # Minimum days for forecast
+FORECAST_BACKTEST_DAYS = 7  # Days to use for backtesting
 
 
 class TrendDirection(Enum):
@@ -262,6 +269,9 @@ class UsageAnalytics:
             # Aggregate by date
             date = d.get("date")
             if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
                 daily_totals[date] = daily_totals.get(date, 0) + d.get("tokens", 0)
 
         # Calculate averages
@@ -482,37 +492,299 @@ class UsageAnalytics:
             if row.get("host_name")
         }
 
-    @cached(ttl=120, key_prefix="analytics", skip_args=[0])
+    def _get_historical_data_for_backtest(
+        self, start_date: str, end_date: str
+    ) -> tuple[list[dict], int]:
+        """
+        Get historical data for backtest, excluding today.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+
+        Returns:
+            Tuple of (historical_data list, sample_days count).
+            Today's data is excluded since it may be incomplete.
+        """
+        daily_data = self._get_daily_totals(start_date, end_date)
+
+        # Exclude today's data (not yet complete)
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        historical_data = [d for d in daily_data if d.get("date") and d["date"] < today]
+
+        return historical_data, len(historical_data)
+
+    def _count_missing_days(self, daily_data: list[dict], expected_days: int) -> int:
+        """
+        Count missing days in the historical data.
+
+        Args:
+            daily_data: List of daily data records.
+            expected_days: Expected number of days in the window.
+
+        Returns:
+            Number of missing days.
+        """
+        if not daily_data:
+            return expected_days
+
+        actual_dates = {d.get("date") for d in daily_data if d.get("date")}
+        return max(0, expected_days - len(actual_dates))
+
+    def _calculate_backtest_wape(self, historical_data: list[dict]) -> float | None:
+        """
+        Calculate WAPE (Weighted Absolute Percentage Error) via rolling backtest.
+
+        Uses last 7 days of historical data as test set.
+        For each test point, predicts using mean of previous 7 days.
+
+        Args:
+            historical_data: Historical daily data (excluding today).
+
+        Returns:
+            WAPE value (0.0-1.0) or None if insufficient data or zero actuals.
+        """
+        if len(historical_data) < FORECAST_MIN_SAMPLE_DAYS + FORECAST_BACKTEST_DAYS:
+            # Need at least 14 days: 7 for initial training + 7 for testing
+            return None
+
+        tokens = [d.get("tokens", 0) for d in historical_data]
+
+        # Rolling backtest on last 7 days
+        abs_errors: list[float] = []
+        actuals: list[float] = []
+
+        test_start = len(tokens) - FORECAST_BACKTEST_DAYS
+
+        for i in range(test_start, len(tokens)):
+            # Predict using mean of previous 7 days
+            train_start = i - FORECAST_WINDOW_DAYS
+            if train_start < 0:
+                continue
+
+            prediction = sum(tokens[train_start:i]) / FORECAST_WINDOW_DAYS
+            actual = tokens[i]
+
+            abs_errors.append(abs(actual - prediction))
+            actuals.append(actual)
+
+        if not actuals:
+            return None
+
+        total_actual = sum(actuals)
+        total_abs_error = sum(abs_errors)
+
+        # Handle division by zero (all actuals are 0)
+        if total_actual == 0:
+            return None
+
+        return total_abs_error / total_actual
+
+    def _apply_horizon_decay(self, base_wape: float, horizon_days: int) -> float:
+        """
+        Apply horizon decay to adjust forecast error for longer prediction periods.
+
+        Forecast accuracy decreases as we predict further into the future.
+        Decay factor increases WAPE by 2% per day beyond the 7-day window.
+
+        Args:
+            base_wape: Base WAPE from backtest.
+            horizon_days: Number of days to forecast.
+
+        Returns:
+            Horizon-adjusted WAPE.
+        """
+        if horizon_days <= FORECAST_WINDOW_DAYS:
+            return base_wape
+
+        decay_factor = 1 + FORECAST_DECAY_RATE * (horizon_days - FORECAST_WINDOW_DAYS)
+        return base_wape * decay_factor
+
+    def _detect_outliers(self, daily_data: list[dict]) -> tuple[int, float]:
+        """
+        Detect outliers using MAD (Median Absolute Deviation) method.
+
+        An outlier is defined as: value > median + 3 * MAD
+
+        Args:
+            daily_data: Historical daily data.
+
+        Returns:
+            Tuple of (outlier_count, outlier_ratio).
+        """
+        values = [d.get("tokens", 0) for d in daily_data]
+
+        if not values:
+            return 0, 0.0
+
+        median = statistics.median(values)
+        mad = statistics.median([abs(v - median) for v in values])
+
+        # MAD = 0 means all values are identical, no outliers exist
+        # This is theoretically correct: no variation = no anomalies
+        if mad == 0:
+            return 0, 0.0
+
+        outlier_threshold = median + 3 * mad
+        outliers = [v for v in values if v > outlier_threshold]
+
+        count = len(outliers)
+        ratio = count / len(values)
+
+        return count, ratio
+
+    def _assess_forecast_quality(
+        self,
+        adjusted_wape: float | None,
+        sample_days: int,
+        missing_days: int,
+        outlier_ratio: float,
+    ) -> tuple[str, str, float | None]:
+        """
+        Assess forecast quality based on multiple metrics.
+
+        Quality levels:
+        - quality: adjusted_wape < 10% AND missing <= 1
+        - satisfactory: adjusted_wape < 20% AND missing <= 3
+        - fair: adjusted_wape < 35% AND missing <= 5
+        - poor: adjusted_wape >= 35% OR missing > 5 OR sample < 14
+        - unavailable: sample < 7 OR wape is None
+
+        Args:
+            adjusted_wape: Horizon-adjusted WAPE (or None if unavailable).
+            sample_days: Number of historical sample days.
+            missing_days: Number of missing days in data.
+            outlier_ratio: Ratio of outlier days.
+
+        Returns:
+            Tuple of (quality_level, quality_description, confidence).
+        """
+        # Unavailable cases
+        if sample_days < FORECAST_MIN_SAMPLE_DAYS:
+            return (
+                "unavailable",
+                "样本不足，无法提供质量评估",
+                None,
+            )
+
+        if adjusted_wape is None:
+            return (
+                "unavailable",
+                "数据无效或全为零，无法计算回测误差",
+                None,
+            )
+
+        # Determine base quality level
+        quality_level: str
+        quality_desc: str
+
+        if adjusted_wape < 0.10 and missing_days <= 1:
+            quality_level = "quality"
+            quality_desc = "数据完整，波动小，预测质量高"
+        elif adjusted_wape < 0.20 and missing_days <= 3:
+            quality_level = "satisfactory"
+            quality_desc = "预测质量良好，可供参考"
+        elif adjusted_wape < 0.35 and missing_days <= 5:
+            quality_level = "fair"
+            quality_desc = "预测质量一般，建议谨慎参考"
+        else:
+            quality_level = "poor"
+            quality_desc = "预测质量较低，仅作趋势参考"
+
+        # Downgrade if too many outliers
+        if outlier_ratio > 0.10:
+            if quality_level == "quality":
+                quality_level = "satisfactory"
+                quality_desc = "预测质量良好（检测到异常峰值）"
+            elif quality_level == "satisfactory":
+                quality_level = "fair"
+                quality_desc = "预测质量一般（检测到异常峰值）"
+            elif quality_level == "fair":
+                quality_level = "poor"
+                quality_desc = "预测质量较低（检测到异常峰值）"
+
+        # Map quality level to confidence for backward compatibility
+        confidence_mapping = {
+            "quality": 0.9,
+            "satisfactory": 0.7,
+            "fair": 0.5,
+            "poor": 0.3,
+            "unavailable": None,
+        }
+        confidence = confidence_mapping.get(quality_level)
+
+        return quality_level, quality_desc, confidence
+
+    @cached(ttl=60, key_prefix="analytics", skip_args=[0])
     def get_forecast(self, days: int = 7) -> dict[str, Any]:
         """
         Get usage forecast based on historical data.
 
         Args:
-            days: Number of days to forecast.
+            days: Number of days to forecast (must be 1-90).
 
         Returns:
-            Dict with forecast data.
+            Dict with forecast data including quality metrics.
+
+        Raises:
+            ValueError: If days is not in valid range 1-90.
         """
+        if not isinstance(days, int) or days < 1 or days > 90:
+            raise ValueError(f"days must be an integer between 1 and 90, got {days}")
+
         # Get last 30 days of data
         end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         start_date = (
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         ).strftime("%Y-%m-%d")
 
-        daily_data = self._get_daily_totals(start_date, end_date)
+        # Get historical data for backtest (excludes today)
+        historical_data, sample_days = self._get_historical_data_for_backtest(start_date, end_date)
 
-        if len(daily_data) < 7:
+        # Check minimum sample requirement
+        if sample_days < FORECAST_MIN_SAMPLE_DAYS:
             return {
                 "forecast_available": False,
                 "reason": "Insufficient historical data",
+                "quality_level": "unavailable",
+                "quality_description": "样本不足，无法提供预测",
+                "quality_metrics": {
+                    "sample_days": sample_days,
+                    "missing_days": 30 - sample_days,
+                    "window_days": FORECAST_WINDOW_DAYS,
+                },
+                "horizon_days": days,
+                # Backward compatibility
+                "confidence": None,
+                "_deprecated_note": "confidence 字段将废弃，请迁移至 quality_level 和 quality_metrics",
             }
 
-        # Simple moving average forecast
-        tokens = [d.get("tokens", 0) for d in daily_data[-7:]]
-        requests = [d.get("requests", 0) for d in daily_data[-7:]]
+        # Calculate quality metrics
+        missing_days = self._count_missing_days(historical_data, 30)
+        base_wape = self._calculate_backtest_wape(historical_data)
+        adjusted_wape = self._apply_horizon_decay(base_wape, days) if base_wape else None
+        outlier_count, outlier_ratio = self._detect_outliers(historical_data)
 
-        avg_tokens = sum(tokens) / len(tokens)
-        avg_requests = sum(requests) / len(requests)
+        # Calculate coefficient of variation
+        tokens = [d.get("tokens", 0) for d in historical_data]
+        if tokens and sum(tokens) > 0:
+            mean_tokens = sum(tokens) / len(tokens)
+            std_tokens = (sum((t - mean_tokens) ** 2 for t in tokens) / len(tokens)) ** 0.5
+            cv = std_tokens / mean_tokens if mean_tokens > 0 else 0.0
+        else:
+            cv = 0.0
+
+        # Assess quality
+        quality_level, quality_desc, confidence = self._assess_forecast_quality(
+            adjusted_wape, sample_days, missing_days, outlier_ratio
+        )
+
+        # Simple moving average forecast using last 7 days
+        forecast_tokens = [d.get("tokens", 0) for d in historical_data[-7:]]
+        forecast_requests = [d.get("requests", 0) for d in historical_data[-7:]]
+
+        avg_tokens = sum(forecast_tokens) / len(forecast_tokens) if forecast_tokens else 0
+        avg_requests = sum(forecast_requests) / len(forecast_requests) if forecast_requests else 0
 
         # Generate forecast dates
         forecast_dates = []
@@ -523,10 +795,17 @@ class UsageAnalytics:
                 )
             )
 
-        return {
+        # Build quality description with horizon info
+        if adjusted_wape is not None and days > FORECAST_WINDOW_DAYS:
+            quality_desc = f"{quality_desc}，{days}天预测回测误差约{adjusted_wape*100:.0f}%"
+        elif base_wape is not None:
+            quality_desc = f"{quality_desc}，历史回测误差约{base_wape*100:.0f}%"
+
+        result = {
             "forecast_available": True,
             "method": "moving_average",
             "period_days": days,
+            "horizon_days": days,
             "daily_forecast": {
                 "tokens": round(avg_tokens),
                 "requests": round(avg_requests),
@@ -536,8 +815,31 @@ class UsageAnalytics:
                 "requests": round(avg_requests * days),
             },
             "forecast_dates": forecast_dates,
-            "confidence": 0.7,  # Simple forecast confidence
+            "quality_level": quality_level,
+            "quality_description": quality_desc,
+            "quality_metrics": {
+                "backtest_wape": round(base_wape, 4) if base_wape else None,
+                "horizon_adjusted_wape": round(adjusted_wape, 4) if adjusted_wape else None,
+                "sample_days": sample_days,
+                "window_days": FORECAST_WINDOW_DAYS,
+                "missing_days": missing_days,
+                "coefficient_of_variation": round(cv, 4),
+                "outlier_count": outlier_count,
+                "outlier_ratio": round(outlier_ratio, 4),
+            },
+            # Backward compatibility (deprecated)
+            "confidence": confidence,
+            "_confidence_mapping": {
+                "quality": 0.9,
+                "satisfactory": 0.7,
+                "fair": 0.5,
+                "poor": 0.3,
+                "unavailable": None,
+            },
+            "_deprecated_note": "confidence 字段将废弃，请迁移至 quality_level 和 quality_metrics",
         }
+
+        return result
 
     @cached(ttl=60, key_prefix="analytics", skip_args=[0])
     def get_efficiency_metrics(self, start_date: str, end_date: str) -> dict[str, Any]:

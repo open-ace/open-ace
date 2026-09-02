@@ -317,7 +317,6 @@ class TestStaleDetection:
         pg_db.execute(
             "UPDATE user_tool_accounts SET last_activity_at = %s WHERE id = %s",
             (datetime.now() - timedelta(days=30), old_account.id),
-            commit=True,
         )
 
         # Create recent active account

@@ -39,29 +39,36 @@ describe('getDefaultDateRange', () => {
     vi.useRealTimers();
   });
 
-  it('defaults to a 30-day window ending today', () => {
+  it('defaults to a 30-day window ending today (exactly 30 calendar days)', () => {
     const range = getDefaultDateRange();
     expect(range.end).toBe('2024-06-15');
-    expect(range.start).toBe('2024-05-16'); // 30 days before 2024-06-15
+    expect(range.start).toBe('2024-05-17'); // 30 days: 05-17 to 06-15
   });
 
-  it('honors a custom day count', () => {
+  it('returns exactly N calendar days (inclusive range)', () => {
     const range = getDefaultDateRange(7);
     expect(range.end).toBe('2024-06-15');
-    expect(range.start).toBe('2024-06-08'); // 7 days before
+    expect(range.start).toBe('2024-06-09'); // 7 days: 06-09,10,11,12,13,14,15
   });
 
   it('crosses month and year boundaries correctly', () => {
     vi.setSystemTime(new Date(2024, 0, 5, 12, 0, 0)); // local 2024-01-05
     const range = getDefaultDateRange(30);
     expect(range.end).toBe('2024-01-05');
-    expect(range.start).toBe('2023-12-06'); // 30 days before, crosses year
+    expect(range.start).toBe('2023-12-07'); // 30 days: 12-07 to 01-05
   });
 
   it('returns start == end for a 0-day lookback', () => {
     const range = getDefaultDateRange(0);
     expect(range.start).toBe(range.end);
     expect(range.end).toBe('2024-06-15');
+  });
+
+  it('handles leap year correctly', () => {
+    vi.setSystemTime(new Date(2024, 2, 1, 12, 0, 0)); // local 2024-03-01 (leap year)
+    const range = getDefaultDateRange(7);
+    expect(range.end).toBe('2024-03-01');
+    expect(range.start).toBe('2024-02-24'); // 7 days including Feb 29
   });
 
   it('always returns start <= end', () => {

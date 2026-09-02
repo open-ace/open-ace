@@ -54,9 +54,28 @@ def test_docs_only_change_selects_no_runtime_suite():
 def test_backend_change_selects_production_python_suite():
     assert ci.select_pr_suites(["app/services/auth_service.py"]) == [
         "default-collection",
+        "false-positive-scan",
         "python-core",
         "python-min",
     ]
+
+
+def test_every_non_docs_change_selects_false_positive_scan():
+    """#3186 Phase A: the scanner lane rides on every non-docs change.
+
+    The docs promise "每个非文档改动都跑" is now literally what the selector
+    implements — a tests-only change, a product-code change, a scanner-script
+    change, and an empty-changes push all select it; only docs-only does not.
+    """
+    for changed in (
+        ["tests/unit/test_example.py"],  # plain test change / new test
+        ["app/services/auth_service.py"],  # product code
+        ["scripts/scan_test_false_positives.py"],  # the scanner itself
+        ["ci/false-positive-ledger.json"],  # ledger edit (also policy)
+        [],  # empty change set
+    ):
+        assert "false-positive-scan" in ci.select_pr_suites(changed), changed
+    assert "false-positive-scan" not in ci.select_pr_suites(["README.md"])
 
 
 def test_min_supported_python_runs_the_full_unit_suite():
@@ -91,6 +110,190 @@ def test_min_supported_python_runs_the_full_unit_suite():
     assert (
         "tests/unit/" in pytest_cmd
     ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
+
+
+def test_python_min_timeout_budget_absorbs_runner_variance():
+    """#3240: python-min's suite budget must absorb GitHub-hosted runner variance.
+
+    Evidence: the SAME commit ran 183s and 652s on the 3.10 lane (PR #3205
+    run 33410540459 first attempt vs same-commit rerun), and main run
+    33384495716 was budget-killed at
+    599s ("Command exceeded 599s") with ZERO test failures. The lane is a
+    required check, so the kill randomly blocked merges. The 600s budget was
+    shared by compileall + the whole pytest run. 1200s keeps ~1.8x headroom
+    over the worst observed run without masking a real slowdown: per-test
+    --timeout on both unit lanes (see test_unit_lanes_fail_fast_on_hung_tests)
+    now catches genuine hangs far below the suite budget. Changing this pin
+    requires consciously re-deriving the budget from fresh variance
+    evidence, not silently trimming it back toward the variance cliff.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["python-min"]["timeout_seconds"] == 1200
+
+
+def test_python_core_timeout_budget_absorbs_runner_variance():
+    """#3280: python-core's suite budget must absorb GitHub-hosted runner variance.
+
+    #3241 kept python-core at 600s as a "tripwire" that would trip before
+    python-min's raised budget if the suite genuinely slowed down. The
+    2026-09-01 evidence in #3280 shows that tripwire sits INSIDE the runner
+    variance band, so it fires on healthy runs: the same main-branch suite
+    passed in 535.69s (run 33497187190) while two other runs were killed at
+    599s (33490406262, 33482741069) and the fast tail finishes in ~290-385s.
+    A required check that dies on a 1.6x slow runner is a flake source, not
+    a regression tripwire; the regression signal now comes from per-test
+    --timeout instead (test_unit_lanes_fail_fast_on_hung_tests). 1200s matches
+    python-min and keeps ~2.2x headroom over the slowest observed healthy
+    run. Changing this pin requires re-deriving the budget from fresh
+    variance evidence, not trimming it back toward the variance cliff.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["python-core"]["timeout_seconds"] == 1200
+
+
+def _pytest_command(suite_name: str) -> list[str]:
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    commands = [tuple(c) for c in suites[suite_name]["commands"]]
+    pytest_cmd = next((c for c in commands if c[:3] == ("{python}", "-m", "pytest")), None)
+    assert pytest_cmd is not None, f"{suite_name} must run pytest"
+    return list(pytest_cmd)
+
+
+def _has_flag_pair(command: list[str], pair: tuple[str, str]) -> bool:
+    return any(command[i : i + 2] == list(pair) for i in range(len(command) - 1))
+
+
+def test_unit_lanes_fail_fast_on_hung_tests():
+    """#3280: unit lanes must bound each test instead of only the whole suite.
+
+    pytest-timeout is installed but was never passed on these lanes, so a
+    hung xdist worker (e.g. the gevent-at-collection deadlock shape #3280
+    cites) burned the ENTIRE suite budget and died with a bare
+    "Command exceeded 599s" plus undiagnosable "OSError: cannot send". A
+    300s per-test bound with the thread method dumps every thread's stack
+    and kills the hung worker loudly: 300s is ~6x the slowest single test
+    on record (46.7s, full-suite --durations measurement on 2026-09-01),
+    so it cannot falsely kill a healthy test, while a hang surfaces in
+    bounded time with a stack trace instead of at the suite ceiling.
+    --durations=20 prints the slowest tests on every run so a shrinking
+    budget margin is visible in the log before it becomes a timeout.
+    """
+    for lane in ("python-core", "python-min"):
+        command = _pytest_command(lane)
+        for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
+            pair = (flag, value)
+            assert _has_flag_pair(
+                command, pair
+            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
+        assert (
+            "--durations" in command
+        ), f"{lane} pytest command must pass --durations (got {command})"
+
+
+def test_db_and_compat_lanes_fail_fast_on_hung_tests():
+    """#3282: postgres and compatibility-smoke get the same hang protection as
+    the unit lanes.
+
+    postgres runs single-process against the CI DB service with no per-test
+    bound, so a hung connection burned its whole 480s budget and died with
+    the same bare "Command exceeded" that motivated #3280 (the lane measured
+    306.5s for 101 tests on run 33565365098 — 64% of budget on a healthy
+    run, so a hang has even less room than the unit lanes had). The same
+    300s/thread bound as the unit lanes applies: measured per-test cost is
+    ~3s average single-threaded, so 300s cannot clip a healthy test.
+    compatibility-smoke runs a 7-file unit subset, where the identical
+    flags are trivially safe. performance stays unbounded on purpose:
+    wall-clock benchmarks are slow by design and a per-test cap would
+    reject the very thing that suite measures.
+    """
+    for lane in ("postgres", "compatibility-smoke"):
+        command = _pytest_command(lane)
+        for flag, value in (("--timeout", "300"), ("--timeout-method", "thread")):
+            pair = (flag, value)
+            assert _has_flag_pair(
+                command, pair
+            ), f"{lane} pytest command must pass {flag} {value} (got {command})"
+        assert (
+            "--durations" in command
+        ), f"{lane} pytest command must pass --durations (got {command})"
+    performance_cmd = _pytest_command("performance")
+    assert (
+        "--timeout" not in performance_cmd
+    ), "performance benchmarks are slow by design and must not carry a per-test timeout"
+
+
+def test_slow_lane_warns_on_budget_erosion(capsys):
+    """#3282: a successful suite that eats most of its budget must say so.
+
+    #3281 retired the 600s "tripwire" in favor of generous budgets plus
+    per-test timeouts, which stops the flake but loses the gradual-slowdown
+    signal: a uniform 2x slowdown passes every per-test bound and only
+    shows up as a shrinking margin nobody watches. The wrapper therefore
+    prints a loud warning once a suite closes above 75% of its budget, so
+    erosion is visible in every CI log (and in the nightly metrics stream)
+    before it becomes an intermittent timeout that looks like a flake.
+    """
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=400.0, timeout_seconds=480, metrics=metrics, invocation_id="inv-1"
+    )
+
+    captured = capsys.readouterr()
+    assert "::warning::" in captured.err
+    assert "postgres" in captured.err
+    assert "400.0s" in captured.err
+    assert "480" in captured.err
+    metrics.record.assert_called_once()
+    assert metrics.record.call_args.args == ("suite_budget_warning",)
+    assert metrics.record.call_args.kwargs == {
+        "invocation_id": "inv-1",
+        "suite": "postgres",
+        "elapsed_seconds": 400.0,
+        "timeout_seconds": 480,
+        "budget_fraction": 0.8333,
+    }
+
+
+def test_healthy_lane_stays_silent_on_budget(capsys):
+    """The warning must stay quiet while a suite is comfortably inside its
+    budget, otherwise it is noise and gets ignored — the exact failure mode
+    that let the 600s tripwire rot into a flake source."""
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "python-core", elapsed=340.0, timeout_seconds=1200, metrics=metrics, invocation_id="inv-1"
+    )
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+    metrics.record.assert_not_called()
+
+
+def test_budget_warning_threshold_is_75_percent(capsys):
+    """Pin the exact trip point: at the threshold the warning fires; one
+    second below it does not. Changing the fraction is a policy decision
+    that must be re-derived, not drifted."""
+    metrics = Mock()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=359.9, timeout_seconds=480, metrics=metrics, invocation_id=""
+    )
+    assert capsys.readouterr().err == ""
+    metrics.record.assert_not_called()
+
+    ci.warn_on_suite_budget_erosion(
+        "postgres", elapsed=360.0, timeout_seconds=480, metrics=metrics, invocation_id=""
+    )
+    assert "::warning::" in capsys.readouterr().err
+    metrics.record.assert_called_once()
 
 
 def test_backend_change_runs_the_min_version_unit_lane():
@@ -274,3 +477,736 @@ def test_changed_files_includes_committed_and_local_worktree_changes(monkeypatch
             text=True,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Known-debt ledger contract (#3186 Phase A)
+# ---------------------------------------------------------------------------
+
+KNOWN_DEBT_FROZEN_SEED = (
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_batch_session_termination",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_batch_session_termination",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_deregister_with_active_session",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_deregister_with_active_session",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_full_deregistration_flow",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/e2e/remote/test_deregister_e2e.py",
+        "TestDeregisterE2E.test_full_deregistration_flow",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestErrorHandlingIntegration.test_degraded_status_on_partial_failure",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestErrorHandlingIntegration.test_idempotent_collection",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPerformanceIntegration.test_100_users_performance",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPerformanceIntegration.test_large_file_handling",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_message_count_correct",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_two_users_permission_700_collected",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestPermission700Collection.test_user_id_mapping_correct",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestSecurityIntegration.test_symlink_attack_blocked",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_fetch_wrapper_integration_2543.py",
+        "TestSecurityIntegration.test_web_service_cannot_read_other_users",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_coverage_data_in_result",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_coverage_data_in_result",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_multi_user_session_collection",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_multi_user_session_collection",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_session_data_persistence",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_session_data_persistence",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_single_user_session_collection",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_single_user_session_collection",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_tenant_attribution",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_tenant_attribution",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_user_id_resolution",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_multiuser_qwen_collection_2735.py",
+        "TestMultiUserQwenCollection.test_user_id_resolution",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_agent_sessions_user_id_filled",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_agent_sessions_user_id_filled",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_daily_messages_user_id_filled",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_daily_messages_user_id_filled",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_isolation_in_aggregation",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestTenantAttribution.test_tenant_summary_includes_qwen_data",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_by_username",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_by_username",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_correct_id",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_qwen_user_attribution_2735.py",
+        "TestUserIdResolution.test_resolve_user_id_returns_none_for_unknown",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_failure_logging",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_failure_logging",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_system_users_creates_users",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/integration/test_system_user_sync_2735.py",
+        "TestSystemUserSync.test_sync_system_users_creates_users",
+        1,
+    ),
+    (
+        "erroneous_skip",
+        "tests/performance/test_qwen_performance_2735.py",
+        "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/performance/test_qwen_performance_2735.py",
+        "TestPerformanceWithDatabase.test_100_session_files_with_db_performance",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_agent_transport.py",
+        "test_shutdown_on_an_already_dead_process_does_not_raise",
+        1,
+    ),
+    ("no_assertion", "tests/unit/test_analytics_routes.py", "TestParseDateRange.test_route", 1),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestAuditLogging.test_audit_log_created",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestAuditLogging.test_username_sanitized",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestFileSizeLimits.test_large_file_rejected",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestIntegration.test_degraded_status_on_partial_failure",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestIntegration.test_multi_user_collection_with_permission_700",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestParameterValidation.test_exact_match_valid_params",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_no_match_returns_none",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_resolve_user_id_by_system_account",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_fetch_wrapper_2543.py",
+        "TestUserIdentityMapping.test_resolve_user_id_by_username",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_issue_wrong_repo_3075.py",
+        "TestIssueRepoFallback.test_fallback_raises_githubopserror",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_new_project_local_repo_init_2963.py",
+        "TestValidateProjectPath.test_pass_if_valid_git_repository",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_admin_merge_is_config_gated",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_current_github_ops_gh_shapes_are_allowed",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_dangerous_gh_shapes_are_denied",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_gh_wrapper.py",
+        "test_version_and_help_are_only_standalone_passthrough",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_current_github_ops_git_shapes_are_allowed",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_forbidden_global_options_and_configs_are_denied",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_git_commands_require_hardening_globals",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_mutating_branches_are_limited_to_workflow_branches",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_relative_path_operands_cannot_escape_worktree",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_show_tree_paths_allow_real_filenames_but_not_escapes",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_openace_git_wrapper.py",
+        "test_version_and_help_are_only_standalone_passthrough",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_client.py",
+        "test_delete_sandbox_treats_404_as_success",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_policy.py",
+        "test_a_cni_tier_accepts_any_public_proxy_host",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_policy.py",
+        "test_an_allowlisted_proxy_url_passes",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_provider.py",
+        "test_destroy_attribution_never_raises",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_wiring.py",
+        "test_sweep_survives_a_provider_failure_on_one_row",
+        1,
+    ),
+    (
+        "no_assertion",
+        "tests/unit/test_opensandbox_workspace.py",
+        "test_apply_deleting_a_missing_path_is_not_an_error",
+        1,
+    ),
+)
+
+KNOWN_DEBT_FINDING_TOTAL = 0  # #3186 fully paid down (batch 5: 8 -> 0). Any new finding is red.
+
+
+def _ledger_counts() -> dict[tuple[str, str, str], int]:
+    import json
+
+    data = json.loads((ROOT / "ci" / "false-positive-ledger.json").read_text())
+    return {
+        (e["pattern"], e["file"], e.get("function") or "<module>"): int(e.get("count", 1))
+        for e in data["entries"]
+    }
+
+
+def test_known_debt_ledger_is_frozen_seed_and_only_shrinks():
+    """#3186: the known-debt ledger starts EXACTLY as the frozen seed and only shrinks.
+
+    Four properties, all load-bearing (the seed tuples carry counts):
+    1. identities ⊆ seed identities — substitution is programmatically red:
+       "fix A, introduce B, hand-edit the ledger to add B" fails here because
+       B is not in the frozen seed. Enrollment is impossible via --prune-ledger
+       (removal-only by design).
+    2. per-identity count <= seed count — raising an existing entry's count
+       (e.g. 1 -> 2 to absorb a second hit in an already-indebted function)
+       is red without a visible seed edit.
+    3. sum(counts) == KNOWN_DEBT_FINDING_TOTAL — the EXACT total pin is the
+       only guard against re-enrolling debt that was already paid down but
+       still sits in the frozen seed (⊆ passes, total red). Do NOT relax to
+       <=. A legitimate paydown (Phase B) prunes the ledger AND lowers this
+       pin in the same PR — that visible pin edit is the audit trail.
+    4. every ledger identity still matches a live finding — a stale entry
+       means debt moved/renamed without pruning; the CI scanner job fails on
+       stale entries too, this keeps the unit lane honest as well.
+    """
+    counts = _ledger_counts()
+    seed_counts = {(p, f, fn): c for p, f, fn, c in KNOWN_DEBT_FROZEN_SEED}
+    ledger_ids = set(counts)
+    assert ledger_ids <= set(seed_counts), (
+        "ledger contains identities outside the frozen seed (substitution or "
+        f"enrollment attempt): {sorted(ledger_ids - set(seed_counts))}"
+    )
+    raised = {
+        identity: (counts[identity], seed_counts[identity])
+        for identity in ledger_ids
+        if counts[identity] > seed_counts[identity]
+    }
+    assert not raised, f"ledger counts exceed the frozen seed (enrollment attempt): {raised}"
+    total = sum(counts.values())
+    assert total == KNOWN_DEBT_FINDING_TOTAL, (
+        f"known-debt finding total {total} != pin {KNOWN_DEBT_FINDING_TOTAL}; "
+        "legitimate shrink: prune the ledger AND lower this pin in the same PR; "
+        "growth is never allowed (fix the finding instead)"
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "scan_fp", ROOT / "scripts" / "scan_test_false_positives.py"
+    )
+    assert spec and spec.loader
+    scanner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scanner)
+    live = scanner._current_counts(scanner.scan_tests(ROOT / "tests"), ROOT)
+    assert all(
+        counts[identity] <= live.get(identity, 0) for identity in ledger_ids
+    ), f"stale ledger entries (debt moved/fixed): {sorted(ledger_ids - set(live))}"
+
+
+def test_every_selectable_pr_suite_has_a_workflow_consumer():
+    """#3186 Phase A req 4: no selectable suite may be a workflow orphan.
+
+    For every suite the selector can pick (pr_suites), the ci.yml `changes`
+    job must expose its output key, and some job must actually execute the
+    suite, via either arm:
+      (i) selection-gated: a job/step `if` references outputs.<key> and the
+          job runs `ci.py run <suite>` (matrix entries resolve to their
+          `ci.py run ${{ matrix.suite }}` job); or
+      (ii) always-run: a step runs `ci.py run <suite>` with no `if` gating on
+          that suite's output (e.g. `package` inside `build`).
+    A registered-but-never-executed suite (the pre-#3186 false-positive-scan
+    situation) fails here.
+    """
+    import json
+
+    pr_suites = json.loads((ROOT / "ci" / "suites.json").read_text())["pr_suites"]
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+
+    changes_outputs = set(workflow["jobs"]["changes"]["outputs"])
+    # Every suite name's snake_case key must be exposed by the changes job.
+    for suite in pr_suites:
+        key = suite.replace("-", "_")
+        assert key in changes_outputs, f"suite {suite}: changes job does not expose {key}"
+
+    def job_text(job: dict) -> str:
+        import json as _json
+
+        return _json.dumps(job)
+
+    import re as _re
+
+    for suite in sorted(pr_suites):
+        key = suite.replace("-", "_")
+        executed = False
+        for job in workflow["jobs"].values():
+            text = job_text(job)
+            # Word-boundary match so a suite that prefixes another cannot
+            # cross-match ("python-min" vs a hypothetical "python-minimal").
+            runs_suite = _re.search(rf"ci\.py run {_re.escape(suite)}\b", text) is not None
+            in_matrix = "${{ matrix.suite }}" in text and any(
+                inc.get("suite") == suite
+                for inc in job.get("strategy", {}).get("matrix", {}).get("include", [])
+            )
+            if not runs_suite and not in_matrix:
+                continue
+            gated = f"outputs.{key}" in text
+            step_gated = any(f"outputs.{key}" in str(s.get("if", "")) for s in job.get("steps", []))
+            job_gated = f"outputs.{key}" in str(job.get("if", ""))
+            if gated or job_gated or step_gated:
+                executed = True  # arm (i): selection-gated execution
+            elif not in_matrix:
+                executed = True  # arm (ii): always-run execution (e.g. package in build)
+            # A matrix lane counts ONLY when the output key gates the job
+            # somewhere (job- or step-level `if`) — an ungated matrix lane is
+            # fail-closed: not counted here.
+        assert executed, (
+            f"suite {suite} is selectable but no ci.yml job executes it through "
+            "either the selection-gated or always-run arm (orphan suite)"
+        )
+
+
+def test_false_positive_scan_lane_is_gate_consumed():
+    """#3186 Phase A req 3: the scanner lane's result must feed PR Gate.
+
+    Executing is not enough — an advisory job would pass the consumer test
+    above. The job that runs `ci.py run false-positive-scan` must be in
+    pr-gate's `needs` AND its result variable must appear in the validation
+    snippet, so a red scanner blocks merge.
+    """
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    scan_job = next(
+        name
+        for name, job in workflow["jobs"].items()
+        if "ci.py run false-positive-scan" in str(job)
+    )
+    gate = workflow["jobs"]["pr-gate"]
+    assert (
+        scan_job in gate["needs"]
+    ), f"job {scan_job} executes the scanner but is absent from pr-gate needs"
+    validate_step = next(s for s in gate["steps"] if "Validate required" in str(s.get("name", "")))
+    snippet = str(validate_step["run"])
+    assert "SCAN" in validate_step["env"], "pr-gate must map the scanner result to SCAN"
+    assert '"SCAN"' in snippet, "the pr-gate validation dict must consume SCAN"
+
+
+def test_workflow_suite_references_resolve():
+    """Every `ci.py run <name>` and changes output key in ci.yml is a real suite."""
+    import json
+    import re
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    run_texts = [
+        str(step.get("run", ""))
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    for run_text in run_texts:
+        for name in re.findall(r"ci\.py run ([a-z][a-z0-9-]*[a-z0-9])", run_text):
+            assert name in suites, f"ci.yml runs unknown suite {name!r}"
+    for key in workflow["jobs"]["changes"]["outputs"]:
+        if key == "selected":
+            continue
+        assert key.replace("_", "-") in suites, f"changes output {key!r} has no suite"
+
+
+def test_false_positive_scan_suite_command_shape():
+    """The scanner suite must scan the whole tests/ tree against the ledger.
+
+    Narrowing the scan via suites.json (--exclude-dirs/--pattern/another
+    target) is the only remaining way to hide new debt without touching the
+    ledger; this pin makes any such narrowing a visible contract change.
+    """
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    assert suites["false-positive-scan"]["commands"] == [
+        [
+            "{python}",
+            "scripts/scan_test_false_positives.py",
+            "tests",
+            "--ledger",
+            "ci/false-positive-ledger.json",
+        ]
+    ], suites["false-positive-scan"]["commands"]
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL lane wiring (#3287): the lane had NEVER executed a test — the
+# conftest reads PG_TEST_URL while the job only set DATABASE_URL, so all 88
+# postgres-marked tests silently skipped in every run since the lane existed.
+# ---------------------------------------------------------------------------
+
+
+def test_postgres_job_sets_the_variable_the_conftest_reads():
+    """Workflow side of the two-sided pin: the job running the postgres suite
+    must export PG_TEST_URL with a postgresql:// scheme."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    job = next(j for j in workflow["jobs"].values() if "ci.py run postgres" in str(j))
+    # Step env is STEP-scoped: the variable must sit on the step that runs
+    # the suite, not merely somewhere in the job.
+    run_steps = [
+        s for s in job.get("steps", []) if isinstance(s, dict) and "ci.py run postgres" in str(s)
+    ]
+    assert run_steps, "no step runs the postgres suite through the shared runner"
+    env = dict(job.get("env") or {})
+    for step in run_steps:
+        env.update(step.get("env") or {})
+    assert env.get("PG_TEST_URL", "").startswith("postgresql://"), (
+        "the postgres job must set PG_TEST_URL (what tests/integration/conftest.py "
+        f"_get_pg_base_url actually reads); got {env.get('PG_TEST_URL')!r}"
+    )
+
+
+def test_integration_conftest_reads_pg_test_url(monkeypatch):
+    """Conftest side of the two-sided pin: _get_pg_base_url must honor exactly
+    the variable the workflow exports. A rename on either side turns one of
+    the pair red instead of silently re-skipping the whole lane."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "integration_conftest", ROOT / "tests" / "integration" / "conftest.py"
+    )
+    assert spec and spec.loader
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    sentinel = "postgresql://ace:ace@localhost:5433/ace_test_pin_sentinel"
+    monkeypatch.setenv("PG_TEST_URL", sentinel)
+    assert conftest._get_pg_base_url() == sentinel
+
+
+def test_every_postgres_marked_integration_file_uses_pg_naming():
+    """Naming contract (#3287): every tests/integration file containing the
+    postgres marker must be named *_pg.py — that glob is what selects the
+    postgres CI lane for plain test edits (POSTGRES_PATTERNS), so a
+    differently-named postgres-marked file rides the lane only when some
+    policy file happens to change too."""
+    import ast
+
+    offenders = []
+    for path in sorted((ROOT / "tests" / "integration").glob("*.py")):
+        if path.name.endswith("_pg.py") or path.name.startswith("conftest"):
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            marked = False
+            if isinstance(node, ast.Assign):
+                marked = any(
+                    (isinstance(t, ast.Name) and t.id == "pytestmark")
+                    or (isinstance(t, ast.Attribute) and t.attr == "pytestmark")
+                    for t in node.targets
+                ) and "postgres" in ast.unparse(node.value)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                marked = any("postgres" in ast.unparse(d) for d in node.decorator_list)
+            if marked:
+                offenders.append(path.name)
+                break
+    assert (
+        not offenders
+    ), f"postgres-marked files not matching *_pg.py (the lane-selection glob): {offenders}"

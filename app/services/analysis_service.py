@@ -257,6 +257,9 @@ class AnalysisService:
         for d in daily_data:
             date = d.get("date")
             if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
                 daily_totals[date] = {
                     "date": date,
                     "tokens": d.get("total_tokens", 0) or 0,
@@ -271,15 +274,21 @@ class AnalysisService:
         daily_hourly_usage = {"daily": list(daily_totals.values()), "hourly": hourly_result}
 
         # Peak usage - use pre-aggregated data
-        daily_totals_for_peak = {
-            d.get("date"): d.get("total_tokens", 0) or 0 for d in daily_data if d.get("date")
-        }
+        daily_totals_for_peak = {}
+        for d in daily_data:
+            date = d.get("date")
+            if date:
+                # Normalize date to YYYY-MM-DD string (PostgreSQL returns datetime.date)
+                if hasattr(date, "strftime"):
+                    date = date.strftime("%Y-%m-%d")
+                daily_totals_for_peak[date] = d.get("total_tokens", 0) or 0
 
         sorted_days = (
             sorted(daily_totals_for_peak.items(), key=lambda x: x[1], reverse=True)
             if daily_totals_for_peak
             else []
         )
+        # peak_days already has normalized dates from daily_totals_for_peak keys
         peak_days = [{"date": d, "tokens": t} for d, t in sorted_days[:5]]
 
         hourly_totals: dict[int, int] = {}
