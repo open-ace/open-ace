@@ -2315,36 +2315,6 @@ CREATE SEQUENCE user_daily_stats_id_seq
     CACHE 1;
 
 ALTER SEQUENCE user_daily_stats_id_seq OWNED BY user_daily_stats.id;
-
--- Issue #3307: Session daily usage for accurate per-day quota display.
--- Records incremental usage per session per day, avoiding the incorrect
--- attribution of session lifetime totals to the session creation date.
-CREATE TABLE session_daily_usage (
-    id integer NOT NULL,
-    session_id character varying(255) NOT NULL,
-    user_id integer NOT NULL,
-    tenant_id integer,
-    date date NOT NULL,
-    tokens integer DEFAULT 0 NOT NULL,
-    requests integer DEFAULT 0 NOT NULL,
-    input_tokens integer DEFAULT 0 NOT NULL,
-    output_tokens integer DEFAULT 0 NOT NULL,
-    cache_read_tokens integer DEFAULT 0 NOT NULL,
-    cache_write_tokens integer DEFAULT 0 NOT NULL,
-    created_at timestamp without time zone DEFAULT now() NOT NULL,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL
-);
-
-CREATE SEQUENCE session_daily_usage_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE session_daily_usage_id_seq OWNED BY session_daily_usage.id;
-
 CREATE TABLE user_permissions (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -2728,9 +2698,6 @@ ALTER TABLE ONLY tool_account_conflicts ALTER COLUMN id SET DEFAULT nextval('too
 ALTER TABLE ONLY tool_account_mapping_rules ALTER COLUMN id SET DEFAULT nextval('tool_account_mapping_rules_id_seq'::regclass);
 
 ALTER TABLE ONLY user_daily_stats ALTER COLUMN id SET DEFAULT nextval('user_daily_stats_id_seq'::regclass);
-
--- Issue #3307: Default value for session_daily_usage
-ALTER TABLE ONLY session_daily_usage ALTER COLUMN id SET DEFAULT nextval('session_daily_usage_id_seq'::regclass);
 
 ALTER TABLE ONLY user_permissions ALTER COLUMN id SET DEFAULT nextval('user_permissions_id_seq'::regclass);
 
@@ -3151,13 +3118,6 @@ ALTER TABLE ONLY usage_summary
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT uq_user_daily_stats_user_date UNIQUE (user_id, date);
-
--- Issue #3307: Constraints for session_daily_usage
-ALTER TABLE ONLY session_daily_usage
-    ADD CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date);
-
-ALTER TABLE ONLY session_daily_usage
-    ADD CONSTRAINT session_daily_usage_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY user_tool_accounts
     ADD CONSTRAINT uq_user_tool_account UNIQUE (tool_account);
@@ -4161,11 +4121,6 @@ CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DES
 --
 
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
-
--- Issue #3307: Indexes for session_daily_usage queries
-CREATE INDEX idx_session_daily_usage_date ON session_daily_usage USING btree (date DESC);
-
-CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage USING btree (user_id, date DESC);
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
 
