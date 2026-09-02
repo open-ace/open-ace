@@ -11,6 +11,11 @@ retention on failed cleanup (#2505), independent of the shim.
 
 from __future__ import annotations
 
+import pytest
+
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2505)]
+
 
 def test_cleanup_failed_keeps_worktree_path_for_recreate(tmp_path):
     """A terminally-failed workflow's worktree DIR is removed but ``worktree_path``

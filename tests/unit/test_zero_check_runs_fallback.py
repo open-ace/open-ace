@@ -156,6 +156,9 @@ def _recorded_metadata(o: AutonomousOrchestrator) -> list[dict]:
 # ── Cycle accounting ─────────────────────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2673)]
+
+
 class TestZeroCheckRunsCycleAccounting:
     def test_first_zero_check_cycle_records_tracker_and_defers(self):
         o = _make_orchestrator(_workflow())
@@ -309,9 +312,9 @@ class TestZeroCheckRunsWallClockFloor:
         gh.reopen_pr.assert_called_once_with(2578)
         metas = _recorded_metadata(o)
         assert any(m.get("retriggered") for m in metas), "retrigger must be durable"
-        assert any(
-            m.get("retriggered_at") == _iso(_NOW) for m in metas
-        ), "retrigger timestamp must be persisted for the escalation floor"
+        assert any(m.get("retriggered_at") == _iso(_NOW) for m in metas), (
+            "retrigger timestamp must be persisted for the escalation floor"
+        )
 
     def test_after_retrigger_within_floor_defers_without_escalation(self):
         """The retrigger fired but its own 20-minute floor has not elapsed —
@@ -360,9 +363,9 @@ class TestZeroCheckRunsWallClockFloor:
             for call in o.repo.update_milestone.call_args_list
             if call.args[1].get("status") not in (None, "in_progress")
         ]
-        assert (
-            finalize_calls and finalize_calls[-1]["status"] == "failed"
-        ), "escalation must close the tracker (status failed) with the error recorded"
+        assert finalize_calls and finalize_calls[-1]["status"] == "failed", (
+            "escalation must close the tracker (status failed) with the error recorded"
+        )
 
     def test_tracker_without_first_seen_backfills_floor(self):
         """A pre-floor tracker metadata (no first_seen_at) must not retrigger
@@ -457,9 +460,9 @@ class TestZeroCheckRunsReopenPending:
 
         assert took_over is True
         metas = _recorded_metadata(o)
-        assert any(
-            m.get("reopen_pending") and m.get("reopen_attempts") == 1 for m in metas
-        ), "partial state must be recorded durably"
+        assert any(m.get("reopen_pending") and m.get("reopen_attempts") == 1 for m in metas), (
+            "partial state must be recorded durably"
+        )
         # The retrigger is INCOMPLETE — no success event was emitted.
         emitted_types = [c.args[1] for c in o.emitter.emit.call_args_list]
         assert "zero_check_runs_retrigger" not in emitted_types
@@ -480,9 +483,9 @@ class TestZeroCheckRunsReopenPending:
         gh.close_pr.assert_not_called()  # close already happened
         gh.reopen_pr.assert_called_once_with(2578)
         metas = _recorded_metadata(o)
-        assert any(
-            m.get("retriggered") and m.get("retriggered_at") == _iso(_NOW) for m in metas
-        ), "completed reopen must start the escalation floor"
+        assert any(m.get("retriggered") and m.get("retriggered_at") == _iso(_NOW) for m in metas), (
+            "completed reopen must start the escalation floor"
+        )
         emitted_types = [c.args[1] for c in o.emitter.emit.call_args_list]
         assert "zero_check_runs_retrigger" in emitted_types
 

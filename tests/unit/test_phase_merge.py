@@ -19,6 +19,8 @@ from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import merge as merge_phase
 
+import pytest
+
 
 def _ctx(workflow: dict) -> WorkflowContext:
     return WorkflowContext(
@@ -108,6 +110,9 @@ def _policy_exhausted_workflow() -> dict:
 # ── registration ─────────────────────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 def test_merge_handle_is_registered():
     """The merge phase must resolve to phases.merge.handle in the registry."""
     assert phases_pkg.resolve_phase_handler("merge") is merge_phase.handle
@@ -130,9 +135,9 @@ def test_merge_handle_success_returns_completed_phase_result():
     host.create_milestone_idempotent.assert_called()
     # Cleanup ran and its milestone rode in milestone_events.
     host.perform_git_cleanup.assert_called_once_with()
-    assert any(
-        ms.get("milestone_type") == "cleaned_up" for ms in result.milestone_events
-    ), result.milestone_events
+    assert any(ms.get("milestone_type") == "cleaned_up" for ms in result.milestone_events), (
+        result.milestone_events
+    )
     # Terminal phase_change emitted through the host.
     host.emit_phase_change.assert_called_with({"phase": "completed"})
 

@@ -157,6 +157,9 @@ def _workflow(**overrides) -> dict:
 # ── registration ─────────────────────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 def test_pr_review_handle_is_registered():
     """The pr_review phase must resolve to phases.pr_review.handle in the registry."""
     assert phases_pkg.resolve_phase_handler("pr_review") is pr_review_phase.handle
@@ -183,9 +186,9 @@ def test_no_changes_returns_completed_with_literal_current_phase():
     # honours it for next_phase="completed").
     assert result.workflow_patch.get("current_phase") == "completed"
     # The no_changes milestone rides in milestone_events.
-    assert any(
-        ms.get("milestone_type") == "no_changes" for ms in result.milestone_events
-    ), result.milestone_events
+    assert any(ms.get("milestone_type") == "no_changes" for ms in result.milestone_events), (
+        result.milestone_events
+    )
     # phase_change{completed} emitted through the host.
     host.emit_phase_change.assert_called_with({"phase": "completed"})
     # No PR created.
@@ -209,9 +212,9 @@ def test_timing_issue_marks_completed_with_timing_milestone():
 
     assert result.outcome == "completed"
     assert result.next_phase == "completed"
-    assert any(
-        ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
-    ), result.milestone_events
+    assert any(ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events), (
+        result.milestone_events
+    )
 
 
 def test_empty_branch_name_fails_loudly():
@@ -232,9 +235,9 @@ def test_empty_branch_name_fails_loudly():
     assert "empty branch_name" in msg, msg
     # NOT the no-changes terminal.
     assert result.next_phase != "completed"
-    assert not any(
-        ms.get("milestone_type") == "no_changes" for ms in result.milestone_events
-    ), result.milestone_events
+    assert not any(ms.get("milestone_type") == "no_changes" for ms in result.milestone_events), (
+        result.milestone_events
+    )
     host.emit_phase_change.assert_not_called()
     host.post_github_comment.assert_not_called()
 
@@ -374,9 +377,9 @@ def test_reopen_omitted_when_verification_not_rejected(verification_status):
 
     assert result.outcome == "completed"
     assert result.next_phase == "completed"
-    assert any(
-        ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
-    ), result.milestone_events
+    assert any(ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events), (
+        result.milestone_events
+    )
     host.dev_round_cap_remaining.assert_not_called()
 
 
@@ -423,9 +426,9 @@ def test_reopen_requires_recorded_pr():
 
     assert result.outcome == "completed"
     assert result.next_phase == "completed"
-    assert any(
-        ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
-    ), result.milestone_events
+    assert any(ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events), (
+        result.milestone_events
+    )
 
 
 # ── review approved → report ──────────────────────────────────────────────

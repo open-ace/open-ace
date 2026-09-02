@@ -91,6 +91,9 @@ def _stub_phase_neighbors(o: AutonomousOrchestrator) -> dict[str, MagicMock]:
 # mid-body then returns PhaseResult.failed must leave current_phase untouched.
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 def test_phase_failure_does_not_partially_commit_next_phase():
     o = _make_orchestrator(_active_workflow(phase="development"))
     # Spy the host aliases a handler reaches mid-body (so they record without
@@ -132,7 +135,7 @@ def test_phase_failure_does_not_partially_commit_next_phase():
     # The LAST _update_workflow write must NOT advance current_phase.
     last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
     assert "current_phase" not in last_updates, (
-        "a failed handler must not partially commit the next phase; got " f"{last_updates!r}"
+        f"a failed handler must not partially commit the next phase; got {last_updates!r}"
     )
     assert last_updates["status"] == "failed"
     assert last_updates["error_message"] == "tests failed mid-development"
@@ -266,9 +269,9 @@ def test_pause_resume_shutdown_contract_survives_phase_adapter():
     o._commit_phase_result(pause_result)
 
     last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
-    assert (
-        "current_phase" not in last_updates
-    ), "pause must not advance the phase (resume re-dispatches the same one)"
+    assert "current_phase" not in last_updates, (
+        "pause must not advance the phase (resume re-dispatches the same one)"
+    )
     assert last_updates["status"] == "paused"
     assert "paused_at" in last_updates
 
@@ -591,7 +594,7 @@ def test_preparation_reentry_skips_create_repo_after_repo_created():
         return out
 
     o.repo.list_milestones.side_effect = list_milestones
-    o.repo.create_milestone.side_effect = lambda kw: (milestone_store.append(dict(kw)) or dict(kw))
+    o.repo.create_milestone.side_effect = lambda kw: milestone_store.append(dict(kw)) or dict(kw)
 
     persisted_updates: list[dict] = []
     real_update = o._update_workflow

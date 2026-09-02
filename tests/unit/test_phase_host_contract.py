@@ -56,6 +56,11 @@ def test_phase_handler_protocol_has_handle_taking_ctx_deps():
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2044)]
+
+
 _PHASES_DIR = (
     Path(__file__).resolve().parents[2] / "app" / "modules" / "workspace" / "autonomous" / "phases"
 )
@@ -134,18 +139,18 @@ def test_build_phase_deps_populates_sandbox_provider():
     # (mirrors _git_workspace/_evidence lazy-attach behavior).
     orch._runner = None
     provider = orch._sandbox_provider
-    assert isinstance(
-        provider, LegacyPosixProvider
-    ), f"_sandbox_provider property must return a provider, got {type(provider)}"
+    assert isinstance(provider, LegacyPosixProvider), (
+        f"_sandbox_provider property must return a provider, got {type(provider)}"
+    )
     # The full PhaseDeps path must also surface it.
     orch._gh = None
     orch._git_workspace_instance = None
     orch._evidence_instance = None
     orch.repo = None
     deps = orch._build_phase_deps()
-    assert isinstance(
-        deps.sandbox, LegacyPosixProvider
-    ), f"_build_phase_deps must surface _sandbox_provider, got {deps.sandbox!r}"
+    assert isinstance(deps.sandbox, LegacyPosixProvider), (
+        f"_build_phase_deps must surface _sandbox_provider, got {deps.sandbox!r}"
+    )
 
 
 def test_build_phase_deps_surfaces_runner_injected_provider():

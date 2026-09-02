@@ -12,6 +12,13 @@ from datetime import datetime, timezone
 
 from app.modules.workspace.autonomous.github_ops import parse_github_iso_datetime
 
+import pytest
+
+
+pytestmark = [pytest.mark.regression]
+# No original issue: guards the Python-3.10 fromisoformat("Z") behavior that
+# the date-parse helpers rely on (created in e000f2b2, no issue reference).
+
 
 def test_parse_z_suffix_yields_aware_utc():
     parsed = parse_github_iso_datetime("2026-08-18T17:43:12Z")
