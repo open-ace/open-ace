@@ -28,8 +28,9 @@
 | `tests/performance/` | 有时间或资源阈值，可能受 runner 噪声影响 | 独立非阻塞 lane |
 
 路由边界测试和并发测试已分别归入 `tests/integration/routes/` 与
-`tests/integration/concurrency/`。`tests/autonomous/` 和 tests 根目录中的
-历史文件继续按 inventory 逐步迁移；不要再新增新的“按功能域”顶层目录或
+`tests/integration/concurrency/`。tests 根层与 autonomous 域的历史存量已
+全部迁毕（#3185），grandfather inventory 随之退役并由 layout policy 钉住
+终态（根层仅 conftest/`__init__`）；不要再新增新的“按功能域”顶层目录或
 tests 根目录测试文件。
 
 **测试数据库隔离（#2869）**：`tests/unit/conftest.py` 的 `_isolated_unit_db`

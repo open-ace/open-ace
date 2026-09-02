@@ -1,2 +1,0 @@
-# Grandfathered test modules at tests/ root. Remove entries as files migrate.
-# New tests must be placed in an execution-layer directory.
