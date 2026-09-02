@@ -7,6 +7,7 @@ between turns.
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 import time
@@ -83,6 +84,74 @@ def test_an_unreadable_slot_raises_rather_than_reading_as_absent(store, monkeypa
     with pytest.raises(CorruptAgentState):
         store.get("wf-1", "main")
     assert path.exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the permission bits this needs")
+def test_a_slot_whose_stat_fails_is_corrupt_not_absent(store):
+    """The absent-vs-corrupt decision must not ride on an `exists()` probe.
+
+    Real chmod, not a mock, because the whole point is that the interpreters
+    this repo gates on disagree about what a failing stat means:
+
+    * 3.14 — `Path.exists()` is `os.path.exists()`, which swallows every
+      OSError and returns False. A probe-then-read `get()` reported this slot
+      ABSENT and the session line silently started fresh, discarding real
+      history — fail-OPEN, on a CI lane we gate on.
+    * 3.12 — `exists()` re-raises, so EACCES escaped as a raw OSError from
+      outside the try. `_plan_agent_state` handles only CorruptAgentState and
+      ValueError, so the turn got no structured refusal.
+
+    One read, and the error kind is the answer.
+    """
+    store.put("wf-1", "main", b"REAL HISTORY")
+    workflow_dir = store.path_for("wf-1", "main").parent
+    os.chmod(workflow_dir, 0o000)
+    try:
+        with pytest.raises(CorruptAgentState):
+            store.get("wf-1", "main")
+    finally:
+        os.chmod(workflow_dir, 0o700)
+
+    # And the history is still there — refusing must not destroy it.
+    assert store.get("wf-1", "main") == b"REAL HISTORY"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the permission bits this needs")
+def test_a_failed_purge_is_logged_rather_than_swallowed(store, caplog):
+    """Retained transcripts must be observable.
+
+    `ignore_errors=True` consumed every OSError inside rmtree, so the handler
+    could never fire: a terminal workflow kept its entire transcript directory
+    while the cleanup path reported success. Cleanup still must not RAISE — a
+    failed tidy-up must not fail a completed workflow — so the contract is
+    "never raises, always logs".
+    """
+    store.put("wf-1", "main", b"SENSITIVE")
+    slot = store.path_for("wf-1", "main")
+    os.chmod(slot.parent, 0o500)  # the child cannot be unlinked
+    try:
+        with caplog.at_level(logging.WARNING):
+            store.purge("wf-1")  # must not raise
+    finally:
+        os.chmod(slot.parent, 0o700)
+
+    assert slot.exists(), "the fixture did not actually block the deletion"
+    assert any("wf-1" in r.message or "wf-1" in r.getMessage() for r in caplog.records), (
+        "the transcript survived the purge and nothing was logged, so a "
+        f"terminal workflow retains it invisibly: {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_purging_a_workflow_that_never_stored_anything_is_quiet(store, caplog):
+    """The ordinary case must not warn, or every terminal workflow would.
+
+    Dropping ignore_errors=True makes rmtree raise FileNotFoundError here;
+    treating that as a failure would make the new warning meaningless noise.
+    """
+    with caplog.at_level(logging.WARNING):
+        store.purge("wf-never-seen")
+
+    assert not caplog.records, [r.getMessage() for r in caplog.records]
 
 
 def test_discard_removes_one_line_only(store):

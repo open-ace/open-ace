@@ -127,10 +127,26 @@ class AgentStateStore:
 
     def get(self, workflow_id: str, line_id: str) -> bytes | None:
         path = self.path_for(workflow_id, line_id)
-        if not path.exists():
-            return None
+        # ONE syscall, and the error kind IS the answer. An `exists()` probe
+        # ahead of the read put the absent-vs-unreadable decision on a stat
+        # whose failure mode is not stable across the interpreters this repo
+        # tests on:
+        #
+        #   * 3.14 — `Path.exists()` is `os.path.exists()`, which swallows
+        #     EVERY OSError and returns False. A present-but-unreadable slot
+        #     read as ABSENT, so the line silently started fresh: the exact
+        #     fail-OPEN this class exists to prevent, on a CI lane we gate on.
+        #   * 3.12 — `exists()` re-raises a non-ignorable error, so EACCES
+        #     escaped as a raw OSError from outside the try. `_plan_agent_state`
+        #     handles CorruptAgentState and ValueError only, so the turn got no
+        #     structured refusal.
+        #
+        # Both verified against a real chmod'ed directory, not a mock.
         try:
             return path.read_bytes()
+        except FileNotFoundError:
+            # Absent: first turn on this line, or a reboot cleared tmpfs.
+            return None
         except OSError as exc:
             raise CorruptAgentState(
                 f"agent state for {workflow_id}/{line_id} exists but could not be read "
@@ -144,10 +160,25 @@ class AgentStateStore:
             logger.warning("Failed to discard agent state %s/%s", workflow_id, line_id)
 
     def purge(self, workflow_id: str) -> None:
+        # NOT ignore_errors=True. That consumes every OSError inside rmtree, so
+        # the handler below could never fire and a terminal workflow could
+        # retain its whole transcript directory while the cleanup path reported
+        # success — sensitive state kept indefinitely with nothing to notice it.
+        # Cleanup still must not raise (a failed tidy-up must not fail a
+        # completed workflow), so the failure is logged instead of swallowed.
         try:
-            shutil.rmtree(self._workflow_dir(workflow_id), ignore_errors=True)
+            shutil.rmtree(self._workflow_dir(workflow_id))
+        except FileNotFoundError:
+            # Nothing to purge is the ordinary case: a workflow that never
+            # carried state, or a second purge. Not worth a warning, or every
+            # terminal workflow would log one.
+            return
         except (OSError, ValueError):
-            logger.warning("Failed to purge agent state for %s", workflow_id)
+            logger.warning(
+                "Failed to purge agent state for %s; transcripts may be retained",
+                workflow_id,
+                exc_info=True,
+            )
 
     def reap(self, max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS) -> int:
         """Drop slots older than the window. Returns how many were removed."""
