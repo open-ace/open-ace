@@ -215,6 +215,12 @@
           "tests/unit/test_schema_guard.py",
           "-q",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "-m",
           "not performance"
         ]
@@ -289,6 +295,12 @@
           "tests/integration",
           "-q",
           "--maxfail=1",
+          "--timeout",
+          "300",
+          "--timeout-method",
+          "thread",
+          "--durations",
+          "20",
           "-m",
           "postgres"
         ]
