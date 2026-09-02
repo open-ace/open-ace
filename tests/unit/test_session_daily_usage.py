@@ -101,6 +101,7 @@ class TestSessionDailyUsageUpsert:
 
         # Mock _get_connection to return a new connection each time (to avoid close issues)
         connection_count = [0]
+
         def get_new_connection():
             connection_count[0] += 1
             # Create a new connection to the same database
@@ -237,7 +238,9 @@ class TestSessionUsageQueryPriority:
         assert tokens == 1000
         assert requests == 10
 
-    @pytest.mark.skip(reason="SQLite CAST(created_at AS DATE) returns year only, not full date. The fallback path has known issue #3307.")
+    @pytest.mark.skip(
+        reason="SQLite CAST(created_at AS DATE) returns year only, not full date. The fallback path has known issue #3307."
+    )
     def test_falls_back_to_agent_sessions(self, sqlite_db):
         """When both session_daily_usage and user_daily_stats are empty, fall back to agent_sessions.
 

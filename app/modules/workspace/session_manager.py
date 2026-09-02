@@ -1302,7 +1302,14 @@ class SessionManager:
                 )
                 existing = cursor.fetchone()
                 if existing:
-                    existing_tokens, existing_requests, existing_input, existing_output, existing_cache_read, existing_cache_write = existing
+                    (
+                        existing_tokens,
+                        existing_requests,
+                        existing_input,
+                        existing_output,
+                        existing_cache_read,
+                        existing_cache_write,
+                    ) = existing
                     total_tokens_delta += existing_tokens or 0
                     request_delta += existing_requests or 0
                     total_input_delta += existing_input or 0
