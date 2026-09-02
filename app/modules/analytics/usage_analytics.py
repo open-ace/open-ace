@@ -10,6 +10,7 @@ excludes incomplete current day, and returns history window metadata.
 
 import logging
 import statistics
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -65,7 +66,7 @@ class ContinuousDailyTotals(NamedTuple):
     first_activity_date: str | None
 
 
-def calculate_moving_average(values: list[float], window: int = 7) -> float | None:
+def calculate_moving_average(values: Sequence[int | float], window: int = 7) -> float | None:
     """Calculate moving average for Issue #3244.
 
     Args:
@@ -1143,15 +1144,19 @@ class UsageAnalytics:
         # Get continuous daily totals with tenant isolation
         continuous_data = self._get_continuous_daily_totals(window, tenant_id)
 
-        # Check minimum sample requirement
-        if continuous_data.total_days < FORECAST_MIN_SAMPLE_DAYS:
+        # Calculate actual sample days (days with data, not zeros)
+        sample_days = continuous_data.total_days - continuous_data.missing_days
+
+        # Check minimum sample requirement - need at least some real data
+        # Even with missing days, we can still provide a forecast (with degraded quality)
+        if sample_days == 0:
             return {
                 "forecast_available": False,
-                "reason": "Insufficient historical data",
+                "reason": "No historical data available",
                 "quality_level": "unavailable",
-                "quality_description": "样本不足，无法提供预测",
+                "quality_description": "无历史数据，无法提供预测",
                 "quality_metrics": {
-                    "sample_days": continuous_data.total_days - continuous_data.missing_days,
+                    "sample_days": sample_days,
                     "missing_days": continuous_data.missing_days,
                     "window_days": window.days,
                 },
@@ -1214,7 +1219,7 @@ class UsageAnalytics:
             "quality_level": quality_level,
             "quality_description": quality_desc,
             "quality_metrics": {
-                "sample_days": continuous_data.total_days - continuous_data.missing_days,
+                "sample_days": sample_days,
                 "window_days": window.days,
                 "missing_days": continuous_data.missing_days,
                 "missing_ratio": round(missing_ratio, 4),
