@@ -14,7 +14,6 @@ from app.modules.workspace.autonomous.github_ops import parse_github_iso_datetim
 
 import pytest
 
-
 pytestmark = [pytest.mark.regression]
 # No original issue: guards the Python-3.10 fromisoformat("Z") behavior that
 # the date-parse helpers rely on (created in e000f2b2, no issue reference).

@@ -325,7 +325,7 @@ class TestPhaseTransitionContract:
     silently change the transition graph."""
 
     def test_phase_order_is_canonical_sequence(self):
-        assert PHASE_ORDER == [
+        assert [
             "preparation",
             "planning",
             "development",
@@ -333,7 +333,7 @@ class TestPhaseTransitionContract:
             "report",
             "merge",
             "acceptance_verification",
-        ]
+        ] == PHASE_ORDER
 
     def test_every_phase_has_a_status_mapping(self):
         # A phase without a status mapping would make the commit entrypoint's
@@ -861,12 +861,12 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     ctx = orch._build_workflow_context(orch.workflow)
     result = orch._do_report(ctx, deps)
 
-    assert isinstance(result, PhaseResult), (
-        f"_do_report must return PhaseResult, got {type(result)}"
-    )
-    assert not inline_phase_status_writes, (
-        f"_do_report wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
-    )
+    assert isinstance(
+        result, PhaseResult
+    ), f"_do_report must return PhaseResult, got {type(result)}"
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_report wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
     # Report always advances to "wait" with waiting status — same decision as
     # the legacy inline _update_workflow({"current_phase":"wait","status":"waiting"}).
     assert result.outcome == "completed"
@@ -948,9 +948,9 @@ def test_wait_phase_returns_phase_result_not_inline_commit(monkeypatch):
     result = orch._do_wait(ctx, deps)
 
     assert isinstance(result, PhaseResult), f"_do_wait must return PhaseResult, got {type(result)}"
-    assert not inline_phase_status_writes, (
-        f"_do_wait wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
-    )
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_wait wrote phase/status/completed_at/paused_at inline: {inline_phase_status_writes}"
     # New-requirements branch advances to "planning" for dev_round 2 — same
     # decision as the legacy inline _update_workflow({"current_phase":"planning",
     # "status":"planning","dev_round":2,"current_round":0,...}).
@@ -1276,9 +1276,9 @@ def test_wait_phase_parking_and_auto_merge_paths(monkeypatch, comments, pr_numbe
     result = orch._do_wait(ctx, deps)
 
     assert isinstance(result, PhaseResult)
-    assert not inline_phase_status_writes, (
-        f"_do_wait wrote phase/status inline on {expected}: {inline_phase_status_writes}"
-    )
+    assert (
+        not inline_phase_status_writes
+    ), f"_do_wait wrote phase/status inline on {expected}: {inline_phase_status_writes}"
     if expected == "wait_outcome":
         assert result.outcome == "wait"
         assert result.next_phase is None
@@ -1379,9 +1379,9 @@ def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
     ctx = orch._build_workflow_context(orch.workflow)
     result = orch._do_preparation(ctx, deps)
 
-    assert isinstance(result, PhaseResult), (
-        f"_do_preparation must return PhaseResult, got {type(result)}"
-    )
+    assert isinstance(
+        result, PhaseResult
+    ), f"_do_preparation must return PhaseResult, got {type(result)}"
     assert not inline_phase_status_writes, (
         f"_do_preparation wrote phase/status/completed_at/paused_at inline: "
         f"{inline_phase_status_writes}"
@@ -1403,21 +1403,21 @@ def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
     assert result.workflow_patch.get("current_round") == 0
     # The immediate-checkpoint of github_issue_number happened via
     # _update_workflow before the terminal PhaseResult was committed.
-    assert any(w.get("github_issue_number") == 42 for w in all_workflow_writes), (
-        f"github_issue_number=42 not immediate-checkpointed: {all_workflow_writes!r}"
-    )
+    assert any(
+        w.get("github_issue_number") == 42 for w in all_workflow_writes
+    ), f"github_issue_number=42 not immediate-checkpointed: {all_workflow_writes!r}"
     # branch_created travels in milestone_events (committed by the entrypoint).
     # issue_created is immediate-checkpointed via _create_milestone (P1-b), so
     # it appears in created_milestones, not in the deferred milestone_events.
-    assert not any(m.get("milestone_type") == "issue_created" for m in result.milestone_events), (
-        f"issue_created must be immediate-checkpointed, not deferred: {result.milestone_events}"
-    )
-    assert any(m.get("milestone_type") == "issue_created" for m in created_milestones), (
-        f"issue_created milestone not created inline: {created_milestones!r}"
-    )
-    assert any(m.get("milestone_type") == "branch_created" for m in result.milestone_events), (
-        f"branch_created milestone missing: {result.milestone_events}"
-    )
+    assert not any(
+        m.get("milestone_type") == "issue_created" for m in result.milestone_events
+    ), f"issue_created must be immediate-checkpointed, not deferred: {result.milestone_events}"
+    assert any(
+        m.get("milestone_type") == "issue_created" for m in created_milestones
+    ), f"issue_created milestone not created inline: {created_milestones!r}"
+    assert any(
+        m.get("milestone_type") == "branch_created" for m in result.milestone_events
+    ), f"branch_created milestone missing: {result.milestone_events}"
     # The migrated handler emits its own phase_change (the commit entrypoint
     # does NOT) — assert the planning payload actually fires.
     assert captured_phase_changes, "_do_preparation did not emit phase_change"
@@ -1746,9 +1746,9 @@ def test_planning_phase_returns_phase_result_not_inline_commit(monkeypatch):
     ctx = orch._build_workflow_context(orch.workflow)
     result = orch._do_planning(ctx, deps)
 
-    assert isinstance(result, PhaseResult), (
-        f"_do_planning must return PhaseResult, got {type(result)}"
-    )
+    assert isinstance(
+        result, PhaseResult
+    ), f"_do_planning must return PhaseResult, got {type(result)}"
     assert not inline_phase_status_writes, (
         f"_do_planning wrote phase/status/completed_at/paused_at inline on the "
         f"success path: {inline_phase_status_writes}"

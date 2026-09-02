@@ -134,9 +134,9 @@ def test_phase_failure_does_not_partially_commit_next_phase():
     milestone_spy.assert_called_once()
     # The LAST _update_workflow write must NOT advance current_phase.
     last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
-    assert "current_phase" not in last_updates, (
-        f"a failed handler must not partially commit the next phase; got {last_updates!r}"
-    )
+    assert (
+        "current_phase" not in last_updates
+    ), f"a failed handler must not partially commit the next phase; got {last_updates!r}"
     assert last_updates["status"] == "failed"
     assert last_updates["error_message"] == "tests failed mid-development"
 
@@ -269,9 +269,9 @@ def test_pause_resume_shutdown_contract_survives_phase_adapter():
     o._commit_phase_result(pause_result)
 
     last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
-    assert "current_phase" not in last_updates, (
-        "pause must not advance the phase (resume re-dispatches the same one)"
-    )
+    assert (
+        "current_phase" not in last_updates
+    ), "pause must not advance the phase (resume re-dispatches the same one)"
     assert last_updates["status"] == "paused"
     assert "paused_at" in last_updates
 

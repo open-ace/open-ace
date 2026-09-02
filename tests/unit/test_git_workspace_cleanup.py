@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 
-
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2505)]
 
 

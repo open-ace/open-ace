@@ -135,9 +135,9 @@ def test_merge_handle_success_returns_completed_phase_result():
     host.create_milestone_idempotent.assert_called()
     # Cleanup ran and its milestone rode in milestone_events.
     host.perform_git_cleanup.assert_called_once_with()
-    assert any(ms.get("milestone_type") == "cleaned_up" for ms in result.milestone_events), (
-        result.milestone_events
-    )
+    assert any(
+        ms.get("milestone_type") == "cleaned_up" for ms in result.milestone_events
+    ), result.milestone_events
     # Terminal phase_change emitted through the host.
     host.emit_phase_change.assert_called_with({"phase": "completed"})
 
