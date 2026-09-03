@@ -357,3 +357,36 @@ def test_sandbox_zcode_refuses_resume_rather_than_cold_starting(monkeypatch):
     assert result.success is False
     assert result.error_code == "agent_state_unavailable"
     assert provider.calls == [], "no pod may be created for a refused resume"
+
+
+def test_sandbox_zcode_provider_selection_failure_keeps_its_classification(monkeypatch):
+    """A SandboxError from provider selection must stay `sandbox_unavailable`,
+    not fall through to the runner's generic handler which drops the code."""
+    from app.modules.workspace.autonomous.sandbox.provider import SandboxError
+
+    transport = _FakeTransport()
+    provider = _FakeSandboxProvider(transport)
+    captured: dict = {}
+    runner = _sandbox_zcode_runner(monkeypatch, provider, captured)
+
+    def _boom(*a, **k):
+        raise SandboxError("backend unhealthy")
+
+    runner._select_sandbox_provider = _boom
+
+    result = runner._run_zcode_appserver(
+        session_id="wf-zc",
+        cli_tool="zcode",
+        model="GLM-5",
+        project_path="/workspace",
+        prompt="do it",
+        permission_mode="yolo",
+        timeout=30,
+        workflow_id="wf-1",
+        user_id=1,
+        workspace_type="local",
+    )
+
+    assert result.success is False
+    assert result.error_code == "sandbox_unavailable"
+    assert "Sandbox unavailable" in result.error

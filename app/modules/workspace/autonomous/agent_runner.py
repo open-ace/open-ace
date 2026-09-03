@@ -3637,17 +3637,30 @@ class AutonomousAgentRunner:
                     error=f"Sandbox unavailable: {e}",
                     error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
                 )
-        provider = self._select_sandbox_provider(
-            # Hardcoded "local", matching the stream-json path: _run_zcode_appserver
-            # is only reached via _run_local (run_agent_task routes remote
-            # workspaces to _run_remote), so execution is always local — passing
-            # workspace_type would pick a RemoteMachineProvider on the
-            # remote-without-machine-id edge case.
-            "local",
-            tenant_id=tenant_id,
-            project_path=project_path,
-            generation=self._resolve_sandbox_generation(workflow_id),
-        )
+        try:
+            provider = self._select_sandbox_provider(
+                # Hardcoded "local", matching the stream-json path:
+                # _run_zcode_appserver is only reached via _run_local
+                # (run_agent_task routes remote workspaces to _run_remote), so
+                # execution is always local — passing workspace_type would pick a
+                # RemoteMachineProvider on the remote-without-machine-id edge case.
+                "local",
+                tenant_id=tenant_id,
+                project_path=project_path,
+                generation=self._resolve_sandbox_generation(workflow_id),
+            )
+        except SandboxError as e:
+            # Mirror the tenant-resolution and stream-json handlers: a selection
+            # failure for a production-required tenant (unhealthy backend) must
+            # keep its sandbox_unavailable classification, not fall through to
+            # run_agent_task's generic except which drops the error_code.
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
         from app.modules.workspace.autonomous.sandbox.provider import (
             AGENT_STATE_CARRIED,
             AGENT_STATE_EPHEMERAL,
