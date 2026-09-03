@@ -92,6 +92,46 @@ def test_a_round_trip_preserves_the_bytes(sandbox):
     assert provider.export_agent_state(handle, cli_session_id=_SID) == blob
 
 
+# ── #3319: qwen carries under a different on-disk layout ──────────────
+
+_QWEN_DIR = "/home/agent/.qwen/projects/-workspace/chats"
+
+
+@pytest.mark.issue(3319)
+def test_qwen_export_reads_the_chats_path(sandbox):
+    """qwen's transcript lives under .qwen/.../chats/, not .claude/."""
+    provider, api, handle = sandbox
+    api.uploaded[handle.sandbox_id][f"{_QWEN_DIR}/{_SID}.jsonl"] = b"QWEN\n"
+
+    assert (
+        provider.export_agent_state(handle, cli_session_id=_SID, cli_tool="qwen-code-cli")
+        == b"QWEN\n"
+    )
+    # And the claude path is NOT where qwen looks.
+    assert provider.export_agent_state(handle, cli_session_id=_SID) is None
+
+
+@pytest.mark.issue(3319)
+def test_qwen_import_writes_to_the_chats_path(sandbox):
+    provider, api, handle = sandbox
+    provider.import_agent_state(
+        handle, cli_session_id=_SID, blob=b"QWEN\n", cli_tool="qwen-code-cli"
+    )
+
+    assert api.uploaded[handle.sandbox_id][f"{_QWEN_DIR}/{_SID}.jsonl"] == b"QWEN\n"
+
+
+@pytest.mark.issue(3319)
+def test_qwen_round_trip_preserves_bytes(sandbox):
+    provider, _api, handle = sandbox
+    blob = b'{"sessionId":"' + _SID.encode() + b'","type":"user"}\n'
+    provider.import_agent_state(handle, cli_session_id=_SID, blob=blob, cli_tool="qwen-code-cli")
+
+    assert (
+        provider.export_agent_state(handle, cli_session_id=_SID, cli_tool="qwen-code-cli") == blob
+    )
+
+
 def test_no_credential_file_is_ever_carried(sandbox):
     """Only the transcript moves.
 

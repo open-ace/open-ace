@@ -164,8 +164,14 @@ _SAFE_DIR = f"-c safe.directory={_WORKSPACE}"
 # so they cannot drift apart.
 _AGENT_STATE_DIR = "/home/agent/.claude/projects/-workspace"
 
+# qwen (#3319) shares the same fixed cwd (/workspace -> -workspace) but keeps its
+# transcript under ~/.qwen and one level deeper, in a chats/ subdir. Both dirs
+# are constants for the pinned sandbox image, not host-derived, and are covered
+# by tests that pin the layout so it cannot drift.
+_QWEN_AGENT_STATE_DIR = "/home/agent/.qwen/projects/-workspace/chats"
 
-def _agent_state_path(cli_session_id: str) -> str | None:
+
+def _agent_state_path(cli_session_id: str, cli_tool: str = "claude-code") -> str | None:
     """The transcript path for *cli_session_id*, or ``None`` if unusable.
 
     The id is NOT trusted. It reaches here from ``agent_sessions.cli_session_id``,
@@ -186,7 +192,8 @@ def _agent_state_path(cli_session_id: str) -> str | None:
     """
     if not _SAFE_SESSION_ID.match(str(cli_session_id or "")):
         return None
-    return f"{_AGENT_STATE_DIR}/{cli_session_id}.jsonl"
+    base = _QWEN_AGENT_STATE_DIR if cli_tool == "qwen-code-cli" else _AGENT_STATE_DIR
+    return f"{base}/{cli_session_id}.jsonl"
 
 
 # Session ids are uuids in practice; this is deliberately a little wider so a
@@ -536,15 +543,21 @@ class OpenSandboxProvider:
         )
         self._emit("changeset_applied", {"sandbox_id": handle.sandbox_id})
 
-    def export_agent_state(self, handle: SandboxHandle, *, cli_session_id: str) -> bytes | None:
+    def export_agent_state(
+        self, handle: SandboxHandle, *, cli_session_id: str, cli_tool: str = "claude-code"
+    ) -> bytes | None:
         """Read the CLI transcript out before the sandbox is destroyed (#3237).
 
         Returns ``None`` when there is nothing to carry — no session id (the
         stream never yielded one) or no transcript at that path (the turn never
         started a conversation). Neither is an error, and neither should cost
         the caller a completed milestone.
+
+        ``cli_tool`` selects the transcript layout: claude-code under
+        ``.claude/projects/-workspace``, qwen-code-cli under
+        ``.qwen/projects/-workspace/chats`` (#3319).
         """
-        path = _agent_state_path(cli_session_id)
+        path = _agent_state_path(cli_session_id, cli_tool)
         if path is None:
             # Emitted, not silently dropped. This is the FIRST place a hostile
             # id surfaces: the sandbox prints it during its own turn and the
@@ -601,7 +614,12 @@ class OpenSandboxProvider:
         return blob
 
     def import_agent_state(
-        self, handle: SandboxHandle, *, cli_session_id: str, blob: bytes
+        self,
+        handle: SandboxHandle,
+        *,
+        cli_session_id: str,
+        blob: bytes,
+        cli_tool: str = "claude-code",
     ) -> None:
         """Place the transcript where ``--resume`` will look for it (#3237).
 
@@ -610,9 +628,10 @@ class OpenSandboxProvider:
         and a credential must not round-trip through the control plane.
         Verified against a real CLI that restoring this file alone into an
         otherwise empty HOME is sufficient for ``--resume`` to resolve, with
-        the original session id preserved.
+        the original session id preserved. ``cli_tool`` selects the layout
+        (#3319), same as :meth:`export_agent_state`.
         """
-        path = _agent_state_path(cli_session_id)
+        path = _agent_state_path(cli_session_id, cli_tool)
         if path is None:
             raise self._refuse(
                 f"agent state id {cli_session_id!r} is not a plain path component; "

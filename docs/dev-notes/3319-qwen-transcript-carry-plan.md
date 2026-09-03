@@ -39,46 +39,57 @@ So even with the bytes restored perfectly, turn 2's argv is `--resume
 cold start. The first draft's "capture `stream_session_id` for carry only, do
 not touch the resolve path" cannot work.
 
+## Verified finding that simplifies the design (2026-09-03)
+
+The reviews' one open question was whether qwen's session id is on the **stdout
+stream** or must be recovered from disk. Tested against the installed qwen
+(0.21.5): it **is** on the stream. Every stream-json event carries
+`"session_id"`, starting with the very first `{"type":"system","subtype":"init",
+"session_id":"<uuid>", …}` — *before* any model call — and that id equals the
+transcript filename basename (`chats/<uuid>.jsonl`, confirmed on disk).
+
+This is exactly claude's shape, so the carry is the **claude pattern**: capture
+the id from the stream *during* the turn, then export/import a fixed
+`chats/<id>.jsonl` path. It also removes the need for disk discovery — which was
+never feasible anyway: the OpenSandbox API exposes only `download_file` /
+`upload_file` / `run_command`, no file listing, so "list `chats/*.jsonl` and pick
+the newest" would have required an extra exec during teardown. Stream capture
+needs neither, and it is what this plan now implements. (The sidecar
+`<line>.meta.json` the first draft proposed is still dropped, for the same
+traversal/leak reasons the review raised.)
+
 ## Design: the minted id is the single source of truth
 
 One id flows through capture → persist → resolve → import, so the file the CLI
-looks for and the file we restore are named by the *same* id. This replaces the
-first draft's sidecar `<line>.meta.json` (which the review showed leaks past
-`reap`/`discard`, is written non-atomically with the blob, and — by storing an
-absolute path the import trusts — removes the `_SAFE_SESSION_ID` traversal guard
-the current code depends on).
+looks for and the file we restore are named by the *same* id.
 
-**Export discovers the id from the sandbox** (it cannot be known before the turn
-— qwen mints it): list `.qwen/projects/*/chats/*.jsonl` in the sandbox, pick the
-newest by mtime (the file this turn wrote or appended), read its `sessionId`
-field, and return `(blob, discovered_id)`. Reading `sessionId` from the file
-content — not the basename — matches how `scripts/fetch_qwen.py:645` identifies
-sessions and is robust to any rename. Picking the newest *after* the turn means
-a resumed turn carries this turn's transcript, not the stale one imported at its
-start (the failure the first draft used to reject an alternative while sharing
-it).
+**Capture from the stream.** qwen reaches the generic stream-json path in
+`_run_local`, which already calls `_capture_cli_session_id` on its stream events
+(including the terminal `result` event, which qwen emits carrying `session_id`).
+Widen that helper's internal gate to admit qwen so it sets
+`session.cli_session_id` from the stream — the change is confined to that one
+helper; `_uses_sidebar_session_source` and its twelve sidebar-linkage call sites
+are left exactly as they are, so qwen's sidebar behaviour does not change, and
+claude's capture is byte-for-byte unchanged.
 
-**Persist** the discovered id with a **dedicated, explicit write at export
-time** — not by touching the claude sidebar machinery. The claude path writes
+**Persist** the captured id with a **dedicated, explicit write at export time** —
+not by touching the claude sidebar machinery. The claude path writes
 `cli_session_id` inside `_ensure_sidebar_session` (`agent_runner.py:2137`→`:2198`),
-which is gated claude-only, fires *during* streaming (before qwen's id is even
-discovered), and falls back to `_find_latest_claude_session_id` — a **host-side**
-`.claude` mtime glob that would look on the control plane, not inside the pod.
-None of that fits qwen. Instead, the export block (`agent_runner.py:~3328`),
-which is where `discovered_id` first exists, calls
+which is gated claude-only and falls back to `_find_latest_claude_session_id` — a
+**host-side** `.claude` mtime glob that would look on the control plane, not
+inside the pod. None of that fits qwen. Instead the export block
+(`agent_runner.py:~3330`, inside `_run_local`, where `cli_tool`, `session` and the
+captured id are all in scope) calls
 `session_manager.update_session_fields(session.session_id, {"cli_session_id":
-discovered_id, …}, require_tenant=False)` directly for qwen. `tracking_session_id`
-stays `task_id`; nothing rotates.
+<id>}, require_tenant=False)` directly for qwen, in its own `try/except` and only
+when a blob was actually carried. `tracking_session_id` stays `task_id`; nothing
+rotates. (This mirrors the codex persist landed in #3321.)
 
-**Resolve** by extending the `_resolve_session_line` mapping branch
-(`orchestrator.py:7228`) from claude-only to also cover qwen-code-cli, so turn 2
-reads back the persisted `cli_session_id` as its resume target. (Confirmed safe:
-the branch's "mapping lost" arm returns `(existing, None, False)` — a clean fresh
-start — and nothing else assumes it is claude-only.)
-
-This is why `_uses_sidebar_session_source` is **not** touched (below): the
-sidebar-linkage functions it gates stay claude-only, and qwen's carry-id persist
-is a separate, explicit code path that never enters them.
+**Resolve** by adding `qwen-code-cli` to `_RESUME_ID_MAPPED_TOOLS`
+(`orchestrator.py`, the shared frozenset #3321 introduced), so turn 2 reads back
+the persisted `cli_session_id` as its resume target. Confirmed safe: the branch's
+"no mapping yet" arm returns `(existing, None, False)` — a clean fresh start for
+turn 1 — and nothing else assumes it is claude-only.
 
 **Import rebuilds the path from the validated id** — never from a stored string.
 Turn 2 resolves resume target = Q1, argv `--resume Q1`; import writes the blob to
@@ -87,66 +98,67 @@ Turn 2 resolves resume target = Q1, argv `--resume Q1`; import writes the blob t
 `-workspace` is the encoded sandbox project dir (see Encoding). No path is
 carried, so the traversal guard is intact.
 
-### On-disk layout and encoding (verified, and why no path is carried)
+### On-disk layout and encoding (verified)
 
-* **Layout.** qwen 0.21.5 on this machine writes `chats/<sessionId>.jsonl`
-  exclusively (1127 transcripts, zero flat). The flat form
-  (`<encoded>/<id>.jsonl`) is a legacy layout `fetch_qwen.py` still tolerates
-  (probes `<encoded>/chats/*.jsonl` at `:787` and `<encoded>/*.jsonl` at `:782`).
-  The sandbox image pins the qwen version, so import targets `chats/` and a test
-  pins it; if the image's qwen ever changed layout, this constant changes with
-  it.
+* **Layout.** qwen 0.21.5 writes `chats/<sessionId>.jsonl` exclusively (1127
+  transcripts on this machine, zero flat). The flat form (`<encoded>/<id>.jsonl`)
+  is a legacy layout `fetch_qwen.py` still tolerates. The sandbox image pins the
+  qwen version, so the provider addresses a fixed
+  `.qwen/projects/-workspace/chats/<id>.jsonl` (analogous to claude's fixed
+  `.claude/projects/-workspace/<id>.jsonl`), pinned by a test; if the image's
+  qwen ever changed layout, this constant changes with it.
 * **Encoding.** The two repo encoders differ in general —
   `encode_project_path_legacy` = `re.sub(r"[/\\:._]","-")`
   (`app/routes/workspace.py`) vs the runner's `_encode_project_path` =
   `re.sub(r"[^A-Za-z0-9]","-")` (`agent_runner.py:1746`) — but both map
-  `/workspace` → `-workspace` (only the leading slash is touched). Export
-  **globs** `.qwen/projects/*/chats/` so discovery does not depend on the exact
-  encoding; import uses `-workspace`, pinned by a test, and confirmed against a
-  real sandbox run during implementation.
+  `/workspace` → `-workspace` (only the leading slash is touched), the sandbox's
+  fixed cwd. Verified locally that qwen encodes cwd with the same `/`→`-` scheme.
+  `-workspace` is pinned by a test and confirmed against a real sandbox run
+  during implementation, the same way claude's constant already is.
 
 ## Changes
 
-1. `provider.py` — `export_agent_state` for qwen discovers the newest
-   `chats/*.jsonl`, reads its `sessionId`, returns `(blob, discovered_id)`;
-   `import_agent_state` writes to `chats/<validated_id>.jsonl` under the encoded
-   project dir. `_SAFE_SESSION_ID` still validates the id before any path is
-   built. claude-code keeps its fixed `-workspace/.claude` path unchanged.
-2. `agent_runner.py` — thread `cli_tool` into the provider export/import; in the
-   export block (`~:3328`), where `discovered_id` first exists, persist it to
-   `agent_sessions.cli_session_id` via a direct
-   `session_manager.update_session_fields(..., require_tenant=False)` for qwen —
-   **not** by extending `_ensure_sidebar_session` (`:2137`→`:2198`) or the other
-   claude-only sidebar functions (they fire during streaming, before the id
-   exists, and fall back to a host-side `.claude` mtime glob); remove the
-   `_plan_agent_state` refusal for qwen-code-cli. The persist write goes in its
-   own `try/except` (a DB hiccup degrades to a cold start, never loses the
-   completed milestone — matching the log-only philosophy at `:3293`) and fires
-   only when `blob is not None`, so a no-transcript turn records no id.
-3. `orchestrator.py` — extend the `_resolve_session_line` mapping branch
-   (`:7228`) to qwen-code-cli so its resume target is the minted
-   `cli_session_id`, not the tracking id.
+1. `provider.py` — `_agent_state_path(cli_session_id, cli_tool)` becomes
+   tool-aware: claude keeps `.claude/projects/-workspace/<id>.jsonl`, qwen gets
+   `.qwen/projects/-workspace/chats/<id>.jsonl`. `export_agent_state` /
+   `import_agent_state` gain `cli_tool="claude-code"` and pass it through.
+   `_SAFE_SESSION_ID` still validates the id before any path is built, so the
+   traversal guard is unchanged and no path string is ever stored.
+2. `agent_runner.py` —
+   * **Capture**: widen `_capture_cli_session_id`'s internal gate to admit qwen
+     (that one helper only — not `_uses_sidebar_session_source`), so its existing
+     stream-event calls set `session.cli_session_id` for qwen too.
+   * **Export/import**: thread `cli_tool` into both provider calls.
+   * **Persist**: in the export block (`~:3330`, inside `_run_local`, where
+     `cli_tool`/`session`/the captured id are in scope), an explicit
+     `session_manager.update_session_fields(session.session_id, {"cli_session_id":
+     <id>}, require_tenant=False)` for qwen — **not** via `_ensure_sidebar_session`
+     (`:2137`→`:2198`) or the other claude-only sidebar functions. Own
+     `try/except` (a DB hiccup degrades to a cold start, never loses the
+     milestone) and only when `blob is not None`.
+   * **Refusal**: `_plan_agent_state` (`:2715`) no longer refuses qwen; the
+     refusal fires only for a tool that is neither claude-code nor qwen-code-cli.
+3. `orchestrator.py` — add `qwen-code-cli` to `_RESUME_ID_MAPPED_TOOLS` so
+   `_resolve_session_line` maps qwen's tracking id to its captured
+   `cli_session_id` (the shared frozenset #3321 introduced).
 4. `docs/sandbox-backends.md` — drop the "claude-code only" note; describe the
-   discover-persist-resolve-import flow.
+   capture-persist-resolve-import flow.
 
 Deliberately **not** changed: `_uses_sidebar_session_source` (its 12 call sites
-drive sidebar linkage — a separate concern — and qwen's carry-id persist is a
-distinct explicit write that never enters them); and no sidecar file is added.
+drive sidebar linkage — a separate concern; only `_capture_cli_session_id`'s own
+gate widens); and no sidecar file is added.
 
 ## Acceptance
 
-1. A two-turn qwen regression through `_run_agent` → `_resolve_session_line`
-   (not the provider in isolation): turn 1's discovered `sessionId` is persisted
-   to `cli_session_id` and the blob uploaded to `chats/<id>.jsonl`; turn 2
-   resolves that id, its argv carries `--resume <same id>`, **and** the blob is
-   imported to that path. It must fail if **either** the persist/resolve
-   extension **or** the import is removed — asserting only that `--resume` is in
-   argv would pass with the carry deleted (the argv is built independently of
-   the import block at `agent_runner.py:2996`), the exact round-1 defect.
-2. Export picks the transcript written by *this* turn (newest by mtime), not a
-   stale one imported at turn start.
-3. Claude-code carry is unchanged; its stored state needs no discovery step and
-   its existing tests pass untouched.
+1. A two-turn qwen regression covering capture → persist → resolve → import:
+   turn 1 captures `sessionId` from the stream into `cli_session_id` and the
+   provider writes the blob to `.qwen/projects/-workspace/chats/<id>.jsonl`;
+   turn 2 resolves that id and imports the blob to that same path. It must fail
+   if **either** the persist/resolve extension **or** the import is removed.
+2. Capture: a qwen `system/init` (or any) event's `session_id` lands in
+   `session.cli_session_id`; claude's capture timing is unchanged.
+3. Claude-code carry is unchanged; the tool-aware path leaves claude's fixed
+   `.claude` path and its existing tests untouched.
 4. Only the transcript round-trips — no `.qwen` credential/settings file — as an
    invariant asserted at the provider's written-path set (mirroring
    `test_no_credential_file_is_ever_carried`). Noted as an invariant, not as
