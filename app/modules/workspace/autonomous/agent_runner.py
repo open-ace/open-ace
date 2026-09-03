@@ -1317,7 +1317,8 @@ class AutonomousAgentRunner:
         if cli_session_id != session.cli_session_id:
             session.cli_session_id = cli_session_id
             logger.info(
-                "Captured Claude session_id from %s (workflow=%s tracking=%s cli=%s)",
+                "Captured %s session_id from %s (workflow=%s tracking=%s cli=%s)",
+                session.cli_tool,
                 source,
                 session.workflow_id,
                 (session.session_id or "")[:8],
@@ -3338,10 +3339,10 @@ class AutonomousAgentRunner:
             # `resume=True` with a falsy `cli_session_id`, and
             # `_resolve_session_line` never returns that shape — it yields
             # `(id, None, False)` when the mapping is missing and `(id, id,
-            # True)` for non-Claude tools. Kept because the alternative failure
-            # is silent (the line simply stops carrying history), and because
-            # the stream capture is gated on `_uses_sidebar_session_source`,
-            # which is a condition this code does not control.
+            # True)` for a tool it does not map. Kept because the alternative
+            # failure is silent (the line simply stops carrying history), and
+            # because stream capture is gated (claude-code and qwen-code-cli
+            # only), a condition this code does not control.
             captured = getattr(session, "cli_session_id", "") or resumed_with
             try:
                 blob = provider.export_agent_state(
