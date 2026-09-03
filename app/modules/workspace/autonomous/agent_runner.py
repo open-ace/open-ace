@@ -2921,6 +2921,7 @@ class AutonomousAgentRunner:
                 milestone_id=milestone_id,
                 system_account=system_account,
                 runtime_python_command=runtime_python_command,
+                tenant_id=tenant_id,
             )
         if not adapter.supports_stdin_input():
             return self._run_single_shot(
@@ -3557,6 +3558,7 @@ class AutonomousAgentRunner:
         milestone_id: str = "",
         system_account: str | None = None,
         runtime_python_command: list[str] | None = None,
+        tenant_id: int | None = None,
     ) -> AgentTaskResult:
         """Run a ZCode agent task via the persistent app-server protocol.
 
@@ -3617,33 +3619,168 @@ class AutonomousAgentRunner:
             else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
-        logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
-
+        # #3323: pick the isolation provider. A production-isolation tenant gets
+        # OpenSandbox and ZCode runs INSIDE the pod, driving the app-server over
+        # the PTY transport wrapped in a Popen-shaped adapter. Every other tenant
+        # gets the local Legacy fallback and keeps the direct-Popen path below,
+        # byte-for-byte unchanged.
+        if tenant_id is None:
+            try:
+                tenant_id = self._resolve_tenant_for_isolation(
+                    user_id, cli_tool=cli_tool, adapter=adapter
+                )
+            except SandboxError as e:
+                return AgentTaskResult(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Sandbox unavailable: {e}",
+                    error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+                )
         try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
+            provider = self._select_sandbox_provider(
+                # Hardcoded "local", matching the stream-json path:
+                # _run_zcode_appserver is only reached via _run_local
+                # (run_agent_task routes remote workspaces to _run_remote), so
+                # execution is always local — passing workspace_type would pick a
+                # RemoteMachineProvider on the remote-without-machine-id edge case.
+                "local",
+                tenant_id=tenant_id,
+                project_path=project_path,
+                generation=self._resolve_sandbox_generation(workflow_id),
             )
-        except (OSError, subprocess.SubprocessError) as e:
+        except SandboxError as e:
+            # Mirror the tenant-resolution and stream-json handlers: a selection
+            # failure for a production-required tenant (unhealthy backend) must
+            # keep its sandbox_unavailable classification, not fall through to
+            # run_agent_task's generic except which drops the error_code.
             return AgentTaskResult(
                 session_id=session_id,
                 tracking_session_id=session_id,
                 success=False,
-                error=f"Failed to start ZCode process: {e}",
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
             )
+        from app.modules.workspace.autonomous.sandbox.provider import (
+            AGENT_STATE_CARRIED,
+            AGENT_STATE_EPHEMERAL,
+            agent_state_persistence,
+        )
+
+        use_sandbox = agent_state_persistence(provider) in (
+            AGENT_STATE_CARRIED,
+            AGENT_STATE_EPHEMERAL,
+        )
+
+        sandbox_handle = None
+        exec_handle = None
+        transport = None
+        if use_sandbox:
+            # ZCode's own agent-state carry is deferred (#3323). A resuming turn
+            # in a fresh pod would resolve `--resume` into an empty HOME and cold
+            # start silently, so refuse before creating the pod — it costs
+            # nothing and a stated refusal is recoverable where the cold start is
+            # not. Lifting this needs ZCode's transcript path + session-id capture
+            # established the way #3319 did for qwen.
+            if resume:
+                return AgentTaskResult(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=(
+                        "ZCode agent-state carry is not implemented yet (#3323): refusing "
+                        "to resume into an empty sandbox HOME rather than start cold silently"
+                    ),
+                    error_code="agent_state_unavailable",
+                )
+            try:
+                sandbox_handle = provider.create(
+                    SandboxSpec(
+                        task_id=session_id,
+                        project_path=project_path,
+                        cli_tool=cli_tool,
+                        system_account=system_account,
+                        policy=self._load_task_policy(),
+                    )
+                )
+                self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
+            except SandboxError as e:
+                return AgentTaskResult(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Sandbox unavailable: {e}",
+                    error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+                )
+            logger.info(
+                "Launching ZCode app-server (mode=%s) in sandbox %s",
+                zcode_mode,
+                sandbox_handle.sandbox_id,
+            )
+            try:
+                # Materialize the project tree in the pod before the agent starts,
+                # then run the app-server over the PTY transport (#2023 seam).
+                provider.upload_workspace(sandbox_handle, None)
+                exec_policy = provider.agent_turn_policy(prompt=prompt, model=model, env=env)
+                exec_handle = provider.exec(
+                    sandbox_handle, command=cmd, env=env, exec_policy=exec_policy
+                )
+                transport = provider.get_transport(exec_handle)
+                # LocalProcessTransport exposes a real Popen; a container backend
+                # leaves it None, so wrap the transport in the Popen-shaped adapter.
+                process = getattr(transport, "process", None)
+                if process is None:
+                    from app.modules.workspace.autonomous.sandbox.opensandbox.popen_adapter import (
+                        TransportPopenAdapter,
+                    )
+
+                    process = TransportPopenAdapter(transport)
+            except Exception as e:  # noqa: BLE001 - the sandbox EXISTS; nothing may leak it
+                try:
+                    provider.destroy(sandbox_handle)
+                except Exception as destroy_error:  # noqa: BLE001 - must not mask `e`
+                    logger.warning(
+                        "sandbox destroy failed while handling %s: %s",
+                        type(e).__name__,
+                        destroy_error,
+                    )
+                return AgentTaskResult(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Failed to start ZCode process: {e}",
+                )
+        else:
+            logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                    start_new_session=True,
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                return AgentTaskResult(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Failed to start ZCode process: {e}",
+                )
 
         # Register PID + wrap into a _LocalSession-compatible tracker so the
-        # orchestrator's stop/pause/cancel can reach the process. Created
-        # before the collector so the collector's session_id_resolver can read
-        # the real CLI session id off the tracker once session/create resolves.
+        # orchestrator's stop/pause/cancel can reach the process. On the sandbox
+        # path the tracker carries transport/provider/exec_handle and NO local
+        # process, so stop_session/pause_session/resume_session route through the
+        # provider and never call os.getpgid(None). Created before the collector
+        # so the collector's session_id_resolver can read the real CLI session id
+        # off the tracker once session/create resolves.
         tracker = _LocalSession(
             session_id=session_id,
-            process=process,
+            process=None if use_sandbox else process,
+            transport=transport,
             cli_tool=cli_tool,
             project_path=project_path,
             encoded_project_path=self._encode_project_path(project_path),
@@ -3653,6 +3790,9 @@ class AutonomousAgentRunner:
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
             task_id=session_id,
+            sandbox_handle=sandbox_handle,
+            exec_handle=exec_handle,
+            sandbox_provider=provider if use_sandbox else None,
         )
 
         collector = _ZcodeResultCollector(
@@ -3674,7 +3814,10 @@ class AutonomousAgentRunner:
         zc_session.allowed_tools = []
 
         self._local_sessions[session_id] = tracker
-        if self._on_pid_registered:
+        # A pidless sandbox backend (process.pid is None) registers nothing —
+        # writing a NULL pid row would be meaningless; cancellation routes
+        # through the provider instead.
+        if self._on_pid_registered and process.pid is not None:
             try:
                 self._on_pid_registered(session_id, process.pid)
             except Exception as e:
@@ -3760,6 +3903,28 @@ class AutonomousAgentRunner:
         finally:
             # Always clean up: stop the process, remove the tracker, clear PID.
             zc_session.stop()
+            # #3323: on the sandbox path, bring the agent's work product back out
+            # BEFORE destroy — after destroy the ephemeral filesystem is gone with
+            # the run's entire output. apply then destroy; Legacy no-ops both. An
+            # apply failure invalidates the run (recorded on the collector so the
+            # success-path result reports it).
+            if use_sandbox and sandbox_handle is not None:
+                try:
+                    provider.apply_changes(sandbox_handle, project_path)
+                except Exception as apply_error:  # noqa: BLE001 - any failure invalidates the run
+                    logger.error(
+                        "sandbox changeset apply failed for %s: %s", session_id[:8], apply_error
+                    )
+                    if collector.error is None:
+                        collector.error = (
+                            f"Sandbox work product could not be applied: {apply_error}"
+                        )
+                try:
+                    provider.destroy(sandbox_handle)
+                except Exception as destroy_error:  # noqa: BLE001 - idempotent, best effort
+                    logger.warning(
+                        "sandbox destroy failed for %s: %s", session_id[:8], destroy_error
+                    )
             self._local_sessions.pop(session_id, None)
             if self._on_pid_cleared:
                 try:
@@ -4451,18 +4616,22 @@ class AutonomousAgentRunner:
         tenant_id = self._resolve_tenant_id_strict(user_id)
         if not requires_production_isolation(tenant_id, config):
             return tenant_id
+        # #3323: ZCode (an _APPSERVER_TOOLS member) now runs INSIDE the sandbox
+        # over the PTY transport — `_run_zcode_appserver` selects the provider —
+        # so it is allowed through here. Only the single-shot tools (codex,
+        # openclaw), which spawn a local process and have no sandbox path, are
+        # still refused: their execution really would bypass the provider.
         if cli_tool in _APPSERVER_TOOLS:
-            reason = "speaks its own app-server protocol"
-        elif not adapter.supports_stdin_input():
-            reason = "has no stdin protocol and runs single-shot"
-        else:
             return tenant_id
-        raise SandboxError(
-            f"tenant {tenant_id} requires production isolation, but {cli_tool!r} {reason} "
-            "and its execution path bypasses the sandbox provider; choose a CLI tool that "
-            "supports the stream-json protocol (claude-code, qwen-code-cli) or remove the "
-            "tenant from production_required_tenants"
-        )
+        if not adapter.supports_stdin_input():
+            raise SandboxError(
+                f"tenant {tenant_id} requires production isolation, but {cli_tool!r} "
+                "has no stdin protocol and runs single-shot, so its execution path "
+                "bypasses the sandbox provider; choose a CLI tool that supports the "
+                "stream-json protocol (claude-code, qwen-code-cli) or remove the tenant "
+                "from production_required_tenants"
+            )
+        return tenant_id
 
     def _select_sandbox_provider(
         self,
