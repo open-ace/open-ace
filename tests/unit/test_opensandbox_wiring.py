@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -386,6 +387,7 @@ def _run_local_against(
     session_id="s-1",
     uses_sidebar=False,
     runner_spy=None,
+    cli_tool="claude-code",
 ):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
@@ -448,7 +450,7 @@ def _run_local_against(
         runner_spy(runner)
     return runner._run_local(
         session_id=session_id,
-        cli_tool="claude-code",
+        cli_tool=cli_tool,
         model="claude-sonnet-4",
         project_path=str(worktree),
         prompt="do the thing",
@@ -887,7 +889,7 @@ def test_run_local_exports_the_transcript_before_destroy(api, tmp_path, monkeypa
     real_export = provider.export_agent_state
     real_destroy = provider.destroy
 
-    def _export(handle, *, cli_session_id):
+    def _export(handle, *, cli_session_id, cli_tool="claude-code"):
         order.append("export")
         # Stand in for the CLI having written its transcript during the turn.
         provider.import_agent_state(
@@ -922,6 +924,62 @@ def test_run_local_exports_the_transcript_before_destroy(api, tmp_path, monkeypa
     )
 
 
+@pytest.mark.issue(3319)
+def test_run_local_carries_qwen_transcript_and_persists_the_id(api, tmp_path, monkeypatch):
+    """#3319 turn 1: qwen captures its stream id, exports under the qwen layout,
+    stores the transcript, and persists the id for the next milestone's resolve.
+
+    Fails if any of the three runner wiring changes is dropped: without the
+    export ``cli_tool`` the provider reads the wrong (claude) path and the store
+    stays empty; without the capture there is no id to export or persist; without
+    the explicit persist the next milestone's ``_resolve_session_line`` reads an
+    empty column and cold-starts.
+    """
+    worktree = _worktree_at(tmp_path)
+    provider = _provider_for(api, worktree, _ScriptedPtyConnection(_turn_frames("qwen-sid-1")))
+    store = _agent_state_store(tmp_path)
+
+    export_tool: list[str] = []
+    real_export = provider.export_agent_state
+
+    def _export(handle, *, cli_session_id, cli_tool="claude-code"):
+        export_tool.append(cli_tool)
+        # Stand in for qwen having written its transcript under the qwen layout
+        # during the turn — import with the SAME cli_tool so export finds it.
+        provider.import_agent_state(
+            handle, cli_session_id=cli_session_id, blob=b"QWEN-T1\n", cli_tool=cli_tool
+        )
+        return real_export(handle, cli_session_id=cli_session_id, cli_tool=cli_tool)
+
+    monkeypatch.setattr(provider, "export_agent_state", _export)
+
+    session_manager = MagicMock()
+
+    def _inject_sm(runner):
+        runner.session_manager = session_manager
+
+    result = _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        agent_state_store=store,
+        session_id="wf-main-track",
+        cli_tool="qwen-code-cli",
+        runner_spy=_inject_sm,
+    )
+
+    assert result.success, result.error
+    # The export addressed the qwen transcript layout, not claude's.
+    assert export_tool == ["qwen-code-cli"], export_tool
+    # The transcript reached the control-plane store.
+    assert store.get("wf-1", "wf-main-track") == b"QWEN-T1\n"
+    # The captured stream id was persisted so the next milestone can resolve it.
+    session_manager.update_session_fields.assert_called_once()
+    call = session_manager.update_session_fields.call_args
+    assert call.args[0] == "wf-main-track", call
+    assert call.args[1].get("cli_session_id") == "qwen-sid-1", call
+
+
 def test_run_local_imports_the_transcript_and_emits_resume(api, tmp_path, monkeypatch):
     """Turn 2: the stored transcript is placed, and --resume goes into argv.
 
@@ -936,7 +994,7 @@ def test_run_local_imports_the_transcript_and_emits_resume(api, tmp_path, monkey
     imported: list = []
     real_import = provider.import_agent_state
 
-    def _import(handle, *, cli_session_id, blob):
+    def _import(handle, *, cli_session_id, blob, cli_tool="claude-code"):
         imported.append((cli_session_id, blob))
         return real_import(handle, cli_session_id=cli_session_id, blob=blob)
 
@@ -1137,7 +1195,7 @@ def test_two_turns_on_one_line_carry_the_conversation(api, tmp_path, monkeypatch
     p1 = _provider_for(api, wt1, _ScriptedPtyConnection(_turn_frames("cli-1")))
     real_export = p1.export_agent_state
 
-    def _export(handle, *, cli_session_id):
+    def _export(handle, *, cli_session_id, cli_tool="claude-code"):
         p1.import_agent_state(handle, cli_session_id=cli_session_id, blob=b"HISTORY\n")
         return real_export(handle, cli_session_id=cli_session_id)
 
@@ -1152,7 +1210,7 @@ def test_two_turns_on_one_line_carry_the_conversation(api, tmp_path, monkeypatch
     placed: list = []
     real_import = p2.import_agent_state
 
-    def _import(handle, *, cli_session_id, blob):
+    def _import(handle, *, cli_session_id, blob, cli_tool="claude-code"):
         placed.append(blob)
         return real_import(handle, cli_session_id=cli_session_id, blob=blob)
 

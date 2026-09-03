@@ -314,16 +314,37 @@ def test_recovery_returns_empty_without_ids(tmp_path):
 
 
 def test_a_resume_for_a_tool_the_provider_cannot_carry_is_refused():
-    """qwen-code-cli runs on OpenSandbox, but its transcript is not `.claude`.
+    """A stream-json tool the provider has no transcript layout for is refused.
 
-    `_AGENT_STATE_DIR` is claude-code specific and `_capture_cli_session_id`
-    only yields an id for claude-code, so on Qwen the export received an empty
-    id and discarded the slot, and the next turn found nothing and started
-    cold. Silent continuity loss for a tool the sandbox genuinely supports —
-    the exact defect this change exists to remove. Refusing costs nothing at
-    this point: no sandbox has been created and no tokens spent.
+    qwen-code-cli used to be this case, but #3319 wired its capture and
+    transcript path, so it now carries (see
+    ``test_qwen_transcript_carry_3319`` and ``test_qwen_carries`` below). A
+    genuinely uncarryable tool — one not in ``_CARRIED_STATE_TOOLS`` — must
+    still refuse rather than resume into an empty HOME. Refusing costs nothing
+    here: no sandbox created, no tokens spent.
     """
     plan = _runner()._plan_agent_state(
+        _Carried(),
+        workflow_id="wf-1",
+        tracking_session_id="s-1",
+        resume=True,
+        cli_tool="some-future-stream-tool",
+    )
+
+    assert plan.refuse, "an uncarryable resume was allowed to proceed into an empty HOME"
+    assert plan.resume is False
+    assert plan.reason_code == "agent_state_unavailable"
+    assert "some-future-stream-tool" in plan.detail
+
+
+def test_qwen_carries(tmp_path):
+    """#3319: qwen-code-cli is now a carried tool, not a refusal."""
+    from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+
+    runner = _runner(tmp_path)
+    AgentStateStore(root=str(tmp_path)).put("wf-1", "s-1", b"QWEN\n")
+
+    plan = runner._plan_agent_state(
         _Carried(),
         workflow_id="wf-1",
         tracking_session_id="s-1",
@@ -331,10 +352,9 @@ def test_a_resume_for_a_tool_the_provider_cannot_carry_is_refused():
         cli_tool="qwen-code-cli",
     )
 
-    assert plan.refuse, "a Qwen resume was allowed to proceed into an empty HOME"
-    assert plan.resume is False
-    assert plan.reason_code == "agent_state_unavailable"
-    assert "qwen-code-cli" in plan.detail
+    assert plan.refuse is False
+    assert plan.resume is True
+    assert plan.blob == b"QWEN\n"
 
 
 def test_claude_code_still_carries(tmp_path):

@@ -435,20 +435,22 @@ than by Open ACE.
 **Multi-turn `--resume` carries the CLI transcript, and nothing else.** Each
 turn gets a fresh sandbox with an empty `HOME`, so the transcript `--resume`
 reads is exported before the sandbox is destroyed and imported into the next
-one (#3237). Exactly one file moves —
-`$HOME/.claude/projects/-workspace/<id>.jsonl` — never `.claude.json`,
-`.credentials.json` or settings: the sandbox environment is constructed, never
-inherited, and a credential must not round-trip through the control plane. A
-real CLI confirms that this one file is sufficient for `--resume` to resolve,
-with the original session id preserved.
+one (#3237). Exactly one file moves, under each tool's own layout —
+`$HOME/.claude/projects/-workspace/<id>.jsonl` for claude-code,
+`$HOME/.qwen/projects/-workspace/chats/<id>.jsonl` for qwen-code-cli (#3319) —
+never `.claude.json`, `.credentials.json` or settings: the sandbox environment
+is constructed, never inherited, and a credential must not round-trip through
+the control plane. A real CLI confirms that this one file is sufficient for
+`--resume` to resolve, with the original session id preserved.
 
-**Carry is claude-code only today.** The transcript path above and the
-session-id capture that feeds it are both claude-code specific, so a resuming
-`qwen-code-cli` turn is *refused* with `agent_state_unavailable` before the
-sandbox is created rather than allowed to start cold and silently lose its
-history. That is an interim state — #3319 implements the real Qwen carry — and
-it is a scoping decision, not a limitation: Qwen supports `--resume`, shares
-Claude's directory encoding, and already puts its session id on the wire.
+**Both stream-json tools carry (#3319).** claude-code and qwen-code-cli both
+emit their `session_id` on stdout, so the runner captures it during the turn,
+persists it to `agent_sessions.cli_session_id`, and the next milestone's
+`_resolve_session_line` maps the line's tracking id to it — resuming the real
+CLI session, not the tracking id. A resuming turn for any *other* tool (a future
+stream-json CLI with no provider transcript path) is still *refused* with
+`agent_state_unavailable` before the sandbox is created, rather than allowed to
+start cold and silently lose its history.
 
 No other tool is affected, because no other tool reaches this path. ZCode
 speaks its own app-server protocol and the single-shot tools (codex, openclaw)

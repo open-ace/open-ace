@@ -160,6 +160,13 @@ COMPLETION_POLL_INTERVAL = 5.0
 # remote-agent/executor.py::_APPSERVER_TOOLS.
 _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 
+# Tools whose transcript a `carried` provider (OpenSandbox) knows how to export
+# and import across an ephemeral HOME (#3237/#3319): both take the stream-json
+# path, emit their session_id on stdout, and have a provider transcript layout.
+# A `carried`-provider resume for any other tool is refused rather than run into
+# an empty HOME.
+_CARRIED_STATE_TOOLS = frozenset({"claude-code", "qwen-code-cli"})
+
 # Path to the cross-user agent launcher (Issue #1395). The service runs as
 # `openace` but agent CLIs (claude-code/qwen-code/openclaw) infer the project
 # root from cwd and have no --cwd flag, so they must launch with cwd=project.
@@ -1288,8 +1295,19 @@ class AutonomousAgentRunner:
         parsed: dict[str, Any],
         source: str,
     ) -> str:
-        """Persist the authoritative Claude session_id when the stream exposes it."""
-        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+        """Capture the CLI's own session_id from the stream onto the session.
+
+        For claude-code this is the sidebar/resume id (its long-standing use).
+        For qwen-code-cli (#3319) it is the id needed to name the carried
+        transcript — qwen emits ``session_id`` on the same stream-json stdout.
+        The gate widens for qwen HERE only; ``_uses_sidebar_session_source`` and
+        its sidebar-linkage call sites are untouched, so qwen's sidebar
+        behaviour does not change.
+        """
+        if (
+            not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type)
+            and session.cli_tool != "qwen-code-cli"
+        ):
             return ""
 
         cli_session_id = self._extract_stream_session_id(parsed)
@@ -1299,7 +1317,8 @@ class AutonomousAgentRunner:
         if cli_session_id != session.cli_session_id:
             session.cli_session_id = cli_session_id
             logger.info(
-                "Captured Claude session_id from %s (workflow=%s tracking=%s cli=%s)",
+                "Captured %s session_id from %s (workflow=%s tracking=%s cli=%s)",
+                session.cli_tool,
                 source,
                 session.workflow_id,
                 (session.session_id or "")[:8],
@@ -2692,35 +2711,31 @@ class AutonomousAgentRunner:
 
         mode = agent_state_persistence(provider)
         # A carrying provider still only carries the tools it knows how to
-        # address. OpenSandbox writes and reads `.claude/projects/-workspace`,
-        # and `_capture_cli_session_id` only yields an id for claude-code — so
-        # for qwen-code-cli the export got an empty id, discarded the slot, and
-        # the next turn found nothing and started cold. That is the silent
-        # continuity loss this whole change exists to remove, surviving for a
-        # tool the sandbox genuinely supports. Refuse instead: the turn costs
-        # nothing yet, and a stated refusal is recoverable where a silent cold
-        # start is not.
+        # address. OpenSandbox reads/writes each tool's own transcript layout —
+        # `.claude/projects/-workspace/<id>.jsonl` for claude-code,
+        # `.qwen/projects/-workspace/chats/<id>.jsonl` for qwen-code-cli (#3319)
+        # — and `_capture_cli_session_id` yields the id for both from the
+        # stream. A tool with neither a captured id nor a provider path would get
+        # an empty id, discard the slot, and cold-start the next turn: silent
+        # continuity loss. Refuse instead — the turn costs nothing yet, and a
+        # stated refusal is recoverable where a silent cold start is not.
         #
-        # INTERIM, and the reason is scope rather than feasibility — #3319
-        # implements the real carry. Qwen supports `--resume`, its directory
-        # encoding is the same one Claude uses, and its session id is already
-        # on the wire; the only genuine unknown is that its transcript may sit
-        # at either `<encoded>/chats/<id>.jsonl` or `<encoded>/<id>.jsonl`, and
-        # that is discoverable by probing on export rather than guessing.
-        #
-        # qwen-code-cli is the ONLY other tool this can reach: ZCode and the
+        # claude-code and qwen-code-cli (#3319) are the tools this seam can
+        # carry: both take the stream-json path, emit their session_id on stdout,
+        # and the provider knows their transcript layout. ZCode and the
         # single-shot tools (codex, openclaw) return from _run_local before
-        # `_select_sandbox_provider` and spawn locally, so they have no
-        # ephemeral HOME to carry anything across.
-        if mode == AGENT_STATE_CARRIED and not self._uses_sidebar_session_source(cli_tool, "local"):
+        # `_select_sandbox_provider` and spawn locally, so they never reach here;
+        # any future stream-json tool without a provider path must refuse rather
+        # than resume into an empty HOME.
+        if mode == AGENT_STATE_CARRIED and cli_tool not in _CARRIED_STATE_TOOLS:
             return _AgentStatePlan(
                 resume=False,
                 refuse=True,
                 reason_code="agent_state_unavailable",
                 detail=(
-                    f"{type(provider).__name__} does not yet carry agent state for "
+                    f"{type(provider).__name__} does not carry agent state for "
                     f"{cli_tool!r}: its transcript location and session-id capture are "
-                    "claude-code specific (see #3319). Refusing rather than resuming "
+                    "not wired for this tool. Refusing rather than resuming "
                     "into an empty HOME."
                 ),
             )
@@ -3113,6 +3128,7 @@ class AutonomousAgentRunner:
                         sandbox_handle,
                         cli_session_id=resume_target,
                         blob=state_plan.blob,
+                        cli_tool=cli_tool,
                     )
                     resumed_with = resume_target
                 except Exception as exc:  # noqa: BLE001 - degrade, never fail the turn
@@ -3323,15 +3339,22 @@ class AutonomousAgentRunner:
             # `resume=True` with a falsy `cli_session_id`, and
             # `_resolve_session_line` never returns that shape — it yields
             # `(id, None, False)` when the mapping is missing and `(id, id,
-            # True)` for non-Claude tools. Kept because the alternative failure
-            # is silent (the line simply stops carrying history), and because
-            # the stream capture is gated on `_uses_sidebar_session_source`,
-            # which is a condition this code does not control.
+            # True)` for a tool it does not map. Kept because the alternative
+            # failure is silent (the line simply stops carrying history), and
+            # because stream capture is gated (claude-code and qwen-code-cli
+            # only), a condition this code does not control.
             captured = getattr(session, "cli_session_id", "") or resumed_with
             try:
-                blob = provider.export_agent_state(sandbox_handle, cli_session_id=captured)
+                blob = provider.export_agent_state(
+                    sandbox_handle, cli_session_id=captured, cli_tool=cli_tool
+                )
                 if blob is not None:
                     self._agent_state_store.put(workflow_id, session_id, blob)
+                    # #3319: persist the captured id so the NEXT milestone's
+                    # `_resolve_session_line` can map the tracking id to it. The
+                    # streaming tools' claude-only sidebar sync never runs for
+                    # qwen, so this is an explicit, best-effort write here.
+                    self._persist_carried_resume_id(session, cli_tool, captured)
                 else:
                     self._agent_state_store.discard(workflow_id, session_id)
             except Exception as exc:  # noqa: BLE001 - never discard finished work
@@ -3950,6 +3973,33 @@ class AutonomousAgentRunner:
                     output_tokens += usage["output"]
 
         return event_log, response_text.strip(), input_tokens, output_tokens, tool_calls
+
+    def _persist_carried_resume_id(
+        self, session: _LocalSession, cli_tool: str, cli_session_id: str
+    ) -> None:
+        """Write a carried tool's stream session id to ``cli_session_id`` (#3319).
+
+        For claude-code the sidebar sync already persists this during streaming;
+        qwen-code-cli's does not (it is gated claude-only), so its export-time id
+        needs an explicit write here so the next milestone's
+        ``_resolve_session_line`` can map the tracking id to it. Best-effort — a
+        DB error degrades the next turn to a cold start, never fails this one.
+        """
+        if cli_tool != "qwen-code-cli" or not cli_session_id:
+            return
+        session_manager = getattr(self, "session_manager", None)
+        if not session_manager:
+            return
+        try:
+            session_manager.update_session_fields(
+                session.session_id, {"cli_session_id": cli_session_id}, require_tenant=False
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail a finished milestone
+            logger.warning(
+                "Failed to persist carried resume id for %s: %s",
+                (session.session_id or "")[:8],
+                exc,
+            )
 
     @staticmethod
     def _extract_thread_started_id(stdout_text: str) -> str:

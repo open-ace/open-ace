@@ -2144,8 +2144,9 @@ SESSION_LINE_FIELDS = {
 # be mapped to the real ``cli_session_id`` before it can be resumed. For these,
 # resuming the tracking id itself would target a session the CLI never created.
 # claude-code captures its id from the SDK stream; codex (#3321) from the
-# ``thread.started`` event. Tools absent here resume the tracking id directly.
-_RESUME_ID_MAPPED_TOOLS = frozenset({"claude-code", "codex"})
+# ``thread.started`` event; qwen-code-cli (#3319) emits ``session_id`` on the
+# same stream-json stdout. Tools absent here resume the tracking id directly.
+_RESUME_ID_MAPPED_TOOLS = frozenset({"claude-code", "codex", "qwen-code-cli"})
 
 # Agent intro/closing text patterns for _clean_agent_text().
 # These match common Chinese agent narration phrases that should not
