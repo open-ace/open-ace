@@ -3638,7 +3638,12 @@ class AutonomousAgentRunner:
                     error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
                 )
         provider = self._select_sandbox_provider(
-            workspace_type,
+            # Hardcoded "local", matching the stream-json path: _run_zcode_appserver
+            # is only reached via _run_local (run_agent_task routes remote
+            # workspaces to _run_remote), so execution is always local — passing
+            # workspace_type would pick a RemoteMachineProvider on the
+            # remote-without-machine-id edge case.
+            "local",
             tenant_id=tenant_id,
             project_path=project_path,
             generation=self._resolve_sandbox_generation(workflow_id),
