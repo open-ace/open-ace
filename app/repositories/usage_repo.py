@@ -2101,27 +2101,39 @@ class UsageRepository:
     ) -> tuple[int, int]:
         """Get session token/request usage for a date window.
 
-        Uses user_daily_stats (fast path, same source as quota enforcement) so
-        the Work-page display matches what enforcement sees. Falls back to
-        agent_sessions.total_tokens when user_daily_stats has no data for the
-        period (e.g. the aggregator hasn't run yet for today's sessions).
+        Issue #3307: Now prioritizes session_daily_usage (per-day incremental
+        records) over user_daily_stats and agent_sessions.created_at fallback.
+        This ensures long-running WebUI sessions have their daily usage correctly
+        attributed to the request date, not the session creation date.
+
+        Query priority:
+        1. session_daily_usage — per-day incremental records (most accurate)
+        2. user_daily_stats — pre-aggregated stats (may have stale data)
+        3. agent_sessions.created_at — fallback for historical data (known issue)
 
         Never reads daily_messages (#1125: analysis fact tables must not
         participate in Workspace runtime display).
-
-        Fixes #2705: the previous session_messages SUM under-counted by ~10%
-        because cache and other non-message token costs are not recorded in
-        individual message rows.
-
-        Known trade-off (#1974): both paths attribute session tokens to the
-        session's created_at date, not to individual message timestamps. A
-        session spanning midnight will have all its tokens counted on the
-        creation day in the daily view. This matches enforcement (which has
-        always used created_at attribution) and is the correct behaviour for
-        quota display; per-message timestamp attribution for the trend chart
-        is a separate follow-up concern.
         """
-        # Fast path: user_daily_stats — identical to quota_manager enforcement.
+        # Priority 1: session_daily_usage — per-day incremental records
+        # This is the most accurate source for daily usage attribution.
+        try:
+            row = self.db.fetch_one(
+                """
+                SELECT
+                    COALESCE(SUM(tokens), 0) as tokens,
+                    COALESCE(SUM(requests), 0) as requests
+                FROM session_daily_usage
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                """,
+                (user_id, start_date, end_date),
+            )
+            if row and (int(row["tokens"]) > 0 or int(row["requests"]) > 0):
+                return int(row["tokens"]), int(row["requests"])
+        except Exception:
+            pass  # Table may not exist yet, continue to fallback
+
+        # Priority 2: user_daily_stats — pre-aggregated stats
+        # Same source as quota enforcement, but may be stale.
         try:
             row = self.db.fetch_one(
                 """
@@ -2138,9 +2150,10 @@ class UsageRepository:
         except Exception:
             pass
 
-        # Fallback: agent_sessions.total_tokens with created_at date attribution.
-        # Uses request_count for requests (model turn count, not message rows).
-        # Issue #3267: Use request_count for accurate model turn counting.
+        # Priority 3: Fallback to agent_sessions.total_tokens with created_at attribution.
+        # Known issue #3307: This incorrectly attributes session lifetime totals
+        # to the session creation date, not the actual request date.
+        # Only used when newer tables don't have data yet.
         session_row = self.db.fetch_one(
             """
             SELECT

@@ -1156,9 +1156,224 @@ class SessionManager:
                 ),
             )
         success = cursor.rowcount > 0
+
+        # Issue #3307: Also record daily incremental usage for accurate quota display.
+        # This writes to session_daily_usage table with the current date, allowing
+        # per-day aggregation instead of incorrect session.created_at attribution.
+        if success and (total_tokens_delta > 0 or request_delta > 0):
+            self._upsert_daily_usage(
+                cursor=cursor,
+                session_id=session_id,
+                request_delta=request_delta,
+                total_tokens_delta=total_tokens_delta,
+                total_input_delta=total_input_delta,
+                total_output_delta=total_output_delta,
+                total_cache_read_delta=total_cache_read_delta,
+                total_cache_write_delta=total_cache_write_delta,
+                tenant_id=tenant_id,
+            )
+
         conn.commit()
         conn.close()
         return success
+
+    def _upsert_daily_usage(
+        self,
+        cursor: Any,
+        session_id: str,
+        request_delta: int = 0,
+        total_tokens_delta: int = 0,
+        total_input_delta: int = 0,
+        total_output_delta: int = 0,
+        total_cache_read_delta: int = 0,
+        total_cache_write_delta: int = 0,
+        tenant_id: int | None = None,
+    ) -> bool:
+        """Upsert incremental usage to session_daily_usage table.
+
+        Records usage by session_id and date, allowing accurate per-day
+        quota display instead of incorrect session.created_at attribution.
+
+        Args:
+            cursor: Database cursor.
+            session_id: Session ID.
+            request_delta: Request count delta.
+            total_tokens_delta: Total tokens delta.
+            total_input_delta: Input tokens delta.
+            total_output_delta: Output tokens delta.
+            total_cache_read_delta: Cache read tokens delta.
+            total_cache_write_delta: Cache write tokens delta.
+            tenant_id: Tenant ID.
+
+        Returns:
+            True if successful.
+        """
+        # Check if session_daily_usage table exists
+        if not self._column_exists(cursor, "session_daily_usage", "id"):
+            return False
+
+        # Get user_id from agent_sessions
+        p = _param()
+        cursor.execute(
+            f"SELECT user_id FROM agent_sessions WHERE session_id = {p}",
+            (session_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        user_id = row[0] if isinstance(row, tuple) else row["user_id"]
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+
+        # Check if cache columns exist
+        has_cache_columns = self._column_exists(cursor, "session_daily_usage", "cache_read_tokens")
+
+        # Determine database type
+        from app.repositories.database import is_postgresql
+
+        if is_postgresql():
+            # PostgreSQL: Use ON CONFLICT DO UPDATE with cumulative addition
+            if has_cache_columns:
+                cursor.execute(
+                    """
+                    INSERT INTO session_daily_usage
+                        (session_id, user_id, tenant_id, date, tokens, requests,
+                         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (session_id, date) DO UPDATE SET
+                        tokens = session_daily_usage.tokens + EXCLUDED.tokens,
+                        requests = session_daily_usage.requests + EXCLUDED.requests,
+                        input_tokens = session_daily_usage.input_tokens + EXCLUDED.input_tokens,
+                        output_tokens = session_daily_usage.output_tokens + EXCLUDED.output_tokens,
+                        cache_read_tokens = COALESCE(session_daily_usage.cache_read_tokens, 0) + EXCLUDED.cache_read_tokens,
+                        cache_write_tokens = COALESCE(session_daily_usage.cache_write_tokens, 0) + EXCLUDED.cache_write_tokens,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        session_id,
+                        user_id,
+                        tenant_id,
+                        today,
+                        total_tokens_delta,
+                        request_delta,
+                        total_input_delta,
+                        total_output_delta,
+                        total_cache_read_delta,
+                        total_cache_write_delta,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO session_daily_usage
+                        (session_id, user_id, tenant_id, date, tokens, requests,
+                         input_tokens, output_tokens)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (session_id, date) DO UPDATE SET
+                        tokens = session_daily_usage.tokens + EXCLUDED.tokens,
+                        requests = session_daily_usage.requests + EXCLUDED.requests,
+                        input_tokens = session_daily_usage.input_tokens + EXCLUDED.input_tokens,
+                        output_tokens = session_daily_usage.output_tokens + EXCLUDED.output_tokens,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        session_id,
+                        user_id,
+                        tenant_id,
+                        today,
+                        total_tokens_delta,
+                        request_delta,
+                        total_input_delta,
+                        total_output_delta,
+                    ),
+                )
+        else:
+            # SQLite: Use INSERT OR REPLACE with cumulative logic
+            # First, get existing values if any
+            if has_cache_columns:
+                cursor.execute(
+                    f"""
+                    SELECT tokens, requests, input_tokens, output_tokens,
+                           COALESCE(cache_read_tokens, 0), COALESCE(cache_write_tokens, 0)
+                    FROM session_daily_usage
+                    WHERE session_id = {p} AND date = {p}
+                    """,
+                    (session_id, today),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    (
+                        existing_tokens,
+                        existing_requests,
+                        existing_input,
+                        existing_output,
+                        existing_cache_read,
+                        existing_cache_write,
+                    ) = existing
+                    total_tokens_delta += existing_tokens or 0
+                    request_delta += existing_requests or 0
+                    total_input_delta += existing_input or 0
+                    total_output_delta += existing_output or 0
+                    total_cache_read_delta += existing_cache_read or 0
+                    total_cache_write_delta += existing_cache_write or 0
+
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO session_daily_usage
+                        (session_id, user_id, tenant_id, date, tokens, requests,
+                         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+                    VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+                    """,
+                    (
+                        session_id,
+                        user_id,
+                        tenant_id,
+                        today,
+                        total_tokens_delta,
+                        request_delta,
+                        total_input_delta,
+                        total_output_delta,
+                        total_cache_read_delta,
+                        total_cache_write_delta,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    f"""
+                    SELECT tokens, requests, input_tokens, output_tokens
+                    FROM session_daily_usage
+                    WHERE session_id = {p} AND date = {p}
+                    """,
+                    (session_id, today),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    existing_tokens, existing_requests, existing_input, existing_output = existing
+                    total_tokens_delta += existing_tokens or 0
+                    request_delta += existing_requests or 0
+                    total_input_delta += existing_input or 0
+                    total_output_delta += existing_output or 0
+
+                cursor.execute(
+                    f"""
+                    INSERT OR REPLACE INTO session_daily_usage
+                        (session_id, user_id, tenant_id, date, tokens, requests,
+                         input_tokens, output_tokens)
+                    VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+                    """,
+                    (
+                        session_id,
+                        user_id,
+                        tenant_id,
+                        today,
+                        total_tokens_delta,
+                        request_delta,
+                        total_input_delta,
+                        total_output_delta,
+                    ),
+                )
+
+        return True
 
     def get_messages(
         self,
