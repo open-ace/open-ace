@@ -84,12 +84,21 @@ class OpenClawAdapter(BaseCLIAdapter):
         return args
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: str | None = None
+        self,
+        prompt: str,
+        project_path: str,
+        model: str | None = None,
+        resume: bool = False,
+        resume_session_id: str = "",
     ) -> list[str]:
         """Build args for a single-shot OpenClaw execution.
 
         Mirrors build_start_args but appends the prompt as the final
         positional argument, matching OpenClaw's agent-mode CLI contract.
+
+        ``resume`` / ``resume_session_id`` are accepted (so the shared
+        ``_run_single_shot`` call site never raises) but **ignored**: openclaw's
+        non-interactive resume is unverified and deliberately deferred (#3321).
         """
         args = [
             self.EXECUTABLE,

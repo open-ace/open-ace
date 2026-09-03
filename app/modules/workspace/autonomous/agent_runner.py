@@ -2920,6 +2920,8 @@ class AutonomousAgentRunner:
                 system_account=system_account,
                 user_id=user_id,
                 runtime_python_command=runtime_python_command,
+                resume=resume,
+                resume_session_id=resume_session_id,
             )
 
         # Build env vars with LLM proxy auth so the agent authenticates through
@@ -3949,6 +3951,53 @@ class AutonomousAgentRunner:
 
         return event_log, response_text.strip(), input_tokens, output_tokens, tool_calls
 
+    @staticmethod
+    def _extract_thread_started_id(stdout_text: str) -> str:
+        """Return codex's minted thread_id from the first ``thread.started`` event.
+
+        ``codex exec --json`` emits ``{"type":"thread.started","thread_id":...}``
+        as its first event; the id names the rollout file and is what
+        ``codex exec resume <id>`` accepts (#3321). Empty string when absent
+        (e.g. openclaw, which emits no such event).
+        """
+        for raw in (stdout_text or "").splitlines():
+            line = raw.strip()
+            if not line or '"thread.started"' not in line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") == "thread.started":
+                thread_id = str(parsed.get("thread_id") or "").strip()
+                if thread_id:
+                    return thread_id
+        return ""
+
+    def _persist_single_shot_resume_id(self, session_id: str, stdout_text: str) -> None:
+        """Write the CLI-minted resume id to ``agent_sessions.cli_session_id`` (#3321).
+
+        Explicit, additive write — the single-shot path never runs the
+        claude-only sidebar sync that populates the column for streaming tools.
+        Best-effort: a DB hiccup degrades the next milestone to a cold start,
+        it never fails the completed milestone. Writes only when an id was
+        found, so a no-``thread.started`` run (openclaw) records nothing.
+        """
+        session_manager = getattr(self, "session_manager", None)
+        if not session_manager:
+            return
+        thread_id = self._extract_thread_started_id(stdout_text)
+        if not thread_id:
+            return
+        try:
+            session_manager.update_session_fields(
+                session_id, {"cli_session_id": thread_id}, require_tenant=False
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail a finished milestone
+            logger.warning(
+                "Failed to persist single-shot resume id for %s: %s", session_id[:8], exc
+            )
+
     def _run_single_shot(
         self,
         session_id: str,
@@ -3962,11 +4011,17 @@ class AutonomousAgentRunner:
         system_account: str | None = None,
         user_id: int | None = None,
         runtime_python_command: list[str] | None = None,
+        resume: bool = False,
+        resume_session_id: str = "",
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
         Uses ``adapter.build_single_shot_args`` to produce a self-contained
         command (e.g. ``codex exec --json "<prompt>"``) and captures output.
+
+        ``resume`` / ``resume_session_id`` (#3321) let codex continue a prior
+        milestone via ``codex exec resume <id>``; the adapter ignores them for
+        tools that cannot resume non-interactively (openclaw).
         """
         import sys
 
@@ -3990,7 +4045,9 @@ class AutonomousAgentRunner:
                 error=f"CLI tool '{exe_name}' not found",
             )
 
-        args = adapter.build_single_shot_args(prompt, project_path, model)
+        args = adapter.build_single_shot_args(
+            prompt, project_path, model, resume=resume, resume_session_id=resume_session_id
+        )
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = (
             self._build_agent_env(
@@ -4077,6 +4134,12 @@ class AutonomousAgentRunner:
             self._parse_single_shot_stdout(proc.stdout or "", cli_tool)
         )
         total_tokens = input_tokens + output_tokens
+
+        # #3321: persist the CLI-minted resume id so the next milestone can
+        # `--resume` it. Explicit write here — the single-shot path never enters
+        # the claude-only sidebar sync that populates cli_session_id for the
+        # streaming tools.
+        self._persist_single_shot_resume_id(session_id, proc.stdout or "")
 
         stderr_text = (proc.stderr or "").strip()
         success = proc.returncode == 0
