@@ -2140,6 +2140,13 @@ SESSION_LINE_FIELDS = {
     "verification": "verification_session_id",  # #2335 acceptance verifier
 }
 
+# Tools whose CLI mints its own session id, so a line's stable tracking id must
+# be mapped to the real ``cli_session_id`` before it can be resumed. For these,
+# resuming the tracking id itself would target a session the CLI never created.
+# claude-code captures its id from the SDK stream; codex (#3321) from the
+# ``thread.started`` event. Tools absent here resume the tracking id directly.
+_RESUME_ID_MAPPED_TOOLS = frozenset({"claude-code", "codex"})
+
 # Agent intro/closing text patterns for _clean_agent_text().
 # These match common Chinese agent narration phrases that should not
 # appear in GitHub comments.
@@ -7225,9 +7232,11 @@ class AutonomousOrchestrator:
             existing = (fresh.get(field) or "").strip()
         if existing:
             resume_target = existing
-            if (wf or {}).get("cli_tool") == "claude-code" and getattr(
-                self._runner, "session_manager", None
-            ) is not None:
+            cli_tool = (wf or {}).get("cli_tool") or ""
+            if (
+                cli_tool in _RESUME_ID_MAPPED_TOOLS
+                and getattr(self._runner, "session_manager", None) is not None
+            ):
                 try:
                     session_row = self._runner.session_manager.get_session(existing) or {}
                     # get_session returns an AgentSession (column on the object)
@@ -7248,19 +7257,30 @@ class AutonomousOrchestrator:
                     if cli_session_id:
                         resume_target = cli_session_id
                     else:
-                        # Mapping lost: keep this SAME session line stable and
+                        # No mapping yet: keep this SAME session line stable and
                         # re-probe/rebind the real CLI id onto it on the next
                         # run, rather than creating a new wrapper line or faking
-                        # a resume with the tracking id.
-                        logger.warning(
-                            "Claude session line %s has no cli_session_id mapping "
-                            "(tracking=%s); starting fresh on the same line",
-                            session_line,
-                            existing[:8],
-                        )
+                        # a resume with the tracking id. For claude this means a
+                        # lost mapping (anomalous → warn); for codex it is simply
+                        # the first turn, before any id is captured (expected).
+                        if cli_tool == "claude-code":
+                            logger.warning(
+                                "Claude session line %s has no cli_session_id mapping "
+                                "(tracking=%s); starting fresh on the same line",
+                                session_line,
+                                existing[:8],
+                            )
+                        else:
+                            logger.debug(
+                                "%s session line %s has no cli_session_id yet "
+                                "(tracking=%s); starting fresh on the same line",
+                                cli_tool,
+                                session_line,
+                                existing[:8],
+                            )
                         return existing, None, False
                 except Exception:
-                    logger.warning("Failed to resolve Claude resume target", exc_info=True)
+                    logger.warning("Failed to resolve %s resume target", cli_tool, exc_info=True)
                     return existing, None, False
             return existing, resume_target, True
         return str(uuid.uuid4()), None, False
