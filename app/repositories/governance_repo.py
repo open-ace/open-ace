@@ -523,7 +523,7 @@ class GovernanceRepository:
         """
         from app.repositories.database import adapt_sql
 
-        config = {}
+        config: dict[str, Any] = {}
         keys = ["outbound_port_whitelist", "global_allowlist_hosts", "ssrf_config_version"]
 
         query = adapt_sql(
@@ -552,7 +552,9 @@ class GovernanceRepository:
     def _get_config_version(self) -> int:
         """Get current SSRF config version."""
         config = self._get_ssrf_config_from_db()
-        return config.get("ssrf_config_version", 1)
+        version = config.get("ssrf_config_version", 1)
+        assert isinstance(version, int), "Config version must be int"
+        return version
 
     def _increment_config_version(self) -> int:
         """Increment config version and return new version.
@@ -656,7 +658,7 @@ class GovernanceRepository:
 
         # Get tenant allowlist info
         allowed_hosts = get_allowed_hosts()
-        tenant_ids = [tid for tid in allowed_hosts.keys() if tid != 0]
+        tenant_ids = [tid for tid in allowed_hosts if tid != 0]
         tenant_count = len(tenant_ids)
 
         # Determine config source
