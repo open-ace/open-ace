@@ -1223,6 +1223,8 @@ class SessionManager:
             return False
 
         user_id = row[0] if isinstance(row, tuple) else row["user_id"]
+        if user_id is None:
+            return False
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Check if cache columns exist

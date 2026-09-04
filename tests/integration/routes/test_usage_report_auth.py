@@ -56,6 +56,14 @@ def manager(tmp_path):
 
     with mgr.db.connection() as conn:
         load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
+        # Seed tenant + user so FK constraints are satisfied
+        conn.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'default', 'default')"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, tenant_id) "
+            "VALUES (1, 'admin', 'x', 1)"
+        )
         conn.commit()
 
     return mgr
