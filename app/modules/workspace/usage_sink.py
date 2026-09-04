@@ -398,9 +398,9 @@ def _record_messages_internal(
 
                         msg_id = msg.get("id") or msg.get("message_id")
                         if not msg_id:
-                            content_hash = hashlib.sha256(
-                                user_content.encode("utf-8")
-                            ).hexdigest()[:16]
+                            content_hash = hashlib.sha256(user_content.encode("utf-8")).hexdigest()[
+                                :16
+                            ]
                             msg_id = f"llm_proxy:{content_hash}"
                         stored = sm.append_transcript_message(
                             session_id=session_id,
