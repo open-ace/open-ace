@@ -28,7 +28,8 @@ interface AlertStreamState {
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
   addAlert: (alert: Alert) => void;
-  setAlerts: (alerts: Alert[]) => void;
+  setAlerts: (alerts: Alert[] | ((prev: Alert[]) => Alert[])) => void;
+  setUnreadCount: (count: number | ((prev: number) => number)) => void;
   markAlertAsRead: (alertId: string) => void;
   markAllAsRead: () => void;
   removeAlert: (alertId: string) => void;
@@ -110,7 +111,21 @@ export const useAlertStreamStore = create<AlertStreamState>((set, get) => ({
     });
   },
 
-  setAlerts: (alerts) => set({ alerts }),
+  setAlerts: (alerts) => {
+    if (typeof alerts === 'function') {
+      set((state) => ({ alerts: alerts(state.alerts) }));
+    } else {
+      set({ alerts });
+    }
+  },
+
+  setUnreadCount: (count) => {
+    if (typeof count === 'function') {
+      set((state) => ({ unreadCount: count(state.unreadCount) }));
+    } else {
+      set({ unreadCount: count });
+    }
+  },
 
   markAlertAsRead: (alertId) => {
     set((state) => ({

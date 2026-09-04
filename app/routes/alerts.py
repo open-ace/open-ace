@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
+from gevent.lock import RLock
 
 from app.auth.decorators import (
     _extract_session_token,
@@ -32,6 +33,9 @@ from app.modules.governance.alert_notifier import (
 logger = logging.getLogger(__name__)
 
 alerts_bp = Blueprint("alerts", __name__)
+
+# Issue #3332: Global gevent-safe lock for SSE cache operations
+_sse_cache_lock = RLock()
 
 
 @alerts_bp.before_request
@@ -127,8 +131,6 @@ def mark_alert_read(alert_id):
             return jsonify({"success": False, "error": "Failed to mark alert as read"}), 500
 
         # Issue #3332: Clean up from cache
-        from gevent.lock import RLock
-
         from app.utils.cache import get_cache
 
         cache = get_cache()
@@ -136,8 +138,7 @@ def mark_alert_read(alert_id):
 
         cached_value = cache.get(cache_key)
         if cached_value:
-            lock = RLock()
-            with lock:
+            with _sse_cache_lock:  # Use global lock
                 pushed_alert_ids = set(cached_value)
                 pushed_alert_ids.discard(alert_id)  # Remove read alert
                 cache.set(cache_key, list(pushed_alert_ids), ttl=86400)
@@ -399,7 +400,6 @@ def list_tenant_alerts():
 def alert_stream():
     """Server-Sent Events stream for real-time alerts."""
     from flask import Response
-    from gevent.lock import RLock
 
     from app.utils.cache import get_cache
 
@@ -408,7 +408,6 @@ def alert_stream():
     # Cache setup for deduplication (Issue #3332)
     cache = get_cache()
     cache_key = f"sse_pushed:{user_id}"
-    lock = RLock()  # gevent-safe reentrant lock
 
     # Read from cache (List -> Set)
     cached_value = cache.get(cache_key)
@@ -442,7 +441,7 @@ def alert_stream():
                     )
 
                     for alert in alerts:
-                        with lock:  # gevent-safe lock
+                        with _sse_cache_lock:  # Use global gevent-safe lock
                             if alert.alert_id not in pushed_alert_ids:
                                 yield f"data: {json.dumps({'type': 'alert', 'data': alert.to_dict()})}\n\n"
                                 pushed_alert_ids.add(alert.alert_id)
@@ -466,7 +465,7 @@ def alert_stream():
                     yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
             # Save state on connection close
-            with lock:
+            with _sse_cache_lock:  # Use global gevent-safe lock
                 cache.set(cache_key, list(pushed_alert_ids), ttl=86400)
 
     return Response(

@@ -95,6 +95,7 @@ export const QuotaAlerts: React.FC = () => {
   // Issue #3332: Use global alert stream store (replaces local state)
   const {
     setAlerts,
+    setUnreadCount,
     markAlertAsRead,
     markAllAsRead,
     removeAlert,
@@ -106,8 +107,8 @@ export const QuotaAlerts: React.FC = () => {
   // Get alerts from store
   const alerts = useAlertStreamStore((state) => state.alerts);
   const unreadCount = useAlertStreamStore((state) => state.unreadCount);
-  const alertsLoading = useAlertStreamStore((state) => state.isLoading);
-  const alertsError = useAlertStreamStore((state) => state.error);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
 
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
@@ -488,7 +489,7 @@ export const QuotaAlerts: React.FC = () => {
     if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' }))) return;
     try {
       await alertsApi.deleteAlert(alertId);
-      setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
+      removeAlert(alertId);
     } catch (err) {
       console.error('Failed to delete alert:', err);
     }

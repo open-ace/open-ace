@@ -2874,19 +2874,18 @@ class AlertNotifier:
             Alert object if found, None otherwise.
         """
         conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            adapt_sql("SELECT * FROM alerts WHERE alert_id = ?"),
-            (alert_id,),
-        )
-
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            return self._row_to_alert(row)
-        return None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql("SELECT * FROM alerts WHERE alert_id = ?"),
+                (alert_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_alert(row)
+            return None
+        finally:
+            conn.close()
 
     def mark_as_read(self, alert_id: str) -> bool:
         """
