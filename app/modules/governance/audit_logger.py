@@ -1094,6 +1094,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "label": "IP Resolved Mismatch",
                     "i18n_key": "actionIPResolvedMismatch",
                 },
+                {
+                    "value": "ssrf_config_reset",
+                    "label": "SSRF Config Reset",
+                    "i18n_key": "actionSSRFConfigReset",
+                },
             ],
         },
         "url_token_security": {
