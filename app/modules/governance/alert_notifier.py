@@ -2861,6 +2861,33 @@ class AlertNotifier:
 
         return bool(count > 0)
 
+    def get_alert_by_id(self, alert_id: str) -> Alert | None:
+        """
+        Get alert by ID.
+
+        Issue #3332: Needed for permission validation when marking alerts as read.
+
+        Args:
+            alert_id: Alert ID to retrieve.
+
+        Returns:
+            Alert object if found, None otherwise.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            adapt_sql("SELECT * FROM alerts WHERE alert_id = ?"),
+            (alert_id,),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return self._row_to_alert(row)
+        return None
+
     def mark_as_read(self, alert_id: str) -> bool:
         """
         Mark an alert as read.
