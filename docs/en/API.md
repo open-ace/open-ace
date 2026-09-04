@@ -464,6 +464,20 @@ Get usage trend data for charts.
 - `end` - End date (default: today)
 - `host` - Filter by host name (optional)
 
+**Response Format:**
+Returns an array of trend data points with the following fields:
+- `date` - Date string (YYYY-MM-DD format)
+- `tool` - Tool name (e.g., "claude", "qwen")
+- `tokens` - Total tokens used
+
+**Response Example:**
+```json
+[
+  {"date": "2026-08-31", "tool": "claude", "tokens": 10000},
+  {"date": "2026-08-31", "tool": "qwen", "tokens": 5000}
+]
+```
+
 ---
 
 ## Messages API (`/api`)
