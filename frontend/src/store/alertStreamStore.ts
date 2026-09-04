@@ -111,11 +111,23 @@ export const useAlertStreamStore = create<AlertStreamState>((set, get) => ({
     });
   },
 
-  setAlerts: (alerts) => {
-    if (typeof alerts === 'function') {
-      set((state) => ({ alerts: alerts(state.alerts) }));
+  setAlerts: (newAlerts) => {
+    if (typeof newAlerts === 'function') {
+      set((state) => ({ alerts: newAlerts(state.alerts) }));
     } else {
-      set({ alerts });
+      // Issue #3332: Merge with existing alerts to avoid losing SSE-pushed alerts on reconnect
+      set((state) => {
+        const alertMap = new Map<string, Alert>();
+        // Add existing alerts first
+        state.alerts.forEach((a) => alertMap.set(a.alert_id, a));
+        // Merge new alerts (will update existing ones or add new ones)
+        newAlerts.forEach((a) => alertMap.set(a.alert_id, a));
+        // Sort by created_at descending (most recent first)
+        const merged = [...alertMap.values()].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        return { alerts: merged };
+      });
     }
   },
 
