@@ -500,6 +500,7 @@ class UsageAnalytics:
     ) -> list[dict]:
         """Get daily totals for a period with optional tenant isolation.
 
+        Issue #3243: Use daily_messages for consistency with historical data API.
         Issue #3245: Added tenant_id parameter for data isolation.
 
         Args:
@@ -510,13 +511,14 @@ class UsageAnalytics:
         Returns:
             List of daily total records.
         """
+        # Query daily_messages directly for consistency with historical data API
         if tenant_id is not None:
             query = """
                 SELECT
                     date,
                     SUM(tokens_used) as tokens,
-                    SUM(request_count) as requests
-                FROM daily_usage
+                    COUNT(*) as requests
+                FROM daily_messages
                 WHERE date >= ? AND date <= ? AND tenant_id = ?
                 GROUP BY date
                 ORDER BY date
@@ -527,8 +529,8 @@ class UsageAnalytics:
                 SELECT
                     date,
                     SUM(tokens_used) as tokens,
-                    SUM(request_count) as requests
-                FROM daily_usage
+                    COUNT(*) as requests
+                FROM daily_messages
                 WHERE date >= ? AND date <= ?
                 GROUP BY date
                 ORDER BY date
