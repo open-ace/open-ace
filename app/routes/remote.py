@@ -1819,13 +1819,13 @@ def get_remote_session(session_id):
         return access_error
 
     if result:
-        # Issue #28: filter Qwen system-context entries that were historically
-        # recorded as role=user messages so they never render as user chat
-        # messages when the webui loads a restored remote session.
+        # Issue #3337: Strip Qwen system-reminder envelopes from user messages,
+        # preserving any real user text. Also filter out messages that become
+        # empty after stripping.
         # ``messages`` may hold SessionMessage objects or dicts — handle both.
         msgs = result.get("messages")
         if isinstance(msgs, list):
-            from scripts.shared.qwen_context import is_qwen_system_context
+            from scripts.shared.qwen_context import is_qwen_system_context, strip_qwen_system_envelopes
 
             def _msg_role(m):
                 return m.get("role") if isinstance(m, dict) else getattr(m, "role", "")
@@ -1833,11 +1833,32 @@ def get_remote_session(session_id):
             def _msg_content(m):
                 return m.get("content") if isinstance(m, dict) else getattr(m, "content", "")
 
-            result["messages"] = [
-                m
-                for m in msgs
-                if not (_msg_role(m) == "user" and is_qwen_system_context(_msg_content(m)))
-            ]
+            def _msg_set_content(m, content):
+                if isinstance(m, dict):
+                    m["content"] = content
+                else:
+                    m.content = content
+
+            filtered_msgs = []
+            for m in msgs:
+                if _msg_role(m) == "user":
+                    content = _msg_content(m)
+                    # First check for other system markers (Platform Tool Limits, etc.)
+                    if is_qwen_system_context(content):
+                        # Check if it's a date reminder that can be stripped
+                        stripped = strip_qwen_system_envelopes(content)
+                        if stripped:
+                            # Update content with stripped version
+                            _msg_set_content(m, stripped)
+                            filtered_msgs.append(m)
+                        # else: pure system context, skip
+                    else:
+                        # Not system context, keep as-is
+                        filtered_msgs.append(m)
+                else:
+                    # Non-user messages, keep as-is
+                    filtered_msgs.append(m)
+            result["messages"] = filtered_msgs
 
         # Issue #2531: Return explicit error for ended/paused sessions with 409 status
         status = result.get("status")
@@ -3110,14 +3131,14 @@ def agent_message():
 
                     role = normalize_message_role(role)
 
-                    # Issue #28: Qwen CLI writes its system context (Platform
-                    # Tool Limits, startup context, memory instructions) as
-                    # role=user messages; never mirror them as user chat
-                    # messages in session_messages / daily_messages.
-                    from scripts.shared.qwen_context import is_qwen_system_context
+                    # Issue #3337: Strip Qwen system-reminder envelopes from
+                    # user messages, preserving any real user text.
+                    from scripts.shared.qwen_context import strip_qwen_system_envelopes
 
-                    if role == "user" and is_qwen_system_context(content):
-                        continue
+                    if role == "user":
+                        content = strip_qwen_system_envelopes(content)
+                        if not content:
+                            continue
 
                     input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
                     output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0

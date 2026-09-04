@@ -388,14 +388,20 @@ def _record_messages(
                                 break
 
                     if user_content:
-                        stored = sm.append_transcript_message(
-                            session_id=session_id,
-                            role="user",
-                            content=user_content[:10000],  # Truncate to prevent overflow
-                            source="llm_proxy",
-                        )
-                        if getattr(stored, "_was_inserted", False):
-                            message_delta += 1
+                        # Issue #3337: Strip Qwen system-reminder envelopes,
+                        # preserving any real user text that follows.
+                        from scripts.shared.qwen_context import strip_qwen_system_envelopes
+
+                        user_content = strip_qwen_system_envelopes(user_content)
+                        if user_content:
+                            stored = sm.append_transcript_message(
+                                session_id=session_id,
+                                role="user",
+                                content=user_content[:10000],  # Truncate to prevent overflow
+                                source="llm_proxy",
+                            )
+                            if getattr(stored, "_was_inserted", False):
+                                message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 pass
 

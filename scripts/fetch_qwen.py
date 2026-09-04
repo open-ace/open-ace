@@ -621,12 +621,14 @@ def process_jsonl_file(
                             # Get content
                             content = extract_content_from_entry(entry)
 
-                            # Issue #28: Qwen CLI stores its system context
-                            # (Platform Tool Limits, startup context, memory
-                            # instructions) as type=user entries; skip them so
-                            # they never surface as user chat messages.
-                            if role == "user" and is_qwen_system_context(content):
-                                continue
+                            # Issue #3337: Strip Qwen system-reminder envelopes
+                            # from user messages, preserving any real user text.
+                            if role == "user":
+                                from scripts.shared.qwen_context import strip_qwen_system_envelopes
+
+                                content = strip_qwen_system_envelopes(content)
+                                if not content:
+                                    continue
 
                             # Keep ``input_tokens`` as non-cached input while
                             # ``tokens_used`` tracks the provider total (which
