@@ -17,7 +17,14 @@ class MockSessionManager:
         self.messages = []
 
     def append_transcript_message(
-        self, session_id, role, content, source, tokens_used=None, model=None
+        self,
+        session_id,
+        role,
+        content,
+        source,
+        tokens_used=None,
+        model=None,
+        external_message_id=None,
     ):
         class StoredMessage:
             _was_inserted = True
