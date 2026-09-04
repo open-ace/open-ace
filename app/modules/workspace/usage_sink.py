@@ -387,11 +387,22 @@ def _record_messages_internal(
                         from scripts.shared.qwen_context import is_qwen_system_context
 
                         if not is_qwen_system_context(user_content):
+                            # Issue #3336: Provide stable identity for dedup.
+                            # Prefer message id from the request; fallback to content hash.
+                            import hashlib
+
+                            msg_id = msg.get("id") or msg.get("message_id")
+                            if not msg_id:
+                                content_hash = hashlib.sha256(
+                                    user_content.encode("utf-8")
+                                ).hexdigest()[:16]
+                                msg_id = f"llm_proxy:{content_hash}"
                             stored = sm.append_transcript_message(
                                 session_id=session_id,
                                 role="user",
                                 content=user_content[:10000],
                                 source="llm_proxy",
+                                external_message_id=msg_id,
                             )
                             if getattr(stored, "_was_inserted", False):
                                 message_delta += 1
