@@ -361,51 +361,56 @@ def _record_messages_internal(
                 req_data = json.loads(request_body)
                 messages = req_data.get("messages", [])
                 if isinstance(messages, list) and messages:
-                    # Record the last user message
+                    # Issue #3335: Find the last REAL user message, skipping Qwen
+                    # system context. Filter inside the loop so we continue searching
+                    # if the selected message is a system context.
+                    from scripts.shared.qwen_context import is_qwen_system_context
+
                     user_content = None
                     for msg in reversed(messages):
                         if not isinstance(msg, dict):
                             continue
-                        if msg.get("role") == "user":
-                            content = msg.get("content", "")
-                            if isinstance(content, list):
-                                text_parts = []
-                                for part in content:
-                                    if isinstance(part, dict) and part.get("type") == "text":
-                                        text_parts.append(part.get("text", ""))
-                                user_content = " ".join(text_parts)
-                            elif isinstance(content, str):
-                                user_content = content
-                            if user_content:
-                                break
+                        if msg.get("role") != "user":
+                            continue
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                            candidate = " ".join(text_parts)
+                        elif isinstance(content, str):
+                            candidate = content
+                        else:
+                            continue
+                        if not candidate:
+                            continue
+                        # Issue #28: Skip Qwen system context and continue searching
+                        if is_qwen_system_context(candidate):
+                            continue
+                        user_content = candidate
+                        break
 
                     if user_content:
-                        # Issue #28: Qwen CLI sends its system context (Platform
-                        # Tool Limits, startup context, memory instructions) as
-                        # the last role=user message in LLM requests; never
-                        # mirror it as a user chat message.
-                        from scripts.shared.qwen_context import is_qwen_system_context
+                        # Issue #3336: Provide stable identity for dedup.
+                        # Prefer message id from the request; fallback to content hash.
+                        import hashlib
 
-                        if not is_qwen_system_context(user_content):
-                            # Issue #3336: Provide stable identity for dedup.
-                            # Prefer message id from the request; fallback to content hash.
-                            import hashlib
-
-                            msg_id = msg.get("id") or msg.get("message_id")
-                            if not msg_id:
-                                content_hash = hashlib.sha256(
-                                    user_content.encode("utf-8")
-                                ).hexdigest()[:16]
-                                msg_id = f"llm_proxy:{content_hash}"
-                            stored = sm.append_transcript_message(
-                                session_id=session_id,
-                                role="user",
-                                content=user_content[:10000],
-                                source="llm_proxy",
-                                external_message_id=msg_id,
-                            )
-                            if getattr(stored, "_was_inserted", False):
-                                message_delta += 1
+                        msg_id = msg.get("id") or msg.get("message_id")
+                        if not msg_id:
+                            content_hash = hashlib.sha256(
+                                user_content.encode("utf-8")
+                            ).hexdigest()[:16]
+                            msg_id = f"llm_proxy:{content_hash}"
+                        stored = sm.append_transcript_message(
+                            session_id=session_id,
+                            role="user",
+                            content=user_content[:10000],
+                            source="llm_proxy",
+                            external_message_id=msg_id,
+                        )
+                        if getattr(stored, "_was_inserted", False):
+                            message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -805,49 +810,49 @@ def _parse_messages_for_daily_messages(
             req_data = json.loads(request_body)
             req_messages = req_data.get("messages", [])
             if isinstance(req_messages, list) and req_messages:
-                # Get the last user message
+                # Issue #3335: Find the last REAL user message, skipping Qwen
+                # system context. Filter inside the loop so we continue searching
+                # if the selected message is a system context.
+                try:
+                    from scripts.shared.qwen_context import is_qwen_system_context
+                except ImportError:
+                    is_qwen_system_context = None  # type: ignore
+
                 user_content = None
                 for msg in reversed(req_messages):
                     if not isinstance(msg, dict):
                         continue
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            # Handle multi-part content
-                            text_parts = []
-                            for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    text_parts.append(part.get("text", ""))
-                            user_content = " ".join(text_parts)
-                        elif isinstance(content, str):
-                            user_content = content
-                        if user_content:
-                            break
+                    if msg.get("role") != "user":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Handle multi-part content
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                        candidate = " ".join(text_parts)
+                    elif isinstance(content, str):
+                        candidate = content
+                    else:
+                        continue
+                    if not candidate:
+                        continue
+                    # Skip Qwen system context and continue searching
+                    if is_qwen_system_context and is_qwen_system_context(candidate):
+                        continue
+                    user_content = candidate
+                    break
 
                 if user_content:
-                    # Filter Qwen system context
-                    try:
-                        from scripts.shared.qwen_context import is_qwen_system_context
-
-                        if not is_qwen_system_context(user_content):
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": user_content[:10000],
-                                    "input_tokens": 0,
-                                    "output_tokens": 0,
-                                }
-                            )
-                    except ImportError:
-                        # If qwen_context not available, include the message
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": user_content[:10000],
-                                "input_tokens": 0,
-                                "output_tokens": 0,
-                            }
-                        )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": user_content[:10000],
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                        }
+                    )
         except (json.JSONDecodeError, ValueError):
             pass
 
