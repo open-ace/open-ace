@@ -26,6 +26,9 @@ import {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useSsrfStatus,
+  useResetSsrfConfig,
+  useUser,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -197,6 +200,20 @@ export const SecurityCenter: React.FC = () => {
 
   // --- Sensitive Keywords State (Issue #3059) ---
   const { effectiveTenantId } = useAdminTenant();
+
+  // --- SSRF Status State (Issue #3328) ---
+  const {
+    data: ssrfStatus,
+    isLoading: ssrfStatusLoading,
+    isError: ssrfStatusError,
+    error: ssrfStatusErrorMsg,
+    refetch: refetchSsrfStatus,
+  } = useSsrfStatus();
+  const resetSsrfConfig = useResetSsrfConfig();
+
+  // Get current user to check if platform admin
+  const user = useUser();
+  const isPlatformAdmin = user?.role === 'platform_admin';
 
   // TODO: Add filter controls in future iteration
   const [keywordFilters] = useState<SensitiveKeywordsFilters>({
@@ -739,6 +756,9 @@ export const SecurityCenter: React.FC = () => {
 
     return (
       <>
+        {/* SSRF Protection Status (Issue #3328) */}
+        {renderSsrfStatusCard()}
+
         {/* Session Settings */}
         <Card title={t('sessionSettings', language)} className="mb-4">
           <div className="row g-3">
@@ -1323,6 +1343,245 @@ export const SecurityCenter: React.FC = () => {
             </div>
           </form>
         </Modal>
+      </>
+    );
+  };
+
+  // --- Render SSRF Status (Issue #3328) ---
+  const handleResetSsrfConfig = async () => {
+    if (!ssrfStatus) return;
+
+    const itemsToReset: string[] = [];
+    if (ssrfStatus.port_whitelist.is_customized) itemsToReset.push('port_whitelist');
+    if (ssrfStatus.global_allowlist.is_customized) itemsToReset.push('global_allowlist');
+
+    if (itemsToReset.length === 0) {
+      toast.info(t('ssrfNoCustomConfig', language));
+      return;
+    }
+
+    const confirmed = await confirm({
+      message: t('ssrfResetConfigConfirm', language),
+      variant: 'warning',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await resetSsrfConfig.mutateAsync({
+        reset_ports: ssrfStatus.port_whitelist.is_customized,
+        reset_global_allowlist: ssrfStatus.global_allowlist.is_customized,
+        expected_version: ssrfStatus.config_version,
+      });
+      toast.success(t('ssrfResetConfigSuccess', language));
+      refetchSsrfStatus();
+    } catch (err: any) {
+      if (err?.response?.data?.error === 'CONFIG_VERSION_CONFLICT') {
+        toast.error(t('ssrfConfigVersionConflict', language));
+        refetchSsrfStatus();
+      } else {
+        console.error('Failed to reset SSRF config:', err);
+        toast.error(t('error', language));
+      }
+    }
+  };
+
+  const renderSsrfStatusCard = () => {
+    if (ssrfStatusLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (ssrfStatusError) {
+      return (
+        <Error
+          message={ssrfStatusErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchSsrfStatus()}
+        />
+      );
+    }
+
+    if (!ssrfStatus) {
+      return <EmptyState icon="bi-shield-check" title={t('noData', language)} />;
+    }
+
+    return (
+      <>
+        {/* Emergency Mode Warning */}
+        {ssrfStatus.emergency_mode && (
+          <div className="alert alert-danger mb-4" role="alert">
+            <i className="bi bi-exclamation-triangle me-2" />
+            {t('ssrfEmergencyModeWarning', language)}
+          </div>
+        )}
+
+        {/* SSRF Protection Status Card */}
+        <Card title={t('ssrfProtectionTitle', language)} className="mb-4">
+          <div className="row g-4">
+            {/* Protection Status */}
+            <div className="col-12">
+              <div className="d-flex align-items-center gap-3">
+                <span className="fw-semibold">{t('ssrfProtectionStatus', language)}:</span>
+                <Badge variant={ssrfStatus.ssrf_protection_enabled ? 'success' : 'danger'}>
+                  {ssrfStatus.emergency_mode
+                    ? t('ssrfEmergencyMode', language)
+                    : ssrfStatus.ssrf_protection_enabled
+                      ? t('ssrfProtectionEnabled', language)
+                      : t('ssrfProtectionDisabled', language)}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Default Policy */}
+            <div className="col-md-6">
+              <h6 className="text-muted mb-3">{t('ssrfDefaultPolicy', language)}</h6>
+              <div className="mb-3">
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedPrivateNetworks', language)}
+                </small>
+                <div className="d-flex flex-wrap gap-1">
+                  {ssrfStatus.default_policy.blocked_private_networks.map((network) => (
+                    <Badge key={network} variant="secondary">
+                      {network}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedHostnames', language)}
+                </small>
+                <div
+                  className="d-flex flex-wrap gap-1"
+                  style={{ maxHeight: '100px', overflowY: 'auto' }}
+                >
+                  {ssrfStatus.default_policy.blocked_hostnames.slice(0, 10).map((hostname) => (
+                    <Badge key={hostname} variant="secondary">
+                      {hostname}
+                    </Badge>
+                  ))}
+                  {ssrfStatus.default_policy.blocked_hostnames.length > 10 && (
+                    <Badge variant="secondary">
+                      +{ssrfStatus.default_policy.blocked_hostnames.length - 10} more
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Current Configuration */}
+            <div className="col-md-6">
+              <h6 className="text-muted mb-3">{t('ssrfCurrentConfig', language)}</h6>
+              <div className="mb-3">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span className="fw-medium">{t('ssrfPortWhitelist', language)}:</span>
+                  <Badge variant={ssrfStatus.port_whitelist.is_customized ? 'info' : 'secondary'}>
+                    {ssrfStatus.port_whitelist.is_customized
+                      ? t('ssrfIsCustomized', language)
+                      : t('ssrfIsDefault', language)}
+                  </Badge>
+                </div>
+                <div className="d-flex flex-wrap gap-1">
+                  {ssrfStatus.port_whitelist.value.map((port) => (
+                    <Badge key={port} variant="secondary">
+                      {port}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-3">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span className="fw-medium">{t('ssrfGlobalAllowlist', language)}:</span>
+                  <Badge variant={ssrfStatus.global_allowlist.is_customized ? 'info' : 'secondary'}>
+                    {ssrfStatus.global_allowlist.is_customized
+                      ? t('ssrfIsCustomized', language)
+                      : t('ssrfIsDefault', language)}
+                  </Badge>
+                </div>
+                <span>
+                  {ssrfStatus.global_allowlist.count} {t('ssrfDomains', language)}
+                </span>
+              </div>
+              <div>
+                <div className="d-flex align-items-center gap-2">
+                  <span className="fw-medium">{t('ssrfTenantAllowlist', language)}:</span>
+                  <Badge variant={ssrfStatus.tenant_allowlist.enabled ? 'success' : 'secondary'}>
+                    {ssrfStatus.tenant_allowlist.enabled
+                      ? t('ssrfTenantAllowlistCount', language, {
+                          count: ssrfStatus.tenant_allowlist.tenant_count,
+                        })
+                      : t('disabled', language)}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Interception Stats */}
+          <hr />
+          <div className="row g-3">
+            <div className="col-12">
+              <h6 className="text-muted mb-3">{t('ssrfInterceptionStats', language)}</h6>
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast24h', language)}
+                value={ssrfStatus.interception_stats.last_24h}
+                variant="info"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast7d', language)}
+                value={ssrfStatus.interception_stats.last_7d}
+                variant="info"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast30d', language)}
+                value={ssrfStatus.interception_stats.last_30d}
+                variant="info"
+              />
+            </div>
+          </div>
+
+          {/* Actions */}
+          <hr />
+          <div className="d-flex justify-content-between align-items-center">
+            <div className="text-muted small">
+              {t('ssrfConfigVersion', language)}: v{ssrfStatus.config_version} |
+              {t('ssrfConfigSource', language)}:{' '}
+              {t(
+                `ssrfConfigSource${ssrfStatus.config_source.charAt(0).toUpperCase()}${ssrfStatus.config_source.slice(1)}`,
+                language
+              )}
+            </div>
+            <div className="d-flex gap-2">
+              <Button variant="outline-secondary" size="sm" onClick={() => refetchSsrfStatus()}>
+                <i className="bi bi-arrow-clockwise me-1" />
+                {t('refresh', language)}
+              </Button>
+              {ssrfStatus.can_reset && isPlatformAdmin && (
+                <Button
+                  variant="outline-warning"
+                  size="sm"
+                  onClick={handleResetSsrfConfig}
+                  loading={resetSsrfConfig.isPending}
+                >
+                  <i className="bi bi-arrow-counterclockwise me-1" />
+                  {t('ssrfResetConfig', language)}
+                </Button>
+              )}
+              <a
+                href="/manage/audit?action=LLM_PROXY_URL_BLOCKED"
+                className="btn btn-outline-primary btn-sm"
+              >
+                <i className="bi bi-journal-text me-1" />
+                {t('ssrfViewAuditLogs', language)}
+              </a>
+            </div>
+          </div>
+        </Card>
       </>
     );
   };

@@ -129,6 +129,7 @@ class AuditAction(Enum):
     LLM_PROXY_URL_BLOCKED = "llm_proxy_url_blocked"
     ALLOWLIST_ENTRY_INVALID = "allowlist_entry_invalid"
     IP_RESOLVED_MISMATCH = "ip_resolved_mismatch"
+    SSRF_CONFIG_RESET = "ssrf_config_reset"  # Issue #3328: Reset SSRF config to default
 
     # Usage report actions (Issue #1891)
     USAGE_REPORT_ACCEPTED = "usage_report_accepted"
@@ -1092,6 +1093,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "ip_resolved_mismatch",
                     "label": "IP Resolved Mismatch",
                     "i18n_key": "actionIPResolvedMismatch",
+                },
+                {
+                    "value": "ssrf_config_reset",
+                    "label": "SSRF Config Reset",
+                    "i18n_key": "actionSSRFConfigReset",
                 },
             ],
         },

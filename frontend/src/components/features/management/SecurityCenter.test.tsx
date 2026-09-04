@@ -305,6 +305,59 @@ vi.mock('@/hooks', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   })),
+  // SSRF Protection Status hooks (Issue #3328)
+  useSsrfStatus: vi.fn(() => ({
+    data: {
+      ssrf_protection_enabled: true,
+      emergency_mode: false,
+      config_source: 'environment',
+      config_version: 1,
+      port_whitelist: {
+        value: [80, 443, 8080],
+        is_customized: false,
+        default_value: [80, 443, 8080],
+      },
+      global_allowlist: {
+        count: 0,
+        entries: [],
+        is_customized: false,
+      },
+      tenant_allowlist: {
+        enabled: false,
+        tenant_count: 0,
+      },
+      default_policy: {
+        blocked_private_networks: [
+          '10.0.0.0/8',
+          '172.16.0.0/12',
+          '192.168.0.0/16',
+          '127.0.0.0/8',
+          '169.254.0.0/16',
+        ],
+        blocked_hostnames: ['localhost', 'metadata.google.internal'],
+        default_port_whitelist: [80, 443, 8080],
+      },
+      interception_stats: {
+        last_24h: 0,
+        last_7d: 0,
+        last_30d: 0,
+      },
+      can_reset: true,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useResetSsrfConfig: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
+  useUser: vi.fn(() => ({
+    id: 1,
+    username: 'testuser',
+    role: 'platform_admin',
+  })),
 }));
 
 const mockConfirm = vi.fn().mockResolvedValue(true);
