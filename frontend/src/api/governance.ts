@@ -144,6 +144,18 @@ export interface ResetSsrfConfigResponse {
   message: string;
 }
 
+// Upload Authentication Status Types (Issue #3327)
+export interface UploadAuthStatus {
+  upload_auth_enabled: boolean;
+  key_length: number | null;
+  config_source: 'environment_variable';
+  security_mode: 'production' | 'pilot' | 'development' | 'unknown';
+  is_valid: boolean;
+  validation_error?: string;
+  fix_suggestion?: string;
+  checked_at: string;
+}
+
 export interface FilterStats {
   enabled: boolean;
   redact_pii: boolean;
@@ -267,6 +279,11 @@ export const governanceApi = {
 
   async resetSsrfConfig(data: ResetSsrfConfigRequest): Promise<ResetSsrfConfigResponse> {
     return apiClient.post<ResetSsrfConfigResponse>('/api/security-settings/ssrf/reset', data);
+  },
+
+  // Upload Authentication Status (Issue #3327)
+  async getUploadAuthStatus(): Promise<UploadAuthStatus> {
+    return apiClient.get<UploadAuthStatus>('/api/security-settings/upload-auth-status');
   },
 
   // Sensitive Keywords (Issue #3059)

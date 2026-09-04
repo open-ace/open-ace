@@ -911,3 +911,116 @@ class TestTenantSensitiveKeywords:
         self.db.execute.side_effect = Exception("DB error")
         result = self.repo.increment_tenant_keywords_version(tenant_id=1)
         assert result is False
+
+
+class TestUploadAuthStatus:
+    """Tests for upload authentication status (Issue #3327)."""
+
+    def setup_method(self):
+        self.db = MagicMock()
+        self.db.is_postgresql = False
+        self.repo = GovernanceRepository(db=self.db)
+
+    # -------------------------------------------------------------------------
+    # get_upload_auth_status
+    # -------------------------------------------------------------------------
+
+    def test_get_upload_auth_status_not_configured(self):
+        """Should return disabled status when key not set."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("app.utils.security_env.get_upload_auth_key", return_value=None):
+                with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                    mock_mode.return_value = MagicMock(value="development")
+                    with patch("app.utils.security_mode.is_weak_secret_value", return_value=False):
+                        result = self.repo.get_upload_auth_status()
+
+        assert result["upload_auth_enabled"] is False
+        assert result["key_length"] is None
+        assert result["is_valid"] is True
+        assert result["validation_error"] is None
+        assert "fix_suggestion" in result
+        assert "checked_at" in result
+
+    def test_get_upload_auth_status_enabled(self):
+        """Should return enabled status when valid key is set."""
+        test_key = "a" * 64  # 64 character key
+
+        with patch("app.utils.security_env.get_upload_auth_key", return_value=test_key):
+            with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                mock_mode.return_value = MagicMock(value="production")
+                result = self.repo.get_upload_auth_status()
+
+        assert result["upload_auth_enabled"] is True
+        assert result["key_length"] == 64
+        assert result["is_valid"] is True
+        assert result["validation_error"] is None
+        assert result["fix_suggestion"] is None
+        assert result["security_mode"] == "production"
+
+    def test_get_upload_auth_status_weak_key_development(self):
+        """Should return invalid status for weak key in development mode."""
+        with patch.dict(os.environ, {"UPLOAD_AUTH_KEY": "placeholder"}):
+            with patch("app.utils.security_env.get_upload_auth_key", return_value=None):
+                with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                    mock_mode.return_value = MagicMock(value="development")
+                    with patch("app.utils.security_mode.is_weak_secret_value", return_value=True):
+                        result = self.repo.get_upload_auth_status()
+
+        assert result["upload_auth_enabled"] is False
+        assert result["is_valid"] is False
+        assert "占位符" in result["validation_error"]
+        assert result["fix_suggestion"] is not None
+
+    def test_get_upload_auth_status_production_weak_key_runtime_error(self):
+        """Should raise RuntimeError for weak key in production mode."""
+        with patch("app.utils.security_env.get_upload_auth_key") as mock_get_key:
+            mock_get_key.side_effect = RuntimeError("UPLOAD_AUTH_KEY uses an insecure placeholder value")
+            with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                mock_mode.return_value = MagicMock(value="production")
+
+                with pytest.raises(RuntimeError) as exc_info:
+                    self.repo.get_upload_auth_status()
+
+                assert "insecure placeholder" in str(exc_info.value)
+
+    def test_get_upload_auth_status_fix_suggestion_not_configured(self):
+        """Should provide fix suggestion when key not configured."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("app.utils.security_env.get_upload_auth_key", return_value=None):
+                with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                    mock_mode.return_value = MagicMock(value="development")
+                    with patch("app.utils.security_mode.is_weak_secret_value", return_value=False):
+                        result = self.repo.get_upload_auth_status()
+
+        assert "部署文档" in result["fix_suggestion"]
+
+    def test_get_upload_auth_status_fix_suggestion_weak_key(self):
+        """Should provide fix suggestion with generation command for weak key."""
+        with patch.dict(os.environ, {"UPLOAD_AUTH_KEY": "dev-secret-key"}):
+            with patch("app.utils.security_env.get_upload_auth_key", return_value=None):
+                with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                    mock_mode.return_value = MagicMock(value="development")
+                    with patch("app.utils.security_mode.is_weak_secret_value", return_value=True):
+                        result = self.repo.get_upload_auth_status()
+
+        assert "secrets.token_hex" in result["fix_suggestion"]
+
+    def test_get_upload_auth_status_checked_at_timestamp(self):
+        """Should include checked_at timestamp in ISO format."""
+        with patch("app.utils.security_env.get_upload_auth_key", return_value="a" * 64):
+            with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                mock_mode.return_value = MagicMock(value="development")
+                result = self.repo.get_upload_auth_status()
+
+        assert "checked_at" in result
+        # Should be ISO format with Z suffix
+        assert result["checked_at"].endswith("Z")
+
+    def test_get_upload_auth_status_config_source(self):
+        """Should always return environment_variable as config_source."""
+        with patch("app.utils.security_env.get_upload_auth_key", return_value="a" * 64):
+            with patch("app.utils.security_mode.get_security_mode") as mock_mode:
+                mock_mode.return_value = MagicMock(value="production")
+                result = self.repo.get_upload_auth_status()
+
+        assert result["config_source"] == "environment_variable"

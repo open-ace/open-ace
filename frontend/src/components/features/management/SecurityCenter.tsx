@@ -28,6 +28,7 @@ import {
   useDeleteSensitiveKeyword,
   useSsrfStatus,
   useResetSsrfConfig,
+  useUploadAuthStatus,
   useUser,
 } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -210,6 +211,15 @@ export const SecurityCenter: React.FC = () => {
     refetch: refetchSsrfStatus,
   } = useSsrfStatus();
   const resetSsrfConfig = useResetSsrfConfig();
+
+  // --- Upload Auth Status State (Issue #3327) ---
+  const {
+    data: uploadAuthStatus,
+    isLoading: uploadAuthStatusLoading,
+    isError: uploadAuthStatusError,
+    error: uploadAuthStatusErrorMsg,
+    refetch: refetchUploadAuthStatus,
+  } = useUploadAuthStatus();
 
   // Get current user to check if platform admin
   const user = useUser();
@@ -756,6 +766,9 @@ export const SecurityCenter: React.FC = () => {
 
     return (
       <>
+        {/* Upload Auth Status (Issue #3327) */}
+        {renderUploadAuthStatusCard()}
+
         {/* SSRF Protection Status (Issue #3328) */}
         {renderSsrfStatusCard()}
 
@@ -1384,6 +1397,139 @@ export const SecurityCenter: React.FC = () => {
         toast.error(t('error', language));
       }
     }
+  };
+
+  // --- Render Upload Auth Status (Issue #3327) ---
+  const renderUploadAuthStatusCard = () => {
+    if (uploadAuthStatusLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (uploadAuthStatusError) {
+      return (
+        <Error
+          message={uploadAuthStatusErrorMsg?.message ?? t('error', language)}
+          onRetry={() => refetchUploadAuthStatus()}
+        />
+      );
+    }
+
+    if (!uploadAuthStatus) {
+      return <EmptyState icon="bi-shield-check" title={t('noData', language)} />;
+    }
+
+    // Determine status badge
+    const statusVariant = uploadAuthStatus.upload_auth_enabled
+      ? uploadAuthStatus.is_valid
+        ? 'success'
+        : 'warning'
+      : 'secondary';
+
+    const statusLabel = uploadAuthStatus.upload_auth_enabled
+      ? uploadAuthStatus.is_valid
+        ? t('uploadAuthEnabled', language)
+        : t('uploadAuthInvalid', language)
+      : t('uploadAuthDisabled', language);
+
+    // Determine document URL based on language
+    const docUrl = language === 'zh' ? '/docs/cn/DEPLOYMENT.md' : '/docs/en/DEPLOYMENT.md';
+
+    return (
+      <Card title={t('uploadAuthStatus', language)} className="mb-4">
+        <div className="row g-4">
+          {/* Status */}
+          <div className="col-12">
+            <div className="d-flex align-items-center gap-3">
+              <span className="fw-semibold">{t('uploadAuthStatus', language)}:</span>
+              <Badge variant={statusVariant}>{statusLabel}</Badge>
+            </div>
+          </div>
+
+          {/* Key Length */}
+          {uploadAuthStatus.key_length !== null && (
+            <div className="col-md-6">
+              <div className="text-muted">{t('uploadAuthKeyLength', language)}</div>
+              <div className="fs-5">
+                {uploadAuthStatus.key_length} {language === 'zh' ? '字符' : 'characters'}
+              </div>
+            </div>
+          )}
+
+          {/* Security Mode */}
+          <div className="col-md-6">
+            <div className="text-muted">{t('securityMode', language)}</div>
+            <div className="fs-5">{uploadAuthStatus.security_mode}</div>
+          </div>
+
+          {/* Checked At */}
+          <div className="col-12">
+            <small className="text-muted">
+              {t('uploadAuthCheckedAt', language)}:{' '}
+              {new Date(uploadAuthStatus.checked_at).toLocaleString(
+                language === 'zh' ? 'zh-CN' : 'en-US'
+              )}
+            </small>
+          </div>
+
+          {/* Error Message */}
+          {!uploadAuthStatus.is_valid && uploadAuthStatus.validation_error && (
+            <div className="col-12">
+              <div className="alert alert-warning mb-0">
+                <i className="bi bi-exclamation-triangle me-2" />
+                <strong>{language === 'zh' ? '配置错误：' : 'Configuration error: '}</strong>
+                {uploadAuthStatus.validation_error}
+                {uploadAuthStatus.fix_suggestion && (
+                  <>
+                    <br />
+                    <strong>{language === 'zh' ? '修复建议：' : 'Fix suggestion: '}</strong>
+                    {uploadAuthStatus.fix_suggestion}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Info for disabled state */}
+          {!uploadAuthStatus.upload_auth_enabled && uploadAuthStatus.is_valid && (
+            <div className="col-12">
+              <div className="alert alert-info mb-0">
+                <i className="bi bi-info-circle me-2" />
+                {uploadAuthStatus.fix_suggestion ?? t('uploadAuthConfigHint', language)}
+                <br />
+                <a href={docUrl} target="_blank" rel="noopener noreferrer">
+                  {t('uploadAuthViewDocs', language)}
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <hr />
+          <div className="d-flex justify-content-between align-items-center">
+            <div className="text-muted small">{t('uploadAuthConfigHint', language)}</div>
+            <div className="d-flex gap-2">
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={() => refetchUploadAuthStatus()}
+              >
+                <i className="bi bi-arrow-clockwise me-1" />
+                {t('refresh', language)}
+              </Button>
+              <a
+                href={docUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-outline-primary btn-sm"
+              >
+                <i className="bi bi-book me-1" />
+                {t('uploadAuthViewDocs', language)}
+              </a>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
   };
 
   const renderSsrfStatusCard = () => {
