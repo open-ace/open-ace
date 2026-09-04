@@ -8,11 +8,7 @@ import { create } from 'zustand';
 import type { Alert } from '@/api';
 
 export type ConnectionStatus =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error';
+  'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 interface AlertStreamState {
   // Connection state
@@ -141,9 +137,7 @@ export const useAlertStreamStore = create<AlertStreamState>((set, get) => ({
 
   markAlertAsRead: (alertId) => {
     set((state) => ({
-      alerts: state.alerts.map((a) =>
-        a.alert_id === alertId ? { ...a, read: true } : a
-      ),
+      alerts: state.alerts.map((a) => (a.alert_id === alertId ? { ...a, read: true } : a)),
       unreadCount: Math.max(0, state.unreadCount - 1),
     }));
   },
@@ -197,14 +191,10 @@ if (typeof window !== 'undefined') {
 }
 
 // Selectors for stable references
-export const useConnectionStatus = () =>
-  useAlertStreamStore((state) => state.connectionStatus);
+export const useConnectionStatus = () => useAlertStreamStore((state) => state.connectionStatus);
 
-export const useAlerts = () =>
-  useAlertStreamStore((state) => state.alerts);
+export const useAlerts = () => useAlertStreamStore((state) => state.alerts);
 
-export const useUnreadCount = () =>
-  useAlertStreamStore((state) => state.unreadCount);
+export const useUnreadCount = () => useAlertStreamStore((state) => state.unreadCount);
 
-export const useProcessedAlertIds = () =>
-  useAlertStreamStore((state) => state.processedAlertIds);
+export const useProcessedAlertIds = () => useAlertStreamStore((state) => state.processedAlertIds);

@@ -38,25 +38,11 @@ interface UseAlertStreamReturn {
 let globalEventSource: EventSource | null = null;
 let connectionCount = 0;
 
-export const useAlertStream = (
-  options: UseAlertStreamOptions = {}
-): UseAlertStreamReturn => {
-  const {
-    url = '/api/alerts/stream',
-    enabled = true,
-    onAlert,
-    onError,
-  } = options;
+export const useAlertStream = (options: UseAlertStreamOptions = {}): UseAlertStreamReturn => {
+  const { url = '/api/alerts/stream', enabled = true, onAlert, onError } = options;
 
   const queryClient = useQueryClient();
-  const {
-    setConnectionStatus,
-    addAlert,
-    setAlerts,
-    markAlertAsRead,
-    incrementUnreadCount,
-    decrementUnreadCount,
-  } = useAlertStreamStore();
+  const { setConnectionStatus, addAlert, setAlerts, markAlertAsRead } = useAlertStreamStore();
 
   const connectionStatus = useAlertStreamStore((state) => state.connectionStatus);
   const unreadCount = useAlertStreamStore((state) => state.unreadCount);
@@ -118,22 +104,14 @@ export const useAlertStream = (
 
           case 'error':
             console.error('SSE error:', message.message);
-            onError?.(message.message || 'Unknown error');
+            onError?.(message.message ?? 'Unknown error');
             break;
         }
       } catch (error) {
         console.error('Failed to parse SSE message:', error);
       }
     },
-    [
-      addAlert,
-      fetchAlerts,
-      markAlertAsRead,
-      onError,
-      onAlert,
-      queryClient,
-      setConnectionStatus,
-    ]
+    [addAlert, fetchAlerts, markAlertAsRead, onError, onAlert, queryClient, setConnectionStatus]
   );
 
   // Connect to SSE endpoint
@@ -163,7 +141,7 @@ export const useAlertStream = (
 
       globalEventSource.onmessage = handleMessage;
 
-      globalEventSource.onerror = (e) => {
+      globalEventSource.onerror = () => {
         if (globalEventSource?.readyState === EventSource.CLOSED) {
           // Native reconnection failed, try manual reconnect
           console.log('EventSource closed, attempting manual reconnect');
@@ -249,6 +227,7 @@ export const useAlertStream = (
         }
       };
     }
+    return undefined;
   }, [fallbackToPolling, enabled, fetchAlerts]);
 
   return {

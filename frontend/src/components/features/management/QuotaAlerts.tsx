@@ -10,7 +10,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useQuotaUsage, useQuotaStats, useUpdateQuota, usePageRefresh, useAlertStream } from '@/hooks';
+import {
+  useQuotaUsage,
+  useQuotaStats,
+  useUpdateQuota,
+  usePageRefresh,
+  useAlertStream,
+} from '@/hooks';
 import { useLanguage, useUser } from '@/store';
 import { useAlertStreamStore } from '@/store/alertStreamStore';
 import { isAdmin } from '@/utils/permissions';
@@ -39,7 +45,7 @@ import {
   formatQuotaForDisplay,
   getAvailableQuotaHint,
 } from '@/utils/quotaFormatter';
-import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
+import { alertsApi, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
 const getTypeOptions = (language: Language) => [
@@ -93,13 +99,7 @@ export const QuotaAlerts: React.FC = () => {
   });
 
   // Issue #3332: Use global alert stream store (replaces local state)
-  const {
-    setAlerts,
-    setUnreadCount,
-    markAlertAsRead,
-    markAllAsRead,
-    removeAlert,
-  } = useAlertStreamStore();
+  const { setAlerts, setUnreadCount, removeAlert } = useAlertStreamStore();
 
   // SSE connection (managed globally by the store)
   useAlertStream();
@@ -119,7 +119,6 @@ export const QuotaAlerts: React.FC = () => {
     daily_request_quota?: string;
     monthly_request_quota?: string;
   }>({});
-
 
   const [typeFilter, setTypeFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
