@@ -286,9 +286,7 @@ def test_dingtalk_build_username_falls_back_to_uuid(monkeypatch, sqlite_db):
     slug = "carol"
     # Seed tenant so FK constraint (users.tenant_id -> tenants.id) is satisfied.
     with sqlite_db.connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (8, 't8', 't8')"
-        )
+        conn.execute("INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (8, 't8', 't8')")
         conn.commit()
     # Exhaust the bounded candidates: slug, slug_1, slug_2 (range(1, 3) -> 1,2).
     for i in range(3):
@@ -314,9 +312,7 @@ def test_feishu_build_username_falls_back_to_uuid(monkeypatch, sqlite_db):
     slug = "dave"
     # Seed tenant so FK constraint (users.tenant_id -> tenants.id) is satisfied.
     with sqlite_db.connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (7, 't7', 't7')"
-        )
+        conn.execute("INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (7, 't7', 't7')")
         conn.commit()
     for i in range(3):
         name = slug if i == 0 else f"{slug}_{i}"
