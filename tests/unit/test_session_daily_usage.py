@@ -51,8 +51,8 @@ def sqlite_db(tmp_path):
             requests INTEGER DEFAULT 0 NOT NULL,
             input_tokens INTEGER DEFAULT 0 NOT NULL,
             output_tokens INTEGER DEFAULT 0 NOT NULL,
-            cache_read_tokens INTEGER DEFAULT 0 NOT NULL,
-            cache_write_tokens INTEGER DEFAULT 0 NOT NULL,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_write_tokens INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
             CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date)
