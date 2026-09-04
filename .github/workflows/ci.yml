@@ -353,11 +353,11 @@ jobs:
   false-positive-scan:
     # #3186 Phase A: the test-code false-positive scanner as a real, gated
     # lane. Selected for every non-docs change (ci.py select_pr_suites); the
-    # known-debt ledger (ci/false-positive-ledger.json) records today's 77
-    # findings by precise identity, so new or substituted debt is red while
-    # fixes only shrink the ledger (--prune-ledger, removal-only). Deliberately
-    # NOT advisory, no continue-on-error, no skip label: the result must be
-    # able to block merges via PR Gate.
+    # known-debt ledger (ci/false-positive-ledger.json) is at ZERO debt since
+    # #3186 Phase B completed (77 findings fully paid down), so ANY finding
+    # is new debt and reds the gate; re-enrolling paid-down debt fails the
+    # unit-lane total pin. Deliberately NOT advisory, no continue-on-error,
+    # no skip label: the result must be able to block merges via PR Gate.
     name: False-positive scan
     needs: changes
     if: needs.changes.outputs.false_positive_scan == 'true'
