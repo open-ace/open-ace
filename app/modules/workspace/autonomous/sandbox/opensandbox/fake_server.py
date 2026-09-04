@@ -208,11 +208,20 @@ class FakeOpenSandboxApi:
         self._require_execd(sandbox_id)
         self.uploaded.setdefault(sandbox_id, {})[path] = data
 
-    def download_file(self, sandbox_id: str, path: str) -> bytes:
+    def download_file(self, sandbox_id: str, path: str, *, max_bytes: int = 0) -> bytes:
         self._require_execd(sandbox_id)
         stored = self.uploaded.get(sandbox_id, {})
         if path not in stored:
             raise OpenSandboxApiError(f"no such file {path}", status_code=404, code="NOT_FOUND")
+        # The real client refuses an oversized body rather than returning it, so
+        # a caller passing max_bytes must see the same shape here — otherwise the
+        # cap would look enforced in tests and not be, in production.
+        if 0 < max_bytes < len(stored[path]):
+            raise OpenSandboxApiError(
+                f"{path} is {len(stored[path])} bytes, over the {max_bytes} limit",
+                status_code=0,
+                code="FILE_TOO_LARGE",
+            )
         return stored[path]
 
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:

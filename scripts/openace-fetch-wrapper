@@ -8,7 +8,8 @@
 # 1. 参数精确匹配白名单（使用参数分离验证）
 # 2. 工具名称白名单校验（支持 fetch_* 下划线格式）
 # 3. 符号链接攻击防护（多层解析、循环检测、路径白名单）
-# 4. 审计日志记录（用户名脱敏）
+# 4. 审计日志记录（caller 恒脱敏；details 中单层 home 段脱敏——
+#    非加密保护，低熵用户名可字典逆推哈希，见 _username_hash 注释）
 # 5. 降权机制（root 读取，openace 写入）
 # 6. 路径规范化防遍历攻击（使用 readlink -f）
 # 7. 参数重复检测和参数值边界校验
@@ -21,6 +22,8 @@
 #
 # Issue #2543: 本地工作区会话数据采集权限修复
 # Issue #3249: 参数校验下划线修复和安全加固
+# Issue #3317: 关闭 `--` 参数分离旁路（post-`--` 曾绕过全部校验进入
+#              审计日志与 fetch 脚本 argv）
 
 set -euo pipefail
 
@@ -69,29 +72,80 @@ declare -A TOOL_TO_DIR=(
 # 辅助函数
 # ============================================================================
 
-# 记录审计日志
+# 记录审计日志（#3292：caller 恒脱敏；details 过 sanitize_details，
+# 对白名单校验过的单层 home 形状保证脱敏——边界见该函数注释）
 log_audit() {
     local action="$1"
     local details="$2"
     local timestamp
     timestamp=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
-    local caller="${SUDO_USER:-$USER}"
+    local caller
+    caller=$(sanitize_username "${SUDO_USER:-${USER:-unknown}}")
 
     # 确保日志目录存在
     mkdir -p "$(dirname "$AUDIT_LOG")" 2>/dev/null || true
 
     # 写入审计日志
-    echo "${timestamp} | caller=${caller} | action=${action} | ${details}" >> "$AUDIT_LOG" 2>/dev/null || true
+    echo "${timestamp} | caller=${caller} | action=${action} | $(sanitize_details "$details")" >> "$AUDIT_LOG" 2>/dev/null || true
 }
 
-# 脱敏用户名（只显示首字母）
+# 用户名短哈希（sha256 前 8 位 hex）
+# 用途是关联而非加密：同一用户跨日志条目可关联，但用户名低熵、
+# 截断哈希可被字典逆推，不提供机密性保证。
+_username_hash() {
+    local name="$1"
+    local out=""
+    # 条件位置的命令替换失败不触发 errexit；sha256sum 缺失（如 macOS）回退 shasum
+    if out=$(printf '%s' "$name" | sha256sum 2>/dev/null); then
+        :
+    elif out=$(printf '%s' "$name" | shasum -a 256 2>/dev/null); then
+        :
+    else
+        out=""
+    fi
+    # 输出形如 "<64位hex>  -"，取前 8 位；工具缺失/输出异常时退化为 unknown
+    local hex="${out:0:8}"
+    if [[ ! "$hex" =~ ^[0-9a-f]{8}$ ]]; then
+        echo "unknown"
+    else
+        echo "$hex"
+    fi
+}
+
+# 脱敏用户名：首字母 + *** + 截断哈希（如 alice -> a***-<hash8>）
+# 单字符名不保留首字母（泄首字母即泄全名），只留 *** + 哈希。
 sanitize_username() {
     local username="$1"
     if [ ${#username} -le 1 ]; then
-        echo "***"
+        echo "***-$(_username_hash "$username")"
     else
-        echo "${username:0:1}***"
+        echo "${username:0:1}***-$(_username_hash "$username")"
     fi
+}
+
+# details 内 home 路径用户名段脱敏（#3292）
+# 将 /home/<name>/ 与 /Users/<name>/ 中的用户名段替换为 sanitize_username
+# 结果。终止性：脱敏产物含 '*'，不满足 [a-zA-Z0-9_-]+ 段匹配，不会再
+# 次命中；对已脱敏输入幂等。
+# 覆盖边界（如实声明）：参数白名单（validate_config_path 等）只放行单层
+# home 形状，本函数对这类形状保证脱敏。`--` 参数分离旁路已被 #3317 关闭
+# （validate_args 不再接受 `--`，一切参数经 case 白名单校验后方可进入
+# details）；对不匹配 ^/home|/Users/<name>/ 形状的用户名（无尾斜杠、含
+# 非法字符、嵌套段）本函数不保证脱敏。
+sanitize_details() {
+    local details="$1"
+    local re='(/(home|Users)/)([a-zA-Z0-9_-]+)/'
+    # 防御性上限：校验过的参数面（单个 --config、拒绝重复）远小于 20 段
+    local guard=0
+    while [[ "$details" =~ $re && $guard -lt 20 ]]; do
+        local prefix="${BASH_REMATCH[1]}"
+        local name="${BASH_REMATCH[3]}"
+        local seg="${prefix}${name}/"
+        local rep="${prefix}$(sanitize_username "$name")/"
+        details="${details//$seg/$rep}"
+        guard=$((guard + 1))
+    done
+    printf '%s' "$details"
 }
 
 # 验证工具名称是否在白名单内
@@ -440,10 +494,11 @@ validate_args() {
                 # 标志参数，无值
                 shift
                 ;;
-            --)
-                # 参数分隔符，停止解析
-                break
-                ;;
+            # Issue #3317: no `--)` separator case. It let everything after
+            # it skip validation into the audit log and the fetch script's
+            # argv; nothing legitimately needs it (fixed-grammar internal
+            # RPC; validate_arg_value already rejects '-'-leading values),
+            # so `--` falls through to the unknown-argument rejection.
             *)
                 echo "ERROR: Unknown argument: $1" >&2
                 return 1

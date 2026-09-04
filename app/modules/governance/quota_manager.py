@@ -514,8 +514,34 @@ class QuotaManager:
         return {"tokens": 0, "requests": 0}
 
     def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
-        """Get total usage in a date range. Tries user_daily_stats first, falls back to raw queries."""
-        # Fast path: use pre-aggregated user_daily_stats
+        """Get total usage in a date range.
+
+        Issue #3307: Now prioritizes session_daily_usage (per-day incremental
+        records) over user_daily_stats and agent_sessions.created_at fallback.
+        This ensures quota enforcement matches the accurate daily attribution.
+        """
+        # Priority 1: session_daily_usage — per-day incremental records
+        # This is the most accurate source for daily usage attribution.
+        try:
+            result = self.db.fetch_one(
+                """
+                SELECT
+                    COALESCE(SUM(tokens), 0) as tokens,
+                    COALESCE(SUM(requests), 0) as requests
+                FROM session_daily_usage
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                """,
+                (user_id, start_date, end_date),
+            )
+            if result and (int(result["tokens"]) > 0 or int(result["requests"]) > 0):
+                return {
+                    "tokens": int(result["tokens"]),
+                    "requests": int(result["requests"]),
+                }
+        except Exception:
+            pass  # Table may not exist yet, continue to fallback
+
+        # Priority 2: user_daily_stats — pre-aggregated stats
         try:
             stats = self._get_usage_from_daily_stats(user_id, start_date, end_date)
             if stats["tokens"] > 0 or stats["requests"] > 0:
@@ -523,13 +549,8 @@ class QuotaManager:
         except Exception:
             pass  # Fall through to legacy query
 
-        # Legacy path: agent_sessions (all workspace types) + daily_messages
-        # (unbound rows only). Counts all session-backed spend — including
-        # local autonomous sessions (workspace_type='local'), which the proxy
-        # never sees because local agents connect to the model API directly.
-        # daily_messages then adds only messages NOT tied to a session
-        # (agent_session_id IS NULL), so the two legs don't double-count.
-        # Uses session_messages subquery for requests (same as aggregator) for consistency.
+        # Priority 3: Legacy path - agent_sessions + daily_messages
+        # Known issue #3307: agent_sessions.created_at attribution is incorrect.
         session_result = self.db.fetch_one(
             adapt_sql("""
             SELECT

@@ -156,3 +156,6 @@ export {
 
 // Admin tenant selection hook (Issue #2841)
 export { useAdminTenant } from './useAdminTenant';
+
+// Alert stream hook (Issue #3332)
+export { useAlertStream } from './useAlertStream';

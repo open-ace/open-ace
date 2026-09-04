@@ -100,6 +100,9 @@ def _extract_closure(tmp_path: Path) -> Path:
         "is_allowed_path",
         "safe_resolve_symlink",
         "log_audit",
+        "sanitize_username",
+        "sanitize_details",
+        "_username_hash",
         "validate_file",
     ]
     text = WRAPPER.read_text(encoding="utf-8")
@@ -138,7 +141,8 @@ def _run_closure(
     import os as _os
 
     preflight = (
-        "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit validate_file; "
+        "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit "
+        "sanitize_username sanitize_details _username_hash validate_file; "
         'do declare -F $f >/dev/null || { echo "PREFLIGHT-MISSING: $f" >&2; exit 99; }; done; '
         "for v in MAX_FILE_SIZE MAX_SYMLINK_DEPTH AUDIT_LOG TOOL_TO_DIR; "
         'do declare -p $v >/dev/null || { echo "PREFLIGHT-MISSING: $v" >&2; exit 99; }; done'
@@ -806,6 +810,55 @@ class TestParameterValidation:
         assert result.returncode != 0
         assert "Unknown argument" in result.stderr or "ERROR" in result.stderr
 
+    def test_dashdash_separator_bypass_rejected(self, wrapper_path, tmp_path, monkeypatch):
+        """`--` no longer stops validation (#3317).
+
+        The separator case let everything after it skip the whitelist
+        verbatim into the audit log (forging `| caller=... | action=...`
+        fields) and the fetch script's argv. It must now fall into the
+        unknown-argument rejection, and the rejection must happen BEFORE
+        the first log_audit call — the forged fields reach no output and
+        no audit line is written at all.
+        """
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        audit_log = tmp_path / "audit.log"
+        monkeypatch.setenv("AUDIT_LOG", str(audit_log))
+        result = subprocess.run(
+            [
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--days",
+                "1",
+                "--",
+                "| caller=root | action=forged | injected=yes",
+                "dir=/home/alice",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Unknown argument: --" in result.stderr
+        assert "caller=root" not in result.stderr
+        # Rejection precedes fetch_start: no audit line may exist, or the
+        # forged pipe-fields would be back in a consumer-parsed log.
+        assert not audit_log.exists()
+
+    def test_bare_dashdash_rejected(self, wrapper_path):
+        """A bare `--` is rejected like any other unknown argument (#3317)."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Unknown argument: --" in result.stderr
+
     def test_reject_extra_args(self, wrapper_path):
         """Test that extra arguments are rejected."""
         if not os.path.exists(wrapper_path):
@@ -1145,9 +1198,11 @@ class TestAuditLogging:
     def test_audit_log_created(self, tmp_path):
         """log_audit writes the documented line format to AUDIT_LOG.
 
-        The line is "<timestamp> | caller=<user> | action=<action> | <details>"
-        (fragments asserted separately — they are ` | `-separated). The
-        end-to-end fetch_start/fetch_end path is covered by
+        The line is "<timestamp> | caller=<pseudonymized> | action=<action> |
+        <details>" (fragments asserted separately — they are ` | `-separated).
+        #3292: the caller is pseudonymized (first letter + *** + 8-hex
+        truncation of sha256), never the raw username. The end-to-end
+        fetch_start/fetch_end path is covered by
         TestParameterValidation.test_exact_match_valid_params (real wrapper).
         """
         harness = _extract_closure(tmp_path)
@@ -1160,15 +1215,121 @@ class TestAuditLogging:
         assert rc.returncode == 0, rc.stderr
         assert rc.stdout.strip().endswith("0")
         line = audit.read_text().strip()
-        assert " | caller=auditprobe | " in line
+        caller = re.search(r" \| caller=([^|]*) \| ", line)
+        assert caller, f"no caller field in {line!r}"
+        # Shape only — never hardcode hash values (they are deterministic
+        # but platform-tool-dependent in derivation, sha256sum vs shasum).
+        assert re.fullmatch(r"a\*\*\*-[0-9a-f]{8}", caller.group(1)), line
+        assert "auditprobe" not in line
         assert " | action=fetch_start | " in line
         assert line.endswith("tool=fetch_qwen")
 
-    # test_username_sanitized was deleted (#3186 batch 3): sanitize_username is
-    # defined-but-never-called in the wrapper and log_audit writes the raw
-    # caller/user — the sanitization requirement was never implemented. The
-    # implement-or-remove decision is tracked in #3292 (the wrapper header's
-    # "脱敏" claim is currently false).
+    @requires_bash4
+    def test_caller_pseudonymized_under_sudo(self, tmp_path):
+        """SUDO_USER drives the caller field, pseudonymized (#3292).
+
+        Drives the real log_audit with SUDO_USER=alice: the audit line must
+        carry the a***-<hash8> pseudonym and must not contain the raw
+        username anywhere.
+        """
+        harness = _extract_closure(tmp_path)
+        audit = tmp_path / "audit.log"
+        rc = _run_closure(
+            harness,
+            'log_audit "fetch_start" "tool=fetch_qwen"; echo $?',
+            env={"AUDIT_LOG": str(audit), "SUDO_USER": "alice", "USER": "root"},
+        )
+        assert rc.returncode == 0, rc.stderr
+        line = audit.read_text().strip()
+        assert re.search(r" \| caller=a\*\*\*-[0-9a-f]{8} \| ", line), line
+        assert "alice" not in line
+
+    @requires_bash4
+    def test_hash_deterministic_for_correlation(self, tmp_path):
+        """Same user -> same hash suffix; different user -> different (#3292).
+
+        The truncation hash exists so operators can correlate audit entries
+        belonging to one user without learning the username.
+        """
+        harness = _extract_closure(tmp_path)
+        rc = _run_closure(
+            harness,
+            'echo "$(sanitize_username carol) $(sanitize_username carol) '
+            '$(sanitize_username dave)"',
+        )
+        assert rc.returncode == 0, rc.stderr
+        carol_a, carol_b, dave = rc.stdout.strip().split()
+        assert carol_a == carol_b, "same user must map to the same pseudonym"
+        assert carol_a != dave, "different users must not collide"
+        assert re.fullmatch(r"c\*\*\*-[0-9a-f]{8}", carol_a)
+        assert re.fullmatch(r"d\*\*\*-[0-9a-f]{8}", dave)
+
+    @requires_bash4
+    def test_home_path_segment_sanitized_in_details(self, tmp_path):
+        """Usernames inside --config home paths are sanitized too (#3292).
+
+        Only pseudonymizing caller= would leak the username right back via
+        args=--config /home/<user>/... — the details pass must rewrite the
+        home-directory segment.
+        """
+        harness = _extract_closure(tmp_path)
+        audit = tmp_path / "audit.log"
+        rc = _run_closure(
+            harness,
+            'log_audit "fetch_start" '
+            '"tool=fetch_qwen args=--config /home/alice/.open-ace/config.json"; echo $?',
+            env={"AUDIT_LOG": str(audit), "USER": "root"},
+        )
+        assert rc.returncode == 0, rc.stderr
+        line = audit.read_text().strip()
+        assert "/home/alice/" not in line
+        assert re.search(r"/home/a\*\*\*-[0-9a-f]{8}/\.open-ace/config\.json", line), line
+
+    @requires_bash4
+    def test_users_path_segment_sanitized_in_details(self, tmp_path):
+        """macOS-shaped /Users/<name>/ segments are sanitized as well (#3292).
+
+        Only reachable through the closure harness (the wrapper's config
+        allowlist rejects /Users paths), but sanitize_details covers both
+        home shapes.
+        """
+        harness = _extract_closure(tmp_path)
+        rc = _run_closure(
+            harness,
+            'echo "$(sanitize_details "file=/Users/bob/.qwen/sessions.json")"',
+        )
+        assert rc.returncode == 0, rc.stderr
+        out = rc.stdout.strip()
+        assert "/Users/bob/" not in out
+        assert re.search(r"/Users/b\*\*\*-[0-9a-f]{8}/\.qwen/sessions\.json", out), out
+
+    @requires_bash4
+    def test_single_char_username_hides_first_letter(self, tmp_path):
+        """A 1-char username keeps no first letter — it IS the name (#3292).
+
+        Uses the g-free details string tool=fetch_claude so the absence
+        assertion cannot trip over the literal 'g' in "args".
+        """
+        harness = _extract_closure(tmp_path)
+        audit = tmp_path / "audit.log"
+        rc = _run_closure(
+            harness,
+            'log_audit "fetch_start" "tool=fetch_claude"; echo $?',
+            env={"AUDIT_LOG": str(audit), "USER": "g"},
+        )
+        assert rc.returncode == 0, rc.stderr
+        line = audit.read_text().strip()
+        assert re.search(r" \| caller=\*\*\*-[0-9a-f]{8} \| ", line), line
+        # 'g' is outside the hex alphabet, so its absence is unambiguous.
+        assert "g" not in line
+
+    # #3292 implemented the sanitization the header always claimed: caller
+    # and home-path username segments are pseudonymized (first letter +
+    # *** + sha256[:8]; 1-char names drop the letter). The #3186 batch-3
+    # deletion note for the unit placeholder test_username_sanitized lived
+    # here; the tests above are its real replacement (the integration-side
+    # canary test_usernames_sanitized_in_log still exists by design — see
+    # its docstring).
 
 
 # ============================================================================

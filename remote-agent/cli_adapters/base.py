@@ -160,7 +160,18 @@ class BaseCLIAdapter(abc.ABC):
         return False
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: str | None = None
+        self,
+        prompt: str,
+        project_path: str,
+        model: str | None = None,
+        resume: bool = False,
+        resume_session_id: str = "",
     ) -> list[str]:
-        """Build args for a single-shot prompt execution (used when stdin is not supported)."""
+        """Build args for a single-shot prompt execution (used when stdin is not supported).
+
+        ``resume`` / ``resume_session_id`` let a tool continue a prior session
+        (#3321). Adapters that cannot resume non-interactively ignore them; the
+        parameters live on the base signature so ``_run_single_shot`` can pass
+        them uniformly without a per-tool ``TypeError``.
+        """
         return [self.get_executable_name(), prompt]

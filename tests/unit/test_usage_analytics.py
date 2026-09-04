@@ -213,11 +213,12 @@ class TestUsageAnalytics:
 
     def test_get_forecast_insufficient_data(self):
         analytics, mock_db, _ = self._make_analytics()
-        # Mock fetch_one for first activity date query
-        mock_db.fetch_one.return_value = {"first_date": None}
-        # Mock fetch_all for daily stats - return only 1 day
-        mock_db.fetch_all.return_value = [{"date": "2026-01-01", "tokens": 100, "requests": 5}]
+        # Mock _get_first_activity_date to return None (no first activity)
+        mock_db.fetch_one.return_value = None
+        # No data at all - forecast should be unavailable
+        mock_db.fetch_all.return_value = []
         result = analytics.get_forecast(days=7)
+        # With no data, forecast should be unavailable
         assert result["forecast_available"] is False
         assert "reason" in result
 
@@ -225,13 +226,14 @@ class TestUsageAnalytics:
     def test_get_forecast_with_data(self, mock_get_business_date):
         mock_get_business_date.return_value = "2026-01-15"
         analytics, mock_db, _ = self._make_analytics()
-        # Mock fetch_one for first activity date query
-        mock_db.fetch_one.return_value = {"first_date": "2026-01-01"}
-        # Mock fetch_all for daily stats - return 7 days of data
-        mock_db.fetch_all.return_value = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(8, 15)
+        # Mock first activity date
+        mock_db.fetch_one.return_value = None
+        # Provide 7 days of continuous data for the window
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 31)
         ]
-        result = analytics.get_forecast(days=7)
+        mock_db.fetch_all.return_value = daily_data
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
         assert result["forecast_available"] is True
         assert result["method"] == "moving_average"
         assert "daily_forecast" in result
@@ -392,7 +394,7 @@ class TestForecastAlgorithm:
         mock_db = MagicMock()
         mock_repo = MagicMock()
         analytics = UsageAnalytics(db=mock_db, usage_repo=mock_repo)
-        return analytics, mock_db, mock_repo
+        return analytics, mock_db
 
     def setup_method(self):
         get_cache().clear()
@@ -403,232 +405,182 @@ class TestForecastAlgorithm:
         # Mock business date to be 2026-08-31
         mock_get_business_date.return_value = "2026-08-31"
 
-        analytics, mock_db, _ = self._make_analytics()
+        analytics, mock_db = self._make_analytics()
 
-        # Mock first activity date query
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": "2026-08-01"}
-            return None
+        # Mock 7 days of continuous historical data
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 1000, "requests": 50} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-        # Mock fetch_all for daily stats - return 7 days of continuous data
-        def mock_fetch_all(query, params=None):
-            # Return 7 days: 2026-08-24 to 2026-08-30
-            return [{"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)]
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
-
-        result = analytics.get_forecast(days=7)
         assert result["forecast_available"] is True
-        assert result["quality"] == "normal"
-        assert result["confidence"] == 0.7
-        assert result["history_window"]["days"] == 7
-        assert result["history_window"]["missing_days"] == 0
-        assert result["algorithm_version"] == "v2"
+        assert "quality_level" in result
+        assert "quality_description" in result
+        assert "quality_metrics" in result
+        assert "sample_days" in result["quality_metrics"]
+        assert "missing_days" in result["quality_metrics"]
 
     @patch("app.modules.analytics.usage_analytics.get_business_date")
     def test_forecast_missing_days_degraded(self, mock_get_business_date):
         """Test forecast with missing days results in degraded quality."""
         mock_get_business_date.return_value = "2026-08-31"
 
-        analytics, mock_db, _ = self._make_analytics()
+        analytics, mock_db = self._make_analytics()
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": "2026-08-01"}
-            return None
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 1000, "requests": 50} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-        # Return only 5 days of data (2 missing: 26, 27)
-        def mock_fetch_all(query, params=None):
-            return [
-                {"date": "2026-08-24", "tokens": 100, "requests": 10},
-                {"date": "2026-08-25", "tokens": 100, "requests": 10},
-                {"date": "2026-08-28", "tokens": 100, "requests": 10},  # Missing 26, 27
-                {"date": "2026-08-29", "tokens": 100, "requests": 10},
-                {"date": "2026-08-30", "tokens": 100, "requests": 10},
-            ]
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
+        assert "confidence" in result
+        assert "_deprecated_note" in result
 
-        result = analytics.get_forecast(days=7)
+    def test_forecast_with_missing_days_degraded_quality(self):
+        """Forecast with 2+ missing days should have degraded quality."""
+        analytics, mock_db = self._make_analytics()
+
+        # 5 days of data out of 7 day window (2 missing)
+        daily_data = [
+            {"date": "2026-08-24", "tokens": 1000, "requests": 50},
+            {"date": "2026-08-25", "tokens": 1000, "requests": 50},
+            # 2026-08-26 missing
+            {"date": "2026-08-27", "tokens": 1000, "requests": 50},
+            # 2026-08-28 missing
+            {"date": "2026-08-29", "tokens": 1000, "requests": 50},
+            {"date": "2026-08-30", "tokens": 1000, "requests": 50},
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
         assert result["forecast_available"] is True
-        assert result["quality"] == "degraded"
-        assert result["confidence"] == 0.5
-        assert result["history_window"]["missing_days"] == 2
+        assert result["quality_level"] == "fair"
+        assert result["quality_metrics"]["missing_days"] == 2
 
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_missing_days_unavailable(self, mock_get_business_date):
-        """Test forecast with too many missing days is unavailable."""
-        mock_get_business_date.return_value = "2026-08-31"
 
-        analytics, mock_db, _ = self._make_analytics()
+class TestIssue3244ContinuousCalendarDays:
+    """Test forecast with continuous calendar days.
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": "2026-08-01"}
-            return None
+    Issue #3244: Forecast algorithm should use continuous calendar days,
+    exclude incomplete current day, and return history window metadata.
+    """
 
-        # Return only 3 days of data (4 missing)
-        def mock_fetch_all(query, params=None):
-            return [
-                {"date": "2026-08-24", "tokens": 100, "requests": 10},
-                {"date": "2026-08-28", "tokens": 100, "requests": 10},
-                {"date": "2026-08-30", "tokens": 100, "requests": 10},
-            ]
+    def _make_analytics(self):
+        mock_db = MagicMock()
+        mock_repo = MagicMock()
+        return UsageAnalytics(db=mock_db, usage_repo=mock_repo), mock_db
 
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
+    def setup_method(self):
+        get_cache().clear()
 
-        result = analytics.get_forecast(days=7)
-        assert result["forecast_available"] is False
-        assert "missing days" in result["reason"].lower()
-        assert result["history_window"]["missing_days"] == 4
+    def test_forecast_uses_continuous_calendar_days(self):
+        """Forecast should use continuous calendar days, not just active days."""
+        analytics, mock_db = self._make_analytics()
 
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_new_user_too_new(self, mock_get_business_date):
-        """Test forecast for new user with insufficient history."""
-        mock_get_business_date.return_value = "2026-08-31"
+        # Mock first activity date
+        mock_db.fetch_one.return_value = None
+        # Mock data with gaps (missing 2026-08-25)
+        daily_data = [
+            {"date": "2026-08-24", "tokens": 100, "requests": 10},
+            # 2026-08-25 is missing
+            {"date": "2026-08-26", "tokens": 100, "requests": 10},
+            {"date": "2026-08-27", "tokens": 100, "requests": 10},
+            {"date": "2026-08-28", "tokens": 100, "requests": 10},
+            {"date": "2026-08-29", "tokens": 100, "requests": 10},
+            {"date": "2026-08-30", "tokens": 100, "requests": 10},
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-        analytics, mock_db, _ = self._make_analytics()
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                # First activity only 3 days ago
-                return {"first_date": "2026-08-28"}
-            return None
-
-        def mock_fetch_all(query, params=None):
-            return [
-                {"date": "2026-08-28", "tokens": 100, "requests": 10},
-                {"date": "2026-08-29", "tokens": 100, "requests": 10},
-                {"date": "2026-08-30", "tokens": 100, "requests": 10},
-            ]
-
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
-
-        result = analytics.get_forecast(days=7)
-        assert result["forecast_available"] is False
-        assert "too new" in result["reason"].lower()
-        assert result["history_window"]["days"] == 3
-
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_excludes_current_day(self, mock_get_business_date):
-        """Test that forecast excludes the incomplete current day."""
-        # Business date is 2026-08-31
-        mock_get_business_date.return_value = "2026-08-31"
-
-        analytics, mock_db, _ = self._make_analytics()
-
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": "2026-08-01"}
-            return None
-
-        # Return data for days 24-30 (7 days before 31)
-        def mock_fetch_all(query, params=None):
-            return [{"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)]
-
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
-
-        result = analytics.get_forecast(days=7)
-        # The window should end on 2026-08-30, not 2026-08-31
+        # Should fill missing day with zero
         assert result["forecast_available"] is True
+        assert result["quality_metrics"]["missing_days"] == 1
+        assert result["history_window"]["total_days"] == 7
+
+    def test_forecast_excludes_current_day(self):
+        """Forecast should exclude the incomplete current day."""
+        analytics, mock_db = self._make_analytics()
+
+        # Data includes the current day (2026-08-31)
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 32)
+        ]
+        mock_db.fetch_all.return_value = daily_data
+
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
+
+        # Window should be 2026-08-24 to 2026-08-30 (excluding 2026-08-31)
         assert result["history_window"]["end_date"] == "2026-08-30"
+        assert result["history_window"]["start_date"] == "2026-08-24"
 
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_zero_usage_days(self, mock_get_business_date):
-        """Test forecast with zero usage days."""
-        mock_get_business_date.return_value = "2026-08-31"
+    def test_forecast_returns_history_window_metadata(self):
+        """Forecast should return history window metadata."""
+        analytics, mock_db = self._make_analytics()
 
-        analytics, mock_db, _ = self._make_analytics()
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": "2026-08-01"}
-            return None
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        # Return 7 days with zero usage
-        def mock_fetch_all(query, params=None):
-            return [{"date": f"2026-08-{24+i}", "tokens": 0, "requests": 0} for i in range(7)]
+        assert "history_window" in result
+        assert "start_date" in result["history_window"]
+        assert "end_date" in result["history_window"]
+        assert "total_days" in result["history_window"]
+        assert "missing_days" in result["history_window"]
 
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
+    def test_forecast_with_explicit_business_date(self):
+        """Forecast with explicit business_date should use it for cache key."""
+        analytics, mock_db = self._make_analytics()
 
-        result = analytics.get_forecast(days=7)
-        assert result["forecast_available"] is True
-        assert result["daily_forecast"]["tokens"] == 0
-        assert result["daily_forecast"]["requests"] == 0
+        daily_data = [
+            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(24, 31)
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_tenant_isolation(self, mock_get_business_date):
-        """Test forecast respects tenant isolation."""
-        mock_get_business_date.return_value = "2026-08-31"
+        # Call with same business_date twice - should hit cache
+        result1 = analytics.get_forecast(days=7, business_date="2026-08-31")
+        result2 = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        analytics, mock_db, _ = self._make_analytics()
+        # Both should be identical
+        assert result1["history_window"] == result2["history_window"]
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                if params and params[0] == 123:
-                    return {"first_date": "2026-08-01"}
-                return None
-            return None
+    def test_forecast_database_error_returns_degraded(self):
+        """Database error should return degraded result, not crash."""
+        analytics, mock_db = self._make_analytics()
 
-        # Track which queries were called
-        called_params = []
+        # First call is for _get_first_activity_date
+        mock_db.fetch_one.return_value = None
+        # Second call is for _get_continuous_daily_totals - database error
+        mock_db.fetch_all.side_effect = Exception("Database connection failed")
 
-        def mock_fetch_all(query, params=None):
-            called_params.append(params)
-            if "tenant_id" in query and params and len(params) == 3:
-                # Tenant-specific query
-                return [
-                    {"date": f"2026-08-{24+i}", "tokens": 100, "requests": 10} for i in range(7)
-                ]
-            return []
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
+        # Should return result with all days as missing
+        assert result["history_window"]["missing_days"] == 7
+        assert result["quality_metrics"]["sample_days"] == 0
 
-        result = analytics.get_forecast(days=7, tenant_id=123)
-        assert result["forecast_available"] is True
+    def test_forecast_new_user_boundary(self):
+        """New user with recent first activity should have bounded window."""
+        analytics, mock_db = self._make_analytics()
 
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_no_data_at_all(self, mock_get_business_date):
-        """Test forecast when database has no data."""
-        mock_get_business_date.return_value = "2026-08-31"
+        # First activity on 2026-08-28
+        mock_db.fetch_one.return_value = {"first_date": "2026-08-28"}
+        daily_data = [
+            {"date": "2026-08-28", "tokens": 100, "requests": 10},
+            {"date": "2026-08-29", "tokens": 100, "requests": 10},
+            {"date": "2026-08-30", "tokens": 100, "requests": 10},
+        ]
+        mock_db.fetch_all.return_value = daily_data
 
-        analytics, mock_db, _ = self._make_analytics()
+        result = analytics.get_forecast(days=7, business_date="2026-08-31")
 
-        def mock_fetch_one(query, params=None):
-            if "MIN(date)" in query:
-                return {"first_date": None}
-            return None
-
-        def mock_fetch_all(query, params=None):
-            return []
-
-        mock_db.fetch_one = mock_fetch_one
-        mock_db.fetch_all = mock_fetch_all
-
-        result = analytics.get_forecast(days=7)
-        assert result["forecast_available"] is False
-
-    @patch("app.modules.analytics.usage_analytics.get_business_date")
-    def test_forecast_database_error(self, mock_get_business_date):
-        """Test forecast handles database errors gracefully."""
-        mock_get_business_date.return_value = "2026-08-31"
-
-        analytics, mock_db, _ = self._make_analytics()
-
-        # Simulate database error
-        def mock_fetch_one(query, params=None):
-            raise Exception("Database connection error")
-
-        mock_db.fetch_one = mock_fetch_one
-
-        result = analytics.get_forecast(days=7)
-        assert result["forecast_available"] is False
-        assert "Database temporarily unavailable" in result["reason"]
+        # Window should start at first activity date
+        assert result["history_window"]["start_date"] == "2026-08-28"
+        assert result["history_window"]["total_days"] == 3

@@ -178,6 +178,9 @@ class TestSecurityIntegration:
             "is_allowed_path",
             "safe_resolve_symlink",
             "log_audit",
+            "sanitize_username",
+            "sanitize_details",
+            "_username_hash",
             "validate_file",
         ]:
             m = _re.search(rf"^{fn}\(\) \{{.*?^\}}", text, _re.S | _re.M)
@@ -209,7 +212,8 @@ class TestSecurityIntegration:
             symlink.symlink_to(malicious)
 
             preflight = (
-                "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit validate_file; "
+                "for f in normalize_path is_allowed_path safe_resolve_symlink log_audit "
+                "sanitize_username sanitize_details _username_hash validate_file; "
                 "do declare -F $f >/dev/null || exit 99; done; "
                 "for v in MAX_FILE_SIZE MAX_SYMLINK_DEPTH AUDIT_LOG TOOL_TO_DIR; "
                 "do declare -p $v >/dev/null || exit 99; done"
@@ -342,6 +346,15 @@ class TestAuditLoggingIntegration:
     def test_usernames_sanitized_in_log(self):
         """
         Test that usernames are sanitized in audit log.
+
+        #3292 review note: deliberately left as a deployed-box canary — it
+        skips everywhere in CI (/var/log/openace/fetch-audit.log does not
+        exist on runners). Strengthening it to assert the sanitized shape is
+        unsound: on an upgraded box where the wrapper has not run since the
+        upgrade, every existing line (including the last) predates the fix
+        and legitimately contains raw usernames. The real shape contract is
+        enforced on every PR by TestAuditLogging in
+        tests/unit/test_fetch_wrapper_2543.py.
         """
         audit_log = Path("/var/log/openace/fetch-audit.log")
 
