@@ -12,7 +12,6 @@ WebSocket endpoint for real-time alerts.
 
 import json
 import logging
-from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
 from gevent.lock import RLock
@@ -122,7 +121,9 @@ def mark_alert_read(alert_id):
             return jsonify({"success": False, "error": "Alert not found"}), 404
 
         if alert.user_id != user_id:
-            logger.warning(f"User {user_id} attempted to mark alert {alert_id} owned by {alert.user_id}")
+            logger.warning(
+                f"User {user_id} attempted to mark alert {alert_id} owned by {alert.user_id}"
+            )
             return jsonify({"success": False, "error": "Permission denied"}), 403
 
         success = notifier.mark_as_read(alert_id)
