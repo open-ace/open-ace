@@ -27,7 +27,7 @@ def upgrade() -> None:
             CREATE TABLE IF NOT EXISTS session_daily_usage (
                 id SERIAL PRIMARY KEY,
                 session_id TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
+                user_id INTEGER,
                 tenant_id INTEGER,
                 date TEXT NOT NULL,
 
@@ -67,7 +67,7 @@ def upgrade() -> None:
             CREATE TABLE IF NOT EXISTS session_daily_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
+                user_id INTEGER,
                 tenant_id INTEGER,
                 date TEXT NOT NULL,
 
