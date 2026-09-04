@@ -353,6 +353,11 @@ vi.mock('@/hooks', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   })),
+  useUser: vi.fn(() => ({
+    id: 1,
+    username: 'testuser',
+    role: 'platform_admin',
+  })),
 }));
 
 const mockConfirm = vi.fn().mockResolvedValue(true);
