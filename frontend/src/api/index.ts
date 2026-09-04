@@ -52,6 +52,10 @@ export type {
   SensitiveKeywordsResponse,
   CreateSensitiveKeywordRequest,
   SensitiveKeywordsFilters,
+  // SSRF Protection Status Types (Issue #3328)
+  SsrfStatus,
+  ResetSsrfConfigRequest,
+  ResetSsrfConfigResponse,
 } from './governance';
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';

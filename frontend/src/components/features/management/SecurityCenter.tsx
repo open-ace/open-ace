@@ -1482,7 +1482,7 @@ export const SecurityCenter: React.FC = () => {
                 </div>
                 <div className="d-flex flex-wrap gap-1">
                   {ssrfStatus.port_whitelist.value.map((port) => (
-                    <Badge key={port} variant="outline-secondary">
+                    <Badge key={port} variant="secondary">
                       {port}
                     </Badge>
                   ))}
