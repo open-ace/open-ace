@@ -156,6 +156,9 @@ def api_usage_report():
 def api_usage_forecast():
     """Get usage forecast.
 
+    Issue #3244: Updated to use continuous calendar days algorithm
+    and return history_window metadata.
+
     Issue #3245: Tenant isolation for forecast API.
 
     Authorization:
