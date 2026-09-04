@@ -1825,7 +1825,10 @@ def get_remote_session(session_id):
         # ``messages`` may hold SessionMessage objects or dicts — handle both.
         msgs = result.get("messages")
         if isinstance(msgs, list):
-            from scripts.shared.qwen_context import is_qwen_system_context, strip_qwen_system_envelopes
+            from scripts.shared.qwen_context import (
+                is_qwen_system_context,
+                strip_qwen_system_envelopes,
+            )
 
             def _msg_role(m):
                 return m.get("role") if isinstance(m, dict) else getattr(m, "role", "")
