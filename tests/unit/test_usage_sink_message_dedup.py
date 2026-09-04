@@ -46,11 +46,7 @@ class TestRecordMessagesInternalDedup:
     def _make_response_body(self, content: str = "response") -> bytes:
         """Create a response body with assistant message."""
         return json.dumps(
-            {
-                "choices": [
-                    {"message": {"role": "assistant", "content": content}}
-                ]
-            }
+            {"choices": [{"message": {"role": "assistant", "content": content}}]}
         ).encode("utf-8")
 
     def _count_user_messages(self, sm, session_id: str) -> int:
