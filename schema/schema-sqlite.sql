@@ -1165,7 +1165,7 @@ CREATE TABLE security_settings (
 CREATE TABLE session_daily_usage (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
- user_id integer NOT NULL,
+ user_id integer,
  tenant_id integer,
  date text NOT NULL,
  tokens integer DEFAULT 0 NOT NULL,
