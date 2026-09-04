@@ -361,23 +361,35 @@ def _record_messages_internal(
                 req_data = json.loads(request_body)
                 messages = req_data.get("messages", [])
                 if isinstance(messages, list) and messages:
-                    # Record the last user message
+                    # Issue #3335: Find the last REAL user message, skipping Qwen
+                    # system context. Filter inside the loop so we continue searching
+                    # if the selected message is a system context.
+                    from scripts.shared.qwen_context import is_qwen_system_context
+
                     user_content = None
                     for msg in reversed(messages):
                         if not isinstance(msg, dict):
                             continue
-                        if msg.get("role") == "user":
-                            content = msg.get("content", "")
-                            if isinstance(content, list):
-                                text_parts = []
-                                for part in content:
-                                    if isinstance(part, dict) and part.get("type") == "text":
-                                        text_parts.append(part.get("text", ""))
-                                user_content = " ".join(text_parts)
-                            elif isinstance(content, str):
-                                user_content = content
-                            if user_content:
-                                break
+                        if msg.get("role") != "user":
+                            continue
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                            candidate = " ".join(text_parts)
+                        elif isinstance(content, str):
+                            candidate = content
+                        else:
+                            continue
+                        if not candidate:
+                            continue
+                        # Issue #28: Skip Qwen system context and continue searching
+                        if is_qwen_system_context(candidate):
+                            continue
+                        user_content = candidate
+                        break
 
                     if user_content:
                         # Issue #3337: Strip Qwen system-reminder envelopes,
@@ -804,24 +816,42 @@ def _parse_messages_for_daily_messages(
             req_data = json.loads(request_body)
             req_messages = req_data.get("messages", [])
             if isinstance(req_messages, list) and req_messages:
-                # Get the last user message
+                # Issue #3335: Find the last REAL user message, skipping Qwen
+                # system context. Filter inside the loop so we continue searching
+                # if the selected message is a system context.
+                try:
+                    from scripts.shared.qwen_context import is_qwen_system_context as _filter_fn
+
+                    _has_filter = True
+                except ImportError:
+                    _has_filter = False
+                    _filter_fn = None  # type: ignore
+
                 user_content = None
                 for msg in reversed(req_messages):
                     if not isinstance(msg, dict):
                         continue
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            # Handle multi-part content
-                            text_parts = []
-                            for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    text_parts.append(part.get("text", ""))
-                            user_content = " ".join(text_parts)
-                        elif isinstance(content, str):
-                            user_content = content
-                        if user_content:
-                            break
+                    if msg.get("role") != "user":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Handle multi-part content
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                        candidate = " ".join(text_parts)
+                    elif isinstance(content, str):
+                        candidate = content
+                    else:
+                        continue
+                    if not candidate:
+                        continue
+                    # Skip Qwen system context and continue searching
+                    if _has_filter and _filter_fn is not None and _filter_fn(candidate):
+                        continue
+                    user_content = candidate
+                    break
 
                 if user_content:
                     # Issue #3337: Strip Qwen system-reminder envelopes,
