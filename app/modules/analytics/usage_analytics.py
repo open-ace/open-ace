@@ -9,7 +9,6 @@ excludes incomplete current day, and returns history window metadata.
 """
 
 import logging
-import statistics
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
