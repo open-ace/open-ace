@@ -56,6 +56,8 @@ export {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useSsrfStatus,
+  useResetSsrfConfig,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

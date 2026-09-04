@@ -512,6 +512,299 @@ class GovernanceRepository:
                 return False
 
     # =========================================================================
+    # SSRF Configuration (Issue #3328)
+    # =========================================================================
+
+    def _get_ssrf_config_from_db(self) -> dict[str, Any]:
+        """Get SSRF configuration from database.
+
+        Returns:
+            Dict with SSRF config keys and their values.
+        """
+        from app.repositories.database import adapt_sql
+
+        config = {}
+        keys = ["outbound_port_whitelist", "global_allowlist_hosts", "ssrf_config_version"]
+
+        query = adapt_sql(
+            "SELECT setting_key, setting_value FROM security_settings "
+            "WHERE setting_key IN (?, ?, ?)"
+        )
+        rows = self.db.fetch_all(query, tuple(keys))
+
+        for row in rows:
+            key = row["setting_key"]
+            value = row["setting_value"]
+
+            if key == "ssrf_config_version":
+                config[key] = int(value) if value else 1
+            elif value:
+                try:
+                    config[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in SSRF config {key}")
+                    config[key] = None
+            else:
+                config[key] = None
+
+        return config
+
+    def _get_config_version(self) -> int:
+        """Get current SSRF config version."""
+        config = self._get_ssrf_config_from_db()
+        return config.get("ssrf_config_version", 1)
+
+    def _increment_config_version(self) -> int:
+        """Increment config version and return new version.
+
+        Returns:
+            New version number.
+        """
+        from app.repositories.database import adapt_sql
+
+        # Get current version
+        current = self._get_config_version()
+        new_version = current + 1
+
+        # Update in database
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql("""
+                INSERT INTO security_settings (setting_key, setting_value, updated_at)
+                VALUES ('ssrf_config_version', ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value,
+                    updated_at = CURRENT_TIMESTAMP
+            """),
+                (str(new_version),),
+            )
+            conn.commit()
+
+        return new_version
+
+    def _delete_ssrf_config_item(self, key: str) -> bool:
+        """Delete a specific SSRF config item from database.
+
+        Args:
+            key: Config key to delete (e.g., 'outbound_port_whitelist').
+
+        Returns:
+            True if successful.
+        """
+        from app.repositories.database import adapt_sql
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    adapt_sql("DELETE FROM security_settings WHERE setting_key = ?"),
+                    (key,),
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete SSRF config {key}: {e}")
+            return False
+
+    def get_ssrf_status(self) -> dict[str, Any]:
+        """Get SSRF protection status and configuration.
+
+        Issue #3328: Returns SSRF protection status, default policy,
+        current configuration, and interception statistics.
+
+        Returns:
+            Dict with SSRF status information.
+        """
+        from datetime import timedelta
+
+        from app.utils.llm_proxy_url_validator import get_allowed_hosts
+        from app.utils.outbound_url_guard import (
+            BLOCKED_HOSTNAMES,
+            _DEFAULT_ALLOWED_PORTS,
+            get_allowed_ports,
+        )
+
+        # Get database config
+        db_config = self._get_ssrf_config_from_db()
+
+        # Get effective port whitelist
+        db_ports = db_config.get("outbound_port_whitelist")
+        if db_ports is not None:
+            port_whitelist = db_ports
+            port_is_customized = True
+            port_source = "database"
+        else:
+            port_whitelist = sorted(get_allowed_ports())
+            port_is_customized = False
+            port_source = "environment" if os.environ.get("OPENACE_OUTBOUND_ALLOWED_PORTS") else "default"
+
+        # Get effective global allowlist
+        db_hosts = db_config.get("global_allowlist_hosts")
+        if db_hosts is not None:
+            global_allowlist = db_hosts
+            allowlist_is_customized = True
+            allowlist_source = "database"
+        else:
+            allowed_hosts = get_allowed_hosts()
+            global_allowlist = allowed_hosts.get(0, [])
+            allowlist_is_customized = False
+            allowlist_source = "environment" if os.environ.get("OPENACE_LLM_PROXY_ALLOWED_HOSTS") else "default"
+
+        # Get tenant allowlist info
+        allowed_hosts = get_allowed_hosts()
+        tenant_ids = [tid for tid in allowed_hosts.keys() if tid != 0]
+        tenant_count = len(tenant_ids)
+
+        # Determine config source
+        if port_source == "database" or allowlist_source == "database":
+            config_source = "database"
+        elif port_source == "environment" or allowlist_source == "environment":
+            config_source = "environment"
+        else:
+            config_source = "default"
+
+        # Check emergency mode
+        emergency_mode = os.environ.get("OPENACE_LLM_PROXY_DISABLE_SSRF_CHECK", "").lower() == "true"
+
+        # Check if can reset
+        can_reset = port_is_customized or allowlist_is_customized
+
+        # Get interception stats
+        interception_stats = self._get_interception_stats()
+
+        # Build response
+        return {
+            "ssrf_protection_enabled": not emergency_mode,
+            "emergency_mode": emergency_mode,
+            "config_source": config_source,
+            "config_version": db_config.get("ssrf_config_version", 1),
+            "port_whitelist": {
+                "value": port_whitelist,
+                "is_customized": port_is_customized,
+                "default_value": sorted(_DEFAULT_ALLOWED_PORTS),
+            },
+            "global_allowlist": {
+                "count": len(global_allowlist),
+                "entries": [{"host": host, "type": "hostname"} for host in global_allowlist],
+                "is_customized": allowlist_is_customized,
+            },
+            "tenant_allowlist": {
+                "enabled": tenant_count > 0,
+                "tenant_count": tenant_count,
+            },
+            "default_policy": {
+                "blocked_hostnames": sorted(BLOCKED_HOSTNAMES),
+                "blocked_private_networks": [
+                    "127.0.0.0/8",
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "169.254.0.0/16",
+                ],
+                "default_port_whitelist": sorted(_DEFAULT_ALLOWED_PORTS),
+            },
+            "interception_stats": interception_stats,
+            "can_reset": can_reset,
+        }
+
+    def _get_interception_stats(self) -> dict[str, int]:
+        """Get SSRF interception statistics from audit log.
+
+        Returns:
+            Dict with interception counts for 24h, 7d, 30d.
+        """
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        stats = {
+            "last_24h": 0,
+            "last_7d": 0,
+            "last_30d": 0,
+        }
+
+        try:
+            # Query for each time range
+            for label, days in [("last_24h", 1), ("last_7d", 7), ("last_30d", 30)]:
+                start_time = now - timedelta(days=days)
+                query = "SELECT COUNT(*) as count FROM audit_log WHERE action = ? AND timestamp >= ?"
+                result = self.db.fetch_one(
+                    query, ("LLM_PROXY_URL_BLOCKED", start_time.isoformat())
+                )
+                stats[label] = result["count"] if result else 0
+        except Exception as e:
+            logger.warning(f"Failed to get interception stats: {e}")
+
+        return stats
+
+    def reset_ssrf_config(
+        self, reset_ports: bool, reset_global_allowlist: bool, expected_version: int
+    ) -> dict[str, Any]:
+        """Reset SSRF configuration to default.
+
+        Issue #3328: Delete database overrides and invalidate caches.
+
+        Args:
+            reset_ports: Whether to reset port whitelist.
+            reset_global_allowlist: Whether to reset global allowlist.
+            expected_version: Expected config version (optimistic locking).
+
+        Returns:
+            Dict with reset result.
+
+        Raises:
+            ValueError: If version conflict or no custom config.
+        """
+        # Verify version (optimistic locking)
+        current_version = self._get_config_version()
+        if current_version != expected_version:
+            raise ValueError(
+                f"Config version conflict: current {current_version}, expected {expected_version}"
+            )
+
+        # Check if there's anything to reset
+        if not reset_ports and not reset_global_allowlist:
+            raise ValueError("No reset items specified")
+
+        reset_items = []
+
+        # Reset port whitelist
+        if reset_ports:
+            if not self._delete_ssrf_config_item("outbound_port_whitelist"):
+                logger.warning("Failed to delete port whitelist config")
+            reset_items.append("port_whitelist")
+
+        # Reset global allowlist
+        if reset_global_allowlist:
+            if not self._delete_ssrf_config_item("global_allowlist_hosts"):
+                logger.warning("Failed to delete global allowlist config")
+            reset_items.append("global_allowlist")
+
+        # Increment version
+        new_version = self._increment_config_version()
+
+        # Invalidate caches
+        try:
+            from app.utils.llm_proxy_url_validator import invalidate_dns_cache
+            from app.utils.outbound_url_guard import invalidate_port_cache
+
+            if reset_ports:
+                invalidate_port_cache()
+                logger.info("Invalidated port whitelist cache")
+
+            if reset_global_allowlist:
+                invalidate_dns_cache()
+                logger.info("Invalidated DNS cache")
+        except ImportError as e:
+            logger.warning(f"Failed to invalidate caches: {e}")
+
+        return {
+            "reset_items": reset_items,
+            "new_config_version": new_version,
+        }
+
+    # =========================================================================
     # Tenant Sensitive Keywords (Issue #2789)
     # =========================================================================
 

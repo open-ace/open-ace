@@ -22,6 +22,7 @@ import type {
   RestoreUserRequest,
   SensitiveKeywordsFilters,
   CreateSensitiveKeywordRequest,
+  ResetSsrfConfigRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -226,6 +227,25 @@ export function useUpdateSecuritySettings() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'security-settings'] });
       // Also invalidate password policy cache so regular users see updated policy
       queryClient.invalidateQueries({ queryKey: ['password-policy'] });
+    },
+  });
+}
+
+// SSRF Protection Status Hooks (Issue #3328)
+export function useSsrfStatus() {
+  return useQuery({
+    queryKey: ['admin', 'ssrf-status'],
+    queryFn: () => governanceApi.getSsrfStatus(),
+  });
+}
+
+export function useResetSsrfConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ResetSsrfConfigRequest) => governanceApi.resetSsrfConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'ssrf-status'] });
     },
   });
 }

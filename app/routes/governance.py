@@ -897,6 +897,122 @@ def api_update_security_settings():
 
 
 # ============================================================================
+# SSRF Protection Configuration (Issue #3328)
+# ============================================================================
+
+
+@governance_bp.route("/security-settings/ssrf-status", methods=["GET"])
+@admin_required
+def api_get_ssrf_status():
+    """Get SSRF protection status and configuration.
+
+    Issue #3328: Returns SSRF protection status, default policy,
+    current configuration, and interception statistics.
+
+    All admins can view SSRF status.
+    """
+
+    try:
+        status = governance_repo.get_ssrf_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.exception("Failed to get SSRF status: %s", e)
+        return jsonify({"error": "Failed to get SSRF status"}), 500
+
+
+@governance_bp.route("/security-settings/ssrf/reset", methods=["POST"])
+@platform_admin_required
+def api_reset_ssrf_config():
+    """Reset SSRF configuration to default.
+
+    Issue #3328: Reset port whitelist and/or global allowlist to default values.
+
+    Only platform admins can reset SSRF configuration because it affects
+    all tenants globally.
+
+    Request body:
+        {
+            "reset_ports": true,
+            "reset_global_allowlist": true,
+            "expected_version": 2,
+            "reason": "Optional reason for audit log"
+        }
+
+    Returns:
+        JSON response with reset result.
+    """
+
+    data = request.get_json() or {}
+
+    reset_ports = data.get("reset_ports", False)
+    reset_global_allowlist = data.get("reset_global_allowlist", False)
+    expected_version = data.get("expected_version")
+    reason = data.get("reason", "")
+
+    # Validate required fields
+    if expected_version is None:
+        return jsonify({"error": "expected_version is required"}), 400
+
+    if not reset_ports and not reset_global_allowlist:
+        return jsonify({"error": "At least one reset item must be specified"}), 400
+
+    try:
+        result = governance_repo.reset_ssrf_config(
+            reset_ports=reset_ports,
+            reset_global_allowlist=reset_global_allowlist,
+            expected_version=expected_version,
+        )
+
+        # Log the action
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.SSRF_CONFIG_RESET,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="security_settings",
+            severity="warning",
+            details={
+                "action": "ssrf_config_reset",
+                "reset_items": result["reset_items"],
+                "reason": reason,
+                "from_version": expected_version,
+                "to_version": result["new_config_version"],
+            },
+            **client_info,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "reset_items": result["reset_items"],
+                "new_config_version": result["new_config_version"],
+                "message": "SSRF configuration reset to default",
+            }
+        )
+
+    except ValueError as e:
+        # Version conflict
+        error_msg = str(e)
+        if "version conflict" in error_msg.lower():
+            current_version = governance_repo._get_config_version()
+            return (
+                jsonify(
+                    {
+                        "error": "CONFIG_VERSION_CONFLICT",
+                        "message": "Configuration has been modified by another admin. Please refresh and try again.",
+                        "current_version": current_version,
+                    }
+                ),
+                409,
+            )
+        return jsonify({"error": error_msg}), 400
+
+    except Exception as e:
+        logger.exception("Failed to reset SSRF config: %s", e)
+        return jsonify({"error": "Failed to reset SSRF configuration"}), 500
+
+
+# ============================================================================
 # Password Policy (accessible to all authenticated users)
 # ============================================================================
 
