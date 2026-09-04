@@ -3,6 +3,9 @@ Unit tests for scripts/shared/qwen_context.py
 
 Tests for is_qwen_system_context() which identifies Qwen CLI system-context
 messages that should not be surfaced as user chat messages.
+
+Issue #3337: Tests for strip_qwen_system_envelopes() which strips system
+envelopes while preserving real user text.
 """
 
 # Import from scripts/shared path
@@ -14,7 +17,7 @@ import pytest
 scripts_shared = Path(__file__).parent.parent.parent / "scripts" / "shared"
 sys.path.insert(0, str(scripts_shared.parent))
 
-from qwen_context import is_qwen_system_context
+from qwen_context import is_qwen_system_context, strip_qwen_system_envelopes
 
 
 class TestSystemContextMarkers:
@@ -79,11 +82,11 @@ class TestStartupReminderRegex:
         content = "<system-reminder>\nThe current date is: 2026-08-11\nThis is the Qwen Code"
         assert is_qwen_system_context(content) is True
 
-    def test_startup_reminder_requires_qwen_sentence(self):
-        """Startup reminder must also contain 'This is the Qwen Code'."""
-        # Without the Qwen sentence, should NOT match via this regex
+    def test_startup_reminder_without_qwen_sentence(self):
+        """Issue #3337: Startup reminder without 'This is the Qwen Code' should now match."""
+        # With the fix, date reminders no longer require the Qwen Code sentence
         content = "<system-reminder>\nThe current date is: 2026-08-11\nSome other content"
-        assert is_qwen_system_context(content) is False
+        assert is_qwen_system_context(content) is True
 
     def test_startup_reminder_whitespace_variations(self):
         """Startup reminder should handle whitespace variations."""
@@ -188,3 +191,121 @@ Managed memory has TWO directories for persistence.
 - USER memory: cross-project knowledge
 - PROJECT memory: this-project-only context"""
         assert is_qwen_system_context(content) is True
+
+
+class TestStripSystemEnvelopes:
+    """Issue #3337: Tests for strip_qwen_system_envelopes()."""
+
+    def test_pure_date_reminder(self):
+        """Pure date reminder should return empty string."""
+        content = """<system-reminder>
+The current date is: Friday, September 4, 2026.
+Note: This is the authoritative current date.
+</system-reminder>"""
+        assert strip_qwen_system_envelopes(content) == ""
+
+    def test_date_reminder_with_chinese_user_text(self):
+        """Date reminder + Chinese user text should return only user text."""
+        content = """<system-reminder>
+The current date is: Friday, September 4, 2026.
+Note: This is the authoritative current date.
+</system-reminder>
+
+帮我修复这个 bug"""
+        assert strip_qwen_system_envelopes(content) == "帮我修复这个 bug"
+
+    def test_date_reminder_with_english_user_text(self):
+        """Date reminder + English user text should return only user text."""
+        content = """<system-reminder>
+The current date is: Friday, September 4, 2026.
+</system-reminder>
+
+Fix this bug for me"""
+        assert strip_qwen_system_envelopes(content) == "Fix this bug for me"
+
+    def test_multiple_envelopes_with_user_text(self):
+        """Multiple date envelopes should all be stripped."""
+        content = """<system-reminder>
+The current date is: Friday, September 4, 2026.
+</system-reminder>
+
+<system-reminder>
+The current date is: Monday, September 7, 2026.
+</system-reminder>
+
+User text here"""
+        assert strip_qwen_system_envelopes(content) == "User text here"
+
+    def test_normal_user_message_unchanged(self):
+        """Normal user message should be unchanged."""
+        content = "帮我修复这个 bug"
+        assert strip_qwen_system_envelopes(content) == "帮我修复这个 bug"
+
+    def test_user_quoting_reminder_tag_not_stripped(self):
+        """User message containing reminder tag should not be stripped."""
+        content = "我看到有个 <system-reminder> 标签，这是什么意思？"
+        # This should not match the date reminder pattern, so return unchanged
+        assert strip_qwen_system_envelopes(content) == content
+
+    def test_non_date_envelope_not_stripped(self):
+        """Non-date system-reminder envelope should not be stripped."""
+        content = """<system-reminder>
+Some other system message
+</system-reminder>
+
+User text"""
+        # Not a date reminder, should return unchanged
+        assert strip_qwen_system_envelopes(content) == content
+
+    def test_empty_string(self):
+        """Empty string should return empty string."""
+        assert strip_qwen_system_envelopes("") == ""
+
+    def test_whitespace_only(self):
+        """Whitespace-only string should return empty string."""
+        assert strip_qwen_system_envelopes("   \n\t  ") == ""
+
+    def test_none_input(self):
+        """None input should return empty string."""
+        assert strip_qwen_system_envelopes(None) == ""
+
+    def test_non_string_input(self):
+        """Non-string input should return the input unchanged."""
+        assert strip_qwen_system_envelopes(12345) == 12345
+        assert strip_qwen_system_envelopes(["some", "list"]) == ["some", "list"]
+
+
+class TestStripSystemEnvelopesEdgeCases:
+    """Edge case tests for strip_qwen_system_envelopes()."""
+
+    def test_envelope_with_extra_whitespace(self):
+        """Envelope with extra whitespace should be stripped."""
+        content = """<system-reminder>   The current date is: 2026-09-04   </system-reminder>
+
+User text"""
+        assert strip_qwen_system_envelopes(content) == "User text"
+
+    def test_user_text_with_newlines_preserved(self):
+        """User text with newlines should be preserved."""
+        content = """<system-reminder>
+The current date is: 2026-09-04
+</system-reminder>
+
+Line 1
+Line 2
+Line 3"""
+        result = strip_qwen_system_envelopes(content)
+        assert result == "Line 1\nLine 2\nLine 3"
+
+    def test_envelope_middle_of_text_not_stripped(self):
+        """Envelope in the middle of user text should NOT be stripped."""
+        content = """User text before
+
+<system-reminder>
+The current date is: 2026-09-04
+</system-reminder>
+
+User text after"""
+        # The stripping only happens at the START, so the envelope in the middle
+        # is NOT stripped. This is by design to avoid removing user content.
+        assert strip_qwen_system_envelopes(content) == content

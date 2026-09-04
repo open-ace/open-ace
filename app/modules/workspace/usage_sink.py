@@ -380,13 +380,12 @@ def _record_messages_internal(
                                 break
 
                     if user_content:
-                        # Issue #28: Qwen CLI sends its system context (Platform
-                        # Tool Limits, startup context, memory instructions) as
-                        # the last role=user message in LLM requests; never
-                        # mirror it as a user chat message.
-                        from scripts.shared.qwen_context import is_qwen_system_context
+                        # Issue #3337: Strip Qwen system-reminder envelopes,
+                        # preserving any real user text that follows.
+                        from scripts.shared.qwen_context import strip_qwen_system_envelopes
 
-                        if not is_qwen_system_context(user_content):
+                        user_content = strip_qwen_system_envelopes(user_content)
+                        if user_content:
                             # Issue #3336: Provide stable identity for dedup.
                             # Prefer message id from the request; fallback to content hash.
                             import hashlib
@@ -825,21 +824,15 @@ def _parse_messages_for_daily_messages(
                             break
 
                 if user_content:
-                    # Filter Qwen system context
+                    # Issue #3337: Strip Qwen system-reminder envelopes,
+                    # preserving any real user text that follows.
                     try:
-                        from scripts.shared.qwen_context import is_qwen_system_context
+                        from scripts.shared.qwen_context import strip_qwen_system_envelopes
 
-                        if not is_qwen_system_context(user_content):
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": user_content[:10000],
-                                    "input_tokens": 0,
-                                    "output_tokens": 0,
-                                }
-                            )
+                        user_content = strip_qwen_system_envelopes(user_content)
                     except ImportError:
-                        # If qwen_context not available, include the message
+                        pass  # If qwen_context not available, use original content
+                    if user_content:
                         messages.append(
                             {
                                 "role": "user",
