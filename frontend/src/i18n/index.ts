@@ -1486,6 +1486,9 @@ export const translations: Record<Language, Translations> = {
     historicalData: 'Historical Data',
     predictedData: 'Predicted Data',
     historicalDataUnavailable: 'Historical data unavailable, showing forecast only',
+    forecastQualityDegraded: 'Forecast quality is degraded due to missing historical data',
+    historyWindowInfo: 'Based on data from {start} to {end} ({days} days)',
+    missingDays: 'days with no data',
 
     // Forecast Quality Metrics
     forecastQuality: 'Forecast Quality',
@@ -3814,6 +3817,9 @@ export const translations: Record<Language, Translations> = {
     historicalData: '历史数据',
     predictedData: '预测数据',
     historicalDataUnavailable: '历史数据不可用，仅显示预测数据',
+    forecastQualityDegraded: '由于历史数据缺失，预测质量已降级',
+    historyWindowInfo: '基于 {start} 至 {end} 的数据（{days} 天）',
+    missingDays: '天无数据',
 
     // Forecast Quality Metrics
     forecastQuality: '预测质量',
@@ -5997,6 +6003,9 @@ export const translations: Record<Language, Translations> = {
     historicalData: '履歴データ',
     predictedData: '予測データ',
     historicalDataUnavailable: '履歴データが利用できません。予測データのみを表示しています',
+    forecastQualityDegraded: '履歴データが不足しているため、予測品質が低下しています',
+    historyWindowInfo: '{start}から{end}までのデータに基づいています（{days}日間）',
+    missingDays: '日間データなし',
 
     // Forecast Quality Metrics
     forecastQuality: '予測品質',
@@ -8146,6 +8155,9 @@ export const translations: Record<Language, Translations> = {
     historicalData: '과거 데이터',
     predictedData: '예측 데이터',
     historicalDataUnavailable: '과거 데이터를 사용할 수 없습니다. 예측 데이터만 표시합니다',
+    forecastQualityDegraded: '과거 데이터가 누락되어 예측 품질이 저하되었습니다',
+    historyWindowInfo: '{start}부터 {end}까지의 데이터를 기반으로 합니다 ({days}일)',
+    missingDays: '일 데이터 없음',
 
     // Forecast Quality Metrics
     forecastQuality: '예측 품질',

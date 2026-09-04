@@ -6,14 +6,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.modules.analytics.usage_analytics import (
+    MISSING_DAYS_THRESHOLD_DEGRADED,
+    MISSING_DAYS_THRESHOLD_UNAVAILABLE,
     Anomaly,
     AnomalyType,
     TrendAnalysis,
     TrendDirection,
     UsageAnalytics,
     UsageReport,
+    calculate_moving_average,
 )
 from app.utils.cache import get_cache
+from app.utils.datetime_utils import (
+    ForecastWindow,
+    generate_date_spine,
+    get_business_date,
+    get_forecast_window,
+)
 
 
 class TestUsageAnalytics:
@@ -213,7 +222,9 @@ class TestUsageAnalytics:
         assert result["forecast_available"] is False
         assert "reason" in result
 
-    def test_get_forecast_with_data(self):
+    @patch("app.modules.analytics.usage_analytics.get_business_date")
+    def test_get_forecast_with_data(self, mock_get_business_date):
+        mock_get_business_date.return_value = "2026-01-15"
         analytics, mock_db, _ = self._make_analytics()
         # Mock first activity date
         mock_db.fetch_one.return_value = None
@@ -307,238 +318,77 @@ class TestUsageAnalytics:
         assert AnomalyType.DROP.value == "drop"
 
 
-class TestBacktestWape:
-    """Test backtest WAPE calculation."""
+class TestDatetimeUtils:
+    """Test datetime utilities for Issue #3244."""
 
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo)
+    def test_get_business_date(self):
+        """Test business date returns UTC date string."""
+        result = get_business_date()
+        assert isinstance(result, str)
+        assert len(result) == 10  # YYYY-MM-DD format
 
-    def setup_method(self):
-        get_cache().clear()
+    def test_get_forecast_window_basic(self):
+        """Test basic forecast window calculation."""
+        window = get_forecast_window("2026-08-31", days=7)
+        assert window.start_date == "2026-08-24"
+        assert window.end_date == "2026-08-30"
+        assert window.days == 7
 
-    def test_wape_stable_data(self):
-        """Stable data should have low WAPE."""
-        analytics = self._make_analytics()
-        # Create 20 days of stable data (100 tokens each)
-        historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 21)
-        ]
-        wape = analytics._calculate_backtest_wape(historical_data)
-        assert wape is not None
-        assert wape < 0.1  # Less than 10% error for stable data
+    def test_get_forecast_window_with_first_activity(self):
+        """Test forecast window bounded by first activity date."""
+        window = get_forecast_window("2026-08-31", days=7, first_activity_date="2026-08-28")
+        assert window.start_date == "2026-08-28"
+        assert window.end_date == "2026-08-30"
+        assert window.days == 3
 
-    def test_wape_high_volatility(self):
-        """High volatility data should have higher WAPE."""
-        analytics = self._make_analytics()
-        # Create 20 days of volatile data
-        historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100 + (i % 3) * 200, "requests": 10}
-            for i in range(1, 21)
-        ]
-        wape = analytics._calculate_backtest_wape(historical_data)
-        assert wape is not None
-        assert wape > 0.1  # Higher error for volatile data
+    def test_get_forecast_window_first_activity_before_window(self):
+        """Test that first activity date before window start is ignored."""
+        window = get_forecast_window("2026-08-31", days=7, first_activity_date="2026-08-01")
+        assert window.start_date == "2026-08-24"
+        assert window.days == 7
 
-    def test_wape_insufficient_data(self):
-        """Insufficient data should return None."""
-        analytics = self._make_analytics()
-        historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10}
-            for i in range(1, 10)  # Only 9 days
-        ]
-        wape = analytics._calculate_backtest_wape(historical_data)
-        assert wape is None
+    def test_generate_date_spine(self):
+        """Test date spine generation."""
+        dates = generate_date_spine("2026-08-01", "2026-08-03")
+        assert dates == ["2026-08-01", "2026-08-02", "2026-08-03"]
 
-    def test_wape_all_zeros(self):
-        """All zero values should return None."""
-        analytics = self._make_analytics()
-        historical_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 0, "requests": 0} for i in range(1, 21)
-        ]
-        wape = analytics._calculate_backtest_wape(historical_data)
-        assert wape is None
+    def test_generate_date_spine_single_day(self):
+        """Test date spine with single day."""
+        dates = generate_date_spine("2026-08-01", "2026-08-01")
+        assert dates == ["2026-08-01"]
 
 
-class TestHorizonDecay:
-    """Test horizon decay calculation."""
+class TestMovingAverage:
+    """Test moving average calculation for Issue #3244."""
 
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo)
+    def test_calculate_moving_average_basic(self):
+        """Test basic moving average calculation."""
+        values = [100, 200, 150, 180, 220, 190, 210]
+        result = calculate_moving_average(values, 7)
+        assert result is not None
+        assert abs(result - sum(values) / 7) < 0.01
 
-    def test_decay_7_days(self):
-        """7-day forecast should have no decay."""
-        analytics = self._make_analytics()
-        base_wape = 0.15
-        adjusted = analytics._apply_horizon_decay(base_wape, 7)
-        assert adjusted == base_wape
+    def test_calculate_moving_average_insufficient_data(self):
+        """Test moving average with insufficient data."""
+        values = [100, 200]
+        result = calculate_moving_average(values, 7)
+        assert result is None
 
-    def test_decay_30_days(self):
-        """30-day forecast should have significant decay."""
-        analytics = self._make_analytics()
-        base_wape = 0.15
-        adjusted = analytics._apply_horizon_decay(base_wape, 30)
-        # Decay factor: 1 + 0.02 * (30 - 7) = 1.46
-        assert abs(adjusted - base_wape * 1.46) < 0.001
+    def test_calculate_moving_average_exact_window(self):
+        """Test moving average with exact window size."""
+        values = [100, 100, 100, 100, 100, 100, 100]
+        result = calculate_moving_average(values, 7)
+        assert result == 100.0
 
-    def test_decay_14_days(self):
-        """14-day forecast should have moderate decay."""
-        analytics = self._make_analytics()
-        base_wape = 0.15
-        adjusted = analytics._apply_horizon_decay(base_wape, 14)
-        # Decay factor: 1 + 0.02 * (14 - 7) = 1.14
-        assert abs(adjusted - base_wape * 1.14) < 0.001
+    def test_calculate_moving_average_uses_last_n(self):
+        """Test that moving average uses only last n values."""
+        values = [1000, 1000, 100, 100, 100, 100, 100, 100, 100]
+        result = calculate_moving_average(values, 7)
+        assert result == 100.0  # Only last 7 values
 
 
-class TestOutlierDetection:
-    """Test outlier detection using MAD."""
-
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo)
-
-    def test_no_outliers(self):
-        """Stable data should have no outliers."""
-        analytics = self._make_analytics()
-        daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 15)
-        ]
-        count, ratio = analytics._detect_outliers(daily_data)
-        assert count == 0
-        assert ratio == 0.0
-
-    def test_single_outlier(self):
-        """Single spike should be detected when MAD > 0."""
-        analytics = self._make_analytics()
-        # Create data with variation so MAD > 0
-        daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100 + (i % 3) * 10, "requests": 10}
-            for i in range(1, 15)
-        ]
-        # Add one large spike (10x the max value)
-        daily_data[7]["tokens"] = 3000
-        count, ratio = analytics._detect_outliers(daily_data)
-        assert count >= 1
-        assert ratio > 0.0
-
-    def test_mad_zero(self):
-        """MAD=0 (identical values) should return no outliers."""
-        analytics = self._make_analytics()
-        daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 15)
-        ]
-        # All values are 100, MAD=0
-        count, ratio = analytics._detect_outliers(daily_data)
-        assert count == 0
-        assert ratio == 0.0
-
-
-class TestQualityAssessment:
-    """Test quality assessment."""
-
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo)
-
-    def test_quality_level(self):
-        """Low WAPE and no missing data should give quality level."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.08, sample_days=30, missing_days=0, outlier_ratio=0.0
-        )
-        assert level == "quality"
-        assert confidence == 0.9
-
-    def test_satisfactory_level(self):
-        """Moderate WAPE should give satisfactory level."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.15, sample_days=30, missing_days=2, outlier_ratio=0.0
-        )
-        assert level == "satisfactory"
-        assert confidence == 0.7
-
-    def test_fair_level(self):
-        """Higher WAPE should give fair level."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.25, sample_days=30, missing_days=4, outlier_ratio=0.0
-        )
-        assert level == "fair"
-        assert confidence == 0.5
-
-    def test_poor_level(self):
-        """High WAPE should give poor level."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.40, sample_days=30, missing_days=0, outlier_ratio=0.0
-        )
-        assert level == "poor"
-        assert confidence == 0.3
-
-    def test_unavailable_insufficient_sample(self):
-        """Insufficient sample should give unavailable."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.15, sample_days=5, missing_days=0, outlier_ratio=0.0
-        )
-        assert level == "unavailable"
-        assert confidence is None
-
-    def test_unavailable_null_wape(self):
-        """Null WAPE should give unavailable."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=None, sample_days=30, missing_days=0, outlier_ratio=0.0
-        )
-        assert level == "unavailable"
-        assert confidence is None
-
-    def test_outlier_downgrade(self):
-        """High outlier ratio should downgrade quality."""
-        analytics = self._make_analytics()
-        level, desc, confidence = analytics._assess_forecast_quality(
-            adjusted_wape=0.08, sample_days=30, missing_days=0, outlier_ratio=0.15
-        )
-        assert level == "satisfactory"  # Downgraded from quality
-        assert confidence == 0.7
-
-
-class TestMissingDays:
-    """Test missing days detection."""
-
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo)
-
-    def test_no_missing_days(self):
-        """Continuous data should have no missing days."""
-        analytics = self._make_analytics()
-        daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 31)
-        ]
-        missing = analytics._count_missing_days(daily_data, 30)
-        assert missing == 0
-
-    def test_some_missing_days(self):
-        """Gaps should be counted as missing."""
-        analytics = self._make_analytics()
-        # Only 27 days of data for expected 30
-        daily_data = [
-            {"date": f"2026-01-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 28)
-        ]
-        missing = analytics._count_missing_days(daily_data, 30)
-        assert missing == 3
-
-
-class TestHistoricalDataForBacktest:
-    """Test historical data extraction for backtest."""
+class TestForecastAlgorithm:
+    """Test forecast algorithm fixes for Issue #3244."""
 
     def _make_analytics(self):
         mock_db = MagicMock()
@@ -546,44 +396,15 @@ class TestHistoricalDataForBacktest:
         analytics = UsageAnalytics(db=mock_db, usage_repo=mock_repo)
         return analytics, mock_db
 
-    def test_excludes_today(self):
-        """Today's data should be excluded."""
-        analytics, mock_db = self._make_analytics()
-        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-
-        # Mock data including today
-        daily_data = [
-            {"date": f"2026-08-{i:02d}", "tokens": 100, "requests": 10} for i in range(1, 31)
-        ]
-        # Override last entry to be today
-        daily_data[-1]["date"] = today
-        mock_db.fetch_all.return_value = daily_data
-
-        historical, sample_days = analytics._get_historical_data_for_backtest(
-            "2026-08-01", "2026-08-31"
-        )
-
-        # Today should be excluded
-        assert all(d["date"] < today for d in historical)
-        assert sample_days == len(historical)
-
-
-class TestForecastQualityMetrics:
-    """Test complete forecast with quality metrics.
-
-    Issue #3244: Quality metrics now based on missing days ratio.
-    """
-
-    def _make_analytics(self):
-        mock_db = MagicMock()
-        mock_repo = MagicMock()
-        return UsageAnalytics(db=mock_db, usage_repo=mock_repo), mock_db
-
     def setup_method(self):
         get_cache().clear()
 
-    def test_forecast_includes_quality_metrics(self):
-        """Forecast should include quality metrics."""
+    @patch("app.modules.analytics.usage_analytics.get_business_date")
+    def test_forecast_continuous_7_days(self, mock_get_business_date):
+        """Test forecast with continuous 7 days of data."""
+        # Mock business date to be 2026-08-31
+        mock_get_business_date.return_value = "2026-08-31"
+
         analytics, mock_db = self._make_analytics()
 
         # Mock 7 days of continuous historical data
@@ -601,8 +422,11 @@ class TestForecastQualityMetrics:
         assert "sample_days" in result["quality_metrics"]
         assert "missing_days" in result["quality_metrics"]
 
-    def test_forecast_backward_compatible(self):
-        """Forecast should include backward-compatible confidence."""
+    @patch("app.modules.analytics.usage_analytics.get_business_date")
+    def test_forecast_missing_days_degraded(self, mock_get_business_date):
+        """Test forecast with missing days results in degraded quality."""
+        mock_get_business_date.return_value = "2026-08-31"
+
         analytics, mock_db = self._make_analytics()
 
         daily_data = [
