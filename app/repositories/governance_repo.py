@@ -616,12 +616,11 @@ class GovernanceRepository:
         Returns:
             Dict with SSRF status information.
         """
-        from datetime import timedelta
 
         from app.utils.llm_proxy_url_validator import get_allowed_hosts
         from app.utils.outbound_url_guard import (
-            BLOCKED_HOSTNAMES,
             _DEFAULT_ALLOWED_PORTS,
+            BLOCKED_HOSTNAMES,
             get_allowed_ports,
         )
 
@@ -637,7 +636,9 @@ class GovernanceRepository:
         else:
             port_whitelist = sorted(get_allowed_ports())
             port_is_customized = False
-            port_source = "environment" if os.environ.get("OPENACE_OUTBOUND_ALLOWED_PORTS") else "default"
+            port_source = (
+                "environment" if os.environ.get("OPENACE_OUTBOUND_ALLOWED_PORTS") else "default"
+            )
 
         # Get effective global allowlist
         db_hosts = db_config.get("global_allowlist_hosts")
@@ -649,7 +650,9 @@ class GovernanceRepository:
             allowed_hosts = get_allowed_hosts()
             global_allowlist = allowed_hosts.get(0, [])
             allowlist_is_customized = False
-            allowlist_source = "environment" if os.environ.get("OPENACE_LLM_PROXY_ALLOWED_HOSTS") else "default"
+            allowlist_source = (
+                "environment" if os.environ.get("OPENACE_LLM_PROXY_ALLOWED_HOSTS") else "default"
+            )
 
         # Get tenant allowlist info
         allowed_hosts = get_allowed_hosts()
@@ -665,7 +668,9 @@ class GovernanceRepository:
             config_source = "default"
 
         # Check emergency mode
-        emergency_mode = os.environ.get("OPENACE_LLM_PROXY_DISABLE_SSRF_CHECK", "").lower() == "true"
+        emergency_mode = (
+            os.environ.get("OPENACE_LLM_PROXY_DISABLE_SSRF_CHECK", "").lower() == "true"
+        )
 
         # Check if can reset
         can_reset = port_is_customized or allowlist_is_customized
@@ -728,10 +733,10 @@ class GovernanceRepository:
             # Query for each time range
             for label, days in [("last_24h", 1), ("last_7d", 7), ("last_30d", 30)]:
                 start_time = now - timedelta(days=days)
-                query = "SELECT COUNT(*) as count FROM audit_log WHERE action = ? AND timestamp >= ?"
-                result = self.db.fetch_one(
-                    query, ("LLM_PROXY_URL_BLOCKED", start_time.isoformat())
+                query = (
+                    "SELECT COUNT(*) as count FROM audit_log WHERE action = ? AND timestamp >= ?"
                 )
+                result = self.db.fetch_one(query, ("LLM_PROXY_URL_BLOCKED", start_time.isoformat()))
                 stats[label] = result["count"] if result else 0
         except Exception as e:
             logger.warning(f"Failed to get interception stats: {e}")
