@@ -28,6 +28,7 @@ import {
   useDeleteSensitiveKeyword,
   useSsrfStatus,
   useResetSsrfConfig,
+  useUser,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -210,7 +211,9 @@ export const SecurityCenter: React.FC = () => {
   } = useSsrfStatus();
   const resetSsrfConfig = useResetSsrfConfig();
 
-  const [ssrfConfigVersion, setSsrfConfigVersion] = useState<number>(1);
+  // Get current user to check if platform admin
+  const user = useUser();
+  const isPlatformAdmin = user?.role === 'platform_admin';
 
   // TODO: Add filter controls in future iteration
   const [keywordFilters] = useState<SensitiveKeywordsFilters>({
@@ -1432,7 +1435,9 @@ export const SecurityCenter: React.FC = () => {
             <div className="col-md-6">
               <h6 className="text-muted mb-3">{t('ssrfDefaultPolicy', language)}</h6>
               <div className="mb-3">
-                <small className="text-muted d-block mb-2">{t('ssrfBlockedPrivateNetworks', language)}</small>
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedPrivateNetworks', language)}
+                </small>
                 <div className="d-flex flex-wrap gap-1">
                   {ssrfStatus.default_policy.blocked_private_networks.map((network) => (
                     <Badge key={network} variant="secondary">
@@ -1442,8 +1447,13 @@ export const SecurityCenter: React.FC = () => {
                 </div>
               </div>
               <div>
-                <small className="text-muted d-block mb-2">{t('ssrfBlockedHostnames', language)}</small>
-                <div className="d-flex flex-wrap gap-1" style={{ maxHeight: '100px', overflowY: 'auto' }}>
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedHostnames', language)}
+                </small>
+                <div
+                  className="d-flex flex-wrap gap-1"
+                  style={{ maxHeight: '100px', overflowY: 'auto' }}
+                >
                   {ssrfStatus.default_policy.blocked_hostnames.slice(0, 10).map((hostname) => (
                     <Badge key={hostname} variant="secondary">
                       {hostname}
@@ -1540,18 +1550,18 @@ export const SecurityCenter: React.FC = () => {
           <div className="d-flex justify-content-between align-items-center">
             <div className="text-muted small">
               {t('ssrfConfigVersion', language)}: v{ssrfStatus.config_version} |
-              {t('ssrfConfigSource', language)}: {t(`ssrfConfigSource${ssrfStatus.config_source.charAt(0).toUpperCase()}${ssrfStatus.config_source.slice(1)}`, language)}
+              {t('ssrfConfigSource', language)}:{' '}
+              {t(
+                `ssrfConfigSource${ssrfStatus.config_source.charAt(0).toUpperCase()}${ssrfStatus.config_source.slice(1)}`,
+                language
+              )}
             </div>
             <div className="d-flex gap-2">
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                onClick={() => refetchSsrfStatus()}
-              >
+              <Button variant="outline-secondary" size="sm" onClick={() => refetchSsrfStatus()}>
                 <i className="bi bi-arrow-clockwise me-1" />
                 {t('refresh', language)}
               </Button>
-              {ssrfStatus.can_reset && (
+              {ssrfStatus.can_reset && isPlatformAdmin && (
                 <Button
                   variant="outline-warning"
                   size="sm"

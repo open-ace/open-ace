@@ -327,7 +327,13 @@ vi.mock('@/hooks', () => ({
         tenant_count: 0,
       },
       default_policy: {
-        blocked_private_networks: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16'],
+        blocked_private_networks: [
+          '10.0.0.0/8',
+          '172.16.0.0/12',
+          '192.168.0.0/16',
+          '127.0.0.0/8',
+          '169.254.0.0/16',
+        ],
         blocked_hostnames: ['localhost', 'metadata.google.internal'],
         default_port_whitelist: [80, 443, 8080],
       },
