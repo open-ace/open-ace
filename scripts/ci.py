@@ -51,6 +51,11 @@ POSTGRES_PATTERNS = (
     "migrations/**",
     "schema/**",
     "tests/integration/*_pg.py",
+    # The integration conftest owns the pg_db fixture (the per-test database
+    # + schema wiring every *_pg.py file consumes) — a conftest-only diff
+    # must select this lane too, or it rides the lane only when some policy
+    # file happens to change (#3287 follow-up review finding).
+    "tests/integration/conftest.py",
 )
 E2E_PATTERNS = (
     "app/auth/**",

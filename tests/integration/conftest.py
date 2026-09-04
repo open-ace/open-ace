@@ -71,8 +71,9 @@ def _create_sqlite_tables(db):
     Previously aggregated 10 modules' get_ddl_statements() plus ~17 hand-written
     CREATE TABLE statements — the same shadow-schema drift #1276 fixed for
     production. Now a single call to load_schema_from_file builds the full
-    authoritative schema (68 tables), so integration tests exercise the SAME
-    schema the app starts with, and drift can't silently re-emerge here.
+    authoritative schema (101 tables at #3287 review time), so integration
+    tests exercise the SAME schema the app starts with, and drift can't
+    silently re-emerge here.
     """
     from app.repositories.schema_init import load_schema_from_file
 
@@ -170,31 +171,97 @@ def _create_pg_tables(db):
     _create_tenant_keywords_tables(db, dialect="postgresql")
 
 
-@pytest.fixture
-def pg_db():
-    """Create a temporary PostgreSQL database for integration testing.
+@pytest.fixture(scope="session")
+def _pg_template_db():
+    """Session-scoped template database with the schema loaded ONCE.
 
-    Creates an isolated test database (ace_test_<uuid>), initializes the schema,
-    and drops it after tests complete.  Does NOT touch the production 'ace' database.
+    ``pg_db`` clones this per test via ``CREATE DATABASE ... TEMPLATE`` —
+    a file-level copy (measured 0.1-0.6s) instead of re-running the full
+    schema DDL per test (measured 3.5-9.7s each — the #3287 budget-erosion
+    bottleneck). Isolation is unchanged: every test still gets its own
+    disposable database cloned from a template that no test ever writes.
+
+    Skip semantics (#3287 review): unreachability is only skippable HERE,
+    at build time (parity with PG-less environments); per-test clone
+    failures in pg_db must ERROR, never skip — an all-skipped run reads
+    as green and hides exactly the regression this lane exists to catch.
     """
     psycopg2 = pytest.importorskip("psycopg2")
     from psycopg2 import pool as pg_pool
-    from psycopg2.extras import RealDictCursor
+
+    base_url = _get_pg_base_url()
+    template_name = f"ace_tpl_{uuid.uuid4().hex[:8]}"
+
+    try:
+        conn = psycopg2.connect(base_url, connect_timeout=2)
+    except psycopg2.OperationalError as exc:
+        pytest.skip(f"PostgreSQL server not reachable at {base_url}: {exc}")
+    conn.autocommit = True
+    try:
+        conn.cursor().execute(f'CREATE DATABASE "{template_name}"')
+    finally:
+        conn.close()
+
+    template_url = base_url.rsplit("/", 1)[0] + "/" + template_name
+
+    try:
+        # The schema loader routes connections through the module-level pool /
+        # get_database_url (not the db_url argument), so point the global pool
+        # at the template exactly like pg_db does for each test database.
+        previous_pool = getattr(db_mod, "_pg_pool", None)
+        db_mod._pg_pool = pg_pool.ThreadedConnectionPool(1, 10, template_url)
+        try:
+            template_db = Database(db_url=template_url)
+            _create_pg_tables(template_db)
+        finally:
+            # closeall() is load-bearing: CREATE DATABASE ... TEMPLATE requires
+            # zero other connections to the source, and this yield-style
+            # fixture keeps local references alive for the whole session —
+            # relying on garbage collection would fail every clone.
+            try:
+                db_mod._pg_pool.closeall()
+            except Exception:
+                pass
+            db_mod._pg_pool = previous_pool
+
+        yield template_name
+    finally:
+        # Covers both session end AND a failed schema build: either way the
+        # template database must not outlive the fixture on a shared server.
+        conn = psycopg2.connect(base_url)
+        conn.autocommit = True
+        try:
+            conn.cursor().execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+                (template_name,),
+            )
+            conn.cursor().execute(f'DROP DATABASE IF EXISTS "{template_name}"')
+        finally:
+            conn.close()
+
+
+@pytest.fixture
+def pg_db(_pg_template_db):
+    """Create a temporary PostgreSQL database for integration testing.
+
+    Each test gets its own disposable database cloned from the
+    session-scoped template (_pg_template_db) — a fast file-level copy of
+    the fully-initialized schema — initialized and dropped per test. Does
+    NOT touch the production 'ace' database and shares no state across
+    tests.
+    """
+    psycopg2 = pytest.importorskip("psycopg2")
+    from psycopg2 import pool as pg_pool
 
     base_url = _get_pg_base_url()
     test_db_name = f"ace_test_{uuid.uuid4().hex[:8]}"
 
-    # Create test database
-    try:
-        conn = psycopg2.connect(base_url, connect_timeout=2)
-    except psycopg2.OperationalError as exc:
-        # Skip cleanly when no live PostgreSQL server is reachable instead of
-        # erroring every test. These integration tests require a running Postgres;
-        # environments without one (local sandbox, CI without a DB service) skip.
-        pytest.skip(f"PostgreSQL server not reachable at {base_url}: {exc}")
+    # Clone the template. The template was built this session, so the
+    # server WAS reachable: any failure here must ERROR, not skip.
+    conn = psycopg2.connect(base_url, connect_timeout=2)
     conn.autocommit = True
     try:
-        conn.cursor().execute(f'CREATE DATABASE "{test_db_name}"')
+        conn.cursor().execute(f'CREATE DATABASE "{test_db_name}" TEMPLATE "{_pg_template_db}"')
     finally:
         conn.close()
 
@@ -207,7 +274,6 @@ def pg_db():
 
     try:
         db = Database(db_url=test_url)
-        _create_pg_tables(db)
 
         # Patch global functions so repo code's is_postgresql() and get_database_url()
         # point to our test database instead of the production config.
