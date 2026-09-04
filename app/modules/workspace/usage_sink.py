@@ -815,8 +815,10 @@ def _parse_messages_for_daily_messages(
                 # if the selected message is a system context.
                 try:
                     from scripts.shared.qwen_context import is_qwen_system_context
+
+                    _has_qwen_filter = True
                 except ImportError:
-                    is_qwen_system_context = None  # type: ignore
+                    _has_qwen_filter = False
 
                 user_content = None
                 for msg in reversed(req_messages):
@@ -839,7 +841,7 @@ def _parse_messages_for_daily_messages(
                     if not candidate:
                         continue
                     # Skip Qwen system context and continue searching
-                    if is_qwen_system_context and is_qwen_system_context(candidate):
+                    if _has_qwen_filter and is_qwen_system_context(candidate):
                         continue
                     user_content = candidate
                     break
