@@ -2,13 +2,12 @@
  * Header Component - Top navigation header
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useAuth, useTheme, useLanguage } from '@/hooks';
+import { useAuth, useTheme, useLanguage, useAlertStream } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
-import { alertsApi } from '@/api';
 import { canAccessManageMode } from '@/utils/permissions';
 import { UserSettingsModal, Avatar, CountBadge } from '@/components/common';
 import { DocumentViewer, helpDocs, getDocTitle } from '@/components/work/DocumentViewer';
@@ -24,40 +23,9 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const navigate = useNavigate();
   const [showSettings, setShowSettings] = useState(false);
   const [helpDocId, setHelpDocId] = useState<string>('');
-  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch unread alert count
-  const fetchUnreadCount = useCallback(async () => {
-    if (!isAuthenticated) return;
-    try {
-      const count = await alertsApi.getUnreadCount();
-      setUnreadAlertCount(count);
-    } catch {
-      // Graceful degradation: keep previous count on error
-    }
-  }, [isAuthenticated]);
-
-  // Poll unread alert count every 30 seconds
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setUnreadAlertCount(0);
-      return;
-    }
-
-    // Initial fetch
-    fetchUnreadCount();
-
-    // Start polling
-    pollingRef.current = setInterval(fetchUnreadCount, 30000);
-
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    };
-  }, [isAuthenticated, fetchUnreadCount]);
+  // Issue #3332: Use SSE for real-time unread count updates
+  const { unreadCount: unreadAlertCount } = useAlertStream({ enabled: isAuthenticated });
 
   const handleNotificationClick = () => {
     if (canAccessManageMode(user)) {
