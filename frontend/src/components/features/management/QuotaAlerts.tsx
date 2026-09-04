@@ -106,9 +106,8 @@ export const QuotaAlerts: React.FC = () => {
   // Get alerts from store
   const alerts = useAlertStreamStore((state) => state.alerts);
   const unreadCount = useAlertStreamStore((state) => state.unreadCount);
-  const [alertsLoading, setAlertsLoading] = useState(true);
-  const [alertsError, setAlertsError] = useState<string | null>(null);
-  });
+  const alertsLoading = useAlertStreamStore((state) => state.isLoading);
+  const alertsError = useAlertStreamStore((state) => state.error);
 
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
@@ -120,11 +119,6 @@ export const QuotaAlerts: React.FC = () => {
     monthly_request_quota?: string;
   }>({});
 
-  // --- Alerts State ---
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [alertsLoading, setAlertsLoading] = useState(true);
-  const [alertsError, setAlertsError] = useState<string | null>(null);
 
   const [typeFilter, setTypeFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
