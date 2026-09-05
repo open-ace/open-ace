@@ -1,6 +1,7 @@
 import React from 'react';
-import { reportFrontendError, logFallback } from '@utils/errorReporter';
+import { reportFrontendError, logFallback, generateErrorId } from '@utils/errorReporter';
 import { isChunkLoadError } from './isChunkLoadError';
+import { diagnoseError, generateContactSupportLink, type ErrorDiagnosis } from './errorDiagnosis';
 
 interface ChunkLoadErrorBoundaryProps {
   children: React.ReactNode;
@@ -9,27 +10,46 @@ interface ChunkLoadErrorBoundaryProps {
 
 interface ChunkLoadErrorBoundaryState {
   error: Error | null;
+  diagnosis: ErrorDiagnosis | null;
 }
 
 /**
  * React.lazy rejects when a content-hashed chunk disappears during a release.
  * Suspense does not handle rejected imports, so this boundary keeps the app
  * recoverable instead of allowing React to unmount the entire root.
+ *
+ * Issue #3277: Enhanced error categorization and user experience.
  */
 export class ChunkLoadErrorBoundary extends React.Component<
   ChunkLoadErrorBoundaryProps,
   ChunkLoadErrorBoundaryState
 > {
-  public override state: ChunkLoadErrorBoundaryState = { error: null };
+  public override state: ChunkLoadErrorBoundaryState = { error: null, diagnosis: null };
 
-  // Instance property to store errorId (avoiding re-render)
-  private errorId: string | null = null;
+  // Instance property to store errorId (pre-generated in getDerivedStateFromError)
+  private errorId: string = 'pending';
 
   public static getDerivedStateFromError(error: Error): ChunkLoadErrorBoundaryState {
-    return { error };
+    // Issue #3277: Pre-generate error ID to avoid showing "pending"
+    const errorId = generateErrorId();
+
+    // Store error ID in a way that persists to componentDidCatch
+    // We'll use a static map to associate error with its ID
+    ChunkLoadErrorBoundary._pendingErrorId = errorId;
+
+    // Diagnose error type for better user guidance
+    const diagnosis = diagnoseError(error);
+
+    return { error, diagnosis };
   }
 
+  // Static property to track pending error ID
+  private static _pendingErrorId: string = 'pending';
+
   public override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    // Use pre-generated error ID from getDerivedStateFromError
+    this.errorId = ChunkLoadErrorBoundary._pendingErrorId;
+
     try {
       // Issue #2953: Build context object with additional information
       const context: Record<string, unknown> = {
@@ -72,16 +92,25 @@ export class ChunkLoadErrorBoundary extends React.Component<
       }
 
       // Report error with context
-      this.errorId = reportFrontendError({
+      // Use enhanced categorization from diagnosis if available
+      const category =
+        this.state.diagnosis?.type ?? (isChunkLoadError(error) ? 'chunk-load' : 'render-runtime');
+
+      const reportedId = reportFrontendError({
         error,
         errorInfo: { componentStack: errorInfo.componentStack ?? undefined },
-        category: isChunkLoadError(error) ? 'chunk-load' : 'render-runtime',
+        category,
         context,
       });
+
+      // Use reported ID if available
+      if (reportedId) {
+        this.errorId = reportedId;
+      }
     } catch (e) {
       // Swallow all exceptions to prevent infinite loop
       logFallback('[ErrorReporter] Failed to report', e);
-      this.errorId = 'fallback';
+      // Keep pre-generated error ID
     }
   }
 
@@ -93,34 +122,68 @@ export class ChunkLoadErrorBoundary extends React.Component<
     window.location.reload();
   };
 
+  private readonly handleContactSupport = (): void => {
+    const { diagnosis } = this.state;
+    const errorType = diagnosis?.type ?? 'render-runtime';
+
+    const mailtoLink = generateContactSupportLink({
+      errorType,
+      errorId: this.errorId,
+      pathname: window.location.pathname,
+      timestamp: new Date().toISOString(),
+    });
+
+    window.location.href = mailtoLink;
+  };
+
   public override render(): React.ReactNode {
-    const { error } = this.state;
+    const { error, diagnosis } = this.state;
     if (!error) return this.props.children;
 
-    const chunkFailure = isChunkLoadError(error);
-    const displayErrorId = this.errorId ?? 'pending';
+    // Use diagnosis if available, otherwise fall back to basic check
+    const title =
+      diagnosis?.title ?? (isChunkLoadError(error) ? 'System Updated' : 'Page Render Error');
+    const description =
+      diagnosis?.description ?? 'An unexpected error occurred. Please reload the page.';
+    const showContactSupport = diagnosis?.showContactSupport ?? true;
+    const showRetry = diagnosis?.showRetry ?? false;
 
     return (
       <main
         className="min-vh-100 d-flex align-items-center justify-content-center bg-light p-4"
         data-testid="application-error-boundary"
       >
-        <section className="card shadow-sm border-0 text-center p-4" role="alert">
+        <section
+          className="card shadow-sm border-0 text-center p-4"
+          role="alert"
+          style={{ maxWidth: '500px' }}
+        >
           <i className="bi bi-exclamation-triangle-fill text-warning fs-1 mb-3" />
-          <h1 className="h4">
-            {chunkFailure ? 'A new version of Open ACE is available' : 'Open ACE could not render'}
-          </h1>
-          <p className="text-muted mb-2">
-            {chunkFailure
-              ? 'This page is still using files from an older version. Reload to continue safely.'
-              : 'An unexpected display error occurred. Reload the page to try again.'}
-          </p>
+          <h1 className="h4 mb-3">{title}</h1>
+          <p className="text-muted mb-2">{description}</p>
           <p className="text-muted small mb-4">
-            Error ID: <code className="user-select-all">{displayErrorId}</code>
+            Error ID: <code className="user-select-all">{this.errorId}</code>
           </p>
-          <button className="btn btn-primary" type="button" onClick={this.reloadPage}>
-            Reload page
-          </button>
+          <div className="d-flex gap-2 justify-content-center">
+            <button className="btn btn-primary" type="button" onClick={this.reloadPage}>
+              Reload page
+            </button>
+            {showRetry && (
+              <button className="btn btn-outline-secondary" type="button" onClick={this.reloadPage}>
+                Retry
+              </button>
+            )}
+            {showContactSupport && (
+              <button
+                className="btn btn-outline-primary"
+                type="button"
+                onClick={this.handleContactSupport}
+              >
+                <i className="bi bi-envelope me-1" />
+                Contact Support
+              </button>
+            )}
+          </div>
         </section>
       </main>
     );
