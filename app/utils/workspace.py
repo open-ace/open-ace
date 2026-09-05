@@ -27,10 +27,12 @@ __all__ = [
     "SHARED_GROUP_NAME",
     "ensure_shared_group",
     "add_user_to_shared_group",
+    "remove_user_from_shared_group",
     "setup_shared_project_permissions",
     "estimate_file_count_fast",
     "setup_permissions_with_depth_limit",
     "verify_setgid_support",
+    "get_user_project_active_sessions",
 ]
 
 # Shared project group name (Issue #2730)
@@ -812,3 +814,72 @@ def _log_permission_audit(
     except Exception as e:
         # Audit log failure should not affect main operation
         logger.error(f"Failed to record permission audit log: {e}")
+
+
+# ============================================================================
+# Shared Project User Management (Issue #3275)
+# ============================================================================
+
+
+def remove_user_from_shared_group(system_account: str) -> bool:
+    """Remove a user from the shared project group.
+
+    Uses 'gpasswd -d' to remove user from the group.
+    Idempotent: if user is not in the group, returns True.
+
+    Args:
+        system_account: Username to remove from the shared group.
+
+    Returns:
+        True if user was removed or not in the group.
+    """
+    if not _is_docker_multi_user_mode():
+        return True  # Skip in non-Docker mode
+
+    result = subprocess.run(
+        ["gpasswd", "-d", system_account, SHARED_GROUP_NAME],
+        capture_output=True,
+        text=True,
+    )
+
+    # gpasswd -d exit codes:
+    # 0 - success (user removed)
+    # 3 - user not in group (treat as success for idempotency)
+    # other - error
+    if result.returncode == 3:
+        logger.info(f"User '{system_account}' not in group, already removed")
+        return True
+
+    if result.returncode != 0:
+        logger.error(f"Failed to remove {system_account} from shared group: {result.stderr}")
+        return False
+
+    logger.info(f"User '{system_account}' removed from shared group")
+    return True
+
+
+def get_user_project_active_sessions(user_id: int, project_id: int) -> int:
+    """Get the number of active sessions for a user in a project.
+
+    Args:
+        user_id: User ID to check.
+        project_id: Project ID to check.
+
+    Returns:
+        Number of active sessions for the user in the project.
+    """
+    try:
+        from app.repositories.database import Database
+
+        db = Database()
+        query = """
+            SELECT COUNT(*) as count
+            FROM agent_sessions
+            WHERE user_id = ? AND project_id = ? AND status = 'active'
+        """
+        result = db.fetch_one(query, (user_id, project_id))
+        return result["count"] if result else 0
+
+    except Exception as e:
+        logger.error(f"Failed to get active sessions: {e}")
+        return 0

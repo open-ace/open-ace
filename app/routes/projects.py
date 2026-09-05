@@ -562,6 +562,340 @@ def api_get_project_users(project_id):
     )
 
 
+# ============================================================================
+# Project User Management API (Issue #3275)
+# ============================================================================
+
+
+@projects_bp.route("/projects/<int:project_id>/users", methods=["POST"])
+def api_add_project_user(project_id):
+    """Add a user to a shared project.
+
+    Issue #3275: Allows project creator or admin to add a visible user.
+
+    Request body:
+        - user_id: int - User ID to add
+
+    Returns:
+        JSON response with success status or error message.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Parse request
+    data = request.get_json() or {}
+    target_user_id = data.get("user_id")
+
+    if not target_user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    # Get target user
+    target_user = user_repo.get_user_by_id(target_user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Tenant isolation: can only add users from the same tenant
+    target_tenant_id = target_user.get("tenant_id")
+    project_tenant_id = project.tenant_id
+
+    if target_tenant_id != project_tenant_id:
+        return jsonify({"error": "Cannot add user from different tenant"}), 403
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Get target user's system_account
+    target_system_account = target_user.get("system_account")
+    if not target_system_account:
+        return jsonify({"error": "User has no system account, cannot manage file permissions"}), 400
+
+    # Add user to shared group (file system permission)
+    from app.utils.workspace import add_user_to_shared_group
+
+    if not add_user_to_shared_group(target_system_account):
+        return jsonify({"error": "Failed to add user to shared group"}), 500
+
+    # Add user to project in database
+    project_repo.add_user_project(target_user_id, project_id)
+
+    # Record audit log
+    _log_project_user_audit(
+        action="project_user_add",
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=target_user_id,
+        tenant_id=tenant_id,
+    )
+
+    logger.info(f"User {target_user_id} added to project {project_id} by {user_id}")
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "User added successfully",
+            "user_id": target_user_id,
+        }
+    )
+
+
+@projects_bp.route("/projects/<int:project_id>/users/<int:target_user_id>", methods=["DELETE"])
+def api_remove_project_user(project_id, target_user_id):
+    """Remove a user from a shared project.
+
+    Issue #3275: Allows project creator or admin to remove a visible user.
+
+    Returns:
+        JSON response with success status or error message.
+        If user has active sessions, includes active_sessions count.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Creator protection: cannot remove project creator
+    if project.created_by == target_user_id:
+        return jsonify({"error": "Cannot remove project creator"}), 403
+
+    # Get target user
+    target_user = user_repo.get_user_by_id(target_user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Check for active sessions
+    from app.utils.workspace import get_user_project_active_sessions
+
+    active_sessions = get_user_project_active_sessions(target_user_id, project_id)
+
+    # Get target user's system_account
+    target_system_account = target_user.get("system_account")
+
+    # Remove user from project in database
+    if not project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id):
+        return jsonify({"error": "Failed to remove user from project"}), 500
+
+    # Remove user from shared group (file system permission)
+    if target_system_account:
+        from app.utils.workspace import remove_user_from_shared_group
+
+        if not remove_user_from_shared_group(target_system_account):
+            logger.warning(f"Failed to remove {target_system_account} from shared group")
+
+    # Record audit log
+    _log_project_user_audit(
+        action="project_user_remove",
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=target_user_id,
+        tenant_id=tenant_id,
+    )
+
+    logger.info(f"User {target_user_id} removed from project {project_id} by {user_id}")
+
+    response = {
+        "success": True,
+        "message": "User removed successfully",
+        "user_id": target_user_id,
+    }
+
+    # Include active sessions count if > 0
+    if active_sessions > 0:
+        response["active_sessions"] = active_sessions
+        response["warning"] = f"User has {active_sessions} active session(s)"
+
+    return jsonify(response)
+
+
+@projects_bp.route("/projects/<int:project_id>/users", methods=["PUT"])
+def api_batch_update_project_users(project_id):
+    """Batch update visible users for a shared project.
+
+    Issue #3275: Allows project creator or admin to batch update user list.
+    Maximum 50 users per batch.
+
+    Request body:
+        - user_ids: list[int] - List of target user IDs
+
+    Returns:
+        JSON response with added/removed/existing user lists.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Parse request
+    data = request.get_json() or {}
+    target_user_ids = data.get("user_ids", [])
+
+    # Validate batch size
+    if len(target_user_ids) > 50:
+        return jsonify({"error": "Maximum 50 users per batch operation"}), 400
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Track group operations for rollback
+    added_accounts = []
+    operation_errors = []
+
+    # Get current users
+    current_users = project_repo.get_project_users(project_id, tenant_id=tenant_id)
+    current_user_ids = {u.user_id for u in current_users}
+    target_user_id_set = set(target_user_ids)
+
+    # Calculate differences
+    to_add = target_user_id_set - current_user_ids
+    to_remove = current_user_id_set - target_user_id_set
+
+    # Creator protection: cannot remove project creator
+    if project.created_by in to_remove:
+        to_remove.discard(project.created_by)
+        operation_errors.append("Cannot remove project creator")
+
+    # Add users
+    from app.utils.workspace import add_user_to_shared_group
+
+    for target_user_id in to_add:
+        target_user = user_repo.get_user_by_id(target_user_id)
+        if not target_user:
+            operation_errors.append(f"User {target_user_id} not found")
+            continue
+
+        # Tenant isolation
+        target_tenant_id = target_user.get("tenant_id")
+        if target_tenant_id != project.tenant_id:
+            operation_errors.append(f"User {target_user_id} is from different tenant")
+            continue
+
+        # Get system_account
+        target_system_account = target_user.get("system_account")
+        if not target_system_account:
+            operation_errors.append(f"User {target_user_id} has no system account")
+            continue
+
+        # Add to shared group
+        if not add_user_to_shared_group(target_system_account):
+            operation_errors.append(f"Failed to add user {target_user_id} to shared group")
+            # Rollback previous additions
+            for account in added_accounts:
+                from app.utils.workspace import remove_user_from_shared_group
+
+                remove_user_from_shared_group(account)
+            return jsonify({"error": f"Failed to add user {target_user_id} to shared group"}), 500
+
+        added_accounts.append(target_system_account)
+
+        # Add to database
+        project_repo.add_user_project(target_user_id, project_id)
+
+    # Remove users
+    for target_user_id in to_remove:
+        target_user = user_repo.get_user_by_id(target_user_id)
+        if target_user:
+            target_system_account = target_user.get("system_account")
+            if target_system_account:
+                from app.utils.workspace import remove_user_from_shared_group
+
+                if not remove_user_from_shared_group(target_system_account):
+                    logger.warning(f"Failed to remove {target_system_account} from shared group")
+
+        # Remove from database
+        project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id)
+
+    # Record audit log
+    _log_project_user_audit(
+        action="project_user_batch_update",
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=None,
+        tenant_id=tenant_id,
+        details={
+            "user_ids": target_user_ids,
+            "added": list(to_add),
+            "removed": list(to_remove),
+            "errors": operation_errors if operation_errors else None,
+        },
+    )
+
+    logger.info(
+        f"Batch update for project {project_id}: added {len(to_add)}, removed {len(to_remove)} by {user_id}"
+    )
+
+    response = {
+        "success": True,
+        "message": "Users updated successfully",
+        "added": list(to_add),
+        "removed": list(to_remove),
+        "existing": list(target_user_id_set & current_user_ids),
+    }
+
+    if operation_errors:
+        response["errors"] = operation_errors
+
+    return jsonify(response)
+
+
+def _log_project_user_audit(
+    action: str,
+    user_id: int,
+    project_id: int,
+    target_user_id: int | None,
+    tenant_id: int | None,
+    details: dict | None = None,
+) -> None:
+    """Record audit log for project user management."""
+    try:
+        from app.modules.governance.audit_logger import AuditLogger
+
+        audit_logger = AuditLogger()
+
+        log_details = details or {}
+        if target_user_id is not None:
+            log_details["target_user_id"] = target_user_id
+
+        audit_logger.log_action(
+            action=action,
+            user_id=user_id,
+            resource_type="project",
+            resource_id=str(project_id),
+            details=log_details,
+            tenant_id=tenant_id,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to record project user audit log: {e}")
+
+
 @projects_bp.route("/projects/<int:project_id>/fix-permissions", methods=["POST"])
 def api_fix_project_permissions(project_id):
     """Fix shared project directory permissions.

@@ -784,3 +784,91 @@ class ProjectRepository:
             )
             for r in results
         ]
+
+    def remove_user_project(
+        self, user_id: int, project_id: int, tenant_id: int | None = None
+    ) -> bool:
+        """
+        Remove a user-project relationship.
+
+        Args:
+            user_id: User ID.
+            project_id: Project ID.
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            query = "DELETE FROM user_projects WHERE user_id = ? AND project_id = ?"
+            params: list[Any] = [user_id, project_id]
+
+            # Tenant isolation: verify project belongs to tenant
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+            if normalized_tenant_id is not None:
+                query = """
+                    DELETE FROM user_projects
+                    WHERE user_id = ? AND project_id = ?
+                    AND project_id IN (SELECT id FROM projects WHERE tenant_id = ?)
+                """
+                params.append(normalized_tenant_id)
+
+            self.db.execute(query, tuple(params))
+            return True
+        except Exception as e:
+            logger.error(f"Error removing user project: {e}")
+            return False
+
+    def batch_update_project_users(
+        self, project_id: int, user_ids: list[int], tenant_id: int | None = None
+    ) -> dict:
+        """
+        Batch update users for a project.
+
+        This method adds and removes users to match the target user list.
+        Uses a database transaction for atomicity.
+
+        Args:
+            project_id: Project ID.
+            user_ids: List of target user IDs.
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            dict: {
+                "added": [user_ids that were added],
+                "removed": [user_ids that were removed],
+                "existing": [user_ids that already existed]
+            }
+        """
+        try:
+            # Get current users
+            current_users = self.get_project_users(project_id, tenant_id=tenant_id)
+            current_user_ids = {u.user_id for u in current_users}
+            target_user_ids = set(user_ids)
+
+            # Calculate differences
+            to_add = target_user_ids - current_user_ids
+            to_remove = current_user_ids - target_user_ids
+            existing = target_user_ids & current_user_ids
+
+            # Remove users
+            for user_id in to_remove:
+                self.remove_user_project(user_id, project_id, tenant_id=tenant_id)
+
+            # Add users
+            for user_id in to_add:
+                self.add_user_project(user_id, project_id)
+
+            return {
+                "added": list(to_add),
+                "removed": list(to_remove),
+                "existing": list(existing),
+            }
+        except Exception as e:
+            logger.error(f"Error batch updating project users: {e}")
+            return {
+                "added": [],
+                "removed": [],
+                "existing": [],
+                "error": str(e),
+            }

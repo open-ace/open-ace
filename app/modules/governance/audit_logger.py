@@ -174,6 +174,11 @@ class AuditAction(Enum):
     SHARED_PROJECT_PERMISSION_SETUP_START = "shared_project_permission_setup_start"
     SHARED_PROJECT_PERMISSION_SETUP_COMPLETE = "shared_project_permission_setup_complete"
 
+    # Project user management actions (Issue #3275)
+    PROJECT_USER_ADD = "project_user_add"
+    PROJECT_USER_REMOVE = "project_user_remove"
+    PROJECT_USER_BATCH_UPDATE = "project_user_batch_update"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -877,7 +882,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "permission": {
             "label": "Permission",
             "i18n_key": "categoryPermission",
-            "resource_types": ["user"],
+            "resource_types": ["user", "project"],
             "actions": [
                 {
                     "value": "permission_grant",
@@ -898,6 +903,21 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "shared_project_permission_setup_complete",
                     "label": "Shared Project Permission Setup Complete",
                     "i18n_key": "actionSharedProjectPermissionSetupComplete",
+                },
+                {
+                    "value": "project_user_add",
+                    "label": "Project User Add",
+                    "i18n_key": "actionProjectUserAdd",
+                },
+                {
+                    "value": "project_user_remove",
+                    "label": "Project User Remove",
+                    "i18n_key": "actionProjectUserRemove",
+                },
+                {
+                    "value": "project_user_batch_update",
+                    "label": "Project User Batch Update",
+                    "i18n_key": "actionProjectUserBatchUpdate",
                 },
             ],
         },
