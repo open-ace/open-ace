@@ -775,7 +775,7 @@ def api_batch_update_project_users(project_id):
 
     # Calculate differences
     to_add = target_user_id_set - current_user_ids
-    to_remove = current_user_id_set - target_user_id_set
+    to_remove = current_user_ids - target_user_id_set
 
     # Creator protection: cannot remove project creator
     if project.created_by in to_remove:

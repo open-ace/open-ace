@@ -69,7 +69,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
         setUsers(response.users || []);
       } catch (err) {
         const error = err as { message?: string };
-        setError(error.message || 'Failed to load users');
+        setError(error.message ?? 'Failed to load users');
       } finally {
         setIsLoading(false);
       }
@@ -84,7 +84,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
     const query = searchQuery.toLowerCase();
     return users.filter(
       (user) =>
-        user.username?.toLowerCase().includes(query) ||
+        user.username?.toLowerCase().includes(query) ??
         `user ${user.user_id}`.toLowerCase().includes(query)
     );
   }, [users, searchQuery]);
@@ -100,7 +100,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
       onSuccess();
     } catch (err) {
       const error = err as { message?: string };
-      toast.error(error.message || t('failedToAddUser', language));
+      toast.error(error.message ?? t('failedToAddUser', language));
     }
   };
 
@@ -125,7 +125,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
       onSuccess();
     } catch (err) {
       const error = err as { message?: string };
-      toast.error(error.message || t('failedToRemoveUser', language));
+      toast.error(error.message ?? t('failedToRemoveUser', language));
     } finally {
       setIsRemoving(false);
     }
@@ -184,11 +184,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
                   </Badge>
                 </h6>
               </div>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowAddModal(true)}
-              >
+              <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
                 <i className="bi bi-plus-lg me-1" />
                 {t('addUser', language)}
               </Button>
@@ -213,9 +209,7 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
                 icon="bi-person-x"
                 title={t('noUsersFound', language)}
                 description={
-                  searchQuery
-                    ? t('noUsersMatchSearch', language)
-                    : t('noVisibleUsers', language)
+                  searchQuery ? t('noUsersMatchSearch', language) : t('noVisibleUsers', language)
                 }
               />
             ) : (

@@ -8,14 +8,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Modal,
-  Button,
-  Loading,
-  Error,
-  EmptyState,
-  Avatar,
-} from '@/components/common';
+import { Modal, Button, Loading, Error, EmptyState, Avatar } from '@/components/common';
 import { useToast } from '@/components/common';
 import { getUsers, type User } from '@/api/users';
 
@@ -59,7 +52,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
         setUsers(response.users || []);
       } catch (err) {
         const error = err as { message?: string };
-        setError(error.message || 'Failed to load users');
+        setError(error.message ?? 'Failed to load users');
       } finally {
         setIsLoading(false);
       }
@@ -76,8 +69,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (user) =>
-          user.username?.toLowerCase().includes(query) ||
-          user.email?.toLowerCase().includes(query)
+          user.username?.toLowerCase().includes(query) ?? user.email?.toLowerCase().includes(query)
       );
     }
 
@@ -117,11 +109,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
           <Button variant="secondary" onClick={handleClose}>
             {t('cancel', language)}
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleConfirm}
-            disabled={selectedUserId === null}
-          >
+          <Button variant="primary" onClick={handleConfirm} disabled={selectedUserId === null}>
             {t('confirm', language)}
           </Button>
         </>
@@ -156,10 +144,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
               }
             />
           ) : (
-            <div
-              className="list-group"
-              style={{ maxHeight: '300px', overflowY: 'auto' }}
-            >
+            <div className="list-group" style={{ maxHeight: '300px', overflowY: 'auto' }}>
               {availableUsers.map((user) => (
                 <button
                   key={user.id}
@@ -174,9 +159,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
                     <div className="fw-medium">{user.username}</div>
                     <small className="text-muted">{user.email}</small>
                   </div>
-                  {selectedUserId === user.id && (
-                    <i className="bi bi-check-circle-fill" />
-                  )}
+                  {selectedUserId === user.id && <i className="bi bi-check-circle-fill" />}
                 </button>
               ))}
             </div>
@@ -186,9 +169,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
           {selectedUserId !== null && (
             <div className="mt-2 text-muted small">
               {t('selectedUser', language, {
-                username:
-                  availableUsers.find((u) => u.id === selectedUserId)?.username ||
-                  'User',
+                username: availableUsers.find((u) => u.id === selectedUserId)?.username ?? 'User',
               })}
             </div>
           )}

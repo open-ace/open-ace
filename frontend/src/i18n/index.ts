@@ -1105,7 +1105,8 @@ export const translations: Record<Language, Translations> = {
     manageProjectUsers: 'Manage Project Users',
     removeUser: 'Remove User',
     confirmRemoveUser: 'Confirm Remove User',
-    confirmRemoveUserMessage: 'Are you sure you want to remove user "{{username}}" from this project?',
+    confirmRemoveUserMessage:
+      'Are you sure you want to remove user "{{username}}" from this project?',
     currentVisibleUsers: 'Current Visible Users',
     searchUsers: 'Search users...',
     noUsersFound: 'No users found',
@@ -5248,7 +5249,8 @@ export const translations: Record<Language, Translations> = {
     manageProjectUsers: 'プロジェクトユーザー管理',
     removeUser: 'ユーザー削除',
     confirmRemoveUser: 'ユーザー削除の確認',
-    confirmRemoveUserMessage: 'ユーザー"{{username}}"をこのプロジェクトから削除してもよろしいですか？',
+    confirmRemoveUserMessage:
+      'ユーザー"{{username}}"をこのプロジェクトから削除してもよろしいですか？',
     currentVisibleUsers: '現在の表示ユーザー',
     searchUsers: 'ユーザーを検索...',
     noUsersFound: 'ユーザーが見つかりません',
