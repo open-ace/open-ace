@@ -33,7 +33,6 @@ export interface ValidateKeyResponse {
   valid: boolean;
   fingerprint: string | null;
   error: string | null;
-  generated_key?: string;
 }
 
 export interface RotateKeyRequest {

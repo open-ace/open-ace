@@ -1,7 +1,7 @@
 """Add encryption_keys table
 
-Revision ID: add_encryption_keys_table
-Revises:
+Revision ID: 20260905_001
+Revises: 20260827_001
 Create Date: 2026-09-05
 
 存储加密密钥元数据（指纹、状态、版本等）
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = 'add_encryption_keys_table'
-down_revision = None
+revision = '20260905_001'
+down_revision = '20260827_001'
 branch_labels = None
 depends_on = None
 

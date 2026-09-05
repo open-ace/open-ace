@@ -56,7 +56,7 @@ const RotateConfirmModal: React.FC<RotateConfirmModalProps> = ({
   const [confirmationText, setConfirmationText] = useState('');
 
   const handleConfirm = useCallback(() => {
-    onConfirm(confirmationText);
+    onConfirm(confirmationText.trim().toUpperCase());
   }, [confirmationText, onConfirm]);
 
   const handleClose = useCallback(() => {

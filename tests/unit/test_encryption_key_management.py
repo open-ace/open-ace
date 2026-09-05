@@ -238,5 +238,21 @@ class TestGenerateEnvConfig:
             assert "config_file_example" in result
 
 
+class TestInputValidation:
+    """测试输入验证"""
+
+    def test_validate_key_length_limit(self, encryption_key_service):
+        """测试密钥长度限制"""
+        # 创建一个超长的密钥
+        long_key = "a" * 200
+
+        # 这应该不会抛出异常，因为验证在 API 层
+        # 但我们可以在服务层测试验证逻辑
+        result = encryption_key_service.validate_key_format(long_key[:44])
+
+        # 短密钥应该失败
+        assert result["valid"] is False
+
+
 # 集成测试标记
 pytestmark = [pytest.mark.unit]

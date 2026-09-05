@@ -64,19 +64,28 @@ def validate_key():
         data = request.get_json() or {}
         key = data.get("key")
 
+        # 输入验证：限制密钥长度以防止 DoS 攻击
+        if key and len(key) > 100:  # Fernet 密钥长度约 44 字符
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "密钥长度超过限制",
+                }
+            ), 400
+
         service = get_encryption_key_service()
 
-        # 如果没有提供密钥，生成并验证新密钥
+        # 如果没有提供密钥，生成并验证新密钥（不返回密钥明文）
         if not key:
             new_key = service.generate_new_key()
             validation = service.validate_key_format(new_key)
+            # 安全考虑：不返回生成的密钥明文，仅返回验证结果
             return jsonify(
                 {
                     "success": True,
                     "valid": validation["valid"],
                     "fingerprint": validation["fingerprint"],
                     "error": validation["error"],
-                    "generated_key": new_key,  # 仅在生成模式下返回
                 }
             )
 
