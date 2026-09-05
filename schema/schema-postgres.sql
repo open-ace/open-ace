@@ -834,6 +834,25 @@ CREATE SEQUENCE email_notification_logs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE email_notification_logs_id_seq OWNED BY email_notification_logs.id;
+CREATE TABLE encryption_keys (
+    key_id integer NOT NULL,
+    key_fingerprint character varying(64) NOT NULL,
+    status character varying(20) NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    rotated_at timestamp without time zone,
+    config_version bigint NOT NULL,
+    last_used_at timestamp without time zone
+);
+
+CREATE SEQUENCE encryption_keys_key_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE encryption_keys_key_id_seq OWNED BY encryption_keys.key_id;
 CREATE TABLE feishu_settings (
     app_id character varying(255) NOT NULL,
     app_secret_enc text NOT NULL,
@@ -2595,6 +2614,8 @@ ALTER TABLE ONLY dingtalk_settings ALTER COLUMN id SET DEFAULT nextval('dingtalk
 
 ALTER TABLE ONLY email_notification_logs ALTER COLUMN id SET DEFAULT nextval('email_notification_logs_id_seq'::regclass);
 
+ALTER TABLE ONLY encryption_keys ALTER COLUMN key_id SET DEFAULT nextval('encryption_keys_key_id_seq'::regclass);
+
 ALTER TABLE ONLY feishu_settings ALTER COLUMN id SET DEFAULT nextval('feishu_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
@@ -2827,6 +2848,12 @@ ALTER TABLE ONLY dingtalk_settings
 
 ALTER TABLE ONLY email_notification_logs
     ADD CONSTRAINT email_notification_logs_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY encryption_keys
+    ADD CONSTRAINT encryption_keys_key_fingerprint_key UNIQUE (key_fingerprint);
+
+ALTER TABLE ONLY encryption_keys
+    ADD CONSTRAINT encryption_keys_pkey PRIMARY KEY (key_id);
 
 ALTER TABLE ONLY feishu_settings
     ADD CONSTRAINT feishu_settings_pkey PRIMARY KEY (id);
@@ -3457,6 +3484,14 @@ CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user
 --
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
+
+CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys USING btree (key_fingerprint);
+
+
+--
+--
+
+CREATE INDEX idx_encryption_keys_status ON encryption_keys USING btree (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
 
