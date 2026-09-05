@@ -877,7 +877,8 @@ def get_user_project_active_sessions(user_id: int, project_id: int) -> int:
             WHERE user_id = ? AND project_id = ? AND status = 'active'
         """
         with get_db_connection() as conn:
-            cursor = conn.execute(query, (user_id, project_id))
+            cursor = conn.cursor()
+            cursor.execute(query, (user_id, project_id))
             result = cursor.fetchone()
             return result[0] if result else 0
 

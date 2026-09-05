@@ -76,7 +76,7 @@ class TestGetUserProjectActiveSessions(unittest.TestCase):
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = [5]
-        mock_conn.execute.return_value = mock_cursor
+        mock_conn.cursor.return_value = mock_cursor
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_get_conn.return_value = mock_conn
@@ -84,7 +84,7 @@ class TestGetUserProjectActiveSessions(unittest.TestCase):
         result = get_user_project_active_sessions(1, 100)
 
         self.assertEqual(result, 5)
-        mock_conn.execute.assert_called_once()
+        mock_cursor.execute.assert_called_once()
 
     @patch("app.repositories.database.get_db_connection")
     def test_returns_zero_when_no_sessions(self, mock_get_conn):
@@ -92,7 +92,7 @@ class TestGetUserProjectActiveSessions(unittest.TestCase):
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = [0]
-        mock_conn.execute.return_value = mock_cursor
+        mock_conn.cursor.return_value = mock_cursor
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_get_conn.return_value = mock_conn

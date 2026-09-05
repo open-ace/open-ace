@@ -860,7 +860,8 @@ class ProjectRepository:
                     """
                     params.append(normalized_tenant_id)
 
-                cursor = conn.execute(query, tuple(params))
+                cursor = conn.cursor()
+                cursor.execute(query, tuple(params))
                 current_user_ids = {row[0] for row in cursor.fetchall()}
                 target_user_ids = set(user_ids)
 
@@ -885,12 +886,14 @@ class ProjectRepository:
                         """
                         params.append(normalized_tenant_id)
 
-                    conn.execute(query, tuple(params))
+                    cursor = conn.cursor()
+                    cursor.execute(query, tuple(params))
 
                 # Add users
                 for user_id in to_add:
+                    cursor = conn.cursor()
                     if self.db.is_postgresql:
-                        conn.execute(
+                        cursor.execute(
                             """
                             INSERT INTO user_projects (user_id, project_id, first_access_at, last_access_at)
                             VALUES (?, ?, ?, ?)
@@ -899,7 +902,7 @@ class ProjectRepository:
                             (user_id, project_id, now, now, now),
                         )
                     else:
-                        conn.execute(
+                        cursor.execute(
                             """
                             INSERT OR REPLACE INTO user_projects
                             (user_id, project_id, first_access_at, last_access_at,
