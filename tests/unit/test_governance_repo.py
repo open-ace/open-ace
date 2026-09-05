@@ -974,7 +974,9 @@ class TestUploadAuthStatus:
     def test_get_upload_auth_status_production_weak_key_runtime_error(self):
         """Should raise RuntimeError for weak key in production mode."""
         with patch("app.utils.security_env.get_upload_auth_key") as mock_get_key:
-            mock_get_key.side_effect = RuntimeError("UPLOAD_AUTH_KEY uses an insecure placeholder value")
+            mock_get_key.side_effect = RuntimeError(
+                "UPLOAD_AUTH_KEY uses an insecure placeholder value"
+            )
             with patch("app.utils.security_mode.get_security_mode") as mock_mode:
                 mock_mode.return_value = MagicMock(value="production")
 

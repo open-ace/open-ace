@@ -1163,7 +1163,7 @@ class GovernanceRepository:
             - checked_at: str
         """
         from app.utils.security_env import get_upload_auth_key
-        from app.utils.security_mode import SecurityMode, get_security_mode, is_weak_secret_value
+        from app.utils.security_mode import get_security_mode, is_weak_secret_value
 
         # Get security mode
         try:
@@ -1195,7 +1195,7 @@ class GovernanceRepository:
                 validation_error = "密钥使用不安全的占位符值"
                 fix_suggestion = (
                     '请生成强密钥：python3 -c "import secrets; print(secrets.token_hex(32))"，'
-                    '并在 .env 或 Kubernetes ConfigMap 中设置 UPLOAD_AUTH_KEY'
+                    "并在 .env 或 Kubernetes ConfigMap 中设置 UPLOAD_AUTH_KEY"
                 )
             elif not validation_error:
                 # Key not set
