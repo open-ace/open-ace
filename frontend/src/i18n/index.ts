@@ -2489,6 +2489,19 @@ export const translations: Record<Language, Translations> = {
     ssrfConfigSourceDefault: 'Default',
     ssrfNoCustomConfig: 'No custom configuration, using default values',
     ssrfDomains: 'domains',
+
+    // Upload Authentication (Issue #3327)
+    uploadAuthStatus: 'Upload Authentication Status',
+    uploadAuthEnabled: 'Enabled',
+    uploadAuthDisabled: 'Not Configured',
+    uploadAuthInvalid: 'Invalid Configuration',
+    uploadAuthKeyLength: 'Key Length',
+    uploadAuthConfigHint: 'Configure via environment variable UPLOAD_AUTH_KEY',
+    uploadAuthWeakKeyWarning: 'Key strength insufficient',
+    uploadAuthCheckedAt: 'Configuration status checked at',
+    uploadAuthFixSuggestion: 'Fix Suggestion',
+    uploadAuthViewDocs: 'View Deployment Docs',
+    securityMode: 'Security Mode',
   },
   zh: {
     // Common
@@ -4881,6 +4894,19 @@ export const translations: Record<Language, Translations> = {
     ssrfConfigSourceDefault: '默认值',
     ssrfNoCustomConfig: '无自定义配置，当前使用默认值',
     ssrfDomains: '个域名',
+
+    // 上传鉴权 (Issue #3327)
+    uploadAuthStatus: '上传鉴权状态',
+    uploadAuthEnabled: '已启用',
+    uploadAuthDisabled: '未配置',
+    uploadAuthInvalid: '配置无效',
+    uploadAuthKeyLength: '密钥长度',
+    uploadAuthConfigHint: '需通过环境变量 UPLOAD_AUTH_KEY 配置',
+    uploadAuthWeakKeyWarning: '密钥强度不足',
+    uploadAuthCheckedAt: '配置状态检查时间',
+    uploadAuthFixSuggestion: '修复建议',
+    uploadAuthViewDocs: '查看部署文档',
+    securityMode: '安全模式',
   },
   ja: {
     // Common

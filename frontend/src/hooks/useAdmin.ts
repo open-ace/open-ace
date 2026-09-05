@@ -250,6 +250,16 @@ export function useResetSsrfConfig() {
   });
 }
 
+// Upload Authentication Status Hooks (Issue #3327)
+export function useUploadAuthStatus() {
+  return useQuery({
+    queryKey: ['admin', 'upload-auth-status'],
+    queryFn: () => governanceApi.getUploadAuthStatus(),
+    staleTime: 30_000, // 30秒缓存，提升状态更新及时性
+    refetchOnWindowFocus: true, // 窗口聚焦时刷新
+  });
+}
+
 // Password Policy Hooks (accessible to all authenticated users)
 export function usePasswordPolicy() {
   return useQuery({
