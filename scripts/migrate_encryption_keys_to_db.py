@@ -140,7 +140,9 @@ def main():
     parser = argparse.ArgumentParser(description="Migrate encryption keys to database")
     parser.add_argument("--dry-run", action="store_true", help="Preview mode, no actual changes")
     parser.add_argument("--execute", action="store_true", help="Execute migration")
-    parser.add_argument("--db-url", default=None, help="Database URL (defaults to environment variable)")
+    parser.add_argument(
+        "--db-url", default=None, help="Database URL (defaults to environment variable)"
+    )
 
     args = parser.parse_args()
 
