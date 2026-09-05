@@ -44,6 +44,7 @@ import { matchesPatterns } from '@/utils/categoryConflictDetection';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
 import { ProjectEditModal } from './ProjectEditModal';
+import { ProjectUserManagement } from './ProjectUserManagement';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -207,6 +208,7 @@ export const ProjectManagement: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<ProjectStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editTarget, setEditTarget] = useState<ProjectStats | null>(null);
+  const [userManageTarget, setUserManageTarget] = useState<ProjectStats | null>(null);
   const [sortKey, setSortKey] = useState<CategorySortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -610,6 +612,19 @@ export const ProjectManagement: React.FC = () => {
                                             <i className="bi bi-eye me-1" />
                                             {t('viewDetails', language)}
                                           </Button>
+                                          {workspace.is_shared && (
+                                            <Button
+                                              variant="outline-info"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e?.stopPropagation();
+                                                setUserManageTarget(workspace);
+                                              }}
+                                            >
+                                              <i className="bi bi-people me-1" />
+                                              {t('manageUsers', language)}
+                                            </Button>
+                                          )}
                                           <Button
                                             variant="outline-secondary"
                                             size="sm"
@@ -696,6 +711,15 @@ export const ProjectManagement: React.FC = () => {
         onClose={() => setEditTarget(null)}
         onSuccess={fetchData}
         project={editTarget}
+      />
+
+      {/* Project User Management Modal (Issue #3275) */}
+      <ProjectUserManagement
+        isOpen={userManageTarget !== null}
+        onClose={() => setUserManageTarget(null)}
+        projectId={userManageTarget?.project_id ?? 0}
+        projectName={userManageTarget?.project_name ?? userManageTarget?.project_path ?? ''}
+        onSuccess={fetchData}
       />
 
       {/* Category Management Modal */}

@@ -34,6 +34,7 @@ export interface ProjectStats {
   project_id: number;
   project_path: string;
   project_name: string | null;
+  is_shared: boolean;
   total_users: number;
   total_sessions: number;
   total_tokens: number;
@@ -124,4 +125,70 @@ export async function updateProject(
  */
 export async function deleteProject(projectId: number): Promise<{ success: boolean }> {
   return apiClient.delete<{ success: boolean }>(`/api/projects/${projectId}`);
+}
+
+// ============================================================================
+// Project User Management API (Issue #3275)
+// ============================================================================
+
+/**
+ * Add a user to a project
+ * Issue #3275: Project user management
+ */
+export async function addProjectUser(
+  projectId: number,
+  userId: number
+): Promise<{ success: boolean; message: string; user_id: number }> {
+  return apiClient.post<{ success: boolean; message: string; user_id: number }>(
+    `/api/projects/${projectId}/users`,
+    { user_id: userId }
+  );
+}
+
+/**
+ * Remove a user from a project
+ * Issue #3275: Project user management
+ */
+export async function removeProjectUser(
+  projectId: number,
+  userId: number
+): Promise<{
+  success: boolean;
+  message: string;
+  user_id: number;
+  active_sessions?: number;
+  warning?: string;
+}> {
+  return apiClient.delete<{
+    success: boolean;
+    message: string;
+    user_id: number;
+    active_sessions?: number;
+    warning?: string;
+  }>(`/api/projects/${projectId}/users/${userId}`);
+}
+
+/**
+ * Batch update project users
+ * Issue #3275: Project user management
+ */
+export async function batchUpdateProjectUsers(
+  projectId: number,
+  userIds: number[]
+): Promise<{
+  success: boolean;
+  message: string;
+  added: number[];
+  removed: number[];
+  existing: number[];
+  errors?: string[];
+}> {
+  return apiClient.put<{
+    success: boolean;
+    message: string;
+    added: number[];
+    removed: number[];
+    existing: number[];
+    errors?: string[];
+  }>(`/api/projects/${projectId}/users`, { user_ids: userIds });
 }
