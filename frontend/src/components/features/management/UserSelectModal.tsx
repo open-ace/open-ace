@@ -35,7 +35,7 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
   isOpen,
   onClose,
   onSelect,
-  projectId,
+  projectId: _projectId,
   existingUserIds,
 }) => {
   const language = useLanguage();
@@ -58,8 +58,8 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
         const response = await getUsers();
         setUsers(response.users || []);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load users';
-        setError(errorMessage);
+        const error = err as { message?: string };
+        setError(error.message || 'Failed to load users');
       } finally {
         setIsLoading(false);
       }

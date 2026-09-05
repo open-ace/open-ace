@@ -34,6 +34,7 @@ export interface ProjectStats {
   project_id: number;
   project_path: string;
   project_name: string | null;
+  is_shared: boolean;
   total_users: number;
   total_sessions: number;
   total_tokens: number;

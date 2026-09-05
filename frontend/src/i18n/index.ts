@@ -1103,7 +1103,6 @@ export const translations: Record<Language, Translations> = {
 
     // Project User Management (Issue #3275)
     manageProjectUsers: 'Manage Project Users',
-    addUser: 'Add User',
     removeUser: 'Remove User',
     confirmRemoveUser: 'Confirm Remove User',
     confirmRemoveUserMessage: 'Are you sure you want to remove user "{{username}}" from this project?',
@@ -1116,7 +1115,6 @@ export const translations: Record<Language, Translations> = {
     userRemovedSuccessfully: 'User removed successfully',
     failedToAddUser: 'Failed to add user',
     failedToRemoveUser: 'Failed to remove user',
-    selectUser: 'Select User',
     pleaseSelectAUser: 'Please select a user',
     noAvailableUsers: 'No available users',
     allUsersAlreadyAdded: 'All users are already in the project',
@@ -3581,7 +3579,6 @@ export const translations: Record<Language, Translations> = {
 
     // Project User Management (Issue #3275)
     manageProjectUsers: '管理项目用户',
-    addUser: '添加用户',
     removeUser: '移除用户',
     confirmRemoveUser: '确认移除用户',
     confirmRemoveUserMessage: '确定要从项目中移除用户"{{username}}"吗？',
@@ -3594,7 +3591,6 @@ export const translations: Record<Language, Translations> = {
     userRemovedSuccessfully: '用户移除成功',
     failedToAddUser: '添加用户失败',
     failedToRemoveUser: '移除用户失败',
-    selectUser: '选择用户',
     pleaseSelectAUser: '请选择一个用户',
     noAvailableUsers: '没有可用用户',
     allUsersAlreadyAdded: '所有用户已添加到项目中',
@@ -5250,7 +5246,6 @@ export const translations: Record<Language, Translations> = {
 
     // Project User Management (Issue #3275)
     manageProjectUsers: 'プロジェクトユーザー管理',
-    addUser: 'ユーザー追加',
     removeUser: 'ユーザー削除',
     confirmRemoveUser: 'ユーザー削除の確認',
     confirmRemoveUserMessage: 'ユーザー"{{username}}"をこのプロジェクトから削除してもよろしいですか？',
@@ -5263,7 +5258,6 @@ export const translations: Record<Language, Translations> = {
     userRemovedSuccessfully: 'ユーザーが正常に削除されました',
     failedToAddUser: 'ユーザーの追加に失敗しました',
     failedToRemoveUser: 'ユーザーの削除に失敗しました',
-    selectUser: 'ユーザー選択',
     pleaseSelectAUser: 'ユーザーを選択してください',
     noAvailableUsers: '利用可能なユーザーがいません',
     allUsersAlreadyAdded: 'すべてのユーザーが既にプロジェクトに追加されています',
@@ -7470,7 +7464,6 @@ export const translations: Record<Language, Translations> = {
 
     // Project User Management (Issue #3275)
     manageProjectUsers: '프로젝트 사용자 관리',
-    addUser: '사용자 추가',
     removeUser: '사용자 제거',
     confirmRemoveUser: '사용자 제거 확인',
     confirmRemoveUserMessage: '사용자 "{{username}}"을(를) 이 프로젝트에서 제거하시겠습니까?',
@@ -7483,7 +7476,6 @@ export const translations: Record<Language, Translations> = {
     userRemovedSuccessfully: '사용자가 성공적으로 제거되었습니다',
     failedToAddUser: '사용자 추가 실패',
     failedToRemoveUser: '사용자 제거 실패',
-    selectUser: '사용자 선택',
     pleaseSelectAUser: '사용자를 선택하세요',
     noAvailableUsers: '사용 가능한 사용자가 없습니다',
     allUsersAlreadyAdded: '모든 사용자가 이미 프로젝트에 추가되었습니다',

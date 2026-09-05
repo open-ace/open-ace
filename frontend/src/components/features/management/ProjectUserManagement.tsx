@@ -54,7 +54,6 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<UserProject | null>(null);
-  const [activeSessions, setActiveSessions] = useState<number>(0);
   const [isRemoving, setIsRemoving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -69,8 +68,8 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
         const response = await getProjectUsers(projectId);
         setUsers(response.users || []);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load users';
-        setError(errorMessage);
+        const error = err as { message?: string };
+        setError(error.message || 'Failed to load users');
       } finally {
         setIsLoading(false);
       }
@@ -259,7 +258,6 @@ export const ProjectUserManagement: React.FC<ProjectUserManagementProps> = ({
                             size="sm"
                             onClick={() => {
                               setRemoveTarget(user);
-                              setActiveSessions(0);
                             }}
                           >
                             <i className="bi bi-trash me-1" />
