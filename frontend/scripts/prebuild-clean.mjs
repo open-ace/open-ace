@@ -24,11 +24,11 @@ const PRESERVE_FILES = [
   '.openace-release-assets.json', // Version detection file
 ];
 
-function isPreserved(name: string): boolean {
+function isPreserved(name) {
   return PRESERVE_FILES.includes(name);
 }
 
-function cleanDistDirectory(): void {
+function cleanDistDirectory() {
   if (!existsSync(DIST_DIR)) {
     console.log('Dist directory does not exist, nothing to clean');
     return;
