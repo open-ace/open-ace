@@ -25,6 +25,7 @@ from app.auth.decorators import (
     security_annotated,
 )
 from app.models.user import User
+from app.modules.governance.audit_logger import AuditAction
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 from app.services.permission_task_service import (
@@ -629,8 +630,10 @@ def api_add_project_user(project_id):
     project_repo.add_user_project(target_user_id, project_id)
 
     # Record audit log
+    from app.modules.governance.audit_logger import AuditAction
+
     _log_project_user_audit(
-        action="project_user_add",
+        action=AuditAction.PROJECT_USER_ADD,
         user_id=user_id,
         project_id=project_id,
         target_user_id=target_user_id,
@@ -703,8 +706,10 @@ def api_remove_project_user(project_id, target_user_id):
             logger.warning(f"Failed to remove {target_system_account} from shared group")
 
     # Record audit log
+    from app.modules.governance.audit_logger import AuditAction
+
     _log_project_user_audit(
-        action="project_user_remove",
+        action=AuditAction.PROJECT_USER_REMOVE,
         user_id=user_id,
         project_id=project_id,
         target_user_id=target_user_id,
@@ -808,8 +813,8 @@ def api_batch_update_project_users(project_id):
         return jsonify({"error": operation_errors[0], "errors": operation_errors}), 400
 
     # Phase 2: Execute all group operations
-    added_accounts = []
-    removed_accounts = []
+    added_accounts: list[str] = []
+    removed_accounts: list[str] = []
 
     # Add users to shared group
     for user_info in users_to_add:
@@ -858,8 +863,10 @@ def api_batch_update_project_users(project_id):
         return jsonify({"error": "Database operation failed"}), 500
 
     # Record audit log
+    from app.modules.governance.audit_logger import AuditAction
+
     _log_project_user_audit(
-        action="project_user_batch_update",
+        action=AuditAction.PROJECT_USER_BATCH_UPDATE,
         user_id=user_id,
         project_id=project_id,
         target_user_id=None,
@@ -887,7 +894,7 @@ def api_batch_update_project_users(project_id):
 
 
 def _log_project_user_audit(
-    action: str,
+    action: AuditAction,
     user_id: int,
     project_id: int,
     target_user_id: int | None,

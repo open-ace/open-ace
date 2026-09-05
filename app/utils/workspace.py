@@ -880,7 +880,7 @@ def get_user_project_active_sessions(user_id: int, project_id: int) -> int:
             cursor = conn.cursor()
             cursor.execute(query, (user_id, project_id))
             result = cursor.fetchone()
-            return result[0] if result else 0
+            return int(result[0]) if result else 0
 
     except Exception as e:
         logger.error(f"Failed to get active sessions: {e}")
