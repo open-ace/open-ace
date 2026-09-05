@@ -5619,8 +5619,6 @@ export const translations: Record<Language, Translations> = {
     // Encryption Key Management
     encryptionKeyManagement: '暗号化鍵管理',
     keyId: '鍵ID',
-    status: 'ステータス',
-    active: 'アクティブ',
     deprecated: '非推奨',
     revoked: '失効',
     fingerprint: 'フィンガープリント',
@@ -7814,8 +7812,6 @@ export const translations: Record<Language, Translations> = {
     // Encryption Key Management
     encryptionKeyManagement: '암호화 키 관리',
     keyId: '키 ID',
-    status: '상태',
-    active: '활성',
     deprecated: '사용되지 않음',
     revoked: '취소됨',
     fingerprint: '핑거프린트',

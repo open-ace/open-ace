@@ -16,14 +16,12 @@ import hashlib
 import json
 import logging
 import os
-import secrets
 import time
-from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 
 from app.repositories.database import Database
-from app.utils.encryption_key_registry import EncryptionKeyRegistry, KeyStatus, get_registry
+from app.utils.encryption_key_registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +52,11 @@ class EncryptionKeyService:
             try:
                 decoded = base64.urlsafe_b64decode(key)
             except Exception as e:
-                return {"valid": False, "fingerprint": None, "error": f"无效的 base64 编码: {str(e)}"}
+                return {
+                    "valid": False,
+                    "fingerprint": None,
+                    "error": f"无效的 base64 编码: {str(e)}",
+                }
 
             # 验证长度
             if len(decoded) != 32:
@@ -68,7 +70,11 @@ class EncryptionKeyService:
             try:
                 Fernet(key.encode() if isinstance(key, str) else key)
             except Exception as e:
-                return {"valid": False, "fingerprint": None, "error": f"无法创建 Fernet 对象: {str(e)}"}
+                return {
+                    "valid": False,
+                    "fingerprint": None,
+                    "error": f"无法创建 Fernet 对象: {str(e)}",
+                }
 
             # 计算指纹
             fingerprint = self._compute_fingerprint(key)
@@ -210,14 +216,12 @@ class EncryptionKeyService:
             密钥列表和状态信息
         """
         # 从数据库获取元数据
-        keys_data = self.db.fetch_all(
-            """
+        keys_data = self.db.fetch_all("""
             SELECT key_id, key_fingerprint, status, created_at, rotated_at,
                    config_version, last_used_at
             FROM encryption_keys
             ORDER BY key_id
-            """
-        )
+            """)
 
         keys = []
         for row in keys_data:
@@ -229,7 +233,9 @@ class EncryptionKeyService:
                     "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                     "rotated_at": row["rotated_at"].isoformat() if row["rotated_at"] else None,
                     "config_version": row["config_version"],
-                    "last_used_at": row["last_used_at"].isoformat() if row["last_used_at"] else None,
+                    "last_used_at": (
+                        row["last_used_at"].isoformat() if row["last_used_at"] else None
+                    ),
                 }
             )
 
@@ -769,7 +775,9 @@ class EncryptionKeyService:
                 namespace=namespace,
                 body={
                     "data": {
-                        "OPENACE_ENCRYPTION_KEYS": base64.b64encode(new_config_json.encode()).decode()
+                        "OPENACE_ENCRYPTION_KEYS": base64.b64encode(
+                            new_config_json.encode()
+                        ).decode()
                     }
                 },
             )
@@ -846,7 +854,9 @@ class EncryptionKeyService:
         """
         try:
             # 删除新插入的密钥
-            self.db.execute("DELETE FROM encryption_keys WHERE status = 'active' AND key_id != ?", (old_key_id,))
+            self.db.execute(
+                "DELETE FROM encryption_keys WHERE status = 'active' AND key_id != ?", (old_key_id,)
+            )
 
             # 恢复旧密钥状态
             self.db.execute(

@@ -15,7 +15,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import admin_required, platform_admin_required
+from app.auth.decorators import platform_admin_required
 from app.repositories.database import Database
 from app.services.encryption_key_service import EncryptionKeyService
 
@@ -66,12 +66,15 @@ def validate_key():
 
         # 输入验证：限制密钥长度以防止 DoS 攻击
         if key and len(key) > 100:  # Fernet 密钥长度约 44 字符
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "密钥长度超过限制",
-                }
-            ), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "密钥长度超过限制",
+                    }
+                ),
+                400,
+            )
 
         service = get_encryption_key_service()
 
@@ -139,7 +142,11 @@ def rotate_key():
         if result["success"]:
             return jsonify(result)
         else:
-            status_code = 409 if result.get("error") in ["rotation_in_progress", "config_version_conflict"] else 400
+            status_code = (
+                409
+                if result.get("error") in ["rotation_in_progress", "config_version_conflict"]
+                else 400
+            )
             return jsonify(result), status_code
 
     except Exception as e:
@@ -265,10 +272,14 @@ def re_encrypt_pre_check():
 
         # 扫描所有加密字段
         # 1. SSO providers
-        sso_secrets = db.fetch_all("SELECT name, config FROM sso_providers WHERE config IS NOT NULL")
+        sso_secrets = db.fetch_all(
+            "SELECT name, config FROM sso_providers WHERE config IS NOT NULL"
+        )
 
         # 2. API keys
-        api_keys = db.fetch_all("SELECT id, encrypted_key FROM api_keys WHERE encrypted_key IS NOT NULL")
+        api_keys = db.fetch_all(
+            "SELECT id, encrypted_key FROM api_keys WHERE encrypted_key IS NOT NULL"
+        )
 
         # 统计密文格式
         ciphertext_stats = {
@@ -379,17 +390,19 @@ def re_encrypt():
     try:
         data = request.get_json() or {}
         confirmation = data.get("confirmation", "")
-        batch_size = data.get("batch_size", 100)
 
         # 验证确认文本
         if confirmation != "RE-ENCRYPT":
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "invalid_confirmation",
-                    "message": "确认文本必须为 'RE-ENCRYPT'",
-                }
-            ), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "invalid_confirmation",
+                        "message": "确认文本必须为 'RE-ENCRYPT'",
+                    }
+                ),
+                400,
+            )
 
         from app.utils.encryption_key_registry import get_registry
 
@@ -405,7 +418,9 @@ def re_encrypt():
         failed = []
 
         # 重新加密 SSO secrets
-        sso_secrets = db.fetch_all("SELECT name, config FROM sso_providers WHERE config IS NOT NULL")
+        sso_secrets = db.fetch_all(
+            "SELECT name, config FROM sso_providers WHERE config IS NOT NULL"
+        )
 
         for row in sso_secrets:
             try:
@@ -442,7 +457,9 @@ def re_encrypt():
                 failed.append({"type": "sso_provider", "name": row["name"], "error": str(e)})
 
         # 重新加密 API keys
-        api_keys = db.fetch_all("SELECT id, encrypted_key FROM api_keys WHERE encrypted_key IS NOT NULL")
+        api_keys = db.fetch_all(
+            "SELECT id, encrypted_key FROM api_keys WHERE encrypted_key IS NOT NULL"
+        )
 
         for row in api_keys:
             try:
