@@ -70,33 +70,41 @@ class TestRemoveUserFromSharedGroup(unittest.TestCase):
 class TestGetUserProjectActiveSessions(unittest.TestCase):
     """Tests for get_user_project_active_sessions function."""
 
-    @patch("app.repositories.database.Database")
-    def test_returns_session_count(self, mock_db_class):
+    @patch("app.repositories.database.get_db_connection")
+    def test_returns_session_count(self, mock_get_conn):
         """Should return the count of active sessions."""
-        mock_db = MagicMock()
-        mock_db.fetch_one.return_value = {"count": 5}
-        mock_db_class.return_value = mock_db
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = [5]
+        mock_conn.execute.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_get_conn.return_value = mock_conn
 
         result = get_user_project_active_sessions(1, 100)
 
         self.assertEqual(result, 5)
-        mock_db.fetch_one.assert_called_once()
+        mock_conn.execute.assert_called_once()
 
-    @patch("app.repositories.database.Database")
-    def test_returns_zero_when_no_sessions(self, mock_db_class):
+    @patch("app.repositories.database.get_db_connection")
+    def test_returns_zero_when_no_sessions(self, mock_get_conn):
         """Should return 0 when there are no active sessions."""
-        mock_db = MagicMock()
-        mock_db.fetch_one.return_value = {"count": 0}
-        mock_db_class.return_value = mock_db
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = [0]
+        mock_conn.execute.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_get_conn.return_value = mock_conn
 
         result = get_user_project_active_sessions(1, 100)
 
         self.assertEqual(result, 0)
 
-    @patch("app.repositories.database.Database")
-    def test_returns_zero_on_exception(self, mock_db_class):
+    @patch("app.repositories.database.get_db_connection")
+    def test_returns_zero_on_exception(self, mock_get_conn):
         """Should return 0 when an exception occurs."""
-        mock_db_class.side_effect = Exception("Database error")
+        mock_get_conn.side_effect = Exception("Database error")
 
         result = get_user_project_active_sessions(1, 100)
 

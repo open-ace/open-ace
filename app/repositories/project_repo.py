@@ -841,23 +841,97 @@ class ProjectRepository:
             }
         """
         try:
-            # Get current users
-            current_users = self.get_project_users(project_id, tenant_id=tenant_id)
-            current_user_ids = {u.user_id for u in current_users}
-            target_user_ids = set(user_ids)
+            # Execute all database operations in a transaction
+            with self.db.connection() as conn:
+                # Get current users within transaction
+                query = """
+                    SELECT up.user_id
+                    FROM user_projects up
+                    WHERE up.project_id = ?
+                """
+                params: list[Any] = [project_id]
+                normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+                if normalized_tenant_id is not None:
+                    query = """
+                        SELECT up.user_id
+                        FROM user_projects up
+                        INNER JOIN projects p ON p.id = up.project_id
+                        WHERE up.project_id = ? AND p.tenant_id = ?
+                    """
+                    params.append(normalized_tenant_id)
 
-            # Calculate differences
-            to_add = target_user_ids - current_user_ids
-            to_remove = current_user_ids - target_user_ids
-            existing = target_user_ids & current_user_ids
+                cursor = conn.execute(query, tuple(params))
+                current_user_ids = {row[0] for row in cursor.fetchall()}
+                target_user_ids = set(user_ids)
 
-            # Remove users
-            for user_id in to_remove:
-                self.remove_user_project(user_id, project_id, tenant_id=tenant_id)
+                # Calculate differences
+                to_add = target_user_ids - current_user_ids
+                to_remove = current_user_ids - target_user_ids
+                existing = target_user_ids & current_user_ids
 
-            # Add users
-            for user_id in to_add:
-                self.add_user_project(user_id, project_id)
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+                # Remove users
+                for user_id in to_remove:
+                    query = "DELETE FROM user_projects WHERE user_id = ? AND project_id = ?"
+                    params = [user_id, project_id]
+
+                    # Tenant isolation
+                    if normalized_tenant_id is not None:
+                        query = """
+                            DELETE FROM user_projects
+                            WHERE user_id = ? AND project_id = ?
+                            AND project_id IN (SELECT id FROM projects WHERE tenant_id = ?)
+                        """
+                        params.append(normalized_tenant_id)
+
+                    conn.execute(query, tuple(params))
+
+                # Add users
+                for user_id in to_add:
+                    if self.db.is_postgresql:
+                        conn.execute(
+                            """
+                            INSERT INTO user_projects (user_id, project_id, first_access_at, last_access_at)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT (user_id, project_id) DO UPDATE SET last_access_at = ?
+                            """,
+                            (user_id, project_id, now, now, now),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO user_projects
+                            (user_id, project_id, first_access_at, last_access_at,
+                             total_sessions, total_tokens, total_requests, total_duration_seconds)
+                            VALUES (?, ?, ?, ?,
+                                    COALESCE((SELECT total_sessions FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_tokens FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_requests FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_duration_seconds FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0))
+                            """,
+                            (
+                                user_id,
+                                project_id,
+                                now,
+                                now,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                            ),
+                        )
+
+                # Commit transaction
+                conn.commit()
 
             return {
                 "added": list(to_add),

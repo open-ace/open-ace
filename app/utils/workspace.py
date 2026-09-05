@@ -869,16 +869,17 @@ def get_user_project_active_sessions(user_id: int, project_id: int) -> int:
         Number of active sessions for the user in the project.
     """
     try:
-        from app.repositories.database import Database
+        from app.repositories.database import get_db_connection
 
-        db = Database()
         query = """
             SELECT COUNT(*) as count
             FROM agent_sessions
             WHERE user_id = ? AND project_id = ? AND status = 'active'
         """
-        result = db.fetch_one(query, (user_id, project_id))
-        return result["count"] if result else 0
+        with get_db_connection() as conn:
+            cursor = conn.execute(query, (user_id, project_id))
+            result = cursor.fetchone()
+            return result[0] if result else 0
 
     except Exception as e:
         logger.error(f"Failed to get active sessions: {e}")

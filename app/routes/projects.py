@@ -764,10 +764,6 @@ def api_batch_update_project_users(project_id):
     if not _is_docker_multi_user_mode():
         return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
 
-    # Track group operations for rollback
-    added_accounts = []
-    operation_errors = []
-
     # Get current users
     current_users = project_repo.get_project_users(project_id, tenant_id=tenant_id)
     current_user_ids = {u.user_id for u in current_users}
@@ -780,10 +776,12 @@ def api_batch_update_project_users(project_id):
     # Creator protection: cannot remove project creator
     if project.created_by in to_remove:
         to_remove.discard(project.created_by)
-        operation_errors.append("Cannot remove project creator")
 
-    # Add users
-    from app.utils.workspace import add_user_to_shared_group
+    # Phase 1: Validate all users before making any changes
+    from app.utils.workspace import add_user_to_shared_group, remove_user_from_shared_group
+
+    users_to_add = []
+    operation_errors = []
 
     for target_user_id in to_add:
         target_user = user_repo.get_user_by_id(target_user_id)
@@ -803,34 +801,61 @@ def api_batch_update_project_users(project_id):
             operation_errors.append(f"User {target_user_id} has no system account")
             continue
 
-        # Add to shared group
-        if not add_user_to_shared_group(target_system_account):
-            operation_errors.append(f"Failed to add user {target_user_id} to shared group")
-            # Rollback previous additions
+        users_to_add.append({"user_id": target_user_id, "system_account": target_system_account})
+
+    # If validation errors, return before making any changes
+    if operation_errors:
+        return jsonify({"error": operation_errors[0], "errors": operation_errors}), 400
+
+    # Phase 2: Execute all group operations
+    added_accounts = []
+    removed_accounts = []
+
+    # Add users to shared group
+    for user_info in users_to_add:
+        if not add_user_to_shared_group(user_info["system_account"]):
+            # Rollback previous group additions
             for account in added_accounts:
-                from app.utils.workspace import remove_user_from_shared_group
-
                 remove_user_from_shared_group(account)
-            return jsonify({"error": f"Failed to add user {target_user_id} to shared group"}), 500
+            return (
+                jsonify({"error": f"Failed to add user {user_info['user_id']} to shared group"}),
+                500,
+            )
+        added_accounts.append(user_info["system_account"])
 
-        added_accounts.append(target_system_account)
-
-        # Add to database
-        project_repo.add_user_project(target_user_id, project_id)
-
-    # Remove users
+    # Remove users from shared group
     for target_user_id in to_remove:
         target_user = user_repo.get_user_by_id(target_user_id)
         if target_user:
             target_system_account = target_user.get("system_account")
             if target_system_account:
-                from app.utils.workspace import remove_user_from_shared_group
-
                 if not remove_user_from_shared_group(target_system_account):
                     logger.warning(f"Failed to remove {target_system_account} from shared group")
+                else:
+                    removed_accounts.append(target_system_account)
 
-        # Remove from database
-        project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id)
+    # Phase 3: Execute database operations in transaction
+    try:
+        result = project_repo.batch_update_project_users(
+            project_id, list(target_user_id_set), tenant_id=tenant_id
+        )
+
+        if "error" in result:
+            # Rollback group operations
+            for account in added_accounts:
+                remove_user_from_shared_group(account)
+            for account in removed_accounts:
+                add_user_to_shared_group(account)
+            return jsonify({"error": result["error"]}), 500
+
+    except Exception as e:
+        logger.error(f"Database error during batch update: {e}")
+        # Rollback group operations
+        for account in added_accounts:
+            remove_user_from_shared_group(account)
+        for account in removed_accounts:
+            add_user_to_shared_group(account)
+        return jsonify({"error": "Database operation failed"}), 500
 
     # Record audit log
     _log_project_user_audit(
@@ -843,7 +868,6 @@ def api_batch_update_project_users(project_id):
             "user_ids": target_user_ids,
             "added": list(to_add),
             "removed": list(to_remove),
-            "errors": operation_errors if operation_errors else None,
         },
     )
 
@@ -858,9 +882,6 @@ def api_batch_update_project_users(project_id):
         "removed": list(to_remove),
         "existing": list(target_user_id_set & current_user_ids),
     }
-
-    if operation_errors:
-        response["errors"] = operation_errors
 
     return jsonify(response)
 
