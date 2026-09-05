@@ -353,6 +353,22 @@ vi.mock('@/hooks', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   })),
+  // Upload Authentication Status hooks (Issue #3327)
+  useUploadAuthStatus: vi.fn(() => ({
+    data: {
+      upload_auth_enabled: false,
+      key_length: null,
+      is_valid: false,
+      security_mode: 'development',
+      fix_suggestion: '请在环境变量中配置 UPLOAD_AUTH_KEY',
+      checked_at: '2025-01-01T00:00:00Z',
+      config_source: 'environment_variable',
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
   useUser: vi.fn(() => ({
     id: 1,
     username: 'testuser',
