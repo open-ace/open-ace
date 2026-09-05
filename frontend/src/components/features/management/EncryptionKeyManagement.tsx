@@ -15,23 +15,12 @@ import {
   useRotateKey,
   useEncryptionKeysSyncStatus,
   useReEncryptPreCheck,
-  useReEncrypt,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import type { Language } from '@/types';
-import {
-  Button,
-  Modal,
-  TextInput,
-  Loading,
-  Error,
-  EmptyState,
-  Badge,
-  PageRefreshControl,
-} from '@/components/common';
+import { Button, Modal, TextInput, Loading, Error, Badge } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { createMatcherConfig } from '@/utils';
 
 const statusBadgeVariant: Record<string, BadgeVariant> = {
   active: 'success',
@@ -40,9 +29,9 @@ const statusBadgeVariant: Record<string, BadgeVariant> = {
 };
 
 const statusText: Record<string, Record<Language, string>> = {
-  active: { zh: '活跃', en: 'Active' },
-  deprecated: { zh: '已弃用', en: 'Deprecated' },
-  revoked: { zh: '已撤销', en: 'Revoked' },
+  active: { zh: '活跃', en: 'Active', ja: 'アクティブ', ko: '활성' },
+  deprecated: { zh: '已弃用', en: 'Deprecated', ja: '非推奨', ko: '사용되지 않음' },
+  revoked: { zh: '已撤销', en: 'Revoked', ja: '失効', ko: '취소됨' },
 };
 
 /**
@@ -112,14 +101,8 @@ const RotateConfirmModal: React.FC<RotateConfirmModalProps> = ({
         </div>
 
         <div className="mb-4">
-          <label className="form-label">
-            {t('enterRotateToConfirm', language)}
-          </label>
-          <TextInput
-            value={confirmationText}
-            onChange={(e) => setConfirmationText(e.target.value)}
-            placeholder="ROTATE"
-          />
+          <label className="form-label">{t('enterRotateToConfirm', language)}</label>
+          <TextInput value={confirmationText} onChange={setConfirmationText} placeholder="ROTATE" />
         </div>
 
         <div className="d-flex justify-content-end gap-2">
@@ -174,16 +157,14 @@ const KeysListTab: React.FC<KeysListTabProps> = ({ keys, language }) => {
               <td>
                 <Badge variant={statusBadgeVariant[key.status] || 'secondary'}>
                   {statusText[key.status]?.[language] || key.status}
-                  {key.status === 'active' && (
-                    <i className="bi bi-check-circle-fill ms-1" />
-                  )}
+                  {key.status === 'active' && <i className="bi bi-check-circle-fill ms-1" />}
                 </Badge>
               </td>
               <td>
                 <code className="user-select-all">{key.fingerprint}</code>
               </td>
               <td>{key.created_at}</td>
-              <td>{key.last_used_at || '-'}</td>
+              <td>{key.last_used_at ?? '-'}</td>
             </tr>
           ))}
         </tbody>
@@ -221,25 +202,18 @@ export const EncryptionKeyManagement: React.FC = () => {
   const [showReEncryptModal, setShowReEncryptModal] = useState(false);
 
   // Hooks
-  const {
-    data: keysData,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useEncryptionKeys();
+  const { data: keysData, isLoading, isError, error, refetch } = useEncryptionKeys();
 
   const rotateKeyMutation = useRotateKey();
   const { data: syncStatus } = useEncryptionKeysSyncStatus();
   const reEncryptPreCheckMutation = useReEncryptPreCheck();
-  const reEncryptMutation = useReEncrypt();
 
   // Data
-  const keys = keysData?.keys || [];
-  const configVersion = keysData?.config_version || 0;
-  const primaryKeyId = keysData?.primary_key_id || 0;
-  const rotationInProgress = keysData?.rotation_in_progress || false;
-  const consistencyStatus = keysData?.consistency_status || 'unknown';
+  const keys = keysData?.keys ?? [];
+  const configVersion = keysData?.config_version ?? 0;
+  const primaryKeyId = keysData?.primary_key_id ?? 0;
+  const rotationInProgress = keysData?.rotation_in_progress ?? false;
+  const consistencyStatus = keysData?.consistency_status ?? 'unknown';
 
   // Handlers
   const handleRotateKey = useCallback(
@@ -290,10 +264,7 @@ export const EncryptionKeyManagement: React.FC = () => {
             <i className="bi bi-arrow-clockwise me-1" />
             {t('refresh', language)}
           </Button>
-          <Button
-            variant="outline-info"
-            onClick={() => setShowSyncStatusModal(true)}
-          >
+          <Button variant="outline-info" onClick={() => setShowSyncStatusModal(true)}>
             <i className="bi bi-diagram-3 me-1" />
             {t('syncStatus', language)}
           </Button>
@@ -313,9 +284,7 @@ export const EncryptionKeyManagement: React.FC = () => {
         <div className="col-md-3">
           <div className="card">
             <div className="card-body">
-              <h6 className="card-subtitle mb-2 text-muted">
-                {t('configVersion', language)}
-              </h6>
+              <h6 className="card-subtitle mb-2 text-muted">{t('configVersion', language)}</h6>
               <h3 className="card-title mb-0">{configVersion}</h3>
             </div>
           </div>
@@ -323,9 +292,7 @@ export const EncryptionKeyManagement: React.FC = () => {
         <div className="col-md-3">
           <div className="card">
             <div className="card-body">
-              <h6 className="card-subtitle mb-2 text-muted">
-                {t('primaryKeyId', language)}
-              </h6>
+              <h6 className="card-subtitle mb-2 text-muted">{t('primaryKeyId', language)}</h6>
               <h3 className="card-title mb-0">{primaryKeyId}</h3>
             </div>
           </div>
@@ -333,9 +300,7 @@ export const EncryptionKeyManagement: React.FC = () => {
         <div className="col-md-3">
           <div className="card">
             <div className="card-body">
-              <h6 className="card-subtitle mb-2 text-muted">
-                {t('syncStatus', language)}
-              </h6>
+              <h6 className="card-subtitle mb-2 text-muted">{t('syncStatus', language)}</h6>
               <h3 className="card-title mb-0">
                 {syncStatus?.sync_status === 'synchronized' ? (
                   <span className="text-success">
@@ -360,9 +325,7 @@ export const EncryptionKeyManagement: React.FC = () => {
         <div className="col-md-3">
           <div className="card">
             <div className="card-body">
-              <h6 className="card-subtitle mb-2 text-muted">
-                {t('consistencyStatus', language)}
-              </h6>
+              <h6 className="card-subtitle mb-2 text-muted">{t('consistencyStatus', language)}</h6>
               <h3 className="card-title mb-0">
                 {consistencyStatus === 'consistent' ? (
                   <span className="text-success">
@@ -385,14 +348,8 @@ export const EncryptionKeyManagement: React.FC = () => {
       {consistencyStatus === 'inconsistent' && (
         <div className="alert alert-danger mb-4" role="alert">
           <i className="bi bi-exclamation-triangle-fill me-2" />
-          <strong>{t('warning', language)}:</strong>{' '}
-          {t('inconsistencyDetected', language)}
-          <Button
-            variant="outline-danger"
-            size="sm"
-            className="ms-3"
-            onClick={handleRefresh}
-          >
+          <strong>{t('warning', language)}:</strong> {t('inconsistencyDetected', language)}
+          <Button variant="outline-danger" size="sm" className="ms-3" onClick={handleRefresh}>
             {t('runMigration', language)}
           </Button>
         </div>
@@ -429,10 +386,7 @@ export const EncryptionKeyManagement: React.FC = () => {
 
       {/* Actions */}
       <div className="mt-4 d-flex gap-2">
-        <Button
-          variant="outline-info"
-          onClick={() => setShowReEncryptModal(true)}
-        >
+        <Button variant="outline-info" onClick={() => setShowReEncryptModal(true)}>
           <i className="bi bi-arrow-repeat me-1" />
           {t('preCheckCiphertext', language)}
         </Button>
@@ -494,7 +448,7 @@ export const EncryptionKeyManagement: React.FC = () => {
                 {Object.entries(syncStatus.remote_versions).map(([name, version]) => (
                   <tr key={name}>
                     <td>{name}</td>
-                    <td>{version || '-'}</td>
+                    <td>{version ?? '-'}</td>
                     <td>
                       {version === syncStatus.local_version ? (
                         <Badge variant="success">
@@ -576,7 +530,8 @@ export const EncryptionKeyManagement: React.FC = () => {
                 ) : (
                   <div className="alert alert-warning">
                     <i className="bi bi-exclamation-triangle-fill me-2" />
-                    {t('someCiphertextsUndecryptable', language)}: {reEncryptPreCheckMutation.data.decryption_test.failed_count}
+                    {t('someCiphertextsUndecryptable', language)}:{' '}
+                    {reEncryptPreCheckMutation.data.decryption_test.failed_count}
                   </div>
                 )}
               </div>
@@ -597,10 +552,7 @@ export const EncryptionKeyManagement: React.FC = () => {
           )}
 
           <div className="d-flex justify-content-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setShowReEncryptModal(false)}
-            >
+            <Button variant="secondary" onClick={() => setShowReEncryptModal(false)}>
               {t('close', language)}
             </Button>
             <Button

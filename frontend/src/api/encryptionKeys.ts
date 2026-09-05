@@ -164,7 +164,14 @@ export const encryptionKeysApi = {
     offset?: number;
     action?: string;
   }): Promise<AuditLogResponse> {
-    return apiClient.get('/api/encryption-keys/audit-log', params);
+    const stringParams: Record<string, string> | undefined = params
+      ? Object.fromEntries(
+          Object.entries(params)
+            .filter(([_, v]) => v !== undefined)
+            .map(([k, v]) => [k, String(v)])
+        )
+      : undefined;
+    return apiClient.get('/api/encryption-keys/audit-log', stringParams);
   },
 
   /**
