@@ -112,7 +112,7 @@ const RotateConfirmModal: React.FC<RotateConfirmModalProps> = ({
           <Button
             variant="primary"
             onClick={handleConfirm}
-            disabled={confirmationText !== 'ROTATE' || isLoading}
+            disabled={confirmationText.trim().toUpperCase() !== 'ROTATE' || isLoading}
           >
             {isLoading ? t('rotating', language) : t('confirmRotate', language)}
           </Button>
