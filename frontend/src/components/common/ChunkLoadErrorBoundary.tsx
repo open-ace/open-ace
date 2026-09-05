@@ -93,7 +93,8 @@ export class ChunkLoadErrorBoundary extends React.Component<
 
       // Report error with context
       // Use enhanced categorization from diagnosis if available
-      const category = this.state.diagnosis?.type ?? (isChunkLoadError(error) ? 'chunk-load' : 'render-runtime');
+      const category =
+        this.state.diagnosis?.type ?? (isChunkLoadError(error) ? 'chunk-load' : 'render-runtime');
 
       const reportedId = reportFrontendError({
         error,
@@ -140,8 +141,10 @@ export class ChunkLoadErrorBoundary extends React.Component<
     if (!error) return this.props.children;
 
     // Use diagnosis if available, otherwise fall back to basic check
-    const title = diagnosis?.title ?? (isChunkLoadError(error) ? 'System Updated' : 'Page Render Error');
-    const description = diagnosis?.description ?? 'An unexpected error occurred. Please reload the page.';
+    const title =
+      diagnosis?.title ?? (isChunkLoadError(error) ? 'System Updated' : 'Page Render Error');
+    const description =
+      diagnosis?.description ?? 'An unexpected error occurred. Please reload the page.';
     const showContactSupport = diagnosis?.showContactSupport ?? true;
     const showRetry = diagnosis?.showRetry ?? false;
 
@@ -150,7 +153,11 @@ export class ChunkLoadErrorBoundary extends React.Component<
         className="min-vh-100 d-flex align-items-center justify-content-center bg-light p-4"
         data-testid="application-error-boundary"
       >
-        <section className="card shadow-sm border-0 text-center p-4" role="alert" style={{ maxWidth: '500px' }}>
+        <section
+          className="card shadow-sm border-0 text-center p-4"
+          role="alert"
+          style={{ maxWidth: '500px' }}
+        >
           <i className="bi bi-exclamation-triangle-fill text-warning fs-1 mb-3" />
           <h1 className="h4 mb-3">{title}</h1>
           <p className="text-muted mb-2">{description}</p>
@@ -162,11 +169,7 @@ export class ChunkLoadErrorBoundary extends React.Component<
               Reload page
             </button>
             {showRetry && (
-              <button
-                className="btn btn-outline-secondary"
-                type="button"
-                onClick={this.reloadPage}
-              >
+              <button className="btn btn-outline-secondary" type="button" onClick={this.reloadPage}>
                 Retry
               </button>
             )}

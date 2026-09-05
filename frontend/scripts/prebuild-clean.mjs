@@ -23,9 +23,16 @@ const DIST_DIR = resolve(import.meta.dirname, '..', 'static', 'js', 'dist');
 const PRESERVE_FILES = [
   '.openace-release-assets.json', // Version detection file
 ];
+const PRESERVE_DIRS = [
+  '.vite', // Vite manifest directory (preserve during build to prevent chunk 404)
+];
 
 function isPreserved(name) {
-  return PRESERVE_FILES.includes(name);
+  // Preserve specific files
+  if (PRESERVE_FILES.includes(name)) return true;
+  // Preserve specific directories
+  if (PRESERVE_DIRS.includes(name)) return true;
+  return false;
 }
 
 function cleanDistDirectory() {

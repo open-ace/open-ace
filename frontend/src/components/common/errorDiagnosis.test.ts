@@ -5,12 +5,10 @@
  * Issue #3277: Enhanced error categorization.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 import {
   diagnoseError,
-  type ErrorType,
-  type ErrorDiagnosis,
   getBuildVersion,
   getCommitSha,
   generateContactSupportLink,

@@ -79,7 +79,8 @@ export function diagnoseError(error: Error): ErrorDiagnosis {
     return {
       type: 'render-runtime',
       title: 'Page Render Error',
-      description: 'An unexpected error occurred while rendering the page. The error has been logged.',
+      description:
+        'An unexpected error occurred while rendering the page. The error has been logged.',
       showContactSupport: true,
       showRetry: false,
     };
