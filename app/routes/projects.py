@@ -630,8 +630,6 @@ def api_add_project_user(project_id):
     project_repo.add_user_project(target_user_id, project_id)
 
     # Record audit log
-    from app.modules.governance.audit_logger import AuditAction
-
     _log_project_user_audit(
         action=AuditAction.PROJECT_USER_ADD,
         user_id=user_id,
@@ -706,8 +704,6 @@ def api_remove_project_user(project_id, target_user_id):
             logger.warning(f"Failed to remove {target_system_account} from shared group")
 
     # Record audit log
-    from app.modules.governance.audit_logger import AuditAction
-
     _log_project_user_audit(
         action=AuditAction.PROJECT_USER_REMOVE,
         user_id=user_id,
@@ -863,8 +859,6 @@ def api_batch_update_project_users(project_id):
         return jsonify({"error": "Database operation failed"}), 500
 
     # Record audit log
-    from app.modules.governance.audit_logger import AuditAction
-
     _log_project_user_audit(
         action=AuditAction.PROJECT_USER_BATCH_UPDATE,
         user_id=user_id,
