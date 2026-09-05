@@ -236,23 +236,23 @@ class TestCheckFrontendBuildOnStartup:
     def test_skip_via_env_var(self) -> None:
         """Should skip check when OPENACE_SKIP_FRONTEND_CHECK=1."""
         # Should not raise
-        check_frontend_build_on_startup(
-            flask_env="production", skip_env_var="1"
-        )
+        check_frontend_build_on_startup(flask_env="production", skip_env_var="1")
+        # Verify no exception was raised
+        assert True
 
     def test_development_mode(self) -> None:
         """Should not raise in development mode even if build is missing."""
         # Should not raise
-        check_frontend_build_on_startup(
-            flask_env="development", skip_env_var=""
-        )
+        check_frontend_build_on_startup(flask_env="development", skip_env_var="")
+        # Verify no exception was raised
+        assert True
 
     def test_testing_mode(self) -> None:
         """Should not raise in testing mode even if build is missing."""
         # Should not raise
-        check_frontend_build_on_startup(
-            flask_env="testing", skip_env_var=""
-        )
+        check_frontend_build_on_startup(flask_env="testing", skip_env_var="")
+        # Verify no exception was raised
+        assert True
 
     def test_production_mode_missing_build(self) -> None:
         """Should raise RuntimeError in production mode if build is missing."""
@@ -261,9 +261,7 @@ class TestCheckFrontendBuildOnStartup:
             mock_get_dist.return_value = Path("/nonexistent/path")
 
             with pytest.raises(RuntimeError) as exc_info:
-                check_frontend_build_on_startup(
-                    flask_env="production", skip_env_var=""
-                )
+                check_frontend_build_on_startup(flask_env="production", skip_env_var="")
 
             assert "Frontend build artifacts missing" in str(exc_info.value)
 

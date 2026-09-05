@@ -10,7 +10,6 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
 
 
 class CheckStatus(Enum):
@@ -35,7 +34,7 @@ class CheckResult:
     name: str
     status: CheckStatus
     message: str
-    error_level: Optional[ErrorLevel] = None
+    error_level: ErrorLevel | None = None
 
 
 @dataclass
@@ -43,9 +42,9 @@ class FrontendBuildCheckResult:
     """Overall result of frontend build integrity check."""
 
     success: bool
-    checks: List[CheckResult] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    checks: list[CheckResult] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def add_error(self, message: str) -> None:
         """Add an error message."""
@@ -295,7 +294,7 @@ def format_error_message(result: FrontendBuildCheckResult) -> str:
 
 
 def check_frontend_build_on_startup(
-    flask_env: Optional[str] = None, skip_env_var: Optional[str] = None
+    flask_env: str | None = None, skip_env_var: str | None = None
 ) -> None:
     """
     Check frontend build on application startup.
@@ -329,7 +328,9 @@ def check_frontend_build_on_startup(
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning("Frontend build artifacts are missing. Management platform UI will not be available.")
+            logger.warning(
+                "Frontend build artifacts are missing. Management platform UI will not be available."
+            )
         return
 
     # In production, perform strict check
