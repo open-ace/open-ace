@@ -1144,3 +1144,78 @@ class GovernanceRepository:
         except Exception as e:
             logger.error(f"Error incrementing tenant keywords version: {e}")
             return False
+
+    def get_upload_auth_status(self) -> dict[str, Any]:
+        """
+        Get upload authentication status.
+
+        Issue #3327: Returns upload auth status without exposing the key value.
+
+        Returns:
+            Dict with upload auth status information, including:
+            - upload_auth_enabled: bool
+            - key_length: int | None
+            - config_source: str
+            - security_mode: str
+            - is_valid: bool
+            - validation_error: str | None
+            - fix_suggestion: str | None
+            - checked_at: str
+        """
+        from app.utils.security_env import get_upload_auth_key
+        from app.utils.security_mode import get_security_mode, is_weak_secret_value
+
+        # Get security mode
+        try:
+            mode = get_security_mode()
+            security_mode = mode.value
+        except Exception:
+            security_mode = "unknown"
+
+        # Get upload auth key (may raise RuntimeError in production with weak key)
+        upload_auth_key = None
+        validation_error = None
+        fix_suggestion = None
+        is_valid = True
+
+        # Call get_upload_auth_key() - will raise RuntimeError in production with weak key
+        # We don't catch it here, let it propagate to the API layer
+        upload_auth_key = get_upload_auth_key()
+
+        # Determine status
+        if upload_auth_key is None:
+            # Key not set or weak key in development mode
+            upload_auth_enabled = False
+            key_length = None
+
+            # Check if this is due to weak key
+            raw_key = os.environ.get("UPLOAD_AUTH_KEY")
+            if raw_key and is_weak_secret_value(raw_key):
+                is_valid = False
+                validation_error = "密钥使用不安全的占位符值"
+                fix_suggestion = (
+                    '请生成强密钥：python3 -c "import secrets; print(secrets.token_hex(32))"，'
+                    "并在 .env 或 Kubernetes ConfigMap 中设置 UPLOAD_AUTH_KEY"
+                )
+            elif not validation_error:
+                # Key not set
+                fix_suggestion = "请参考部署文档配置 UPLOAD_AUTH_KEY 环境变量"
+        else:
+            # Key is set and valid
+            upload_auth_enabled = True
+            key_length = len(upload_auth_key)
+            is_valid = True
+
+        # Get current timestamp
+        checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        return {
+            "upload_auth_enabled": upload_auth_enabled,
+            "key_length": key_length,
+            "config_source": "environment_variable",
+            "security_mode": security_mode,
+            "is_valid": is_valid,
+            "validation_error": validation_error,
+            "fix_suggestion": fix_suggestion,
+            "checked_at": checked_at,
+        }

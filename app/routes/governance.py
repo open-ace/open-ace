@@ -897,6 +897,32 @@ def api_update_security_settings():
 
 
 # ============================================================================
+# Upload Authentication Status (Issue #3327)
+# ============================================================================
+
+
+@governance_bp.route("/security-settings/upload-auth-status", methods=["GET"])
+@admin_required
+def api_get_upload_auth_status():
+    """Get upload authentication status.
+
+    Issue #3327: Returns upload auth status without exposing the key value.
+    All admins can view upload auth status (global config, no tenant isolation).
+    """
+
+    try:
+        status = governance_repo.get_upload_auth_status()
+        return jsonify(status)
+    except RuntimeError as e:
+        # Production mode with weak key
+        logger.error("Upload auth key validation failed: %s", e)
+        return jsonify({"error": "Upload auth key configuration is invalid", "detail": str(e)}), 500
+    except Exception as e:
+        logger.exception("Failed to get upload auth status: %s", e)
+        return jsonify({"error": "Failed to get upload auth status"}), 500
+
+
+# ============================================================================
 # SSRF Protection Configuration (Issue #3328)
 # ============================================================================
 
