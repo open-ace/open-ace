@@ -403,10 +403,8 @@ def tool_accounts_app(tmp_db):
     """
     from flask import Flask
 
-    from app.routes.tool_accounts import tool_accounts_bp, tool_account_repo, user_repo
-    from app.services.tool_account_verification_service import (
-        get_tool_account_verification_service,
-    )
+    from app.routes.tool_accounts import tool_account_repo, tool_accounts_bp, user_repo
+    from app.services.tool_account_verification_service import get_tool_account_verification_service
 
     app = Flask(__name__)
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
@@ -423,10 +421,20 @@ def tool_accounts_app(tmp_db):
 
     # Also patch the verification service's database
     verification_service = get_tool_account_verification_service()
-    original_mapping_repo_db = verification_service.mapping_repo.db if verification_service.mapping_repo else None
-    original_user_repo_db = verification_service.user_repo.db if verification_service.user_repo else None
-    original_local_verifier_db = verification_service.local_verifier.db if verification_service.local_verifier else None
-    original_discovered_verifier_db = verification_service.discovered_verifier.db if verification_service.discovered_verifier else None
+    original_mapping_repo_db = (
+        verification_service.mapping_repo.db if verification_service.mapping_repo else None
+    )
+    original_user_repo_db = (
+        verification_service.user_repo.db if verification_service.user_repo else None
+    )
+    original_local_verifier_db = (
+        verification_service.local_verifier.db if verification_service.local_verifier else None
+    )
+    original_discovered_verifier_db = (
+        verification_service.discovered_verifier.db
+        if verification_service.discovered_verifier
+        else None
+    )
 
     if verification_service.mapping_repo:
         verification_service.mapping_repo.db = tmp_db

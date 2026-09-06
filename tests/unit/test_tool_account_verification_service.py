@@ -4,19 +4,20 @@ Unit tests for Tool Account Verification Service
 Issue #3273: Tests for tool account mapping verification functionality.
 """
 
-import pytest
 from datetime import datetime
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from app.models.user_tool_account import UserToolAccount, VerificationStatus
 from app.services.tool_account_verification_service import (
-    ToolAccountVerificationService,
-    LocalToolVerifier,
-    DiscoveredAccountVerifier,
-    _is_container_environment,
-    LOCAL_TOOL_TYPES,
-    EXTERNAL_PLATFORM_TYPES,
     DISCOVERED_TYPES,
+    EXTERNAL_PLATFORM_TYPES,
+    LOCAL_TOOL_TYPES,
+    DiscoveredAccountVerifier,
+    LocalToolVerifier,
+    ToolAccountVerificationService,
+    _is_container_environment,
 )
 
 
@@ -82,21 +83,21 @@ class TestContainerEnvironmentDetection:
 
     def test_detect_docker_when_dockerenv_exists(self):
         """Test detection when /.dockerenv exists."""
-        with patch('os.path.exists') as mock_exists:
+        with patch("os.path.exists") as mock_exists:
             mock_exists.return_value = True
             assert _is_container_environment() is True
 
     def test_detect_kubernetes_when_env_var_set(self):
         """Test detection when KUBERNETES_SERVICE_HOST is set."""
-        with patch.dict('os.environ', {'KUBERNETES_SERVICE_HOST': '10.0.0.1'}):
-            with patch('os.path.exists') as mock_exists:
+        with patch.dict("os.environ", {"KUBERNETES_SERVICE_HOST": "10.0.0.1"}):
+            with patch("os.path.exists") as mock_exists:
                 mock_exists.return_value = False
                 assert _is_container_environment() is True
 
     def test_not_container_when_neither_exists(self):
         """Test detection when neither Docker nor Kubernetes."""
-        with patch.dict('os.environ', {}, clear=True):
-            with patch('os.path.exists') as mock_exists:
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("os.path.exists") as mock_exists:
                 mock_exists.return_value = False
                 assert _is_container_environment() is False
 
@@ -149,7 +150,7 @@ class TestLocalToolVerifier:
 
         # Mock container environment
         with patch(
-            'app.services.tool_account_verification_service._is_container_environment'
+            "app.services.tool_account_verification_service._is_container_environment"
         ) as mock_container:
             mock_container.return_value = True
             result = verifier.verify(
