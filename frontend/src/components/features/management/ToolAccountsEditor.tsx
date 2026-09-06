@@ -371,7 +371,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
                   size="sm"
                   onClick={() => handleVerify(account.id)}
                   loading={verifyingId === account.id}
-                  disabled={verifyingId !== null}
+                  disabled={verifyingId !== null && verifyingId !== account.id}
                   style={{ fontSize: '0.7rem' }}
                 >
                   {language === 'zh' ? '验证' : 'Verify'}

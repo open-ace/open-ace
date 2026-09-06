@@ -684,44 +684,77 @@ class UserToolAccountRepository:
         id: int,
         verification_status: str,
         verification_result: str | None = None,
+        expected_version: int | None = None,
     ) -> UserToolAccount | None:
         """Update verification status for a mapping.
 
         Issue #3273: Update verification_status, verification_result, and verified_at.
+        Issue #3273 P0 fix: Add optimistic lock version check for concurrent safety.
 
         Args:
             id: Mapping ID.
             verification_status: New verification status (verified/failed/unverified).
             verification_result: Detailed verification result message.
+            expected_version: Expected version for optimistic lock. If None, no version check.
 
         Returns:
-            Updated mapping or None if not found.
+            Updated mapping or None if not found or version mismatch.
         """
         from app.repositories.database import is_postgresql
 
-        if is_postgresql():
-            query = """
-                UPDATE user_tool_accounts
-                SET verification_status = %s,
-                    verification_result = %s,
-                    verified_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-                RETURNING *
-            """
-            params = (verification_status, verification_result, id)
-            row = self.db.fetch_one(query, params, commit=True)
+        if expected_version is not None:
+            # With optimistic lock check
+            if is_postgresql():
+                query = """
+                    UPDATE user_tool_accounts
+                    SET verification_status = %s,
+                        verification_result = %s,
+                        verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP,
+                        version = version + 1
+                    WHERE id = %s AND version = %s
+                    RETURNING *
+                """
+                params = (verification_status, verification_result, id, expected_version)
+                row = self.db.fetch_one(query, params, commit=True)
+            else:
+                query = """
+                    UPDATE user_tool_accounts
+                    SET verification_status = ?,
+                        verification_result = ?,
+                        verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP,
+                        version = version + 1
+                    WHERE id = ? AND version = ?
+                """
+                params = (verification_status, verification_result, id, expected_version)
+                self.db.execute(query, params)
+                row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
         else:
-            query = """
-                UPDATE user_tool_accounts
-                SET verification_status = ?,
-                    verification_result = ?,
-                    verified_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """
-            params = (verification_status, verification_result, id)
-            self.db.execute(query, params)
-            row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
+            # Without optimistic lock check (backward compatibility)
+            if is_postgresql():
+                query = """
+                    UPDATE user_tool_accounts
+                    SET verification_status = %s,
+                        verification_result = %s,
+                        verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING *
+                """
+                params = (verification_status, verification_result, id)
+                row = self.db.fetch_one(query, params, commit=True)
+            else:
+                query = """
+                    UPDATE user_tool_accounts
+                    SET verification_status = ?,
+                        verification_result = ?,
+                        verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """
+                params = (verification_status, verification_result, id)
+                self.db.execute(query, params)
+                row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
 
         return self._row_to_model(row) if row else None

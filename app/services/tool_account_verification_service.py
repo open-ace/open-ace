@@ -11,7 +11,6 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 
 from app.models.user_tool_account import VerificationStatus
 from app.repositories.user_repo import UserRepository
@@ -374,6 +373,7 @@ class ToolAccountVerificationService:
             id=mapping_id,
             verification_status=verification_status,
             verification_result=result["message"],
+            expected_version=mapping.version,  # Optimistic lock check
         )
 
         # Prepare response
