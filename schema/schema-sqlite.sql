@@ -1550,7 +1550,7 @@ CREATE TABLE user_tool_accounts (
  tenant_id integer,
  version integer,
  verification_status TEXT,
- verification_result TEXT,
+ verification_result text,
  verified_at TIMESTAMP
 );
 
