@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20260906_001_add_tool_account_verification_fields'
-down_revision = '20260905_001_add_encryption_keys_table'
+down_revision = '20260905_001'
 branch_labels = None
 depends_on = None
 

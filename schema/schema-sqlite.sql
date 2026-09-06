@@ -1548,7 +1548,10 @@ CREATE TABLE user_tool_accounts (
  observed_message_count integer,
  created_by integer,
  tenant_id integer,
- version integer
+ version integer,
+ verification_status TEXT,
+ verification_result TEXT,
+ verified_at TIMESTAMP
 );
 
 CREATE TABLE users (

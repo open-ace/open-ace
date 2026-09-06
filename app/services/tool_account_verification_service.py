@@ -14,8 +14,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from app.models.user_tool_account import VerificationStatus
-from app.repositories.user_tool_account_repo import UserToolAccountRepository
 from app.repositories.user_repo import UserRepository
+from app.repositories.user_tool_account_repo import UserToolAccountRepository
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +383,7 @@ class ToolAccountVerificationService:
             if isinstance(updated_mapping.verified_at, str):
                 # SQLite returns string
                 verified_at_str = updated_mapping.verified_at
-            elif hasattr(updated_mapping.verified_at, 'isoformat'):
+            elif hasattr(updated_mapping.verified_at, "isoformat"):
                 # PostgreSQL returns datetime object
                 verified_at_str = updated_mapping.verified_at.isoformat()
 
