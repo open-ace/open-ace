@@ -1269,6 +1269,17 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "label": "Tool Account Mapping Batch",
                     "i18n_key": "actionToolAccountMappingBatch",
                 },
+                # Issue #3273: Tool account mapping verification actions
+                {
+                    "value": "tool_account_mapping_verify",
+                    "label": "Tool Account Mapping Verify",
+                    "i18n_key": "actionToolAccountMappingVerify",
+                },
+                {
+                    "value": "tool_account_mapping_verify_batch",
+                    "label": "Tool Account Mapping Verify Batch",
+                    "i18n_key": "actionToolAccountMappingVerifyBatch",
+                },
             ],
         },
     }
