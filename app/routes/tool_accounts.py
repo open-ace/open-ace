@@ -898,9 +898,7 @@ def verify_tool_account_mapping(id: int):
     }
 
     # Run verification
-    from app.services.tool_account_verification_service import (
-        get_tool_account_verification_service,
-    )
+    from app.services.tool_account_verification_service import get_tool_account_verification_service
 
     verification_service = get_tool_account_verification_service()
     result = verification_service.verify_mapping(id, context)
