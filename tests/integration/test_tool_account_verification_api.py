@@ -4,9 +4,10 @@ Integration tests for Tool Account Verification API
 Issue #3273: Integration tests for verification endpoints.
 """
 
-import pytest
 from datetime import datetime
 from unittest.mock import patch
+
+import pytest
 
 from app.models.user_tool_account import VerificationStatus
 

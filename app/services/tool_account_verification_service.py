@@ -40,10 +40,7 @@ def _is_container_environment() -> bool:
         return True
 
     # Check for Kubernetes
-    if os.environ.get("KUBERNETES_SERVICE_HOST"):
-        return True
-
-    return False
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST"))
 
 
 class ToolVerifier(ABC):
@@ -203,10 +200,7 @@ class LocalToolVerifier(ToolVerifier):
         user_dir = os.path.join(base_path, username)
 
         try:
-            if os.path.exists(user_dir):
-                return True
-            else:
-                return False
+            return bool(os.path.exists(user_dir))
         except PermissionError:
             logger.warning(f"Permission denied when checking user directory {user_dir}")
             return None
