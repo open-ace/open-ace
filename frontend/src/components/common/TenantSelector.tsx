@@ -42,18 +42,30 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   const language = useLanguage();
   const navigate = useNavigate();
   const user = useUser();
-  const {
-    tenants,
-    selectedTenantId,
-    selectTenant,
-    clearSelection,
-    isLoading,
-    error,
-    retry,
-  } = useAdminTenant();
+  const { tenants, selectedTenantId, selectTenant, clearSelection, isLoading, error, retry } =
+    useAdminTenant();
 
   // Check if user is platform admin
   const isPlatformAdmin = user ? canManageAllTenants(user) : false;
+
+  // Sort tenants by name for consistent display and search
+  const sortedTenants = useMemo(() => {
+    if (!tenants) return [];
+    return [...tenants].sort((a, b) => a.name.localeCompare(b.name));
+  }, [tenants]);
+
+  // Filter tenants for search
+  const [searchTerm, setSearchTerm] = React.useState('');
+
+  const filteredTenants = useMemo(() => {
+    if (!showSearch || !searchTerm) {
+      return sortedTenants;
+    }
+    const term = searchTerm.toLowerCase();
+    return sortedTenants.filter(
+      (tenant) => tenant.name.toLowerCase().includes(term) || tenant.id.toString().includes(term)
+    );
+  }, [sortedTenants, searchTerm, showSearch]);
 
   // If not platform admin, don't show selector (tenant is auto-resolved)
   if (!isPlatformAdmin) {
@@ -73,21 +85,18 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   if (error) {
     return (
       <Card className={className}>
-        <Error
-          message={error}
-          onRetry={retry}
-          actions={
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              onClick={() => navigate('/')}
-              className="ms-2"
-            >
-              <i className="bi bi-house me-1" />
-              {t('backToHome', language)}
-            </Button>
-          }
-        />
+        <Error message={error} onRetry={retry} />
+        <div className="mt-2">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => navigate('/')}
+            className="ms-2"
+          >
+            <i className="bi bi-house me-1" />
+            {t('backToHome', language)}
+          </Button>
+        </div>
       </Card>
     );
   }
@@ -96,11 +105,6 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   if (!tenants || tenants.length === 0) {
     return null;
   }
-
-  // Sort tenants by name for consistent display and search
-  const sortedTenants = useMemo(() => {
-    return [...tenants].sort((a, b) => a.name.localeCompare(b.name));
-  }, [tenants]);
 
   // Handle tenant selection
   const handleTenantSelect = (value: string) => {
@@ -121,21 +125,6 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
     clearSelection();
     onTenantChange?.(null);
   };
-
-  // Filter tenants for search
-  const [searchTerm, setSearchTerm] = React.useState('');
-
-  const filteredTenants = useMemo(() => {
-    if (!showSearch || !searchTerm) {
-      return sortedTenants;
-    }
-    const term = searchTerm.toLowerCase();
-    return sortedTenants.filter(
-      (tenant) =>
-        tenant.name.toLowerCase().includes(term) ||
-        tenant.id.toString().includes(term)
-    );
-  }, [sortedTenants, searchTerm, showSearch]);
 
   return (
     <Card className={className}>

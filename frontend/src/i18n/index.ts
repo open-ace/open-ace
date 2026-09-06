@@ -2480,7 +2480,8 @@ export const translations: Record<Language, Translations> = {
     clearSelection: 'Clear Selection',
     backToHome: 'Back to Home',
     selectTenantToManageKeywords: 'Please select a tenant to manage sensitive keywords',
-    selectTenantToManageKeywordsDesc: 'You need to select a tenant first to view and manage its sensitive keywords',
+    selectTenantToManageKeywordsDesc:
+      'You need to select a tenant first to view and manage its sensitive keywords',
     noKeywordsDesc: 'No sensitive keywords configured for this tenant',
     tenantSettings: 'Security Settings',
 

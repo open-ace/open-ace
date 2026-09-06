@@ -103,12 +103,7 @@ export const SecurityCenter: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('filter');
 
   // Get tenant selection from useAdminTenant
-  const {
-    tenants,
-    selectedTenantId,
-    selectTenant,
-    effectiveTenantId,
-  } = useAdminTenant();
+  const { tenants, selectedTenantId, selectTenant, effectiveTenantId } = useAdminTenant();
 
   // URL parameter processing (Issue #3274)
   useEffect(() => {
@@ -128,7 +123,7 @@ export const SecurityCenter: React.FC = () => {
       // Validate: must be positive integer
       if (!isNaN(tenantId) && tenantId > 0 && Number.isInteger(tenantId)) {
         // Check if tenant exists in the list
-        const tenantExists = tenants?.some(t => t.id === tenantId);
+        const tenantExists = tenants?.some((t) => t.id === tenantId);
         if (tenantExists && selectedTenantId !== tenantId) {
           selectTenant(tenantId);
         }
@@ -155,7 +150,7 @@ export const SecurityCenter: React.FC = () => {
   // Get current tenant name for display
   const currentTenantName = useMemo(() => {
     if (!effectiveTenantId || !tenants) return null;
-    const tenant = tenants.find(t => t.id === effectiveTenantId);
+    const tenant = tenants.find((t) => t.id === effectiveTenantId);
     return tenant?.name ?? null;
   }, [effectiveTenantId, tenants]);
 
@@ -261,7 +256,7 @@ export const SecurityCenter: React.FC = () => {
   const [showAllPatterns, setShowAllPatterns] = useState(false);
 
   // --- Sensitive Keywords State (Issue #3059) ---
-  const { effectiveTenantId } = useAdminTenant();
+  // (effectiveTenantId already obtained from useAdminTenant at component top)
 
   // --- SSRF Status State (Issue #3328) ---
   const {
@@ -1305,8 +1300,14 @@ export const SecurityCenter: React.FC = () => {
       return (
         <EmptyState
           icon="bi-shield-exclamation"
-          title={t('selectTenantToManageKeywords', language) || 'Please select a tenant to manage sensitive keywords'}
-          description={t('selectTenantToManageKeywordsDesc', language) || 'You need to select a tenant first to view and manage its sensitive keywords'}
+          title={
+            t('selectTenantToManageKeywords', language) ||
+            'Please select a tenant to manage sensitive keywords'
+          }
+          description={
+            t('selectTenantToManageKeywordsDesc', language) ||
+            'You need to select a tenant first to view and manage its sensitive keywords'
+          }
         />
       );
     }
@@ -1332,9 +1333,10 @@ export const SecurityCenter: React.FC = () => {
       <>
         {/* Keywords List with Tenant Name (Issue #3274) */}
         <Card
-          title={currentTenantName
-            ? `${currentTenantName} ${t('sensitiveKeywords', language)}`
-            : t('sensitiveKeywords', language)
+          title={
+            currentTenantName
+              ? `${currentTenantName} ${t('sensitiveKeywords', language)}`
+              : t('sensitiveKeywords', language)
           }
           className="mb-4"
         >
@@ -1342,7 +1344,9 @@ export const SecurityCenter: React.FC = () => {
             <EmptyState
               icon="bi-key"
               title={t('noKeywords', language)}
-              description={t('noKeywordsDesc', language) || 'No sensitive keywords configured for this tenant'}
+              description={
+                t('noKeywordsDesc', language) || 'No sensitive keywords configured for this tenant'
+              }
             />
           ) : (
             <div className="table-responsive">

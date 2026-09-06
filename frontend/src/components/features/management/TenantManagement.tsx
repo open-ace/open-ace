@@ -869,7 +869,11 @@ export const TenantManagement: React.FC = () => {
                             <Button
                               variant="outline-primary"
                               size="sm"
-                              onClick={() => navigate(`/manage/security?tenant_id=${tenant.id}&tab=sensitive-keywords`)}
+                              onClick={() =>
+                                navigate(
+                                  `/manage/security?tenant_id=${tenant.id}&tab=sensitive-keywords`
+                                )
+                              }
                               title={t('tenantSettings', language) ?? 'Security Settings'}
                             >
                               <i className="bi bi-shield" />

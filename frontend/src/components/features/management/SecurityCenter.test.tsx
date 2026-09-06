@@ -12,6 +12,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import type { ContentFilterRule, SecuritySettings, AuditThresholds } from '@/api';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -269,7 +270,17 @@ vi.mock('@/hooks', () => ({
     isFetching: false,
   })),
   useAdminTenant: vi.fn(() => ({
+    tenants: [
+      { id: 1, name: 'Test Tenant', is_active: true },
+      { id: 2, name: 'Another Tenant', is_active: true },
+    ],
+    selectedTenantId: null,
+    selectTenant: vi.fn(),
     effectiveTenantId: 1,
+    clearSelection: vi.fn(),
+    isLoading: false,
+    error: null,
+    retry: vi.fn(),
   })),
   useSensitiveKeywords: vi.fn(() => ({
     data: {
@@ -537,6 +548,8 @@ vi.mock('@/components/common', () => ({
   ),
   useToast: () => mockToast,
   useConfirm: () => mockConfirm,
+  // Mock TenantSelector (Issue #3274)
+  TenantSelector: () => null,
 }));
 
 vi.mock('./FilterRuleTableHeader', () => ({
@@ -677,16 +690,29 @@ describe('SecurityCenter', () => {
     mockConfirm.mockResolvedValue(true);
   });
 
+  // Helper function to render with Router context (needed for useSearchParams)
+  const renderWithRouter = (component: React.ReactElement, initialEntries?: string[]) => {
+    const result = render(<MemoryRouter initialEntries={initialEntries}>{component}</MemoryRouter>);
+    // Wrap rerender to maintain Router context
+    const originalRerender = result.rerender;
+    result.rerender = (newComponent: React.ReactElement) => {
+      return originalRerender(
+        <MemoryRouter initialEntries={initialEntries}>{newComponent}</MemoryRouter>
+      );
+    };
+    return result;
+  };
+
   // ─── Page & Tab Rendering ─────────────────────────────────────────────────
 
   describe('Page & Tab Rendering', () => {
     it('renders the page title', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByText('Security Center')).toBeInTheDocument();
     });
 
     it('renders five tab buttons', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByText('Content Filter')).toBeInTheDocument();
       expect(screen.getByText('Security Settings')).toBeInTheDocument();
       expect(screen.getByText('Audit Thresholds')).toBeInTheDocument();
@@ -695,27 +721,27 @@ describe('SecurityCenter', () => {
     });
 
     it('shows Content Filter tab as active by default', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       const filterTab = screen.getByText('Content Filter').closest('button');
       expect(filterTab).toHaveClass('active');
     });
 
     it('switches to Security Settings tab when clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       const settingsTab = screen.getByText('Security Settings').closest('button');
       expect(settingsTab).toHaveClass('active');
     });
 
     it('switches to Audit Thresholds tab when clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
       const auditTab = screen.getByText('Audit Thresholds').closest('button');
       expect(auditTab).toHaveClass('active');
     });
 
     it('shows Add Rule button only on Content Filter tab', () => {
-      const { rerender } = render(<SecurityCenter />);
+      const { rerender } = renderWithRouter(<SecurityCenter />);
       expect(screen.getByText('Add Rule')).toBeInTheDocument();
 
       fireEvent.click(screen.getByText('Security Settings'));
@@ -727,7 +753,7 @@ describe('SecurityCenter', () => {
     });
 
     it('shows PageRefreshControl', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByTestId('page-refresh-control')).toBeInTheDocument();
     });
   });
@@ -743,7 +769,7 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: mockRefetchRules,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
 
@@ -755,7 +781,7 @@ describe('SecurityCenter', () => {
         error: new Error('Network error'),
         refetch: mockRefetchRules,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByTestId('error')).toBeInTheDocument();
       expect(screen.getByText('Network error')).toBeInTheDocument();
       expect(screen.getByTestId('retry-btn')).toBeInTheDocument();
@@ -769,7 +795,7 @@ describe('SecurityCenter', () => {
         error: new Error('Network error'),
         refetch: mockRefetchRules,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByTestId('retry-btn'));
       expect(mockRefetchRules).toHaveBeenCalled();
     });
@@ -782,20 +808,20 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: mockRefetchRules,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByTestId('empty-state')).toBeInTheDocument();
       expect(screen.getByText('No Filter Rules')).toBeInTheDocument();
     });
 
     it('renders rules table with data', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByTestId('filter-rule-table-header')).toBeInTheDocument();
       expect(screen.getByText('password')).toBeInTheDocument();
       expect(screen.getByText('Block passwords')).toBeInTheDocument();
     });
 
     it('displays correct badge variants for severity', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       const badges = screen.getAllByTestId('badge');
       // High severity -> danger variant
       const highBadge = badges.find((b) => b.textContent === 'High');
@@ -803,7 +829,7 @@ describe('SecurityCenter', () => {
     });
 
     it('displays correct badge variants for action', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       const badges = screen.getAllByTestId('badge');
       // Block action -> danger variant
       const blockBadge = badges.find((b) => b.textContent === 'Block');
@@ -811,7 +837,7 @@ describe('SecurityCenter', () => {
     });
 
     it('opens create modal when Add Rule is clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
       // Use getAllByText since after opening the modal the title also reads "Add Rule"
       const addRuleElements = screen.getAllByText('Add Rule');
@@ -820,7 +846,7 @@ describe('SecurityCenter', () => {
     });
 
     it('pre-populates modal when editing a rule', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       // Click edit button (pencil icon) on the first rule
       const editButtons = screen.getAllByRole('button');
       const editBtn = editButtons.find((btn) => btn.querySelector('.bi-pencil'));
@@ -831,7 +857,7 @@ describe('SecurityCenter', () => {
 
     it('calls create API when submitting a new rule', async () => {
       mockMutateAsyncCreate.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Add Rule'));
 
       // Fill in the pattern field
@@ -851,7 +877,7 @@ describe('SecurityCenter', () => {
 
     it('calls update API when editing an existing rule', async () => {
       mockMutateAsyncUpdate.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
 
       // Click edit button
       const editBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-pencil'));
@@ -867,7 +893,7 @@ describe('SecurityCenter', () => {
     });
 
     it('closes modal when cancel is clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Add Rule'));
       expect(screen.getByTestId('modal')).toBeInTheDocument();
 
@@ -877,7 +903,7 @@ describe('SecurityCenter', () => {
 
     it('calls delete API when delete is confirmed', async () => {
       mockMutateAsyncDelete.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
 
       const deleteBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-trash'));
       fireEvent.click(deleteBtn as HTMLElement);
@@ -890,7 +916,7 @@ describe('SecurityCenter', () => {
 
     it('does not delete when confirmation is rejected', async () => {
       mockConfirm.mockResolvedValue(false);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
 
       const deleteBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-trash'));
       fireEvent.click(deleteBtn as HTMLElement);
@@ -903,7 +929,7 @@ describe('SecurityCenter', () => {
 
     it('toggles rule enabled state when switch is clicked', async () => {
       mockMutateAsyncUpdate.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
 
       const checkboxes = screen.getAllByRole('checkbox');
       // First checkbox is the rule enabled toggle
@@ -931,7 +957,7 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: mockRefetchSettings,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
@@ -944,45 +970,45 @@ describe('SecurityCenter', () => {
         error: new Error('Settings fetch failed'),
         refetch: mockRefetchSettings,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       expect(screen.getByTestId('error')).toBeInTheDocument();
     });
 
     it('renders session settings card', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       expect(screen.getByText('Session Settings')).toBeInTheDocument();
     });
 
     it('renders password policy card', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       expect(screen.getByText('Password Policy')).toBeInTheDocument();
     });
 
     it('renders IP whitelist card', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       expect(screen.getByText('IP Whitelist')).toBeInTheDocument();
     });
 
     it('displays current session timeout value', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       const timeoutInput = screen.getByDisplayValue('30');
       expect(timeoutInput).toBeInTheDocument();
     });
 
     it('displays current max login attempts value', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
       const attemptsInput = screen.getByDisplayValue('5');
       expect(attemptsInput).toBeInTheDocument();
     });
 
     it('displays password requirement checkboxes in correct state', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       const requireUppercase = screen.getByLabelText('Require Uppercase');
@@ -994,7 +1020,7 @@ describe('SecurityCenter', () => {
 
     it('calls update settings API on save', async () => {
       mockMutateAsyncUpdateSettings.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       // Change session timeout
@@ -1015,7 +1041,7 @@ describe('SecurityCenter', () => {
 
     it('shows success toast after saving settings', async () => {
       mockMutateAsyncUpdateSettings.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       const saveButtons = screen.getAllByText('Save');
@@ -1028,7 +1054,7 @@ describe('SecurityCenter', () => {
 
     it('shows error toast when saving settings fails', async () => {
       mockMutateAsyncUpdateSettings.mockRejectedValue(new Error('Failed'));
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       const saveButtons = screen.getAllByText('Save');
@@ -1040,7 +1066,7 @@ describe('SecurityCenter', () => {
     });
 
     it('resets form data when reset is clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       // Change a value
@@ -1056,7 +1082,7 @@ describe('SecurityCenter', () => {
 
     it('processes IP whitelist: trims, deduplicates, filters empty', async () => {
       mockMutateAsyncUpdateSettings.mockResolvedValue({});
-      const { container } = render(<SecurityCenter />);
+      const { container } = renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Security Settings'));
 
       // The IP whitelist is a native <textarea> (not wrapped in TextInput mock).
@@ -1094,7 +1120,7 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: mockRefetchThresholds,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
       expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
@@ -1107,13 +1133,13 @@ describe('SecurityCenter', () => {
         error: new Error('Thresholds fetch failed'),
         refetch: mockRefetchThresholds,
       });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
       expect(screen.getByTestId('error')).toBeInTheDocument();
     });
 
     it('renders anomaly detection thresholds card', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
       expect(screen.getByText('Anomaly Detection Thresholds')).toBeInTheDocument();
     });
@@ -1123,7 +1149,7 @@ describe('SecurityCenter', () => {
     const getFailedLoginInput = () => screen.getAllByDisplayValue('5')[0];
 
     it('displays default threshold values', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       // Check the default values are rendered in inputs
@@ -1134,7 +1160,7 @@ describe('SecurityCenter', () => {
     });
 
     it('shows all five threshold fields', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       expect(screen.getByText('Failed Login Threshold')).toBeInTheDocument();
@@ -1145,7 +1171,7 @@ describe('SecurityCenter', () => {
     });
 
     it('validates empty input with error message', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1159,7 +1185,7 @@ describe('SecurityCenter', () => {
     it('validates non-numeric input with error message', async () => {
       // Note: type="number" inputs normalize non-numeric values to '' in the DOM,
       // so the empty-value check triggers before the NaN check.
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1172,7 +1198,7 @@ describe('SecurityCenter', () => {
     });
 
     it('validates values below minimum (1) with error message', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1184,7 +1210,7 @@ describe('SecurityCenter', () => {
     });
 
     it('clamps values above maximum (10000) and shows warning toast', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1198,7 +1224,7 @@ describe('SecurityCenter', () => {
     });
 
     it('clears error when valid value is entered after invalid', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1213,7 +1239,7 @@ describe('SecurityCenter', () => {
     });
 
     it('disables save button when validation errors exist', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1228,7 +1254,7 @@ describe('SecurityCenter', () => {
     });
 
     it('shows error indicator text when validation errors exist', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1242,7 +1268,7 @@ describe('SecurityCenter', () => {
 
     it('calls update thresholds API on save', async () => {
       mockMutateAsyncUpdateThresholds.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       // Change the failed login threshold
@@ -1261,7 +1287,7 @@ describe('SecurityCenter', () => {
     });
 
     it('prevents saving when validation errors exist', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       // Introduce validation error (empty value)
@@ -1283,7 +1309,7 @@ describe('SecurityCenter', () => {
 
     it('shows success toast after saving thresholds', async () => {
       mockMutateAsyncUpdateThresholds.mockResolvedValue({});
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const saveButtons = screen.getAllByText('Save');
@@ -1296,7 +1322,7 @@ describe('SecurityCenter', () => {
 
     it('shows error toast when saving thresholds fails', async () => {
       mockMutateAsyncUpdateThresholds.mockRejectedValue(new Error('Failed'));
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const saveButtons = screen.getAllByText('Save');
@@ -1308,7 +1334,7 @@ describe('SecurityCenter', () => {
     });
 
     it('resets thresholds form data and errors', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       // Make a valid change first (this populates thresholdsFormData so reset shows toast)
@@ -1330,7 +1356,7 @@ describe('SecurityCenter', () => {
     });
 
     it('parses float input to integer (e.g., 3.5 → 3)', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1341,7 +1367,7 @@ describe('SecurityCenter', () => {
     });
 
     it('accepts negative values below 1 with proper error message', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Audit Thresholds'));
 
       const input = getFailedLoginInput();
@@ -1416,31 +1442,41 @@ describe('SecurityCenter', () => {
     });
 
     it('shows Sensitive Keywords tab button', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       expect(screen.getByText('Sensitive Keywords')).toBeInTheDocument();
     });
 
     it('switches to Sensitive Keywords tab when clicked', () => {
-      render(<SecurityCenter />);
-      fireEvent.click(screen.getByText('Sensitive Keywords'));
-      const keywordTab = screen.getByText('Sensitive Keywords').closest('button');
+      renderWithRouter(<SecurityCenter />);
+      const sensitiveKeywordsButtons = screen.getAllByText('Sensitive Keywords');
+      // Click the tab button (should be the first one)
+      fireEvent.click(sensitiveKeywordsButtons[0]);
+      const keywordTab = sensitiveKeywordsButtons[0].closest('button');
       expect(keywordTab).toHaveClass('active');
     });
 
     it('shows Add Keyword button only on Sensitive Keywords tab when tenant is selected', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.getByText('Add Keyword')).toBeInTheDocument();
     });
 
-    it('shows error when no tenant is selected (no permission)', () => {
+    it('shows no Sensitive Keywords content when no tenant is selected', () => {
       vi.mocked(useAdminTenant).mockReturnValue({
         effectiveTenantId: null,
+        tenants: [],
+        selectedTenantId: null,
+        selectTenant: vi.fn(),
+        clearSelection: vi.fn(),
+        isLoading: false,
+        error: null,
+        retry: vi.fn(),
       } as ReturnType<typeof useAdminTenant>);
-      render(<SecurityCenter />);
-      fireEvent.click(screen.getByText('Sensitive Keywords'));
-      expect(screen.getByTestId('error')).toBeInTheDocument();
-      expect(screen.getByText('No permission to access')).toBeInTheDocument();
+      renderWithRouter(<SecurityCenter />);
+      const sensitiveKeywordsButtons = screen.getAllByText('Sensitive Keywords');
+      fireEvent.click(sensitiveKeywordsButtons[0]);
+      // When no tenant is selected, Sensitive Keywords content should not render
+      expect(screen.queryByText('Add Keyword')).not.toBeInTheDocument();
     });
 
     it('shows loading state for keywords', () => {
@@ -1451,7 +1487,7 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: vi.fn(),
       } as ReturnType<typeof useSensitiveKeywords>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
@@ -1464,7 +1500,7 @@ describe('SecurityCenter', () => {
         error: new Error('Keywords fetch failed'),
         refetch: vi.fn(),
       } as ReturnType<typeof useSensitiveKeywords>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.getByTestId('error')).toBeInTheDocument();
     });
@@ -1477,20 +1513,20 @@ describe('SecurityCenter', () => {
         error: null,
         refetch: vi.fn(),
       } as ReturnType<typeof useSensitiveKeywords>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.getByTestId('empty-state')).toBeInTheDocument();
       expect(screen.getByText('No sensitive keywords configured')).toBeInTheDocument();
     });
 
     it('renders keywords table with data', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.getByText('password')).toBeInTheDocument();
     });
 
     it('opens create modal when Add Keyword is clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
       const addKeywordElements = screen.getAllByText('Add Keyword');
@@ -1499,7 +1535,7 @@ describe('SecurityCenter', () => {
     });
 
     it('validates empty keyword with error message', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1512,7 +1548,7 @@ describe('SecurityCenter', () => {
     });
 
     it('validates keyword exceeding 255 characters', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1533,7 +1569,7 @@ describe('SecurityCenter', () => {
         mutateAsync: mockMutateAsyncCreateKeyword,
         isPending: false,
       } as ReturnType<typeof useCreateSensitiveKeyword>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1559,7 +1595,7 @@ describe('SecurityCenter', () => {
         isPending: false,
       } as ReturnType<typeof useCreateSensitiveKeyword>);
       mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 2, is_new: true });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1580,7 +1616,7 @@ describe('SecurityCenter', () => {
         isPending: false,
       } as ReturnType<typeof useCreateSensitiveKeyword>);
       mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 1, is_new: false });
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1601,7 +1637,7 @@ describe('SecurityCenter', () => {
         isPending: false,
       } as ReturnType<typeof useCreateSensitiveKeyword>);
       mockMutateAsyncCreateKeyword.mockRejectedValue(new Error('Create failed'));
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       fireEvent.click(screen.getByText('Add Keyword'));
 
@@ -1621,7 +1657,7 @@ describe('SecurityCenter', () => {
         mutateAsync: mockMutateAsyncUpdateKeyword,
         isPending: false,
       } as ReturnType<typeof useUpdateSensitiveKeyword>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const checkboxes = screen.getAllByRole('checkbox');
@@ -1646,7 +1682,7 @@ describe('SecurityCenter', () => {
         isPending: false,
       } as ReturnType<typeof useUpdateSensitiveKeyword>);
       mockMutateAsyncUpdateKeyword.mockRejectedValue(new Error('Update failed'));
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const checkboxes = screen.getAllByRole('checkbox');
@@ -1659,7 +1695,7 @@ describe('SecurityCenter', () => {
 
     it('calls delete API when delete is confirmed', async () => {
       mockConfirm.mockResolvedValue(true);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       // Find the delete button by its variant (outline-danger)
@@ -1681,7 +1717,7 @@ describe('SecurityCenter', () => {
 
     it('does not delete when confirmation is rejected', async () => {
       mockConfirm.mockResolvedValue(false);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const buttons = screen.getAllByRole('button');
@@ -1700,7 +1736,7 @@ describe('SecurityCenter', () => {
     it('shows error toast when delete fails', async () => {
       mockMutateAsyncDeleteKeyword.mockRejectedValue(new Error('Delete failed'));
       mockConfirm.mockResolvedValue(true);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const buttons = screen.getAllByRole('button');
@@ -1716,7 +1752,7 @@ describe('SecurityCenter', () => {
     });
 
     it('closes modal when cancel is clicked', () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Sensitive Keywords'));
       const addKeywordElements = screen.getAllByText('Add Keyword');
       fireEvent.click(addKeywordElements[0]);
@@ -1731,7 +1767,7 @@ describe('SecurityCenter', () => {
 
   describe('Filter Statistics Tab', () => {
     it('switches to Filter Statistics tab when clicked', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       const statsTab = await waitFor(() => screen.getByText('Filter Statistics').closest('button'));
       expect(statsTab).toHaveClass('active');
@@ -1746,7 +1782,7 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
@@ -1760,13 +1796,13 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       expect(screen.getByTestId('error')).toBeInTheDocument();
     });
 
     it('renders filter status badges', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Filter Status')).toBeInTheDocument();
@@ -1776,7 +1812,7 @@ describe('SecurityCenter', () => {
     });
 
     it('renders pattern and keyword rule counts', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Pattern Rules')).toBeInTheDocument();
@@ -1785,7 +1821,7 @@ describe('SecurityCenter', () => {
     });
 
     it('renders cache performance card', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Cache Performance')).toBeInTheDocument();
@@ -1794,7 +1830,7 @@ describe('SecurityCenter', () => {
     });
 
     it('renders loaded patterns section', async () => {
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
@@ -1823,7 +1859,7 @@ describe('SecurityCenter', () => {
         refetch: mockRefetch,
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Cache Performance')).toBeInTheDocument();
@@ -1853,7 +1889,7 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
@@ -1883,7 +1919,7 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
@@ -1924,7 +1960,7 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      const { unmount } = render(<SecurityCenter />);
+      const { unmount } = renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByTestId('progress')).toBeInTheDocument();
@@ -1953,7 +1989,7 @@ describe('SecurityCenter', () => {
         refetch: vi.fn(),
         isFetching: false,
       } as ReturnType<typeof useFilterStats>);
-      render(<SecurityCenter />);
+      renderWithRouter(<SecurityCenter />);
       fireEvent.click(screen.getByText('Filter Statistics'));
       await waitFor(() => {
         expect(screen.getByTestId('progress')).toBeInTheDocument();

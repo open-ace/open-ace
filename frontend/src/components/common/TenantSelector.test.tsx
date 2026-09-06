@@ -7,32 +7,46 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
+import { vi } from 'vitest';
 import { TenantSelector } from './TenantSelector';
-import * as hooks from '@/hooks';
-import * as permissions from '@/utils/permissions';
 
 // Mock hooks
-jest.mock('@/hooks');
-jest.mock('@/utils/permissions');
-jest.mock('@/i18n', () => ({
+vi.mock('@/hooks', () => ({
+  useAdminTenant: vi.fn(),
+  useUser: vi.fn(),
+}));
+
+vi.mock('@/utils/permissions', () => ({
+  canManageAllTenants: vi.fn(),
+}));
+
+vi.mock('@/i18n', () => ({
   t: (key: string) => key,
 }));
 
-const mockUseAdminTenant = hooks.useAdminTenant as jest.MockedFunction<typeof hooks.useAdminTenant>;
-const mockUseUser = hooks.useUser as jest.MockedFunction<typeof hooks.useUser>;
-const mockCanManageAllTenants = permissions.canManageAllTenants as jest.MockedFunction<typeof permissions.canManageAllTenants>;
-
 // Mock navigate
-const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useNavigate: () => mockNavigate,
-}));
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // Mock useLanguage
-jest.mock('@/store', () => ({
+vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
+
+import * as hooks from '@/hooks';
+import * as permissions from '@/utils/permissions';
+
+const mockUseAdminTenant = hooks.useAdminTenant as vi.MockedFunction<typeof hooks.useAdminTenant>;
+const mockUseUser = hooks.useUser as vi.MockedFunction<typeof hooks.useUser>;
+const mockCanManageAllTenants = permissions.canManageAllTenants as vi.MockedFunction<
+  typeof permissions.canManageAllTenants
+>;
 
 const mockTenants = [
   { id: 1, name: 'Tenant A', slug: 'tenant-a', status: 'active', plan: 'standard' },
@@ -49,7 +63,7 @@ const mockUser = {
 
 describe('TenantSelector', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockUseUser.mockReturnValue(mockUser as any);
     mockCanManageAllTenants.mockReturnValue(true);
   });
@@ -63,9 +77,9 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: [],
       selectedTenantId: null,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: 100,
@@ -79,25 +93,26 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: [],
       selectedTenantId: null,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: true,
       error: null,
       effectiveTenantId: null,
     } as any);
 
     renderWithRouter(<TenantSelector />);
-    expect(screen.getByText('loading')).toBeInTheDocument();
+    // Use getAllByText since Loading component may have multiple loading texts
+    expect(screen.getAllByText('loading').length).toBeGreaterThan(0);
   });
 
   it('should show error state with retry button', () => {
-    const mockRetry = jest.fn();
+    const mockRetry = vi.fn();
     mockUseAdminTenant.mockReturnValue({
       tenants: [],
       selectedTenantId: null,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
       retry: mockRetry,
       isLoading: false,
       error: 'Failed to load tenants',
@@ -107,7 +122,7 @@ describe('TenantSelector', () => {
     renderWithRouter(<TenantSelector />);
     expect(screen.getByText('Failed to load tenants')).toBeInTheDocument();
 
-    const retryButton = screen.getByText('retry');
+    const retryButton = screen.getByText('Retry');
     fireEvent.click(retryButton);
     expect(mockRetry).toHaveBeenCalled();
   });
@@ -116,9 +131,9 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: [],
       selectedTenantId: null,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: null,
@@ -129,13 +144,13 @@ describe('TenantSelector', () => {
   });
 
   it('should display tenant selector with search', () => {
-    const mockSelectTenant = jest.fn();
+    const mockSelectTenant = vi.fn();
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: null,
       selectTenant: mockSelectTenant,
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: null,
@@ -143,8 +158,8 @@ describe('TenantSelector', () => {
 
     renderWithRouter(<TenantSelector showSearch={true} />);
 
-    // Check search input
-    expect(screen.getByPlaceholderText('Search tenant by name or ID')).toBeInTheDocument();
+    // Check search input (placeholder will be the translation key since t() returns key)
+    expect(screen.getByPlaceholderText('searchTenantPlaceholder')).toBeInTheDocument();
 
     // Check select dropdown
     const select = screen.getByRole('combobox');
@@ -161,9 +176,9 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: null,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: null,
@@ -171,11 +186,10 @@ describe('TenantSelector', () => {
 
     renderWithRouter(<TenantSelector showSearch={true} />);
 
-    const searchInput = screen.getByPlaceholderText('Search tenant by name or ID');
+    const searchInput = screen.getByPlaceholderText('searchTenantPlaceholder');
     fireEvent.change(searchInput, { target: { value: 'Tenant B' } });
 
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
       const options = screen.getAllByRole('option');
       // Should only show Tenant B (and placeholder)
       expect(options.length).toBe(2);
@@ -183,14 +197,14 @@ describe('TenantSelector', () => {
   });
 
   it('should call selectTenant when tenant is selected', () => {
-    const mockSelectTenant = jest.fn();
-    const mockOnChange = jest.fn();
+    const mockSelectTenant = vi.fn();
+    const mockOnChange = vi.fn();
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: null,
       selectTenant: mockSelectTenant,
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: null,
@@ -206,14 +220,14 @@ describe('TenantSelector', () => {
   });
 
   it('should show clear button when tenant is selected', () => {
-    const mockClearSelection = jest.fn();
-    const mockOnChange = jest.fn();
+    const mockClearSelection = vi.fn();
+    const mockOnChange = vi.fn();
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: 1,
-      selectTenant: jest.fn(),
+      selectTenant: vi.fn(),
       clearSelection: mockClearSelection,
-      retry: jest.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: 1,
@@ -221,7 +235,8 @@ describe('TenantSelector', () => {
 
     renderWithRouter(<TenantSelector showClearButton={true} onTenantChange={mockOnChange} />);
 
-    const clearButton = screen.getByRole('button', { name: /clear selection/i });
+    // Find the clear button by its icon
+    const clearButton = screen.getByRole('button', { name: /clearSelection/i });
     fireEvent.click(clearButton);
 
     expect(mockClearSelection).toHaveBeenCalled();
@@ -232,9 +247,9 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: 1,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: 1,
@@ -249,9 +264,9 @@ describe('TenantSelector', () => {
     mockUseAdminTenant.mockReturnValue({
       tenants: mockTenants,
       selectedTenantId: 1,
-      selectTenant: jest.fn(),
-      clearSelection: jest.fn(),
-      retry: jest.fn(),
+      selectTenant: vi.fn(),
+      clearSelection: vi.fn(),
+      retry: vi.fn(),
       isLoading: false,
       error: null,
       effectiveTenantId: 1,

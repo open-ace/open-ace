@@ -48,9 +48,6 @@ export const RemoteMachineManagement: React.FC = () => {
   // Admin tenant selection (Issue #2841)
   const {
     tenants,
-    selectedTenantId,
-    selectTenant,
-    clearSelection,
     effectiveTenantId,
     isLoading: isLoadingTenants,
     error: tenantLoadError,
