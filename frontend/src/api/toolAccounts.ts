@@ -11,6 +11,9 @@ export type MappingSource =
 export type MappingStatus =
   'pending' | 'active' | 'stale' | 'conflict_type' | 'conflict_owner' | 'conflict_tenant';
 
+// Issue #3273: Verification status type
+export type VerificationStatus = 'unverified' | 'verified' | 'failed';
+
 export interface ToolAccount {
   id: number;
   user_id: number;
@@ -29,6 +32,10 @@ export interface ToolAccount {
   created_by?: number | null;
   tenant_id?: number | null;
   version?: number;
+  // Issue #3273: Verification fields
+  verification_status?: VerificationStatus | null;
+  verification_result?: string | null;
+  verified_at?: string | null;
 }
 
 export interface UnmappedAccount {
@@ -131,5 +138,21 @@ export const toolAccountsApi = {
         existing_user_id?: number;
       }>;
     }>(`/api/tool-accounts/user/${userId}/batch`, { tool_accounts: toolAccounts });
+  },
+
+  // Issue #3273: Verification API
+  async verify(id: number): Promise<{
+    success: boolean;
+    verification_status: VerificationStatus;
+    verification_result: string;
+    verified_at: string | null;
+    details: {
+      tool_type: string | null;
+      tool_account: string;
+      checks: Record<string, boolean>;
+      warnings: string[];
+    };
+  }> {
+    return apiClient.post(`/api/tool-accounts/${id}/verify`, {});
   },
 };

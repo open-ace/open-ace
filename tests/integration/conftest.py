@@ -330,9 +330,40 @@ def app(tmp_db):
 
 
 @pytest.fixture
+def tool_accounts_app(tmp_db):
+    """Create Flask app for testing tool accounts API with temporary database.
+
+    Issue #3273: Fixture for tool account verification API tests.
+    """
+    from flask import Flask
+
+    from app.routes.tool_accounts import tool_accounts_bp
+
+    app = Flask(__name__)
+    app.register_blueprint(tool_accounts_bp, url_prefix="/api")
+    app.config["TESTING"] = True
+    app.secret_key = "test-secret-key"
+
+    # Patch database to use tmp_db
+    with patch("app.repositories.database.Database", return_value=tmp_db):
+        with patch("app.repositories.user_tool_account_repo.Database", return_value=tmp_db):
+            with patch("app.repositories.user_repo.Database", return_value=tmp_db):
+                yield app
+
+
+@pytest.fixture
 def client(app):
     """Create test client."""
     return app.test_client()
+
+
+@pytest.fixture
+def tool_accounts_client(tool_accounts_app):
+    """Create test client for tool accounts API.
+
+    Issue #3273: Client for tool account verification API tests.
+    """
+    return tool_accounts_app.test_client()
 
 
 @pytest.fixture

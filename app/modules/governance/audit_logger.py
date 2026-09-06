@@ -169,6 +169,9 @@ class AuditAction(Enum):
     TOOL_ACCOUNT_MAPPING_UPDATE = "tool_account_mapping_update"
     TOOL_ACCOUNT_MAPPING_DELETE = "tool_account_mapping_delete"
     TOOL_ACCOUNT_MAPPING_BATCH = "tool_account_mapping_batch"
+    # Issue #3273: Tool account mapping verification actions
+    TOOL_ACCOUNT_MAPPING_VERIFY = "tool_account_mapping_verify"
+    TOOL_ACCOUNT_MAPPING_VERIFY_BATCH = "tool_account_mapping_verify_batch"
 
     # Shared project permission actions (Issue #2745)
     SHARED_PROJECT_PERMISSION_SETUP_START = "shared_project_permission_setup_start"
