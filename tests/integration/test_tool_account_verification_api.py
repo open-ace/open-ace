@@ -57,10 +57,10 @@ class TestVerificationAPIIntegration:
         cursor = tmp_db.execute(
             """
             INSERT INTO user_tool_accounts
-            (user_id, tool_account, tool_type, mapping_status, tenant_id)
-            VALUES (?, ?, ?, ?, ?)
+            (user_id, tool_account, tool_type, mapping_status, tenant_id, version)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, "alice-qwen", "qwen", "active", tenant_id),
+            (user_id, "alice-qwen", "qwen", "active", tenant_id, 1),
         )
         mapping_id = cursor.lastrowid
 
@@ -110,10 +110,10 @@ class TestVerificationAPIIntegration:
         cursor = tmp_db.execute(
             """
             INSERT INTO user_tool_accounts
-            (user_id, tool_account, tool_type, mapping_status, tenant_id)
-            VALUES (?, ?, ?, ?, ?)
+            (user_id, tool_account, tool_type, mapping_status, tenant_id, version)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, "bob-claude", "claude", "active", tenant_id),
+            (user_id, "bob-claude", "claude", "active", tenant_id, 1),
         )
         mapping_id = cursor.lastrowid
 
@@ -159,10 +159,10 @@ class TestVerificationAPIIntegration:
         cursor = tmp_db.execute(
             """
             INSERT INTO user_tool_accounts
-            (user_id, tool_account, tool_type, mapping_status, tenant_id)
-            VALUES (?, ?, ?, ?, ?)
+            (user_id, tool_account, tool_type, mapping_status, tenant_id, version)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user2_id, "user2-qwen", "qwen", "active", tenant2_id),
+            (user2_id, "user2-qwen", "qwen", "active", tenant2_id, 1),
         )
         mapping_id = cursor.lastrowid
 
