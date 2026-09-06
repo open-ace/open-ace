@@ -370,6 +370,17 @@ class ToolAccountVerificationService:
             expected_version=mapping.version,  # Optimistic lock check
         )
 
+        # Handle optimistic lock failure
+        if updated_mapping is None:
+            logger.warning(
+                f"Optimistic lock failure for mapping {mapping_id}, "
+                f"expected version {mapping.version}"
+            )
+            return {
+                "success": False,
+                "error": "版本冲突，映射已被其他操作修改，请重试验证操作",
+            }
+
         # Prepare response
         # Handle verified_at field (SQLite returns string, PostgreSQL returns datetime)
         verified_at_str = None
