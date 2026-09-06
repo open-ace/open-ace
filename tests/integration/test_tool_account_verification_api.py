@@ -76,6 +76,8 @@ class TestVerificationAPIIntegration:
         # Mock authentication
         admin_user = _get_admin_user(user_id, tenant_id)
         with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+            # Set session token cookie
+            tool_accounts_client.set_cookie("session_token", "test-admin-token")
             # Call verify endpoint
             response = tool_accounts_client.post(f"/api/tool-accounts/{mapping_id}/verify")
 
@@ -117,6 +119,8 @@ class TestVerificationAPIIntegration:
         # Mock authentication
         admin_user = _get_admin_user(user_id, tenant_id)
         with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+            # Set session token cookie
+            tool_accounts_client.set_cookie("session_token", "test-admin-token")
             # Call verify endpoint
             response = tool_accounts_client.post(f"/api/tool-accounts/{mapping_id}/verify")
 
@@ -134,6 +138,8 @@ class TestVerificationAPIIntegration:
         # Mock authentication
         admin_user = _get_admin_user(user_id)
         with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+            # Set session token cookie
+            tool_accounts_client.set_cookie("session_token", "test-admin-token")
             # Call verify endpoint for non-existent mapping
             response = tool_accounts_client.post("/api/tool-accounts/999/verify")
 
@@ -169,6 +175,8 @@ class TestVerificationAPIIntegration:
         }
 
         with patch("app.auth.decorators._load_user_from_token", return_value=tenant_user):
+            # Set session token cookie
+            tool_accounts_client.set_cookie("session_token", "test-tenant-token")
             # Try to verify mapping from tenant2
             response = tool_accounts_client.post(f"/api/tool-accounts/{mapping_id}/verify")
 
@@ -187,6 +195,8 @@ class TestVerificationStatusInAPIResponses:
         tenant_id = _insert_tenant(tmp_db, name="tenant3")
 
         # Insert a tool account mapping with verification status
+        # Note: verification_status, verification_result, verified_at columns
+        # should exist in the schema loaded by tmp_db fixture
         tmp_db.execute(
             """
             INSERT INTO user_tool_accounts
@@ -209,6 +219,8 @@ class TestVerificationStatusInAPIResponses:
         # Mock authentication
         admin_user = _get_admin_user(user_id, tenant_id)
         with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+            # Set session token cookie
+            tool_accounts_client.set_cookie("session_token", "test-admin-token")
             # Get user tool accounts
             response = tool_accounts_client.get(f"/api/tool-accounts/user/{user_id}")
 

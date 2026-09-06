@@ -377,13 +377,21 @@ class ToolAccountVerificationService:
         )
 
         # Prepare response
+        # Handle verified_at field (SQLite returns string, PostgreSQL returns datetime)
+        verified_at_str = None
+        if updated_mapping and updated_mapping.verified_at:
+            if isinstance(updated_mapping.verified_at, str):
+                # SQLite returns string
+                verified_at_str = updated_mapping.verified_at
+            elif hasattr(updated_mapping.verified_at, 'isoformat'):
+                # PostgreSQL returns datetime object
+                verified_at_str = updated_mapping.verified_at.isoformat()
+
         response = {
             "success": True,
             "verification_status": verification_status,
             "verification_result": result["message"],
-            "verified_at": updated_mapping.verified_at.isoformat()
-            if updated_mapping and updated_mapping.verified_at
-            else None,
+            "verified_at": verified_at_str,
             "details": {
                 "tool_type": tool_type,
                 "tool_account": mapping.tool_account,
