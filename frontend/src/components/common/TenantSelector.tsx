@@ -11,13 +11,43 @@
  * Issue #3274: Extracted from RemoteMachineManagement, SSOSettings, and SecurityCenter
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { useAdminTenant, useUser } from '@/hooks';
 import { canManageAllTenants } from '@/utils/permissions';
 import { Card, Button, Select, Loading, Error } from '@/components/common';
+
+// Performance thresholds (in milliseconds)
+const PERF_THRESHOLDS = {
+  SORT: 100,
+  SEARCH: 200,
+  RENDER: 100,
+};
+
+// Check if in development mode
+const isDev = import.meta.env?.DEV ?? false;
+
+// Performance monitoring helper (only in development)
+const measurePerformance = (name: string, threshold: number, fn: () => void) => {
+  if (isDev && typeof window !== 'undefined' && window.performance) {
+    const start = window.performance.now();
+    fn();
+    const duration = window.performance.now() - start;
+    if (duration > threshold) {
+      console.warn(
+        `[TenantSelector] Performance warning: ${name} took ${duration.toFixed(
+          2
+        )}ms (threshold: ${threshold}ms)`
+      );
+    } else {
+      console.debug(`[TenantSelector] ${name}: ${duration.toFixed(2)}ms`);
+    }
+  } else {
+    fn();
+  }
+};
 
 export interface TenantSelectorProps {
   /** Optional callback when tenant selection changes */
@@ -51,7 +81,11 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   // Sort tenants by name for consistent display and search
   const sortedTenants = useMemo(() => {
     if (!tenants) return [];
-    return [...tenants].sort((a, b) => a.name.localeCompare(b.name));
+    let result: typeof tenants = [];
+    measurePerformance('Sort tenants', PERF_THRESHOLDS.SORT, () => {
+      result = [...tenants].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    return result;
   }, [tenants]);
 
   // Filter tenants for search
@@ -61,11 +95,22 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
     if (!showSearch || !searchTerm) {
       return sortedTenants;
     }
-    const term = searchTerm.toLowerCase();
-    return sortedTenants.filter(
-      (tenant) => tenant.name.toLowerCase().includes(term) || tenant.id.toString().includes(term)
-    );
+    let result: typeof sortedTenants = [];
+    measurePerformance('Search tenants', PERF_THRESHOLDS.SEARCH, () => {
+      const term = searchTerm.toLowerCase();
+      result = sortedTenants.filter(
+        (tenant) => tenant.name.toLowerCase().includes(term) || tenant.id.toString().includes(term)
+      );
+    });
+    return result;
   }, [sortedTenants, searchTerm, showSearch]);
+
+  // Track component render performance
+  useEffect(() => {
+    if (isDev) {
+      console.debug('[TenantSelector] Component rendered');
+    }
+  });
 
   // If not platform admin, don't show selector (tenant is auto-resolved)
   if (!isPlatformAdmin) {

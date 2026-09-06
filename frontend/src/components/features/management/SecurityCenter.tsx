@@ -106,7 +106,15 @@ export const SecurityCenter: React.FC = () => {
   const { tenants, selectedTenantId, selectTenant, effectiveTenantId } = useAdminTenant();
 
   // URL parameter processing (Issue #3274)
+  // Use ref to track if URL parameters have been processed
+  const urlParamsProcessedRef = React.useRef(false);
+
   useEffect(() => {
+    // Skip if already processed
+    if (urlParamsProcessedRef.current) {
+      return;
+    }
+
     // Read URL parameters
     const tabParam = searchParams.get('tab');
     const tenantIdParam = searchParams.get('tenant_id');
@@ -126,10 +134,15 @@ export const SecurityCenter: React.FC = () => {
         const tenantExists = tenants?.some((t) => t.id === tenantId);
         if (tenantExists && selectedTenantId !== tenantId) {
           selectTenant(tenantId);
+          // Mark as processed only if tenant selection was successful
+          urlParamsProcessedRef.current = true;
         }
       }
+    } else {
+      // No tenant ID in URL, mark as processed
+      urlParamsProcessedRef.current = true;
     }
-  }, []); // Empty dependency array - only run on mount
+  }, [tenants, selectedTenantId, selectTenant, searchParams]);
 
   // Sync URL parameters when tab or tenant changes
   const handleTabChange = (newTab: TabType) => {
