@@ -142,6 +142,11 @@ const TenantDetail = lazy(() =>
 const SSOSettings = lazy(() =>
   import('@/components/features/settings/SSOSettings').then((m) => ({ default: m.SSOSettings }))
 );
+const BrandingSettings = lazy(() =>
+  import('@/components/features/settings/BrandingSettings').then((m) => ({
+    default: m.BrandingSettings,
+  }))
+);
 const AiAgentSettings = lazy(() =>
   import('@/components/features/settings/AiAgentSettings').then((m) => ({
     default: m.AiAgentSettings,
@@ -482,6 +487,7 @@ const ManageRoutes: React.FC = () => {
 
           {/* Settings */}
           <Route path="settings/sso" element={<SSOSettings />} />
+          <Route path="settings/branding" element={<BrandingSettings />} />
           <Route path="settings/api-keys" element={<APIKeyManagement />} />
           <Route path="settings/encryption-keys" element={<EncryptionKeyManagement />} />
           <Route path="settings/ai-agent" element={<AiAgentSettings />} />

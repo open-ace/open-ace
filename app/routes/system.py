@@ -28,6 +28,7 @@ system_bp = Blueprint("system", __name__)
 # Public endpoints that don't require authentication
 _PUBLIC_PATHS = [
     "/settings/sso-enabled",
+    "/public/branding",
 ]
 
 
@@ -366,25 +367,37 @@ def update_system_settings():
     if not data:
         return jsonify({"success": False, "error": "Request body required"}), 400
 
+    # Issue #3271: Validate branding settings if present
+    from app.utils.branding_validator import validate_branding_settings
+
+    is_valid, errors = validate_branding_settings(
+        logo_url=data.get("brand_logo_url"),
+        system_name=data.get("brand_system_name"),
+        welcome_message=data.get("brand_welcome_message"),
+        copyright_text=data.get("brand_copyright_text"),
+    )
+    if not is_valid:
+        return jsonify({"success": False, "error": "; ".join(errors)}), 400
+
     from app.utils.config import set_system_setting
 
     try:
         updated_keys = []
-        errors = []
+        errors_list = []
 
         for key, value in data.items():
             if set_system_setting(key, value):
                 updated_keys.append(key)
             else:
-                errors.append(f"Failed to update {key}")
+                errors_list.append(f"Failed to update {key}")
 
-        if errors:
+        if errors_list:
             return (
                 jsonify(
                     {
                         "success": False,
                         "error": "Failed to update some settings",
-                        "details": errors,
+                        "details": errors_list,
                         "updated": updated_keys,
                     }
                 ),
@@ -429,4 +442,73 @@ def get_sso_enabled():
 
     except Exception as e:
         logger.error(f"Error getting SSO enabled status: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+@system_bp.route("/public/branding", methods=["GET"])
+def get_public_branding():
+    """Get branding configuration for login page.
+
+    Public endpoint - no authentication required.
+    Issue #3271: Used by login page to display custom branding.
+
+    Query Parameters:
+        tenant_slug (optional): Tenant identifier for tenant-specific branding
+
+    Returns:
+        JSON response with branding configuration:
+        - logo_url: Custom logo URL or None
+        - system_name: System name or None
+        - welcome_message: Dict of language -> welcome text
+        - copyright_text: Copyright text or None
+        - is_custom: True if tenant branding is applied
+    """
+    from app.utils.config import get_branding_settings
+
+    try:
+        # Get tenant_slug parameter
+        tenant_slug = request.args.get("tenant_slug")
+
+        # Start with system-level branding
+        system_branding = get_branding_settings()
+        branding = {
+            "logo_url": system_branding.get("brand_logo_url"),
+            "system_name": system_branding.get("brand_system_name"),
+            "welcome_message": system_branding.get("brand_welcome_message", {}),
+            "copyright_text": system_branding.get("brand_copyright_text"),
+            "is_custom": False,
+        }
+
+        # If tenant_slug is provided, try to get tenant branding
+        if tenant_slug:
+            try:
+                from app.services.tenant_service import TenantService
+
+                tenant_service = TenantService()
+                tenant = tenant_service.get_tenant_by_slug(tenant_slug)
+
+                # Check if tenant exists, is active, and has custom branding
+                if tenant and tenant.is_active() and tenant.settings.custom_branding:
+                    branding["is_custom"] = True
+
+                    # Field-level override: only override non-None tenant fields
+                    if tenant.settings.branding_logo_url:
+                        branding["logo_url"] = tenant.settings.branding_logo_url
+                    if tenant.settings.branding_name:
+                        branding["system_name"] = tenant.settings.branding_name
+                    if tenant.settings.branding_welcome_message:
+                        # Merge welcome messages: tenant languages override system
+                        branding["welcome_message"] = {
+                            **branding["welcome_message"],
+                            **tenant.settings.branding_welcome_message,
+                        }
+                    # Note: copyright_text is system-level only, not overridden by tenant
+            except Exception as e:
+                # Log but don't fail - fall back to system branding
+                logger.warning(f"Failed to get tenant branding for slug {tenant_slug}: {e}")
+
+        return jsonify({"success": True, "data": branding})
+
+    except Exception as e:
+        logger.error(f"Error getting branding settings: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500

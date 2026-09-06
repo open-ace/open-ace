@@ -271,3 +271,86 @@ def is_sso_enabled() -> bool:
         True if SSO is enabled, False otherwise.
     """
     return bool(get_system_setting("sso_enabled", False))
+
+
+# ── Branding Settings ──────────────────────────────────────────────────
+# Issue #3271: System-level branding configuration
+# Used for customizing the login page appearance.
+
+
+def get_branding_settings() -> dict[str, Any]:
+    """Get system-level branding settings.
+
+    Returns:
+        Dict with branding settings:
+        - brand_logo_url: Custom logo URL
+        - brand_system_name: System name
+        - brand_welcome_message: Multi-language welcome messages
+        - brand_copyright_text: Copyright text
+    """
+    settings = get_all_system_settings()
+    return {
+        "brand_logo_url": settings.get("brand_logo_url"),
+        "brand_system_name": settings.get("brand_system_name"),
+        "brand_welcome_message": settings.get("brand_welcome_message", {}),
+        "brand_copyright_text": settings.get("brand_copyright_text"),
+    }
+
+
+def set_branding_settings(
+    logo_url: str | None = None,
+    system_name: str | None = None,
+    welcome_message: dict[str, str] | None = None,
+    copyright_text: str | None = None,
+) -> bool:
+    """Set system-level branding settings.
+
+    Only non-None values are updated. This allows partial updates.
+
+    Args:
+        logo_url: Logo URL (must be HTTPS public URL)
+        system_name: System name
+        welcome_message: Multi-language welcome messages
+        copyright_text: Copyright text
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    from app.repositories.database import CONFIG_DIR
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+
+    try:
+        # Read existing config
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                config = json.load(f)
+
+        # Ensure system_settings exists
+        if "system_settings" not in config:
+            config["system_settings"] = {}
+
+        # Update only non-None branding fields
+        if logo_url is not None:
+            config["system_settings"]["brand_logo_url"] = logo_url
+        if system_name is not None:
+            config["system_settings"]["brand_system_name"] = system_name
+        if welcome_message is not None:
+            config["system_settings"]["brand_welcome_message"] = welcome_message
+        if copyright_text is not None:
+            config["system_settings"]["brand_copyright_text"] = copyright_text
+
+        # Write back
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+
+        # Invalidate cache
+        with _cache_lock:
+            _cache.pop("_root", None)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to write branding settings: {e}")
+        return False

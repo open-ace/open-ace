@@ -1,5 +1,6 @@
 /**
  * Login Page Component
+ * Issue #3271: Supports custom branding from system-level and tenant-level configuration
  */
 
 import React, { useState, useEffect } from 'react';
@@ -7,11 +8,20 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { Button } from '@/components/common';
-import { ssoApi, systemApi, type SSOProvider } from '@/api';
+import { ssoApi, systemApi, type SSOProvider, type BrandingConfig } from '@/api';
 import type { Language } from '@/types';
 import './Login.css';
 
-// Translations
+// Default branding configuration
+const DEFAULT_BRANDING: BrandingConfig = {
+  logo_url: null,
+  system_name: null,
+  welcome_message: {},
+  copyright_text: null,
+  is_custom: false,
+};
+
+// Translations (fallback when branding is not configured)
 const translations: Record<Language, Record<string, string>> = {
   en: {
     title: 'Open ACE',
@@ -133,12 +143,17 @@ export const Login: React.FC = () => {
   const [ssoProviders, setSsoProviders] = useState<SSOProvider[]>([]);
   const [ssoLoading, setSsoLoading] = useState(false);
 
+  // Issue #3271: Branding state
+  const [branding, setBranding] = useState<BrandingConfig>(DEFAULT_BRANDING);
+  const [logoLoadError, setLogoLoadError] = useState(false);
+
   // Check if already authenticated
   useEffect(() => {
     // Handle SSO callback parameters
     const params = new URLSearchParams(window.location.search);
     const ssoSuccess = params.get('sso_success');
     const ssoError = params.get('sso_error');
+    const tenantSlug = params.get('tenant'); // Issue #3271: Tenant identification
 
     // Clean up URL parameters
     if (ssoSuccess || ssoError) {
@@ -175,6 +190,19 @@ export const Login: React.FC = () => {
     // Check if default credentials should be shown (development mode)
     const isDev = import.meta.env.DEV;
     setShowDefaultCredentials(isDev);
+
+    // Issue #3271: Fetch branding configuration
+    const fetchBranding = async () => {
+      try {
+        const brandingConfig = await systemApi.getPublicBranding(tenantSlug || undefined);
+        setBranding(brandingConfig);
+      } catch (err) {
+        console.log('Branding config fetch failed (using defaults):', err);
+        // Use default branding on error
+        setBranding(DEFAULT_BRANDING);
+      }
+    };
+    fetchBranding();
   }, [navigate, isAuthenticated, language]);
 
   // Check if SSO is enabled at system level
@@ -243,6 +271,68 @@ export const Login: React.FC = () => {
     setLanguage(lang);
   };
 
+  // Issue #3271: Get welcome message with fallback
+  const getWelcomeMessage = (): string => {
+    // Try current language first
+    if (branding.welcome_message[language]) {
+      return branding.welcome_message[language];
+    }
+    // Fallback to English
+    if (branding.welcome_message.en) {
+      return branding.welcome_message.en;
+    }
+    // Fallback to default translation
+    return getTranslation('subtitle', language);
+  };
+
+  // Issue #3271: Get system name with fallback
+  const getSystemName = (): string => {
+    return branding.system_name || getTranslation('title', language);
+  };
+
+  // Issue #3271: Get copyright text with fallback
+  const getCopyrightText = (): string => {
+    return branding.copyright_text || getTranslation('copyright', language);
+  };
+
+  // Issue #3271: Handle logo load error
+  const handleLogoError = () => {
+    setLogoLoadError(true);
+  };
+
+  // Issue #3271: Render logo (custom or default)
+  const renderLogo = () => {
+    if (branding.logo_url && !logoLoadError) {
+      return (
+        <img
+          src={branding.logo_url}
+          alt="Logo"
+          className="login-custom-logo"
+          onError={handleLogoError}
+        />
+      );
+    }
+    // Default SVG logo
+    return (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <defs>
+          <linearGradient id="login-icon-grad" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stopColor="#667eea" />
+            <stop offset="1" stopColor="#764ba2" />
+          </linearGradient>
+        </defs>
+        <rect width="100" height="100" rx="20" fill="url(#login-icon-grad)" />
+        <path
+          d="M30 40h40M30 60h40M35 30v40M65 30v40M25 50h50"
+          stroke="white"
+          strokeWidth="8"
+          strokeLinecap="round"
+          fill="none"
+        />
+      </svg>
+    );
+  };
+
   return (
     <div className="login-page">
       {/* Language Selector */}
@@ -261,26 +351,9 @@ export const Login: React.FC = () => {
 
       <div className="login-container">
         <div className="login-header">
-          <div className="login-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-              <defs>
-                <linearGradient id="login-icon-grad" x1="0" x2="1" y1="0" y2="1">
-                  <stop offset="0" stopColor="#667eea" />
-                  <stop offset="1" stopColor="#764ba2" />
-                </linearGradient>
-              </defs>
-              <rect width="100" height="100" rx="20" fill="url(#login-icon-grad)" />
-              <path
-                d="M30 40h40M30 60h40M35 30v40M65 30v40M25 50h50"
-                stroke="white"
-                strokeWidth="8"
-                strokeLinecap="round"
-                fill="none"
-              />
-            </svg>
-          </div>
-          <h1>{getTranslation('title', language)}</h1>
-          <p>{getTranslation('subtitle', language)}</p>
+          <div className="login-logo">{renderLogo()}</div>
+          <h1>{getSystemName()}</h1>
+          <p>{getWelcomeMessage()}</p>
         </div>
 
         {error && <div className="login-error">{error}</div>}
@@ -352,7 +425,7 @@ export const Login: React.FC = () => {
         )}
 
         <div className="login-footer">
-          <p>{getTranslation('copyright', language)}</p>
+          <p>{getCopyrightText()}</p>
         </div>
       </div>
     </div>
