@@ -35,6 +35,7 @@ import {
   EmptyState,
   Badge,
   useToast,
+  TenantSelector,
 } from '@/components/common';
 import type { RemoteMachine } from '@/api';
 import { copyToClipboard } from '@/utils';
@@ -360,44 +361,8 @@ export const RemoteMachineManagement: React.FC = () => {
 
   return (
     <div className="remote-machine-management">
-      {/* Tenant Selector - Show when there are tenants to choose from */}
-      {tenants.length > 0 && (
-        <div className="card mb-3">
-          <div className="card-body">
-            <div className="row align-items-center">
-              <div className="col-md-4">
-                <label className="form-label mb-0">
-                  <i className="bi bi-building me-2" />
-                  {t('selectTenant', language) || 'Select Tenant'}
-                </label>
-              </div>
-              <div className="col-md-6">
-                <Select
-                  value={selectedTenantId?.toString() ?? ''}
-                  onChange={(value) => selectTenant(Number(value))}
-                  options={tenants.map((tenant) => ({
-                    value: tenant.id.toString(),
-                    label: tenant.name,
-                  }))}
-                  placeholder={t('selectTenantPlaceholder', language) || 'Choose a tenant'}
-                />
-              </div>
-              <div className="col-md-2">
-                {selectedTenantId && (
-                  <Button
-                    variant="outline-secondary"
-                    size="sm"
-                    onClick={clearSelection}
-                    title={t('clearSelection', language) || 'Clear Selection'}
-                  >
-                    <i className="bi bi-x-lg" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Tenant Selector (Issue #3274) - Use unified component */}
+      <TenantSelector className="mb-3" />
 
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">

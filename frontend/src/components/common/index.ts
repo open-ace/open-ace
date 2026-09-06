@@ -77,3 +77,7 @@ export {
   type IntervalOption,
   type PageRefreshControlProps,
 } from './PageRefreshControl';
+
+// Tenant Selector (Issue #3274)
+export { TenantSelector } from './TenantSelector';
+export type { TenantSelectorProps } from './TenantSelector';

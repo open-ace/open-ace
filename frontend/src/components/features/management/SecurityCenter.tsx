@@ -6,9 +6,11 @@
  * - Filter Rules: Manage content filtering rules
  * - Security Settings: Configure security policies
  * - Audit Thresholds: Configure anomaly detection thresholds
+ * - Tenant selector for platform admins (Issue #3274)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { cn, createMatcherConfig } from '@/utils';
 import {
   useFilterRules,
@@ -46,6 +48,7 @@ import {
   PageRefreshControl,
   StatCard,
   Progress,
+  TenantSelector,
 } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
@@ -96,7 +99,65 @@ const MAX_THRESHOLD_VALUE = 10000;
 export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>('filter');
+
+  // Get tenant selection from useAdminTenant
+  const {
+    tenants,
+    selectedTenantId,
+    selectTenant,
+    effectiveTenantId,
+  } = useAdminTenant();
+
+  // URL parameter processing (Issue #3274)
+  useEffect(() => {
+    // Read URL parameters
+    const tabParam = searchParams.get('tab');
+    const tenantIdParam = searchParams.get('tenant_id');
+
+    // Validate and set tab
+    const VALID_TABS: TabType[] = ['filter', 'settings', 'audit', 'stats', 'sensitive-keywords'];
+    if (tabParam && VALID_TABS.includes(tabParam as TabType)) {
+      setActiveTab(tabParam as TabType);
+    }
+
+    // Validate and select tenant
+    if (tenantIdParam) {
+      const tenantId = Number(tenantIdParam);
+      // Validate: must be positive integer
+      if (!isNaN(tenantId) && tenantId > 0 && Number.isInteger(tenantId)) {
+        // Check if tenant exists in the list
+        const tenantExists = tenants?.some(t => t.id === tenantId);
+        if (tenantExists && selectedTenantId !== tenantId) {
+          selectTenant(tenantId);
+        }
+      }
+    }
+  }, []); // Empty dependency array - only run on mount
+
+  // Sync URL parameters when tab or tenant changes
+  const handleTabChange = (newTab: TabType) => {
+    setActiveTab(newTab);
+    if (selectedTenantId) {
+      setSearchParams({ tenant_id: selectedTenantId.toString(), tab: newTab });
+    } else {
+      setSearchParams({ tab: newTab });
+    }
+  };
+
+  const handleTenantChange = (tenantId: number | null) => {
+    if (tenantId && activeTab) {
+      setSearchParams({ tenant_id: tenantId.toString(), tab: activeTab });
+    }
+  };
+
+  // Get current tenant name for display
+  const currentTenantName = useMemo(() => {
+    if (!effectiveTenantId || !tenants) return null;
+    const tenant = tenants.find(t => t.id === effectiveTenantId);
+    return tenant?.name ?? null;
+  }, [effectiveTenantId, tenants]);
 
   // Generate translated options for Select components
   const getTypeOptions = () => [
@@ -1237,11 +1298,17 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
-  // --- Render Sensitive Keywords Tab (Issue #3059) ---
+  // --- Render Sensitive Keywords Tab (Issue #3059, Issue #3274) ---
   const renderSensitiveKeywordsTab = () => {
-    // Permission check
+    // Permission check with friendly message
     if (!effectiveTenantId) {
-      return <Error message={t('noPermission', language)} />;
+      return (
+        <EmptyState
+          icon="bi-shield-exclamation"
+          title={t('selectTenantToManageKeywords', language) || 'Please select a tenant to manage sensitive keywords'}
+          description={t('selectTenantToManageKeywordsDesc', language) || 'You need to select a tenant first to view and manage its sensitive keywords'}
+        />
+      );
     }
 
     // Loading state
@@ -1263,60 +1330,72 @@ export const SecurityCenter: React.FC = () => {
 
     return (
       <>
-        {/* Keywords Table */}
-        {!keywords || keywords.length === 0 ? (
-          <EmptyState icon="bi-key" title={t('noKeywords', language)} />
-        ) : (
-          <div className="table-responsive">
-            <table className="table table-hover">
-              <thead>
-                <tr>
-                  <th>{t('keyword', language)}</th>
-                  <th>{t('status', language)}</th>
-                  <th>{t('createdAt', language)}</th>
-                  <th>{t('actions', language)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keywords.map((keyword) => (
-                  <tr key={keyword.id}>
-                    <td>
-                      <code>{keyword.keyword}</code>
-                    </td>
-                    <td>
-                      <div className="form-check form-switch">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          checked={keyword.is_enabled}
-                          onChange={() => handleToggleKeywordEnabled(keyword)}
-                          disabled={updateKeyword.isPending}
-                        />
-                      </div>
-                    </td>
-                    <td>
-                      <small className="text-muted">
-                        {new Date(keyword.created_at).toLocaleString(
-                          language === 'zh' ? 'zh-CN' : 'en-US'
-                        )}
-                      </small>
-                    </td>
-                    <td>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => handleDeleteKeyword(keyword.id)}
-                        disabled={deleteKeyword.isPending}
-                      >
-                        <i className="bi bi-trash" />
-                      </Button>
-                    </td>
+        {/* Keywords List with Tenant Name (Issue #3274) */}
+        <Card
+          title={currentTenantName
+            ? `${currentTenantName} ${t('sensitiveKeywords', language)}`
+            : t('sensitiveKeywords', language)
+          }
+          className="mb-4"
+        >
+          {!keywords || keywords.length === 0 ? (
+            <EmptyState
+              icon="bi-key"
+              title={t('noKeywords', language)}
+              description={t('noKeywordsDesc', language) || 'No sensitive keywords configured for this tenant'}
+            />
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>{t('keyword', language)}</th>
+                    <th>{t('status', language)}</th>
+                    <th>{t('createdAt', language)}</th>
+                    <th>{t('actions', language)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {keywords.map((keyword) => (
+                    <tr key={keyword.id}>
+                      <td>
+                        <code>{keyword.keyword}</code>
+                      </td>
+                      <td>
+                        <div className="form-check form-switch">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            checked={keyword.is_enabled}
+                            onChange={() => handleToggleKeywordEnabled(keyword)}
+                            disabled={updateKeyword.isPending}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <small className="text-muted">
+                          {new Date(keyword.created_at).toLocaleString(
+                            language === 'zh' ? 'zh-CN' : 'en-US'
+                          )}
+                        </small>
+                      </td>
+                      <td>
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          onClick={() => handleDeleteKeyword(keyword.id)}
+                          disabled={deleteKeyword.isPending}
+                        >
+                          <i className="bi bi-trash" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
 
         {/* Create Keyword Modal */}
         <Modal
@@ -1761,12 +1840,20 @@ export const SecurityCenter: React.FC = () => {
         </div>
       </div>
 
+      {/* Tenant Selector (Issue #3274) */}
+      <TenantSelector
+        onTenantChange={handleTenantChange}
+        showClearButton={true}
+        showSearch={true}
+        className="mb-3"
+      />
+
       {/* Tab Navigation */}
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'filter' && 'active')}
-            onClick={() => setActiveTab('filter')}
+            onClick={() => handleTabChange('filter')}
           >
             <i className="bi bi-shield-check me-1" />
             {t('contentFilter', language)}
@@ -1775,7 +1862,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'settings' && 'active')}
-            onClick={() => setActiveTab('settings')}
+            onClick={() => handleTabChange('settings')}
           >
             <i className="bi bi-gear me-1" />
             {t('securitySettings', language)}
@@ -1784,7 +1871,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'audit' && 'active')}
-            onClick={() => setActiveTab('audit')}
+            onClick={() => handleTabChange('audit')}
           >
             <i className="bi bi-sliders me-1" />
             {t('auditThresholds', language)}
@@ -1793,7 +1880,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'stats' && 'active')}
-            onClick={() => setActiveTab('stats')}
+            onClick={() => handleTabChange('stats')}
           >
             <i className="bi bi-bar-chart me-1" />
             {t('filterStats', language)}
@@ -1802,7 +1889,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'sensitive-keywords' && 'active')}
-            onClick={() => setActiveTab('sensitive-keywords')}
+            onClick={() => handleTabChange('sensitive-keywords')}
           >
             <i className="bi bi-key me-1" />
             {t('sensitiveKeywords', language)}
