@@ -533,7 +533,7 @@ class TestGetActionCategories:
                 assert "label" in action
                 assert "i18n_key" in action
 
-    def test_get_action_categories_total_actions_is_66(self):
+    def test_get_action_categories_total_actions_is_71(self):
         """Test the total action count, including notification integration actions."""
         from app.modules.governance.audit_logger import get_action_categories
 
@@ -545,7 +545,8 @@ class TestGetActionCategories:
         # Issue #3200: Added tenant_billing_period_reset action (64 -> 65)
         # Issue #3328: Added ssrf_config_reset action (65 -> 66)
         # Issue #3275: Added 3 project_user management actions (66 -> 69)
-        assert total_actions == 69, f"Expected 69 actions, got {total_actions}"
+        # Issue #3273: Added 2 tool_account_mapping verification actions (69 -> 71)
+        assert total_actions == 71, f"Expected 71 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""

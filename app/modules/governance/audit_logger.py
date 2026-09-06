@@ -169,6 +169,9 @@ class AuditAction(Enum):
     TOOL_ACCOUNT_MAPPING_UPDATE = "tool_account_mapping_update"
     TOOL_ACCOUNT_MAPPING_DELETE = "tool_account_mapping_delete"
     TOOL_ACCOUNT_MAPPING_BATCH = "tool_account_mapping_batch"
+    # Issue #3273: Tool account mapping verification actions
+    TOOL_ACCOUNT_MAPPING_VERIFY = "tool_account_mapping_verify"
+    TOOL_ACCOUNT_MAPPING_VERIFY_BATCH = "tool_account_mapping_verify_batch"
 
     # Shared project permission actions (Issue #2745)
     SHARED_PROJECT_PERMISSION_SETUP_START = "shared_project_permission_setup_start"
@@ -1265,6 +1268,17 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "tool_account_mapping_batch",
                     "label": "Tool Account Mapping Batch",
                     "i18n_key": "actionToolAccountMappingBatch",
+                },
+                # Issue #3273: Tool account mapping verification actions
+                {
+                    "value": "tool_account_mapping_verify",
+                    "label": "Tool Account Mapping Verify",
+                    "i18n_key": "actionToolAccountMappingVerify",
+                },
+                {
+                    "value": "tool_account_mapping_verify_batch",
+                    "label": "Tool Account Mapping Verify Batch",
+                    "i18n_key": "actionToolAccountMappingVerifyBatch",
                 },
             ],
         },

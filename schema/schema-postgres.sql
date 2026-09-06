@@ -2387,7 +2387,10 @@ CREATE TABLE user_tool_accounts (
     observed_message_count integer,
     created_by integer,
     tenant_id integer,
-    version integer
+    version integer,
+    verification_status character varying(50),
+    verification_result text,
+    verified_at timestamp without time zone
 );
 
 CREATE SEQUENCE user_tool_accounts_id_seq
