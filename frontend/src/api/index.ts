@@ -185,7 +185,7 @@ export { modelGatewayApi } from './modelGateway';
 export type { ModelGatewayConfig, ModelGatewayTestResult } from './modelGateway';
 // system settings
 export { systemApi } from './system';
-export type { SystemSettings } from './system';
+export type { SystemSettings, BrandingConfig } from './system';
 // feature flags
 export { featureFlagsApi } from './featureFlags';
 export type { FeatureFlags } from './featureFlags';
