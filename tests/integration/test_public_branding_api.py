@@ -178,5 +178,3 @@ class TestSystemSettingsUpdate:
         )
         # Should return 401 Unauthorized
         assert response.status_code == 401
-
-    
