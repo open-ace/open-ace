@@ -81,6 +81,15 @@ vi.mock('@/i18n', () => ({
       ipWhitelist: 'IP Whitelist',
       allowedIpAddresses: 'Allowed IP Addresses',
       ipWhitelistHelp: 'IP whitelist help',
+      // Upload Auth Status (Issue #3327)
+      uploadAuthStatus: 'Upload Authentication Status',
+      uploadAuthEnabled: 'Enabled',
+      uploadAuthDisabled: 'Not Configured',
+      uploadAuthInvalid: 'Configuration Invalid',
+      uploadAuthKeyLength: 'Key Length',
+      characters: 'characters',
+      uploadAuthConfigHint: 'Set UPLOAD_AUTH_KEY in .env or deployment configuration.',
+      uploadAuthFixSuggestion: 'Fix Suggestion',
       anomalyDetectionThresholds: 'Anomaly Detection Thresholds',
       failedLoginThreshold: 'Failed Login Threshold',
       failedLoginThresholdHelp: 'Failed login threshold help',
@@ -305,6 +314,21 @@ vi.mock('@/hooks', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   })),
+  useUploadAuthStatus: vi.fn(() => ({
+    data: {
+      upload_auth_enabled: false,
+      key_length: null,
+      config_source: 'environment_variable',
+      security_mode: 'development',
+      is_valid: true,
+      validation_error: null,
+      fix_suggestion: 'Set UPLOAD_AUTH_KEY in .env or deployment configuration.',
+      checked_at: '2026-01-01T00:00:00Z',
+    },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  })),
 }));
 
 const mockConfirm = vi.fn().mockResolvedValue(true);
@@ -501,6 +525,7 @@ import {
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
   useFilterStats,
+  useUploadAuthStatus,
 } from '@/hooks';
 
 // ─── Helper to override hooks for specific tests ──────────────────────────────
@@ -1011,6 +1036,120 @@ describe('SecurityCenter', () => {
           })
         );
       });
+    });
+
+    // ─── Upload Auth Status Tests (Issue #3327) ──────────────────────────────
+
+    it('renders upload auth status card', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      expect(screen.getByText('Upload Authentication Status')).toBeInTheDocument();
+    });
+
+    it('shows "Not Configured" badge when upload auth is disabled', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      // Default mock has upload_auth_enabled: false
+      expect(screen.getByText('Not Configured')).toBeInTheDocument();
+    });
+
+    it('shows "Enabled" badge when upload auth is enabled', () => {
+      vi.mocked(useUploadAuthStatus).mockReturnValue({
+        data: {
+          upload_auth_enabled: true,
+          key_length: 64,
+          config_source: 'environment_variable',
+          security_mode: 'development',
+          is_valid: true,
+          validation_error: null,
+          fix_suggestion: null,
+          checked_at: '2026-01-01T00:00:00Z',
+        },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useUploadAuthStatus>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      expect(screen.getByText('Enabled')).toBeInTheDocument();
+      expect(screen.getByText('64 characters')).toBeInTheDocument();
+    });
+
+    it('shows validation error when config is invalid', async () => {
+      vi.mocked(useUploadAuthStatus).mockReturnValue({
+        data: {
+          upload_auth_enabled: false,
+          key_length: null,
+          config_source: 'environment_variable',
+          security_mode: 'production',
+          is_valid: false,
+          validation_error: 'UPLOAD_AUTH_KEY uses an insecure placeholder value',
+          fix_suggestion: 'Generate a strong key: python3 -c "import secrets; print(secrets.token_hex(32))"',
+          checked_at: '2026-01-01T00:00:00Z',
+        },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useUploadAuthStatus>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      await waitFor(() => {
+        expect(screen.getByText('Upload Authentication Status')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Configuration Invalid:')).toBeInTheDocument();
+      expect(screen.getByText(/UPLOAD_AUTH_KEY uses an insecure placeholder value/)).toBeInTheDocument();
+      expect(screen.getByText(/Generate a strong key/)).toBeInTheDocument();
+    });
+
+    it('shows config hint when not configured but valid', async () => {
+      // Explicitly set the mock to ensure correct default state
+      vi.mocked(useUploadAuthStatus).mockReturnValue({
+        data: {
+          upload_auth_enabled: false,
+          key_length: null,
+          config_source: 'environment_variable',
+          security_mode: 'development',
+          is_valid: true,
+          validation_error: null,
+          fix_suggestion: 'Set UPLOAD_AUTH_KEY in .env or deployment configuration.',
+          checked_at: '2026-01-01T00:00:00Z',
+        },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useUploadAuthStatus>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      // Default mock has is_valid: true and upload_auth_enabled: false
+      await waitFor(() => {
+        expect(screen.getByText('Upload Authentication Status')).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Set UPLOAD_AUTH_KEY/)).toBeInTheDocument();
+    });
+
+    it('shows loading state for upload auth status', () => {
+      vi.mocked(useUploadAuthStatus).mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useUploadAuthStatus>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      // The Card should still render, but with Loading inside
+      expect(screen.getByText('Upload Authentication Status')).toBeInTheDocument();
+    });
+
+    it('shows error state for upload auth status', () => {
+      vi.mocked(useUploadAuthStatus).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useUploadAuthStatus>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Security Settings'));
+      expect(screen.getByText('Upload Authentication Status')).toBeInTheDocument();
     });
   });
 

@@ -87,6 +87,18 @@ export interface PasswordPolicy {
   password_require_special: boolean;
 }
 
+// Upload Auth Status Types (Issue #3327)
+export interface UploadAuthStatus {
+  upload_auth_enabled: boolean;
+  key_length: number | null;
+  config_source: 'environment_variable';
+  security_mode: 'production' | 'pilot' | 'development';
+  is_valid: boolean;
+  validation_error: string | null;
+  fix_suggestion: string | null;
+  checked_at: string;
+}
+
 export interface FilterStats {
   enabled: boolean;
   redact_pii: boolean;
@@ -201,6 +213,11 @@ export const governanceApi = {
   // Password Policy (accessible to all authenticated users)
   async getPasswordPolicy(): Promise<PasswordPolicy> {
     return apiClient.get<PasswordPolicy>('/api/password-policy');
+  },
+
+  // Upload Auth Status (Issue #3327)
+  async getUploadAuthStatus(): Promise<UploadAuthStatus> {
+    return apiClient.get<UploadAuthStatus>('/api/security-settings/upload-auth-status');
   },
 
   // Sensitive Keywords (Issue #3059)

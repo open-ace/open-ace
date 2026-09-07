@@ -52,6 +52,7 @@ export type {
   SensitiveKeywordsResponse,
   CreateSensitiveKeywordRequest,
   SensitiveKeywordsFilters,
+  UploadAuthStatus,
 } from './governance';
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';

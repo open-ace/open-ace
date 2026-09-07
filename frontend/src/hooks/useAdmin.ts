@@ -415,3 +415,13 @@ export function useDeleteSensitiveKeyword() {
     },
   });
 }
+
+// Upload Auth Status Hooks (Issue #3327)
+export function useUploadAuthStatus() {
+  return useQuery({
+    queryKey: ['admin', 'upload-auth-status'],
+    queryFn: () => governanceApi.getUploadAuthStatus(),
+    staleTime: 30000, // 30 seconds
+    refetchOnWindowFocus: true,
+  });
+}

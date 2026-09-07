@@ -56,6 +56,7 @@ export {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useUploadAuthStatus,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

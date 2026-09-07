@@ -896,6 +896,19 @@ def api_update_security_settings():
     return jsonify({"error": "Failed to update security settings"}), 500
 
 
+@governance_bp.route("/security-settings/upload-auth-status", methods=["GET"])
+@admin_required
+def api_get_upload_auth_status():
+    """Get upload authentication status.
+
+    Issue #3327: Returns upload auth status without exposing the key value.
+    All admins can view upload auth status (global config, no tenant isolation).
+    """
+
+    status = governance_repo.get_upload_auth_status()
+    return jsonify(status)
+
+
 # ============================================================================
 # Password Policy (accessible to all authenticated users)
 # ============================================================================

@@ -844,3 +844,77 @@ class GovernanceRepository:
         except Exception as e:
             logger.error(f"Error incrementing tenant keywords version: {e}")
             return False
+
+    # =========================================================================
+    # Upload Auth Status (Issue #3327)
+    # =========================================================================
+
+    def get_upload_auth_status(self) -> dict[str, Any]:
+        """
+        Get upload authentication status.
+
+        Issue #3327: Returns upload auth status without exposing the key value.
+        All admins can view upload auth status (global config, no tenant isolation).
+
+        Returns:
+            Dict with upload auth status fields:
+            - upload_auth_enabled: Whether upload auth is configured
+            - key_length: Length of the key (if set), for strength verification
+            - config_source: Always "environment_variable"
+            - security_mode: Current security mode
+            - is_valid: Whether the configuration is valid
+            - validation_error: Error message if invalid
+            - fix_suggestion: Suggested fix if invalid
+            - checked_at: Timestamp of the check
+        """
+        from app.utils.security_env import get_upload_auth_key
+        from app.utils.security_mode import (
+            get_security_mode,
+            is_weak_secret_value,
+        )
+
+        checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        security_mode = get_security_mode().value
+
+        try:
+            upload_auth_key = get_upload_auth_key()
+
+            if upload_auth_key is None:
+                # Key not configured
+                return {
+                    "upload_auth_enabled": False,
+                    "key_length": None,
+                    "config_source": "environment_variable",
+                    "security_mode": security_mode,
+                    "is_valid": True,
+                    "validation_error": None,
+                    "fix_suggestion": "Set UPLOAD_AUTH_KEY in .env or deployment configuration.",
+                    "checked_at": checked_at,
+                }
+
+            # Key is configured and valid
+            return {
+                "upload_auth_enabled": True,
+                "key_length": len(upload_auth_key),
+                "config_source": "environment_variable",
+                "security_mode": security_mode,
+                "is_valid": True,
+                "validation_error": None,
+                "fix_suggestion": None,
+                "checked_at": checked_at,
+            }
+
+        except RuntimeError as e:
+            # RuntimeError is raised in production mode for weak/short keys
+            return {
+                "upload_auth_enabled": False,
+                "key_length": None,
+                "config_source": "environment_variable",
+                "security_mode": security_mode,
+                "is_valid": False,
+                "validation_error": str(e),
+                "fix_suggestion": (
+                    'Generate a strong key: python3 -c "import secrets; print(secrets.token_hex(32))"'
+                ),
+                "checked_at": checked_at,
+            }

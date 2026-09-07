@@ -26,6 +26,7 @@ import {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useUploadAuthStatus,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -215,6 +216,14 @@ export const SecurityCenter: React.FC = () => {
   const createKeyword = useCreateSensitiveKeyword();
   const updateKeyword = useUpdateSensitiveKeyword();
   const deleteKeyword = useDeleteSensitiveKeyword();
+
+  // --- Upload Auth Status (Issue #3327) ---
+  const {
+    data: uploadAuthStatus,
+    isLoading: uploadAuthLoading,
+    isError: uploadAuthError,
+    refetch: refetchUploadAuth,
+  } = useUploadAuthStatus();
 
   const [showKeywordModal, setShowKeywordModal] = useState(false);
   const [keywordInput, setKeywordInput] = useState('');
@@ -880,6 +889,51 @@ export const SecurityCenter: React.FC = () => {
             />
             <small className="text-muted">{t('ipWhitelistHelp', language)}</small>
           </div>
+        </Card>
+
+        {/* Upload Auth Status (Issue #3327) */}
+        <Card title={t('uploadAuthStatus', language)} className="mb-4">
+          {uploadAuthLoading ? (
+            <Loading size="sm" text={t('loading', language)} />
+          ) : uploadAuthError ? (
+            <Error message={t('error', language)} onRetry={() => refetchUploadAuth()} />
+          ) : uploadAuthStatus ? (
+            <div className="upload-auth-status-content">
+              <div className="d-flex align-items-center mb-3">
+                <span className="me-2">{t('status', language)}:</span>
+                {uploadAuthStatus.upload_auth_enabled ? (
+                  <Badge variant="success">{t('uploadAuthEnabled', language)}</Badge>
+                ) : (
+                  <Badge variant="secondary">{t('uploadAuthDisabled', language)}</Badge>
+                )}
+              </div>
+              {uploadAuthStatus.upload_auth_enabled && uploadAuthStatus.key_length && (
+                <div className="mb-2">
+                  <span className="text-muted">{t('uploadAuthKeyLength', language)}:</span>{' '}
+                  <span>{uploadAuthStatus.key_length} {t('characters', language)}</span>
+                </div>
+              )}
+              {!uploadAuthStatus.is_valid && uploadAuthStatus.validation_error && (
+                <div className="alert alert-warning mt-2">
+                  <i className="bi bi-exclamation-triangle me-2" />
+                  <strong>{t('uploadAuthInvalid', language)}:</strong>{' '}
+                  {uploadAuthStatus.validation_error}
+                  {uploadAuthStatus.fix_suggestion && (
+                    <div className="mt-1">
+                      <strong>{t('uploadAuthFixSuggestion', language)}:</strong>{' '}
+                      {uploadAuthStatus.fix_suggestion}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!uploadAuthStatus.upload_auth_enabled && uploadAuthStatus.is_valid && (
+                <div className="alert alert-info mt-2">
+                  <i className="bi bi-info-circle me-2" />
+                  {uploadAuthStatus.fix_suggestion || t('uploadAuthConfigHint', language)}
+                </div>
+              )}
+            </div>
+          ) : null}
         </Card>
 
         {/* Save/Reset Buttons */}

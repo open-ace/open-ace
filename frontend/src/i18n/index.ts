@@ -640,6 +640,16 @@ export const translations: Record<Language, Translations> = {
     allowedIpAddresses: 'Allowed IP Addresses',
     ipWhitelistHelp: 'Enter one IP address or CIDR range per line. Leave empty to allow all IPs.',
 
+    // Upload Auth Status (Issue #3327)
+    uploadAuthStatus: 'Upload Authentication Status',
+    uploadAuthEnabled: 'Enabled',
+    uploadAuthDisabled: 'Not Configured',
+    uploadAuthInvalid: 'Configuration Invalid',
+    uploadAuthKeyLength: 'Key Length',
+    characters: 'characters',
+    uploadAuthConfigHint: 'Configure UPLOAD_AUTH_KEY in .env or deployment settings.',
+    uploadAuthFixSuggestion: 'Fix Suggestion',
+
     // Analysis
     overview: 'Overview',
     conversationHistory: 'Conversation History',
@@ -3002,6 +3012,16 @@ export const translations: Record<Language, Translations> = {
     ipWhitelist: 'IP 白名单',
     allowedIpAddresses: '允许的 IP 地址',
     ipWhitelistHelp: '每行输入一个 IP 地址或 CIDR 范围。留空则允许所有 IP。',
+
+    // Upload Auth Status (Issue #3327)
+    uploadAuthStatus: '上传鉴权状态',
+    uploadAuthEnabled: '已启用',
+    uploadAuthDisabled: '未配置',
+    uploadAuthInvalid: '配置无效',
+    uploadAuthKeyLength: '密钥长度',
+    characters: '字符',
+    uploadAuthConfigHint: '请在 .env 或部署配置中设置 UPLOAD_AUTH_KEY。',
+    uploadAuthFixSuggestion: '修复建议',
 
     // Analysis
     overview: '概览',
@@ -5638,6 +5658,16 @@ export const translations: Record<Language, Translations> = {
     allowedIpAddresses: '許可されたIPアドレス',
     ipWhitelistHelp: '1行に1つのIPアドレスまたはCIDR範囲を入力。空の場合はすべてのIPを許可。',
 
+    // Upload Auth Status (Issue #3327)
+    uploadAuthStatus: 'アップロード認証ステータス',
+    uploadAuthEnabled: '有効',
+    uploadAuthDisabled: '未設定',
+    uploadAuthInvalid: '設定無効',
+    uploadAuthKeyLength: 'キー長',
+    characters: '文字',
+    uploadAuthConfigHint: '.env またはデプロイ設定で UPLOAD_AUTH_KEY を設定してください。',
+    uploadAuthFixSuggestion: '修正提案',
+
     // Analysis
     overview: '概要',
     conversationHistory: '会話履歴',
@@ -7784,6 +7814,16 @@ export const translations: Record<Language, Translations> = {
     allowedIpAddresses: '허용된 IP 주소',
     ipWhitelistHelp:
       '한 줄에 하나의 IP 주소 또는 CIDR 범위를 입력하세요. 비워두면 모든 IP를 허용합니다.',
+
+    // Upload Auth Status (Issue #3327)
+    uploadAuthStatus: '업로드 인증 상태',
+    uploadAuthEnabled: '활성화됨',
+    uploadAuthDisabled: '미설정',
+    uploadAuthInvalid: '설정 무효',
+    uploadAuthKeyLength: '키 길이',
+    characters: '문자',
+    uploadAuthConfigHint: '.env 또는 배포 설정에서 UPLOAD_AUTH_KEY를 설정하세요.',
+    uploadAuthFixSuggestion: '수정 제안',
 
     // Analysis
     overview: '개요',
