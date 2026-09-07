@@ -160,7 +160,7 @@ export const BrandingSettings: React.FC = () => {
     return (
       <Card className="p-6">
         <div className="text-red-600 dark:text-red-400">{error}</div>
-        <Button variant="outline" onClick={fetchSettings} className="mt-4">
+        <Button variant="outline-primary" onClick={fetchSettings} className="mt-4">
           {t('retry', language)}
         </Button>
       </Card>
@@ -184,9 +184,9 @@ export const BrandingSettings: React.FC = () => {
           <TextInput
             label={t('logoUrl', language)}
             value={logoUrl}
-            onChange={(e) => setLogoUrl(e.target.value)}
+            onChange={setLogoUrl}
             placeholder="https://example.com/logo.png"
-            helperText={t('logoUrlHelper', language)}
+            hint={t('logoUrlHelper', language)}
           />
 
           {/* Logo Preview */}
@@ -219,9 +219,9 @@ export const BrandingSettings: React.FC = () => {
         <TextInput
           label={t('systemName', language)}
           value={systemName}
-          onChange={(e) => setSystemName(e.target.value)}
+          onChange={setSystemName}
           placeholder="Open ACE"
-          helperText={t('systemNameHelper', language)}
+          hint={t('systemNameHelper', language)}
         />
       </Card>
 
@@ -256,7 +256,7 @@ export const BrandingSettings: React.FC = () => {
         <TextInput
           label={`${t('welcomeMessage', language)} (${SUPPORTED_LANGUAGES.find((l) => l.code === activeLang)?.label})`}
           value={welcomeMessages[activeLang]}
-          onChange={(e) => handleWelcomeMessageChange(activeLang, e.target.value)}
+          onChange={(value) => handleWelcomeMessageChange(activeLang, value)}
           placeholder={t('welcomeMessagePlaceholder', language)}
         />
       </Card>
@@ -267,9 +267,9 @@ export const BrandingSettings: React.FC = () => {
         <TextInput
           label={t('copyrightText', language)}
           value={copyrightText}
-          onChange={(e) => setCopyrightText(e.target.value)}
+          onChange={setCopyrightText}
           placeholder="© 2026 Open ACE. All rights reserved."
-          helperText={t('copyrightHelper', language)}
+          hint={t('copyrightHelper', language)}
         />
       </Card>
 
