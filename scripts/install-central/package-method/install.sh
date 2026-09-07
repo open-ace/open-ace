@@ -4079,6 +4079,121 @@ wait_for_openace_service() {
     return 1
 }
 
+# Build frontend if Node.js is available
+# Issue #3277: Ensure frontend build artifacts are created for management platform
+build_frontend() {
+    local target_path="$1"
+    local install_user="$2"
+
+    print_header "Building Frontend"
+
+    # Check if Node.js is available
+    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+        print_warning "Node.js not found. Frontend build will be skipped."
+        print_warning "The management platform UI will not be available."
+        print_info ""
+        print_info "To build the frontend manually:"
+        print_info "  1. Install Node.js 20 or later"
+        print_info "  2. cd $target_path/frontend && npm ci --legacy-peer-deps"
+        print_info "  3. npm run build"
+        print_info "  4. Restart the Open ACE service"
+        print_info ""
+        print_info "Alternative: Use Docker deployment, which builds the frontend automatically."
+        return 0
+    fi
+
+    # Check Node.js version (require Node.js 20+)
+    local node_version
+    node_version=$(node --version 2>/dev/null | sed 's/^v//' || echo "0")
+    local major_version
+    major_version=$(echo "$node_version" | cut -d. -f1)
+
+    if [ "$major_version" -lt 20 ]; then
+        print_warning "Node.js version $node_version is too old. Need Node.js 20 or later."
+        print_warning "Frontend build will be skipped."
+        print_info "To build the frontend manually, install Node.js 20+ and run: cd $target_path/frontend && npm run build"
+        return 0
+    fi
+
+    print_success "Node.js $node_version detected"
+
+    # Build frontend
+    local frontend_dir="$target_path/frontend"
+
+    if [ ! -d "$frontend_dir" ]; then
+        print_warning "Frontend directory not found at $frontend_dir"
+        print_warning "Skipping frontend build"
+        return 0
+    fi
+
+    print_info "Installing frontend dependencies..."
+    cd "$frontend_dir"
+
+    # Run as install_user if running as root
+    if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+        if su - "$install_user" -c "cd '$frontend_dir' && npm ci --legacy-peer-deps 2>&1"; then
+            print_success "Frontend dependencies installed"
+        else
+            print_warning "Failed to install frontend dependencies (npm ci failed, trying npm install)"
+            su - "$install_user" -c "cd '$frontend_dir' && npm install --legacy-peer-deps 2>&1" || {
+                print_error "Failed to install frontend dependencies"
+                cd - > /dev/null
+                return 1
+            }
+        fi
+
+        print_info "Building frontend..."
+        if su - "$install_user" -c "cd '$frontend_dir' && npm run build 2>&1"; then
+            print_success "Frontend build completed"
+        else
+            print_error "Frontend build failed"
+            cd - > /dev/null
+            return 1
+        fi
+    else
+        # Running as the target user already
+        if npm ci --legacy-peer-deps 2>&1; then
+            print_success "Frontend dependencies installed"
+        else
+            print_warning "Failed to install frontend dependencies (npm ci failed, trying npm install)"
+            npm install --legacy-peer-deps 2>&1 || {
+                print_error "Failed to install frontend dependencies"
+                cd - > /dev/null
+                return 1
+            }
+        fi
+
+        print_info "Building frontend..."
+        if npm run build 2>&1; then
+            print_success "Frontend build completed"
+        else
+            print_error "Frontend build failed"
+            cd - > /dev/null
+            return 1
+        fi
+    fi
+
+    cd - > /dev/null
+
+    # Verify build artifacts
+    local dist_dir="$target_path/static/js/dist"
+
+    if [ ! -f "$dist_dir/index.html" ]; then
+        print_error "Frontend build verification failed: index.html not found at $dist_dir"
+        print_info "The management platform UI may not work correctly"
+        return 1
+    fi
+
+    if [ ! -f "$dist_dir/.vite/manifest.json" ]; then
+        print_warning "Frontend build may be incomplete: manifest.json not found"
+    fi
+
+    print_success "Frontend build artifacts verified"
+    print_info "Build output: $dist_dir"
+
+    return 0
+}
+
 # ============================================================================
 # Local Installation
 # ============================================================================
@@ -5095,6 +5210,9 @@ do_fresh_install() {
     else
         print_warning "init_db.py not found, skipping default user creation"
     fi
+
+    # Build frontend (Issue #3277)
+    build_frontend "$target_path" "$install_user"
 
     print_success "Fresh installation completed"
 }

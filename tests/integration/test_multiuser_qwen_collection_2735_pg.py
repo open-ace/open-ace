@@ -80,16 +80,29 @@ def _entry(
     usage=None,
     message_id=None,
     session_id="sess-fixture-1",
+    text=None,
 ):
     """One entry; a real qwen session file shares ONE sessionId across its
-    entries, so the default pins every fixture entry to a single session."""
+    entries, so the default pins every fixture entry to a single session.
+
+    Args:
+        text: Optional text content for user/assistant messages. If provided,
+            adds a text part to the message parts array. This is required for
+            user messages after Issue #3337's strip_qwen_system_envelopes fix
+            (empty user messages are skipped to handle Qwen SDK's system-reminder
+            envelopes that may be combined with real user input).
+    """
+    parts = []
+    if text:
+        parts.append({"text": text})
+
     entry = {
         "uuid": uuid,
         "parentUuid": parent,
         "type": entry_type,
         "timestamp": ts,
         "sessionId": session_id,
-        "message": {"message_id": message_id or uuid, "parts": []},
+        "message": {"message_id": message_id or uuid, "parts": parts},
     }
     if model:
         entry["model"] = model
@@ -112,7 +125,9 @@ class TestMultiUserQwenCollection:
 
     def _sample_entries(self):
         return [
-            _entry("u1", "user", "2026-01-05T10:00:00Z", message_id="m1"),
+            # Issue #3337: user messages must have actual text content (empty user
+            # messages are skipped by strip_qwen_system_envelopes logic)
+            _entry("u1", "user", "2026-01-05T10:00:00Z", message_id="m1", text="Test user message"),
             _entry(
                 "a1",
                 "assistant",

@@ -162,6 +162,12 @@ const APIKeyManagement = lazy(() =>
     default: m.APIKeyManagement,
   }))
 );
+// Issue #3326: Encryption key management
+const EncryptionKeyManagement = lazy(() =>
+  import('@/components/features/management/EncryptionKeyManagement').then((m) => ({
+    default: m.EncryptionKeyManagement,
+  }))
+);
 // model-gateway (removable)
 const ModelGatewayConfig = lazy(() =>
   import('@/components/features/management/ModelGatewayConfig').then((m) => ({
@@ -477,6 +483,7 @@ const ManageRoutes: React.FC = () => {
           {/* Settings */}
           <Route path="settings/sso" element={<SSOSettings />} />
           <Route path="settings/api-keys" element={<APIKeyManagement />} />
+          <Route path="settings/encryption-keys" element={<EncryptionKeyManagement />} />
           <Route path="settings/ai-agent" element={<AiAgentSettings />} />
           <Route path="settings/notification-integration" element={<NotificationIntegration />} />
           <Route

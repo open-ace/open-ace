@@ -371,6 +371,10 @@ def _record_messages(
                     # Issue #3335: Find the last REAL user message, skipping Qwen
                     # system context. Filter inside the loop so we continue searching
                     # if the selected message is a system context.
+                    # Issue #28: Qwen CLI sends its system context (Platform
+                    # Tool Limits, startup context, memory instructions) as
+                    # the last role=user message in LLM requests; never
+                    # mirror it as a user chat message.
                     from scripts.shared.qwen_context import is_qwen_system_context
 
                     user_content = None

@@ -209,6 +209,13 @@ const navSections: NavSection[] = [
         adminOnly: true,
       },
       {
+        id: 'encryption-keys',
+        label: 'encryptionKeys',
+        icon: 'bi-shield-key',
+        path: '/manage/settings/encryption-keys',
+        adminOnly: true,
+      },
+      {
         id: 'ai-agent',
         label: 'aiAgentSettings',
         icon: 'bi-robot',

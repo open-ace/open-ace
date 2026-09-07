@@ -22,6 +22,7 @@ import type {
   RestoreUserRequest,
   SensitiveKeywordsFilters,
   CreateSensitiveKeywordRequest,
+  ResetSsrfConfigRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -227,6 +228,35 @@ export function useUpdateSecuritySettings() {
       // Also invalidate password policy cache so regular users see updated policy
       queryClient.invalidateQueries({ queryKey: ['password-policy'] });
     },
+  });
+}
+
+// SSRF Protection Status Hooks (Issue #3328)
+export function useSsrfStatus() {
+  return useQuery({
+    queryKey: ['admin', 'ssrf-status'],
+    queryFn: () => governanceApi.getSsrfStatus(),
+  });
+}
+
+export function useResetSsrfConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ResetSsrfConfigRequest) => governanceApi.resetSsrfConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'ssrf-status'] });
+    },
+  });
+}
+
+// Upload Authentication Status Hooks (Issue #3327)
+export function useUploadAuthStatus() {
+  return useQuery({
+    queryKey: ['admin', 'upload-auth-status'],
+    queryFn: () => governanceApi.getUploadAuthStatus(),
+    staleTime: 30_000, // 30秒缓存，提升状态更新及时性
+    refetchOnWindowFocus: true, // 窗口聚焦时刷新
   });
 }
 

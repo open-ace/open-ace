@@ -87,15 +87,72 @@ export interface PasswordPolicy {
   password_require_special: boolean;
 }
 
-// Upload Auth Status Types (Issue #3327)
+// SSRF Protection Status Types (Issue #3328)
+export interface SsrfPortWhitelist {
+  value: number[];
+  is_customized: boolean;
+  default_value: number[];
+}
+
+export interface SsrfGlobalAllowlist {
+  count: number;
+  entries: Array<{ host: string; type: string }>;
+  is_customized: boolean;
+}
+
+export interface SsrfTenantAllowlist {
+  enabled: boolean;
+  tenant_count: number;
+}
+
+export interface SsrfDefaultPolicy {
+  blocked_hostnames: string[];
+  blocked_private_networks: string[];
+  default_port_whitelist: number[];
+}
+
+export interface SsrfInterceptionStats {
+  last_24h: number;
+  last_7d: number;
+  last_30d: number;
+}
+
+export interface SsrfStatus {
+  ssrf_protection_enabled: boolean;
+  emergency_mode: boolean;
+  config_source: 'database' | 'environment' | 'default';
+  config_version: number;
+  port_whitelist: SsrfPortWhitelist;
+  global_allowlist: SsrfGlobalAllowlist;
+  tenant_allowlist: SsrfTenantAllowlist;
+  default_policy: SsrfDefaultPolicy;
+  interception_stats: SsrfInterceptionStats;
+  can_reset: boolean;
+}
+
+export interface ResetSsrfConfigRequest {
+  reset_ports: boolean;
+  reset_global_allowlist: boolean;
+  expected_version: number;
+  reason?: string;
+}
+
+export interface ResetSsrfConfigResponse {
+  success: boolean;
+  reset_items: string[];
+  new_config_version: number;
+  message: string;
+}
+
+// Upload Authentication Status Types (Issue #3327)
 export interface UploadAuthStatus {
   upload_auth_enabled: boolean;
   key_length: number | null;
   config_source: 'environment_variable';
-  security_mode: 'production' | 'pilot' | 'development';
+  security_mode: 'production' | 'pilot' | 'development' | 'unknown';
   is_valid: boolean;
-  validation_error: string | null;
-  fix_suggestion: string | null;
+  validation_error?: string;
+  fix_suggestion?: string;
   checked_at: string;
 }
 
@@ -215,7 +272,16 @@ export const governanceApi = {
     return apiClient.get<PasswordPolicy>('/api/password-policy');
   },
 
-  // Upload Auth Status (Issue #3327)
+  // SSRF Protection Status (Issue #3328)
+  async getSsrfStatus(): Promise<SsrfStatus> {
+    return apiClient.get<SsrfStatus>('/api/security-settings/ssrf-status');
+  },
+
+  async resetSsrfConfig(data: ResetSsrfConfigRequest): Promise<ResetSsrfConfigResponse> {
+    return apiClient.post<ResetSsrfConfigResponse>('/api/security-settings/ssrf/reset', data);
+  },
+
+  // Upload Authentication Status (Issue #3327)
   async getUploadAuthStatus(): Promise<UploadAuthStatus> {
     return apiClient.get<UploadAuthStatus>('/api/security-settings/upload-auth-status');
   },

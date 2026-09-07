@@ -10,8 +10,15 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useQuotaUsage, useQuotaStats, useUpdateQuota, usePageRefresh } from '@/hooks';
+import {
+  useQuotaUsage,
+  useQuotaStats,
+  useUpdateQuota,
+  usePageRefresh,
+  useAlertStream,
+} from '@/hooks';
 import { useLanguage, useUser } from '@/store';
+import { useAlertStreamStore } from '@/store/alertStreamStore';
 import { isAdmin } from '@/utils/permissions';
 import { t, type Language } from '@/i18n';
 import {
@@ -38,7 +45,7 @@ import {
   formatQuotaForDisplay,
   getAvailableQuotaHint,
 } from '@/utils/quotaFormatter';
-import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
+import { alertsApi, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
 const getTypeOptions = (language: Language) => [
@@ -91,6 +98,18 @@ export const QuotaAlerts: React.FC = () => {
     enabled: false,
   });
 
+  // Issue #3332: Use global alert stream store (replaces local state)
+  const { setAlerts, setUnreadCount, removeAlert } = useAlertStreamStore();
+
+  // SSE connection (managed globally by the store)
+  useAlertStream();
+
+  // Get alerts from store
+  const alerts = useAlertStreamStore((state) => state.alerts);
+  const unreadCount = useAlertStreamStore((state) => state.unreadCount);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
   const [formData, setFormData] = useState<UpdateQuotaRequest>({});
@@ -100,12 +119,6 @@ export const QuotaAlerts: React.FC = () => {
     daily_request_quota?: string;
     monthly_request_quota?: string;
   }>({});
-
-  // --- Alerts State ---
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [alertsLoading, setAlertsLoading] = useState(true);
-  const [alertsError, setAlertsError] = useState<string | null>(null);
 
   const [typeFilter, setTypeFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
@@ -475,7 +488,7 @@ export const QuotaAlerts: React.FC = () => {
     if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' }))) return;
     try {
       await alertsApi.deleteAlert(alertId);
-      setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
+      removeAlert(alertId);
     } catch (err) {
       console.error('Failed to delete alert:', err);
     }

@@ -100,6 +100,16 @@ def get_allowed_ports() -> set[int]:
     return _ALLOWED_PORTS_CACHE
 
 
+def invalidate_port_cache() -> None:
+    """Invalidate port whitelist cache (called when resetting SSRF config).
+
+    Issue #3328: When admin resets SSRF config to default, we need to
+    clear the cache so the next request uses the fresh configuration.
+    """
+    global _ALLOWED_PORTS_CACHE
+    _ALLOWED_PORTS_CACHE = None
+
+
 def _normalize_hostname(host: str) -> str:
     """Normalize hostname with security checks.
 

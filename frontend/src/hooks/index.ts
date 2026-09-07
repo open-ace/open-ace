@@ -56,6 +56,8 @@ export {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useSsrfStatus,
+  useResetSsrfConfig,
   useUploadAuthStatus,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
@@ -157,3 +159,18 @@ export {
 
 // Admin tenant selection hook (Issue #2841)
 export { useAdminTenant } from './useAdminTenant';
+
+// Alert stream hook (Issue #3332)
+export { useAlertStream } from './useAlertStream';
+
+// Encryption keys hooks (Issue #3326)
+export {
+  useEncryptionKeys,
+  useValidateKey,
+  useRotateKey,
+  useGenerateEnvConfig,
+  useEncryptionKeysAuditLog,
+  useEncryptionKeysSyncStatus,
+  useReEncryptPreCheck,
+  useReEncrypt,
+} from './useEncryptionKeys';

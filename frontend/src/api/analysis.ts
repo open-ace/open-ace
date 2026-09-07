@@ -174,15 +174,29 @@ export interface QualityMetrics {
   outlier_ratio?: number; // Ratio of outlier days
 }
 
+// Issue #3244: History window metadata for forecast
+export interface HistoryWindow {
+  start_date: string;
+  end_date: string;
+  days: number;
+  missing_days: number;
+  timezone: string;
+  first_activity_date: string | null;
+}
+
 // Forecast response type
 export interface ForecastAvailableTrue {
   forecast_available: true;
   method: 'moving_average';
+  algorithm_version: string; // Issue #3244: Algorithm version for forward compatibility
+  quality: 'normal' | 'degraded'; // Issue #3244: Quality assessment
   period_days: number;
   horizon_days: number; // Forecast horizon (same as period_days)
   daily_forecast: { tokens: number; requests: number };
   total_forecast: { tokens: number; requests: number };
   forecast_dates: string[];
+  // Issue #3244: History window metadata
+  history_window: HistoryWindow;
   // Quality metrics (Issue #3248)
   quality_level: 'quality' | 'satisfactory' | 'fair' | 'poor' | 'unavailable';
   quality_description: string;
@@ -202,11 +216,14 @@ export interface ForecastAvailableTrue {
 export interface ForecastAvailableFalse {
   forecast_available: false;
   reason: string;
+  algorithm_version?: string; // Issue #3244: Algorithm version
   quality_level: 'unavailable';
   quality_description: string;
   quality_metrics?: Partial<QualityMetrics>;
   horizon_days: number;
   confidence: null;
+  // Issue #3244: History window metadata (may be present for some unavailable cases)
+  history_window?: HistoryWindow;
   _deprecated_note?: string;
 }
 

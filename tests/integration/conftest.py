@@ -83,6 +83,10 @@ def _create_sqlite_tables(db):
     # These tables are defined in migration 20260819_001 but may not be in schema.sql yet
     _create_tenant_keywords_tables(db, dialect="sqlite")
 
+    # Issue #3273: Add verification fields to user_tool_accounts table
+    # These fields are defined in migration 20260906_001 but may not be in schema.sql yet
+    _create_verification_fields(db, dialect="sqlite")
+
 
 def _create_tenant_keywords_tables(db, dialect="sqlite"):
     """Create tenant keywords tables for Issue #2789.
@@ -149,6 +153,68 @@ def _create_tenant_keywords_tables(db, dialect="sqlite"):
             """)
     except Exception as e:
         logger.warning(f"Could not create tenant_keywords tables (may already exist): {e}")
+
+
+def _create_verification_fields(db, dialect="sqlite"):
+    """Add verification fields to user_tool_accounts table for Issue #3273.
+
+    Adds fields if they don't exist (idempotent).
+    """
+    try:
+        if dialect == "sqlite":
+            # Add verification_status field
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN verification_status TEXT
+                """)
+            except Exception:
+                pass  # Column already exists
+
+            # Add verification_result field
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN verification_result TEXT
+                """)
+            except Exception:
+                pass  # Column already exists
+
+            # Add verified_at field
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN verified_at TIMESTAMP
+                """)
+            except Exception:
+                pass  # Column already exists
+        else:
+            # PostgreSQL
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20)
+                """)
+            except Exception:
+                pass  # Column already exists
+
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN IF NOT EXISTS verification_result TEXT
+                """)
+            except Exception:
+                pass  # Column already exists
+
+            try:
+                db.execute("""
+                    ALTER TABLE user_tool_accounts
+                    ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP
+                """)
+            except Exception:
+                pass  # Column already exists
+    except Exception as e:
+        logger.warning(f"Could not add verification fields (may already exist): {e}")
 
 
 def _get_pg_base_url():
@@ -330,9 +396,85 @@ def app(tmp_db):
 
 
 @pytest.fixture
+def tool_accounts_app(tmp_db):
+    """Create Flask app for testing tool accounts API with temporary database.
+
+    Issue #3273: Fixture for tool account verification API tests.
+    """
+    from flask import Flask
+
+    from app.routes.tool_accounts import tool_account_repo, tool_accounts_bp, user_repo
+    from app.services.tool_account_verification_service import get_tool_account_verification_service
+
+    app = Flask(__name__)
+    app.register_blueprint(tool_accounts_bp, url_prefix="/api")
+    app.config["TESTING"] = True
+    app.secret_key = "test-secret-key"
+
+    # Patch database in repository instances
+    # The repositories are created at module load time, so we need to patch their db attribute
+    original_tool_account_db = tool_account_repo.db
+    original_user_db = user_repo.db
+
+    tool_account_repo.db = tmp_db
+    user_repo.db = tmp_db
+
+    # Also patch the verification service's database
+    verification_service = get_tool_account_verification_service()
+    original_mapping_repo_db = (
+        verification_service.mapping_repo.db if verification_service.mapping_repo else None
+    )
+    original_user_repo_db = (
+        verification_service.user_repo.db if verification_service.user_repo else None
+    )
+    original_local_verifier_db = (
+        verification_service.local_verifier.db if verification_service.local_verifier else None
+    )
+    original_discovered_verifier_db = (
+        verification_service.discovered_verifier.db
+        if verification_service.discovered_verifier
+        else None
+    )
+
+    if verification_service.mapping_repo:
+        verification_service.mapping_repo.db = tmp_db
+    if verification_service.user_repo:
+        verification_service.user_repo.db = tmp_db
+    if verification_service.local_verifier:
+        verification_service.local_verifier.db = tmp_db
+    if verification_service.discovered_verifier:
+        verification_service.discovered_verifier.db = tmp_db
+
+    try:
+        yield app
+    finally:
+        # Restore original database references
+        tool_account_repo.db = original_tool_account_db
+        user_repo.db = original_user_db
+
+        if verification_service.mapping_repo:
+            verification_service.mapping_repo.db = original_mapping_repo_db
+        if verification_service.user_repo:
+            verification_service.user_repo.db = original_user_repo_db
+        if verification_service.local_verifier:
+            verification_service.local_verifier.db = original_local_verifier_db
+        if verification_service.discovered_verifier:
+            verification_service.discovered_verifier.db = original_discovered_verifier_db
+
+
+@pytest.fixture
 def client(app):
     """Create test client."""
     return app.test_client()
+
+
+@pytest.fixture
+def tool_accounts_client(tool_accounts_app):
+    """Create test client for tool accounts API.
+
+    Issue #3273: Client for tool account verification API tests.
+    """
+    return tool_accounts_app.test_client()
 
 
 @pytest.fixture

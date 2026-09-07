@@ -129,6 +129,7 @@ class AuditAction(Enum):
     LLM_PROXY_URL_BLOCKED = "llm_proxy_url_blocked"
     ALLOWLIST_ENTRY_INVALID = "allowlist_entry_invalid"
     IP_RESOLVED_MISMATCH = "ip_resolved_mismatch"
+    SSRF_CONFIG_RESET = "ssrf_config_reset"  # Issue #3328: Reset SSRF config to default
 
     # Usage report actions (Issue #1891)
     USAGE_REPORT_ACCEPTED = "usage_report_accepted"
@@ -168,10 +169,18 @@ class AuditAction(Enum):
     TOOL_ACCOUNT_MAPPING_UPDATE = "tool_account_mapping_update"
     TOOL_ACCOUNT_MAPPING_DELETE = "tool_account_mapping_delete"
     TOOL_ACCOUNT_MAPPING_BATCH = "tool_account_mapping_batch"
+    # Issue #3273: Tool account mapping verification actions
+    TOOL_ACCOUNT_MAPPING_VERIFY = "tool_account_mapping_verify"
+    TOOL_ACCOUNT_MAPPING_VERIFY_BATCH = "tool_account_mapping_verify_batch"
 
     # Shared project permission actions (Issue #2745)
     SHARED_PROJECT_PERMISSION_SETUP_START = "shared_project_permission_setup_start"
     SHARED_PROJECT_PERMISSION_SETUP_COMPLETE = "shared_project_permission_setup_complete"
+
+    # Project user management actions (Issue #3275)
+    PROJECT_USER_ADD = "project_user_add"
+    PROJECT_USER_REMOVE = "project_user_remove"
+    PROJECT_USER_BATCH_UPDATE = "project_user_batch_update"
 
 
 class AuditSeverity(Enum):
@@ -876,7 +885,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "permission": {
             "label": "Permission",
             "i18n_key": "categoryPermission",
-            "resource_types": ["user"],
+            "resource_types": ["user", "project"],
             "actions": [
                 {
                     "value": "permission_grant",
@@ -897,6 +906,21 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "shared_project_permission_setup_complete",
                     "label": "Shared Project Permission Setup Complete",
                     "i18n_key": "actionSharedProjectPermissionSetupComplete",
+                },
+                {
+                    "value": "project_user_add",
+                    "label": "Project User Add",
+                    "i18n_key": "actionProjectUserAdd",
+                },
+                {
+                    "value": "project_user_remove",
+                    "label": "Project User Remove",
+                    "i18n_key": "actionProjectUserRemove",
+                },
+                {
+                    "value": "project_user_batch_update",
+                    "label": "Project User Batch Update",
+                    "i18n_key": "actionProjectUserBatchUpdate",
                 },
             ],
         },
@@ -1093,6 +1117,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "label": "IP Resolved Mismatch",
                     "i18n_key": "actionIPResolvedMismatch",
                 },
+                {
+                    "value": "ssrf_config_reset",
+                    "label": "SSRF Config Reset",
+                    "i18n_key": "actionSSRFConfigReset",
+                },
             ],
         },
         "url_token_security": {
@@ -1239,6 +1268,17 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "tool_account_mapping_batch",
                     "label": "Tool Account Mapping Batch",
                     "i18n_key": "actionToolAccountMappingBatch",
+                },
+                # Issue #3273: Tool account mapping verification actions
+                {
+                    "value": "tool_account_mapping_verify",
+                    "label": "Tool Account Mapping Verify",
+                    "i18n_key": "actionToolAccountMappingVerify",
+                },
+                {
+                    "value": "tool_account_mapping_verify_batch",
+                    "label": "Tool Account Mapping Verify Batch",
+                    "i18n_key": "actionToolAccountMappingVerifyBatch",
                 },
             ],
         },

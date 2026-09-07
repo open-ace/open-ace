@@ -11,7 +11,12 @@ const DEDUPE_WINDOW = 60 * 1000; // 60 seconds
 const MAX_DEDUPE_KEYS = 100;
 
 // Types
-export type ErrorCategory = 'chunk-load' | 'render-runtime';
+export type ErrorCategory =
+  | 'chunk-load' // Legacy: chunk load errors
+  | 'render-runtime' // Legacy: runtime errors
+  | 'build-artifact-missing' // Frontend build artifacts are missing
+  | 'chunk-404' // Specific chunk file 404
+  | 'chunk-load-failed'; // Chunk load failed (network or other reason)
 
 export interface FrontendErrorPayload {
   category: ErrorCategory;

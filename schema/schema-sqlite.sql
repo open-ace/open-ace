@@ -565,6 +565,16 @@ CREATE TABLE email_notification_logs (
  next_retry_at TIMESTAMP
 );
 
+CREATE TABLE encryption_keys (
+ key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ key_fingerprint TEXT NOT NULL,
+ status TEXT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ rotated_at TIMESTAMP,
+ config_version INTEGER NOT NULL,
+ last_used_at TIMESTAMP
+);
+
 CREATE TABLE feishu_settings (
  app_id TEXT NOT NULL,
  app_secret_enc text NOT NULL,
@@ -1538,7 +1548,10 @@ CREATE TABLE user_tool_accounts (
  observed_message_count integer,
  created_by integer,
  tenant_id integer,
- version integer
+ version integer,
+ verification_status TEXT,
+ verification_result text,
+ verified_at TIMESTAMP
 );
 
 CREATE TABLE users (
@@ -1671,6 +1684,8 @@ CREATE UNIQUE INDEX api_key_store_tenant_id_provider_key_name_key ON api_key_sto
 CREATE UNIQUE INDEX autonomous_workflows_workflow_id_key ON autonomous_workflows (workflow_id);
 
 CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (report_id);
+
+CREATE UNIQUE INDEX encryption_keys_key_fingerprint_key ON encryption_keys (key_fingerprint);
 
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
@@ -1903,6 +1918,10 @@ CREATE INDEX idx_email_logs_status ON email_notification_logs (status);
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs (user_id);
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs (user_id, sent_at);
+
+CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys (key_fingerprint);
+
+CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
 
