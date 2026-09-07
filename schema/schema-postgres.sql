@@ -1752,6 +1752,32 @@ CREATE SEQUENCE session_messages_id_seq
     CACHE 1;
 
 ALTER SEQUENCE session_messages_id_seq OWNED BY session_messages.id;
+CREATE TABLE session_daily_usage (
+    id integer NOT NULL,
+    session_id text NOT NULL,
+    user_id integer,
+    tenant_id integer,
+    date text NOT NULL,
+    tokens integer DEFAULT 0 NOT NULL,
+    requests integer DEFAULT 0 NOT NULL,
+    input_tokens integer DEFAULT 0 NOT NULL,
+    output_tokens integer DEFAULT 0 NOT NULL,
+    cache_read_tokens integer DEFAULT 0,
+    cache_write_tokens integer DEFAULT 0,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date)
+);
+
+CREATE SEQUENCE session_daily_usage_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE session_daily_usage_id_seq OWNED BY session_daily_usage.id;
 CREATE MATERIALIZED VIEW session_stats AS
  SELECT agent_session_id AS session_id,
     tool_name,
@@ -3935,6 +3961,12 @@ CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree
 --
 
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
+
+CREATE INDEX idx_session_daily_usage_date ON session_daily_usage USING btree (date);
+
+CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage USING btree (tenant_id);
+
+CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage USING btree (user_id, date);
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 

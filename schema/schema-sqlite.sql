@@ -1163,6 +1163,23 @@ CREATE TABLE session_messages (
  tenant_id integer DEFAULT 1 NOT NULL
 );
 
+CREATE TABLE session_daily_usage (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id TEXT NOT NULL,
+ user_id INTEGER,
+ tenant_id INTEGER,
+ date TEXT NOT NULL,
+ tokens INTEGER DEFAULT 0 NOT NULL,
+ requests INTEGER DEFAULT 0 NOT NULL,
+ input_tokens INTEGER DEFAULT 0 NOT NULL,
+ output_tokens INTEGER DEFAULT 0 NOT NULL,
+ cache_read_tokens INTEGER DEFAULT 0,
+ cache_write_tokens INTEGER DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date)
+);
+
 CREATE TABLE sessions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  token TEXT NOT NULL,
@@ -2142,6 +2159,12 @@ CREATE INDEX idx_session_messages_source ON session_messages (session_id, source
 CREATE INDEX idx_session_messages_tenant_session ON session_messages (tenant_id, session_id);
 
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages (tenant_id, session_id, "timestamp", id);
+
+CREATE INDEX idx_session_daily_usage_date ON session_daily_usage (date);
+
+CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage (tenant_id);
+
+CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage (user_id, date);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 
