@@ -269,6 +269,34 @@ def test_timestamp_skew_below_tolerance_is_invalid():
         metrics.measured_delta("2026-08-11T00:00:03Z", "2026-08-11T00:00:00Z", "test")
 
 
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+@pytest.mark.parametrize("raw", [-3600, -3, -2, -1, 0, 3])
+def test_workflow_queue_excludes_negative_samples_instead_of_clamping(raw):
+    start = datetime(2026, 9, 6, tzinfo=timezone.utc)
+    end = start + timedelta(seconds=raw)
+    measured = metrics.measured_workflow_queue(start.isoformat(), end.isoformat())
+    assert measured == {
+        "seconds": None if raw < 0 else raw,
+        "raw_seconds": raw,
+        "timestamp_skew_clamped": False,
+        "created_at": start.isoformat(),
+        "run_started_at": end.isoformat(),
+        "unavailable_reason": "negative_timestamp_delta" if raw < 0 else None,
+    }
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+@pytest.mark.parametrize("bad", [None, "invalid-timestamp"])
+@pytest.mark.parametrize("field", ["start", "end"])
+def test_workflow_queue_missing_or_malformed_timestamps_still_fail_closed(bad, field):
+    start = bad if field == "start" else "2026-09-06T03:40:28Z"
+    end = bad if field == "end" else "2026-09-06T03:40:25Z"
+    with pytest.raises(metrics.MetricsError, match="timestamp"):
+        metrics.measured_workflow_queue(start, end)
+
+
 def test_nearest_rank_and_minimum_sample_contract():
     values = list(range(1, 26))
     assert metrics.nearest_rank(values, 0.95) == 24
@@ -485,6 +513,114 @@ def _job(job_id, conclusion, created, started, completed):
         "started_at": started,
         "completed_at": completed,
     }
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+def test_real_negative_retry_queue_preserves_cancelled_run_and_valid_timings():
+    # GitHub API run 34009579058, attempts 1/2, caused collector 34068124975
+    # to abort. Keep literal source timestamps/conclusions, not a made-up clamp.
+    repo = "open-ace/open-ace"
+    run_id = 34009579058
+    base = f"/repos/{repo}/actions/runs/{run_id}/attempts"
+    responses = {
+        f"{base}/1": _attempt_meta(
+            1,
+            "action_required",
+            "2026-09-06T03:40:19Z",
+            "2026-09-06T03:40:19Z",
+            "2026-09-06T03:40:19Z",
+        ),
+        f"{base}/1/jobs?per_page=100": {"total_count": 0, "jobs": []},
+        f"{base}/2": _attempt_meta(
+            2,
+            "cancelled",
+            "2026-09-06T03:40:28Z",
+            "2026-09-06T03:40:25Z",
+            "2026-09-06T03:44:03Z",
+        ),
+        f"{base}/2/jobs?per_page=100": {
+            "total_count": 1,
+            "jobs": [
+                {
+                    **_job(
+                        101422983775,
+                        "success",
+                        "2026-09-06T03:40:53Z",
+                        "2026-09-06T03:40:55Z",
+                        "2026-09-06T03:41:02Z",
+                    ),
+                    "name": "Select suites",
+                }
+            ],
+        },
+    }
+    run = {"id": run_id, "run_attempt": 2, "created_at": "2026-09-06T03:40:19Z"}
+    attempts = metrics.collect_attempts(AttemptClient(responses), repo, run, 100)
+    normalized = metrics.normalize_run(run, "contract", {}, attempts)
+    aggregate = metrics.aggregate_contract([normalized], min_samples=20)
+    assert attempts[1]["queue"]["raw_seconds"] == -3
+    assert attempts[1]["queue"]["seconds"] is None
+    assert attempts[1]["wall"]["seconds"] == 218
+    assert aggregate["sample_count"] == 1
+    assert aggregate["first_conclusions"]["action_required"] == 1
+    assert aggregate["eventual_conclusions"]["cancelled"] == 1
+    assert aggregate["eventual_pass_rate"] == 0
+    assert aggregate["retry_recovery_count"] == 0
+    assert aggregate["workflow_queue"]["count"] == 1
+    assert aggregate["workflow_queue"]["excluded_count"] == 1
+    assert aggregate["job_queue"]["p50_seconds"] == 2
+    assert aggregate["job_execution"]["p50_seconds"] == 7
+    assert aggregate["workflow_queue_anomalies"] == [
+        {
+            "run_id": run_id,
+            "attempt": 2,
+            "url": None,
+            "seconds": None,
+            "raw_seconds": -3,
+            "timestamp_skew_clamped": False,
+            "created_at": "2026-09-06T03:40:28Z",
+            "run_started_at": "2026-09-06T03:40:25Z",
+            "unavailable_reason": "negative_timestamp_delta",
+        }
+    ]
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+@pytest.mark.parametrize("valid_run_count", [0, 19, 20])
+def test_workflow_queue_p95_needs_valid_distinct_runs_not_retries(valid_run_count):
+    runs = []
+    duration = {"seconds": 10}
+    for run_id in range(25):
+        valid = run_id < valid_run_count
+        queue = metrics.measured_workflow_queue(
+            "2026-09-06T03:40:28Z",
+            "2026-09-06T03:40:29Z" if valid else "2026-09-06T03:40:25Z",
+        )
+        runs.append(
+            {
+                "run_id": run_id,
+                "first_conclusion": "success",
+                "eventual_conclusion": "success",
+                "recovered_on_retry": False,
+                "first_attempt_wall": duration,
+                "eventual_resolution": duration,
+                "attempts": [{"attempt": number, "queue": queue, "jobs": []} for number in (1, 2)],
+            }
+        )
+    aggregate = metrics.aggregate_contract(runs, min_samples=20)
+    queue_summary = aggregate["workflow_queue"]
+    assert aggregate["sample_count"] == 25
+    assert aggregate["first_pass_rate"] == 1
+    assert queue_summary["count"] == 2 * valid_run_count
+    assert queue_summary["eligible_run_count"] == valid_run_count
+    assert queue_summary["excluded_count"] == 2 * (25 - valid_run_count)
+    assert queue_summary["p50_seconds"] == (1 if valid_run_count else None)
+    assert queue_summary["p95_seconds"] == (1 if valid_run_count >= 20 else None)
+    assert queue_summary["p95_status"] == (
+        "observed" if valid_run_count >= 20 else "insufficient_data"
+    )
 
 
 def _runtime_fixture(*, payload_link=True, bad_parents=False):
@@ -976,6 +1112,93 @@ def test_collect_end_to_end_records_pre_epoch_skip_and_writes_reports(
     assert "Out-of-contract runs skipped (ci-pull-request): pre_contract_epoch=1" in markdown
 
 
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+def test_collector_writes_reports_with_unavailable_queue_and_visible_diagnostics(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(metrics, "datetime", _FrozenDateTime)
+    payload = _e2e_fixture(break_contract=False)
+    for response in payload["responses"]:
+        if response["path"].endswith("/actions/runs/501/attempts/1"):
+            response["json"]["created_at"] = "2026-08-26T09:41:33Z"
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps(payload), encoding="utf-8")
+    out_json = tmp_path / "report.json"
+    out_md = tmp_path / "report.md"
+    rc = metrics.main(
+        [
+            "--repo",
+            "open-ace/open-ace",
+            "--policy",
+            str(_e2e_policy(tmp_path)),
+            "--input",
+            str(fixture),
+            "--output-json",
+            str(out_json),
+            "--output-markdown",
+            str(out_md),
+        ]
+    )
+    assert rc == 0
+    report = json.loads(out_json.read_text(encoding="utf-8"))
+    assert report["schema_version"] == 2
+    cohort = report["cohorts"][0]
+    assert cohort["sampled_count"] == 1
+    assert cohort["runs"][0]["eventual_conclusion"] == "success"
+    contract = next(iter(cohort["contracts"].values()))
+    assert contract["workflow_queue"]["count"] == 0
+    assert contract["workflow_queue"]["excluded_count"] == 1
+    assert contract["workflow_queue"]["p95_seconds"] is None
+    assert contract["workflow_queue"]["p95_status"] == "insufficient_data"
+    markdown = out_md.read_text(encoding="utf-8")
+    assert (
+        "unavailable workflow queue samples: 1 (valid runs: 0; p95: insufficient_data)" in markdown
+    )
+    assert "run 501 / attempt 1; negative_timestamp_delta; raw=-3.0s" in markdown
+    assert "created_at=2026-08-26T09:41:33Z; run_started_at=2026-08-26T09:41:30Z" in markdown
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+@pytest.mark.parametrize("field", ["attempt.wall", "job.execution", "job.queue"])
+def test_unavailable_workflow_queue_does_not_hide_other_invalid_timings(tmp_path, field):
+    payload = _e2e_fixture(break_contract=False)
+    responses = {}
+    for response in payload["responses"]:
+        if "json" not in response:
+            continue
+        path = response["path"]
+        data = response["json"]
+        if path.endswith("/actions/runs/501/attempts/1"):
+            data["created_at"] = "2026-08-26T09:41:33Z"
+            if field == "attempt.wall":
+                data["updated_at"] = "2026-08-26T09:41:27Z"
+        if path.endswith("/actions/runs/501/attempts/1/jobs"):
+            job = data["jobs"][0]
+            if field == "job.execution":
+                job["completed_at"] = "2026-08-26T09:41:29Z"
+            elif field == "job.queue":
+                job["created_at"] = "2026-08-26T09:41:35Z"
+        responses[metrics.canonical_request(path, response.get("params"))] = data
+    with pytest.raises(metrics.MetricsError, match=f"timestamp order invalid for {field}"):
+        metrics.collect_attempts(
+            AttemptClient(responses), "open-ace/open-ace", {"id": 501, "run_attempt": 1}, 100
+        )
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3358)
+def test_queue_derivation_contract_does_not_mix_with_v1():
+    policy = metrics.load_policy(ROOT / "ci" / "ci-health-policy.json")
+    assert policy["derivation_version"] == 2
+    run = {"head_sha": "head"}
+    cohort = {"id": "ci-main-push", "event": "push", "contract_paths": []}
+    current, _ = metrics.contract_hash(run, cohort, {"head": {}}, policy["derivation_version"])
+    previous, _ = metrics.contract_hash(run, cohort, {"head": {}}, 1)
+    assert current != previous
+
+
 def test_collect_end_to_end_contract_break_fails_closed_without_reports(
     tmp_path, monkeypatch, capsys
 ):
@@ -1110,8 +1333,8 @@ def test_attempts_keep_first_failure_and_retry_recovery_separate():
     normalized = metrics.normalize_run(run, "contract", {}, attempts)
     aggregate = metrics.aggregate_contract([normalized], min_samples=20)
 
-    assert attempts[1]["queue"]["seconds"] == 0
-    assert attempts[1]["queue"]["timestamp_skew_clamped"] is True
+    assert attempts[1]["queue"]["seconds"] is None
+    assert attempts[1]["queue"]["timestamp_skew_clamped"] is False
     assert normalized["recovered_on_retry"] is True
     assert aggregate["first_conclusions"]["failure"] == 1
     assert aggregate["first_conclusions"]["success"] == 0
@@ -1122,7 +1345,7 @@ def test_attempts_keep_first_failure_and_retry_recovery_separate():
     # The attempt-1 skipped job never executed: no queue sample, counted in
     # skipped_job_no_execution_count instead.
     assert aggregate["skipped_job_no_execution_count"] == 1
-    assert aggregate["workflow_queue"]["count"] == 2
+    assert aggregate["workflow_queue"]["count"] == 1
     assert aggregate["job_queue"]["count"] == 3
     assert attempts[1]["jobs"][1]["inherited_from_job_id"] == 3
     assert attempts[1]["jobs"][2]["inherited_from_job_id"] == 4
