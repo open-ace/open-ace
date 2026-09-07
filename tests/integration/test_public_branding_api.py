@@ -179,28 +179,4 @@ class TestSystemSettingsUpdate:
         # Should return 401 Unauthorized
         assert response.status_code == 401
 
-    def test_xss_in_brand_name_is_rejected(self, client):
-        """Should reject XSS in brand name."""
-        # This test would require auth setup
-        # For now, we verify the validation logic is called
-        # The actual auth test would be in a full integration test
-        pass
-
-    def test_ssrf_in_logo_url_is_rejected(self, client):
-        """Should reject SSRF in logo URL."""
-        # This test would require auth setup
-        pass
-
-
-class TestTenantSettingsUpdate:
-    """Tests for PUT /api/tenants/{id}/settings endpoint with branding validation."""
-
-    def test_tenant_branding_welcome_message_is_validated(self, client):
-        """Should validate tenant welcome message."""
-        # This test would require auth and database setup
-        pass
-
-    def test_tenant_logo_url_is_validated(self, client):
-        """Should validate tenant logo URL."""
-        # This test would require auth and database setup
-        pass
+    
