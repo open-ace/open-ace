@@ -171,7 +171,7 @@ if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
 from shared.file_change_parser import append_file_change_blocks, extract_file_changes  # Issue #8
-from shared.qwen_context import is_qwen_system_context  # Issue #28
+from shared.qwen_context import is_qwen_system_context, strip_qwen_system_envelopes
 from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
@@ -624,8 +624,6 @@ def process_jsonl_file(
                             # Issue #3337: Strip Qwen system-reminder envelopes
                             # from user messages, preserving any real user text.
                             if role == "user":
-                                from scripts.shared.qwen_context import strip_qwen_system_envelopes
-
                                 content = strip_qwen_system_envelopes(content)
                                 if not content:
                                     continue
