@@ -174,7 +174,6 @@ CREATE TABLE alerts_history (
  status TEXT,
  sent_at TIMESTAMP,
  created_at TIMESTAMP
-
 );
 
 CREATE TABLE annotations (
@@ -202,7 +201,6 @@ CREATE TABLE anomaly_status (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  anomaly_id TEXT DEFAULT '' NOT NULL,
  tenant_id integer
-
 );
 
 CREATE TABLE api_key_store (
@@ -224,7 +222,6 @@ CREATE TABLE api_key_store (
  weight integer DEFAULT 100,
  resolved_ips text,
  resolved_at TIMESTAMP
-
 );
 
 CREATE TABLE archive_files (
@@ -243,7 +240,6 @@ CREATE TABLE archive_files (
  verified_at TIMESTAMP,
  verification_status TEXT,
  source_deleted INTEGER DEFAULT 0 NOT NULL
-
 );
 
 CREATE TABLE audit_logs (
@@ -369,7 +365,6 @@ CREATE TABLE autonomous_workflows (
  issue_closed_by_workflow_at TIMESTAMP,
  merge_fail_dev_rounds integer DEFAULT 0,
  merge_policy_settle_retries integer DEFAULT 0
-
 );
 
 CREATE TABLE backfill_logs (
@@ -381,7 +376,6 @@ CREATE TABLE backfill_logs (
  started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  completed_at TIMESTAMP,
  status TEXT DEFAULT 'completed'
-
 );
 
 CREATE TABLE command_execution_evidence (
@@ -445,7 +439,6 @@ CREATE TABLE consistency_violations (
  detected_at TIMESTAMP,
  repaired_at TIMESTAMP,
  created_at TIMESTAMP
-
 );
 
 CREATE TABLE content_filter_rules (
@@ -629,7 +622,6 @@ CREATE TABLE insights_reports (
  model TEXT,
  raw_response text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE knowledge_base (
@@ -662,7 +654,6 @@ CREATE TABLE legal_holds (
  lifted_by integer,
  lifted_at TIMESTAMP,
  lift_reason text
-
 );
 
 CREATE TABLE login_attempts (
@@ -678,7 +669,6 @@ CREATE TABLE machine_assignments (
  permission text DEFAULT 'user',
  granted_by integer,
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE mapping_migration_status (
@@ -740,7 +730,6 @@ CREATE TABLE permission_checkpoints (
  snapshot_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP
-
 );
 
 CREATE TABLE permission_tasks (
@@ -761,7 +750,6 @@ CREATE TABLE permission_tasks (
  updated_at TIMESTAMP,
  started_at TIMESTAMP,
  completed_at TIMESTAMP
-
 );
 
 CREATE TABLE policy_decisions (
@@ -905,7 +893,6 @@ CREATE TABLE quota_alerts (
  acknowledged INTEGER DEFAULT 0,
  acknowledged_at TIMESTAMP,
  acknowledged_by integer
-
 );
 
 CREATE TABLE quota_usage (
@@ -920,7 +907,6 @@ CREATE TABLE quota_usage (
  tool_name text,
     CONSTRAINT chk_quota_usage_requests_positive CHECK ((requests_used >= 0)),
     CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
-
 );
 
 CREATE TABLE recycle_bin (
@@ -935,7 +921,6 @@ CREATE TABLE recycle_bin (
  restored_at TIMESTAMP,
  restored_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE registration_tokens (
@@ -969,7 +954,6 @@ CREATE TABLE remote_machines (
  last_heartbeat TIMESTAMP,
  legacy_mode INTEGER DEFAULT 0,
  token_revoke_timeout integer DEFAULT 300
-
 );
 
 CREATE TABLE remote_runtime_commands (
@@ -1056,7 +1040,6 @@ CREATE TABLE retention_evidence (
  policy_config text,
  policy_source TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE retention_executions (
@@ -1084,7 +1067,6 @@ CREATE TABLE retention_executions (
  last_batch_status TEXT,
  max_records_override integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE retention_history (
@@ -1109,7 +1091,6 @@ CREATE TABLE retention_policies (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  created_by integer,
  updated_by integer
-
 );
 
 CREATE TABLE role_permissions (
@@ -1196,7 +1177,6 @@ CREATE TABLE session_messages (
  external_message_id text DEFAULT '' NOT NULL,
  content_blocks text,
  tenant_id integer DEFAULT 1 NOT NULL
-
 );
 
 CREATE TABLE sessions (
@@ -1206,7 +1186,6 @@ CREATE TABLE sessions (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  expires_at TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1
-
 );
 
 CREATE TABLE shared_sessions (
@@ -1260,7 +1239,6 @@ CREATE TABLE sso_identities (
  provider_data text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_used_at TIMESTAMP
-
 );
 
 CREATE TABLE sso_providers (
@@ -1272,7 +1250,6 @@ CREATE TABLE sso_providers (
  is_active INTEGER DEFAULT 1,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE sso_sessions (
@@ -1284,7 +1261,6 @@ CREATE TABLE sso_sessions (
  refresh_token text,
  expires_at TIMESTAMP,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE sync_events (
@@ -1321,10 +1297,9 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE tenant_keywords_version (
- tenant_id INTEGER PRIMARY KEY NOT NULL,
+ tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
  version INTEGER DEFAULT '1' NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE tenant_migrations (
@@ -1339,7 +1314,6 @@ CREATE TABLE tenant_migrations (
  batch_number integer,
  total_batches integer,
  status TEXT DEFAULT 'pending' NOT NULL
-
 );
 
 CREATE TABLE tenant_period_history (
@@ -1352,7 +1326,6 @@ CREATE TABLE tenant_period_history (
  reset_at TIMESTAMP NOT NULL,
  reset_by TEXT,
  created_at TIMESTAMP
-
 );
 
 CREATE TABLE tenant_plans (
@@ -1380,7 +1353,6 @@ CREATE TABLE tenant_quotas (
  max_sessions_per_user integer DEFAULT 5,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE tenant_sensitive_keywords (
@@ -1392,7 +1364,6 @@ CREATE TABLE tenant_sensitive_keywords (
  created_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP
-
 );
 
 CREATE TABLE tenant_settings (
@@ -1414,7 +1385,6 @@ CREATE TABLE tenant_settings (
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary',
  allowed_tools TEXT DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]',
  roi_assumptions TEXT
-
 );
 
 CREATE TABLE tenant_usage (
@@ -1426,7 +1396,6 @@ CREATE TABLE tenant_usage (
  active_users integer DEFAULT 0,
  new_users integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE tenants (
@@ -1482,7 +1451,6 @@ CREATE TABLE test_execution_evidence (
  milestone_id text DEFAULT '' NOT NULL,
  tenant_id integer DEFAULT 1 NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE tool_account_conflicts (
@@ -1496,7 +1464,6 @@ CREATE TABLE tool_account_conflicts (
  resolved_by integer,
  resolution_action TEXT,
  details text
-
 );
 
 CREATE TABLE tool_account_mapping_rules (
@@ -1511,7 +1478,6 @@ CREATE TABLE tool_account_mapping_rules (
  description TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 CREATE TABLE usage_report_rate_limits (
@@ -1561,7 +1527,6 @@ CREATE TABLE user_daily_stats (
  cache_tokens integer DEFAULT 0 NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE user_permissions (
@@ -1603,7 +1568,6 @@ CREATE TABLE user_tool_accounts (
  verification_status TEXT,
  verification_result text,
  verified_at TIMESTAMP
-
 );
 
 CREATE TABLE users (
@@ -1629,7 +1593,6 @@ CREATE TABLE users (
  tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
-
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1638,7 +1601,6 @@ CREATE TABLE web_user_auth_sessions (
  session_token text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  expires_at TIMESTAMP NOT NULL
-
 );
 
 CREATE TABLE webhook_deliveries (
@@ -1717,7 +1679,6 @@ CREATE TABLE workflow_milestones (
  phase_output_tokens integer DEFAULT 0 NOT NULL,
  phase_request_count integer DEFAULT 0 NOT NULL,
  tldr text DEFAULT '' NOT NULL
-
 );
 
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
