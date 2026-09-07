@@ -144,6 +144,25 @@ CI 所需的测试、检查、构建及审计工具统一保留在
 收集成功只证明测试“存在且能导入”，不证明断言是绿的。只有 required lane
 中的测试才能作为合并门禁。
 
+## CI Health Metrics 计时有效性
+
+`ci-health-metrics.yml` 在 GitHub 定时采集，也支持默认分支手动 dispatch。
+采集器按 `ci/ci-health-policy.json` 限制时间窗口、样本量与 API 请求预算；
+报告中的同契约样本不足时，p95 必须标记 `insufficient_data`，不得据此将
+Critical E2E 从 advisory 提升为 required。
+
+报告 schema/计时推导版本 2（#3358）将 GitHub workflow/attempt 的负排队
+时间单独标记为不可用：`seconds=null`，保留原始差值、两端时间戳及原因。
+它不会被夹成 0 秒，也不会导致丢弃整个 run/attempt 或其 success/failure/
+cancelled 结论。JSON `workflow_queue_anomalies` 和 Markdown 提供 run/attempt
+定位信息；queue 分位数只使用有效值，p95 最小样本数按有有效 queue 的独立
+run 数判断，不能用多次重跑或已排除样本凑足。读取报告的消费者须先检查
+`schema_version`；版本 1/2 的 queue 统计不可直接混合。
+
+此容错仅适用于 workflow queue 的源数据时序异常。缺失或格式错误时间戳
+仍报错；job queue、job execution、attempt wall 等保留既有的 fail-closed
+校验与最多 2 秒的小幅时钟偏差规则，inherited/skipped job 规则不变。
+
 ## Legacy issue 测试迁移（已完成并退役）
 
 #2429 分批把 `tests/issues/` 迁入规范目录（unit-like → integration →

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "derivation_version": 1,
+  "derivation_version": 2,
   "window_days": 30,
   "pr_contract_epoch": "2026-08-09T12:23:45Z",
   "sample_cap": 25,
