@@ -62,6 +62,7 @@ PUBLIC_ENDPOINTS: set[str] = {
     "/api/fetch/data",
     "/api/fetch/status",
     "/api/pages/",
+    "/api/public/branding",  # Issue #3271: Public branding endpoint for login page
     "/",
 }
 

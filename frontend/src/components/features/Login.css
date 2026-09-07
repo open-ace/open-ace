@@ -55,6 +55,13 @@
   margin-bottom: 16px;
 }
 
+/* Issue #3271: Custom logo styling */
+.login-logo img.login-custom-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
 .login-logo svg {
   width: 48px;
   height: 48px;
