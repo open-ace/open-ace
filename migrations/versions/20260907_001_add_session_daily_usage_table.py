@@ -11,7 +11,7 @@ Fixes #3338
 from alembic import op
 
 # revision identifiers
-revision = "20260904_001"
+revision = "20260907_001_add_session_daily_usage_table"
 down_revision = "20260906_001_add_tool_account_verification_fields"
 branch_labels = None
 depends_on = None
