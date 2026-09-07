@@ -194,7 +194,7 @@ export const Login: React.FC = () => {
     // Issue #3271: Fetch branding configuration
     const fetchBranding = async () => {
       try {
-        const brandingConfig = await systemApi.getPublicBranding(tenantSlug || undefined);
+        const brandingConfig = await systemApi.getPublicBranding(tenantSlug ?? undefined);
         setBranding(brandingConfig);
       } catch (err) {
         console.log('Branding config fetch failed (using defaults):', err);
@@ -287,12 +287,12 @@ export const Login: React.FC = () => {
 
   // Issue #3271: Get system name with fallback
   const getSystemName = (): string => {
-    return branding.system_name || getTranslation('title', language);
+    return branding.system_name ?? getTranslation('title', language);
   };
 
   // Issue #3271: Get copyright text with fallback
   const getCopyrightText = (): string => {
-    return branding.copyright_text || getTranslation('copyright', language);
+    return branding.copyright_text ?? getTranslation('copyright', language);
   };
 
   // Issue #3271: Handle logo load error

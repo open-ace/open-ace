@@ -1128,7 +1128,8 @@ export const translations: Record<Language, Translations> = {
     brandingSettings: 'Branding Settings',
     logoConfiguration: 'Logo Configuration',
     logoUrl: 'Logo URL',
-    logoUrlHelper: 'Enter a public HTTPS URL for your logo image. Recommended size: 128x128 pixels.',
+    logoUrlHelper:
+      'Enter a public HTTPS URL for your logo image. Recommended size: 128x128 pixels.',
     logoPreview: 'Logo Preview',
     logoLoadFailed: 'Failed to load logo',
     systemNameConfiguration: 'System Name Configuration',
@@ -7572,7 +7573,8 @@ export const translations: Record<Language, Translations> = {
     copyrightText: '저작권 텍스트',
     copyrightHelper: '이 텍스트는 로그인 페이지 하단에 표시됩니다.',
     brandingInfoTitle: '브랜드 설정 정보',
-    brandingInfoDescription: '브랜드 설정 변경은 로그인 페이지에 반영됩니다. 로고 URL은 공개 HTTPS URL이어야 합니다.',
+    brandingInfoDescription:
+      '브랜드 설정 변경은 로그인 페이지에 반영됩니다. 로고 URL은 공개 HTTPS URL이어야 합니다.',
     failedToFetchBrandingSettings: '브랜드 설정 가져오기 실패',
     brandingSettingsSaved: '브랜드 설정이 저장되었습니다',
     saving: '저장 중...',

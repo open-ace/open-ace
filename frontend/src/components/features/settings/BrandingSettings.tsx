@@ -192,9 +192,7 @@ export const BrandingSettings: React.FC = () => {
           {/* Logo Preview */}
           {logoUrl && (
             <div className="mt-4">
-              <label className="block text-sm font-medium mb-2">
-                {t('logoPreview', language)}
-              </label>
+              <label className="block text-sm font-medium mb-2">{t('logoPreview', language)}</label>
               <div className="flex items-center justify-center w-32 h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
                 {logoError ? (
                   <span className="text-sm text-gray-500">{t('logoLoadFailed', language)}</span>
