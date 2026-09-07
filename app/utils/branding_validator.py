@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from app.utils.outbound_url_guard import validate_public_http_url
 

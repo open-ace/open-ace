@@ -8,14 +8,14 @@ welcome messages, and validation logic.
 import pytest
 
 from app.utils.branding_validator import (
+    MAX_COPYRIGHT_LENGTH,
+    MAX_SYSTEM_NAME_LENGTH,
+    MAX_WELCOME_MESSAGE_LENGTH,
     validate_brand_name,
     validate_branding_settings,
     validate_copyright_text,
     validate_logo_url,
     validate_welcome_message,
-    MAX_SYSTEM_NAME_LENGTH,
-    MAX_WELCOME_MESSAGE_LENGTH,
-    MAX_COPYRIGHT_LENGTH,
 )
 
 
