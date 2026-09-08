@@ -1146,6 +1146,22 @@ CREATE TABLE security_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE session_daily_usage (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id text NOT NULL,
+ user_id integer,
+ tenant_id integer,
+ date text NOT NULL,
+ tokens integer DEFAULT 0 NOT NULL,
+ requests integer DEFAULT 0 NOT NULL,
+ input_tokens integer DEFAULT 0 NOT NULL,
+ output_tokens integer DEFAULT 0 NOT NULL,
+ cache_read_tokens integer DEFAULT 0,
+ cache_write_tokens integer DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE session_messages (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
@@ -1755,6 +1771,8 @@ CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id,
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
+CREATE UNIQUE INDEX uq_session_daily_usage_session_date ON session_daily_usage (session_id, date);
+
 CREATE UNIQUE INDEX uq_tenant_keyword ON tenant_sensitive_keywords (tenant_id, normalized_keyword);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
@@ -2130,6 +2148,12 @@ CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
+
+CREATE INDEX idx_session_daily_usage_date ON session_daily_usage (date);
+
+CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage (tenant_id);
+
+CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage (user_id, date);
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
 
