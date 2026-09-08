@@ -85,11 +85,19 @@ macOS 的 `/bin/bash` 3.2 不满足要求。可安装独立现代 Bash，并仅�
 ```bash
 brew install bash
 export PATH="$(brew --prefix)/bin:$PATH"
+# 再激活装有 requirements-ci.lock 的环境，避免 Homebrew python3 抢先
+source venv/bin/activate
 command -v bash
 bash --version
+command -v python python3
 python scripts/ci.py doctor --strict
 python scripts/ci.py run default-collection python-core
 ```
+
+保留 Docker Compose CLI 等已有依赖所在的 PATH 目录；不要为选择 Bash
+而用一份缩减 PATH 覆盖它们。相关脚本测试会调用 `python3` 和
+`docker compose version`，仅用 venv Python 的绝对路径启动入口并不足以
+保证这些子进程也使用同一套依赖。
 
 探测和 suite 子进程统一移除 `BASH_ENV` / `ENV`，避免开发者启动脚本注入
 影响 CI；父进程环境不变。PATH 保持原顺序，相对/空目录项按调用时工作目录
