@@ -390,13 +390,15 @@ class TestPostgreSQLParameterFormat:
         causes 'there is no parameter $1' errors at runtime.
         """
         import inspect
+
         from app.modules.workspace.session_manager import SessionManager
 
         source = inspect.getsource(SessionManager._upsert_daily_usage)
 
         # Should NOT contain $n placeholders in SQL VALUES clauses
         import re
-        dollar_placeholders = re.findall(r'VALUES\s*\([^)]*\$[0-9]+', source, re.IGNORECASE)
+
+        dollar_placeholders = re.findall(r"VALUES\s*\([^)]*\$[0-9]+", source, re.IGNORECASE)
         assert len(dollar_placeholders) == 0, (
             f"Found $n placeholders in _upsert_daily_usage: {dollar_placeholders}. "
             "PostgreSQL branch must use %s format for psycopg2 compatibility."
@@ -405,11 +407,12 @@ class TestPostgreSQLParameterFormat:
     def test_upsert_daily_usage_postgresql_branch_has_percent_s(self):
         """Verify PostgreSQL branch uses %s placeholders."""
         import inspect
+
         from app.modules.workspace.session_manager import SessionManager
 
         source = inspect.getsource(SessionManager._upsert_daily_usage)
 
         # Should contain %s placeholders for PostgreSQL
-        assert "%s" in source, (
-            "_upsert_daily_usage should use %s placeholders for PostgreSQL compatibility"
-        )
+        assert (
+            "%s" in source
+        ), "_upsert_daily_usage should use %s placeholders for PostgreSQL compatibility"
