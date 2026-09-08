@@ -2499,6 +2499,16 @@ export const translations: Record<Language, Translations> = {
     keywordEmpty: 'Keyword cannot be empty',
     keywordTooLong: 'Keyword cannot exceed 255 characters',
 
+    // Tenant Selector (Issue #3274)
+    searchTenantPlaceholder: 'Search tenant by name or ID',
+    clearSelection: 'Clear Selection',
+    backToHome: 'Back to Home',
+    selectTenantToManageKeywords: 'Please select a tenant to manage sensitive keywords',
+    selectTenantToManageKeywordsDesc:
+      'You need to select a tenant first to view and manage its sensitive keywords',
+    noKeywordsDesc: 'No sensitive keywords configured for this tenant',
+    tenantSettings: 'Security Settings',
+
     // SSRF Protection (Issue #3328)
     ssrfProtectionTitle: 'SSRF Protection Configuration',
     ssrfProtectionStatus: 'Protection Status',
@@ -4947,6 +4957,15 @@ export const translations: Record<Language, Translations> = {
     filterByStatus: '按状态筛选',
     keywordEmpty: '关键词不能为空',
     keywordTooLong: '关键词长度不能超过 255 个字符',
+
+    // 租户选择器 (Issue #3274)
+    searchTenantPlaceholder: '按名称或 ID 搜索租户',
+    clearSelection: '清除选择',
+    backToHome: '返回首页',
+    selectTenantToManageKeywords: '请先选择租户以管理敏感关键词',
+    selectTenantToManageKeywordsDesc: '您需要先选择一个租户才能查看和管理其敏感关键词',
+    noKeywordsDesc: '该租户未配置敏感关键词',
+    tenantSettings: '安全设置',
 
     // SSRF 防护 (Issue #3328)
     ssrfProtectionTitle: 'SSRF 防护配置',
