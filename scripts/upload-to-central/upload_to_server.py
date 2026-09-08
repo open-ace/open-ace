@@ -393,7 +393,9 @@ def run_daemon(
     if auth_key is None:
         auth_key = config.get("auth_key")
     if hostname is None:
-        hostname = config.get("hostname", os.uname().nodename)
+        # Prefer the standardized "host_name" key; fall back to the legacy
+        # "hostname" for backward compatibility with older config files.
+        hostname = config.get("host_name") or config.get("hostname") or os.uname().nodename
     if interval is None:
         interval = config.get("interval", 300)
     if days is None:
@@ -456,7 +458,12 @@ if __name__ == "__main__":
         config = load_config(args.config)
         server_url = args.server or config.get("server_url")
         auth_key = args.auth_key or config.get("auth_key")
-        hostname = args.hostname or config.get("hostname", os.uname().nodename)
+        hostname = (
+            args.hostname
+            or config.get("host_name")
+            or config.get("hostname")
+            or os.uname().nodename
+        )
 
         if not server_url or not auth_key:
             print("Error: --server and --auth-key are required (or set in config.json)")

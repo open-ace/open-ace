@@ -3230,21 +3230,14 @@ $workspace_config,
     "openclaw": {
       "enabled": $OPENCLAW_ENABLED,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "$openclaw_url_config",
-      "hostname": "$HOST_NAME"
+      "gateway_url": "$openclaw_url_config"
     },
     "claude": {
-      "enabled": $CLAUDE_ENABLED,
-      "hostname": "$HOST_NAME"
+      "enabled": $CLAUDE_ENABLED
     },
     "qwen": {
-      "enabled": $QWEN_ENABLED,
-      "hostname": "$HOST_NAME"
+      "enabled": $QWEN_ENABLED
     }
-  },
-  "cron": {
-    "enabled": true,
-    "run_time": "00:30"
   },
   "insights": {
     "model": "glm-5",

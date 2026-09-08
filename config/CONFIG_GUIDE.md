@@ -6,7 +6,7 @@
 
 | 参数 | 说明 | 示例值 |
 |------|------|--------|
-| `host_name` | 主机名标识，用于区分不同机器的数据 | `localhost`, `server-01` |
+| `host_name` | 主机名标识，用于区分不同机器的数据。这是**唯一**的主机名字段，所有工具的数据都以它归属；请勿在 `tools.*` 下重复配置主机名。 | `localhost`, `server-01` |
 | `server.upload_auth_key` | 上传认证密钥，用于验证远程机器上传的数据 | 随机字符串 |
 | `server.server_url` | 服务器地址，远程机器需要配置此地址 | `http://192.168.1.100:19888` |
 | `server.web_port` | Web 服务端口 | `19888` |
@@ -114,12 +114,6 @@
 | `tools.openclaw.gateway_url` | OpenClaw Gateway 地址 | `http://localhost:18789` |
 | `tools.claude.enabled` | 是否启用 Claude | `true` |
 | `tools.qwen.enabled` | 是否启用 Qwen | `true` |
-
-#### 定时任务
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `cron.enabled` | 是否启用定时任务 | `true` |
-| `cron.run_time` | 每日运行时间（HH:MM 格式） | `00:30` |
 
 #### 飞书集成（可选）
 
