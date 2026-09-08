@@ -51,6 +51,9 @@ What actually happened.
 
 - Python 3.10+
 - pip
+- Bash >= 4 on PATH for `python-core` / `python-min` (macOS's bundled Bash 3.2
+  is insufficient). See [local shell prerequisites](docs/TEST_LAYERS.md#local-shell-prerequisites)
+  for setup and the Linux/macOS validation boundary.
 
 ### Setup
 

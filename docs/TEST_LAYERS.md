@@ -66,6 +66,42 @@ pytest --issue=2429
 python scripts/run_extended_tests.py --category e2e --isolated-home
 ```
 
+## Local shell prerequisites
+
+`ci/suites.json` 声明 Bash 最低主版本为 4；`python-core` 和 `python-min`
+包含 fetch wrapper 的真实子进程测试，需要 Bash associative arrays。
+`python scripts/ci.py doctor` 报告 PATH 实际选中的 Bash 路径、版本和能力；
+`doctor --strict` 对缺失、不兼容或探测失败返回非零。严格 doctor 同时检查
+生产 Python 3.11 / Node 20；它不是 Python 3.10 最低版本 lane 的启动条件。
+
+`run` / `pr` 在任何选中 suite 开始前检查整个执行计划的 Bash 前置条件，
+避免先花数分钟跑 collection 或测试再暴露环境问题。单独扫描、`list`、
+`detect` 不要求 Bash；直接运行 `pytest` 会绕过这个入口前置检查，但不改变
+测试自身的要求或通过标准。
+
+macOS 的 `/bin/bash` 3.2 不满足要求。可安装独立现代 Bash，并仅为当前终端
+调整 PATH；不需要替换系统 Bash、修改默认登录 shell 或 wrapper shebang：
+
+```bash
+brew install bash
+export PATH="$(brew --prefix)/bin:$PATH"
+command -v bash
+bash --version
+python scripts/ci.py doctor --strict
+python scripts/ci.py run default-collection python-core
+```
+
+探测和 suite 子进程统一移除 `BASH_ENV` / `ENV`，避免开发者启动脚本注入
+影响 CI；父进程环境不变。PATH 保持原顺序，相对/空目录项按调用时工作目录
+转为绝对路径，避免 suite 切换工作目录后选中另一个 Bash。不要依赖个人
+shell 启动脚本提供 CI 依赖，应显式准备 PATH 和锁定依赖环境。
+
+现代 Bash 是必要条件，并不代表 macOS 已获得全量 Linux CI 等价保证。
+规范执行环境仍是 `ci/suites.json` 的 Ubuntu 24.04、对应 lane 的 Python、
+锁定依赖及所需服务。跨平台验收应分别记录操作系统、Python/Bash 实际版本、
+相同 suite 命令、测试结果和 GitHub run 链接；不能把前置检查通过或定向测试
+通过写成全量通过。本改动不新增耗时 macOS PR lane，不跳过 wrapper 回归。
+
 ## CI 保证
 
 目录本身不构成保证，CI 的消费关系才构成保证：
