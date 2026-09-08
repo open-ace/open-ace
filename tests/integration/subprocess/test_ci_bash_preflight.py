@@ -211,3 +211,18 @@ def test_relative_path_keeps_same_bash_when_suite_changes_directory(checkout):
     result = _invoke(checkout, "run", "python-core", extra_env={"PATH": "bin"})
     assert result.returncode == 0, result.stdout + result.stderr
     assert "assoc-ok" in result.stdout
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_path_symlink_parent_semantics_are_preserved(checkout, absolute):
+    _shell(checkout, "5.2.0")
+    (checkout / "nested/inner").mkdir(parents=True)
+    (checkout / "link").symlink_to(checkout / "nested/inner", target_is_directory=True)
+    # link/../bin denotes nested/bin (missing), not checkout/bin (suitable).
+    path = "link/../bin"
+    if absolute:
+        path = str(checkout / path)
+    result = _invoke(checkout, "run", "python-core", extra_env={"PATH": path})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "not found on PATH" in result.stderr
+    assert not list(checkout.glob("*.ran"))

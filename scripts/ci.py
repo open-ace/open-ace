@@ -280,9 +280,11 @@ def shell_environment() -> dict[str, str]:
     for name in ("BASH_ENV", "ENV"):
         env.pop(name, None)
     # Anchor relative (including empty) entries before commands change cwd.
-    # Preserve PATH ordering and the user's interpreter choice.
+    # Do not collapse symlink/..: preserve filesystem traversal and ordering.
+    cwd = os.getcwd()
     env["PATH"] = os.pathsep.join(
-        os.path.abspath(entry) for entry in env.get("PATH", os.defpath).split(os.pathsep)
+        os.path.join(cwd, entry) if entry else cwd
+        for entry in env.get("PATH", os.defpath).split(os.pathsep)
     )
     return env
 
