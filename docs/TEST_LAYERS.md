@@ -84,9 +84,10 @@ macOS 的 `/bin/bash` 3.2 不满足要求。可安装独立现代 Bash，并仅�
 
 ```bash
 brew install bash
-export PATH="$(brew --prefix)/bin:$PATH"
-# 再激活装有 requirements-ci.lock 的环境，避免 Homebrew python3 抢先
+# 先激活装有 requirements-ci.lock 的环境（重复激活会恢复旧 PATH）
 source venv/bin/activate
+# 保持 venv Python 第一、现代 Bash 随后，不丢弃其余 CLI 路径
+export PATH="$VIRTUAL_ENV/bin:$(brew --prefix)/bin:$PATH"
 command -v bash
 bash --version
 command -v python python3
