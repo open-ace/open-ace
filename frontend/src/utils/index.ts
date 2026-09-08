@@ -59,6 +59,9 @@ export { copyToClipboard } from './clipboard';
 
 export { downloadBlob } from './download';
 
+// UUID generation utilities
+export { generateUUID } from './uuid';
+
 // Project path utilities
 export { decodeProjectName, encodeProjectPath } from './project';
 
