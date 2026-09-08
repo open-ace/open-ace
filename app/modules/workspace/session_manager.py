@@ -1241,7 +1241,7 @@ class SessionManager:
                     INSERT INTO session_daily_usage
                         (session_id, user_id, tenant_id, date, tokens, requests,
                          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (session_id, date) DO UPDATE SET
                         tokens = session_daily_usage.tokens + EXCLUDED.tokens,
                         requests = session_daily_usage.requests + EXCLUDED.requests,
@@ -1270,7 +1270,7 @@ class SessionManager:
                     INSERT INTO session_daily_usage
                         (session_id, user_id, tenant_id, date, tokens, requests,
                          input_tokens, output_tokens)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (session_id, date) DO UPDATE SET
                         tokens = session_daily_usage.tokens + EXCLUDED.tokens,
                         requests = session_daily_usage.requests + EXCLUDED.requests,
