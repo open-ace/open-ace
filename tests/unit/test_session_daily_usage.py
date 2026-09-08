@@ -378,3 +378,38 @@ class TestQuotaManagerPriority:
         # Should return session_daily_usage values
         assert result["tokens"] == 300
         assert result["requests"] == 3
+
+
+class TestPostgreSQLParameterFormat:
+    """Tests for Issue #3368: PostgreSQL parameter placeholder format."""
+
+    def test_upsert_daily_usage_uses_percent_s_not_dollar_n(self):
+        """PostgreSQL branch must use %s placeholders, not $1, $2, etc.
+
+        psycopg2 requires %s format for parameterized queries. Using $n format
+        causes 'there is no parameter $1' errors at runtime.
+        """
+        import inspect
+        from app.modules.workspace.session_manager import SessionManager
+
+        source = inspect.getsource(SessionManager._upsert_daily_usage)
+
+        # Should NOT contain $n placeholders in SQL VALUES clauses
+        import re
+        dollar_placeholders = re.findall(r'VALUES\s*\([^)]*\$[0-9]+', source, re.IGNORECASE)
+        assert len(dollar_placeholders) == 0, (
+            f"Found $n placeholders in _upsert_daily_usage: {dollar_placeholders}. "
+            "PostgreSQL branch must use %s format for psycopg2 compatibility."
+        )
+
+    def test_upsert_daily_usage_postgresql_branch_has_percent_s(self):
+        """Verify PostgreSQL branch uses %s placeholders."""
+        import inspect
+        from app.modules.workspace.session_manager import SessionManager
+
+        source = inspect.getsource(SessionManager._upsert_daily_usage)
+
+        # Should contain %s placeholders for PostgreSQL
+        assert "%s" in source, (
+            "_upsert_daily_usage should use %s placeholders for PostgreSQL compatibility"
+        )
