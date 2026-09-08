@@ -235,7 +235,6 @@ def cmd_config(action: str) -> None:
                     "claude": {"enabled": True},
                     "qwen": {"enabled": True},
                 },
-                "cron": {"enabled": True, "run_time": "00:30"},
             }
             with open(config_path, "w") as f:
                 json.dump(default_config, f, indent=2)

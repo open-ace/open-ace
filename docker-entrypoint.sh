@@ -886,32 +886,18 @@ generate_default_config() {
     "openclaw": {
       "enabled": true,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "http://${SERVER_IP}:18789",
-      "hostname": "$HOST_NAME"
+      "gateway_url": "http://${SERVER_IP}:18789"
     },
     "claude": {
-      "enabled": true,
-      "hostname": "$HOST_NAME"
+      "enabled": true
     },
     "qwen": {
-      "enabled": true,
-      "hostname": "$HOST_NAME"
+      "enabled": true
     }
-  },
-  "cron": {
-    "enabled": true,
-    "run_time": "00:30"
   },
   "feishu": {
     "app_id": "",
     "app_secret": ""
-  },
-  "auth": {
-    "auth_type": "openai",
-    "env": {
-      "OPENAI_API_KEY": "",
-      "OPENAI_BASE_URL": "https://api.openai.com/v1"
-    }
   },
   "insights": {
     "temperature": 0.3,

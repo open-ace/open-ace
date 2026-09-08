@@ -201,16 +201,13 @@ cat > "$DEPLOY_DIR/config/config.json" << EOF
     "openclaw": {
       "enabled": false,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "",
-      "hostname": "$(hostname)"
+      "gateway_url": ""
     },
     "claude": {
-      "enabled": true,
-      "hostname": "$(hostname)"
+      "enabled": true
     },
     "qwen": {
-      "enabled": true,
-      "hostname": "$(hostname)"
+      "enabled": true
     }
   }
 }
