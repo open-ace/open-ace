@@ -9,6 +9,7 @@
       "3.14"
     ],
     "node": "20",
+    "bash_min_major": 4,
     "runner": "ubuntu-24.04"
   },
   "pr_suites": [
@@ -109,6 +110,7 @@
       ]
     },
     "python-core": {
+      "requires_bash": true,
       "description": "Required deterministic Python suite on the production runtime",
       "timeout_seconds": 1200,
       "commands": [
@@ -155,6 +157,7 @@
       ]
     },
     "python-min": {
+      "requires_bash": true,
       "description": "compileall + full unit suite on the minimum supported Python (catches version-specific regressions on the oldest interpreter; #2868)",
       "timeout_seconds": 1200,
       "commands": [
