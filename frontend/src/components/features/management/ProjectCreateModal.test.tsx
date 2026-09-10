@@ -86,7 +86,9 @@ vi.mock('@/components/common', () => ({
         required={required}
       />
       {hint && <small>{hint}</small>}
-      {error && <span data-testid={`error-${label.toLowerCase().replace(/\s+/g, '-')}`}>{error}</span>}
+      {error && (
+        <span data-testid={`error-${label.toLowerCase().replace(/\s+/g, '-')}`}>{error}</span>
+      )}
     </div>
   ),
   Textarea: ({ label, value, onChange, error, placeholder, maxLength, showCount }: any) => (
@@ -229,9 +231,6 @@ describe('ProjectCreateModal', () => {
       status: 409,
       message: 'Project already exists',
     });
-
-    const { useToast } = await import('@/components/common');
-    const mockToast = useToast();
 
     render(<ProjectCreateModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} />);
 

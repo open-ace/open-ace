@@ -369,11 +369,7 @@ export const ProjectManagement: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
         <div className="d-flex align-items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowCreateProjectModal(true)}
-          >
+          <Button variant="primary" size="sm" onClick={() => setShowCreateProjectModal(true)}>
             <i className="bi bi-plus-lg me-1" />
             {t('createProject', language)}
           </Button>
