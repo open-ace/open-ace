@@ -44,6 +44,7 @@ import { matchesPatterns } from '@/utils/categoryConflictDetection';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
 import { ProjectEditModal } from './ProjectEditModal';
+import { ProjectCreateModal } from './ProjectCreateModal';
 import { ProjectUserManagement } from './ProjectUserManagement';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
@@ -215,6 +216,9 @@ export const ProjectManagement: React.FC = () => {
   // Category management modal state
   const [showCategoryManageModal, setShowCategoryManageModal] = useState(false);
 
+  // Create project modal state (Issue #3372)
+  const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
+
   // Category filter state
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
 
@@ -365,6 +369,10 @@ export const ProjectManagement: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
         <div className="d-flex align-items-center gap-2">
+          <Button variant="primary" size="sm" onClick={() => setShowCreateProjectModal(true)}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('createProject', language)}
+          </Button>
           {canManageCategories && (
             <Button
               variant="outline-primary"
@@ -727,6 +735,13 @@ export const ProjectManagement: React.FC = () => {
         isOpen={showCategoryManageModal}
         onClose={() => setShowCategoryManageModal(false)}
         onChange={handleCategoryChange}
+      />
+
+      {/* Create Project Modal (Issue #3372) */}
+      <ProjectCreateModal
+        isOpen={showCreateProjectModal}
+        onClose={() => setShowCreateProjectModal(false)}
+        onSuccess={fetchData}
       />
     </div>
   );

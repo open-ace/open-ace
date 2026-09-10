@@ -1100,6 +1100,19 @@ export const translations: Record<Language, Translations> = {
     projectEditNotFound: 'Project not found. It may have been deleted.',
     projectShareAsyncProcessing:
       'The project is being processed for sharing. Please refresh the page in a moment.',
+    // Issue #3372: Create project
+    createProject: 'Create Project',
+    projectCreated: 'Project created successfully',
+    projectAlreadyExists: 'A project with this path already exists',
+    projectCreateNoPermission: 'You do not have permission to create this project',
+    projectCreateFailed: 'Failed to create project',
+    projectPathRequired: 'Project path is required',
+    projectPathAbsolute: 'Project path must be an absolute path (starting with /)',
+    projectPathPlaceholder: 'Enter absolute path, e.g. /path/to/project',
+    projectCreatePathHint: 'Absolute path for the project directory on the server',
+    projectCreateDir: 'Create directory if not exists',
+    projectCreateDirHint:
+      'Automatically create the project directory if it does not exist on the server',
 
     // Project User Management (Issue #3275)
     manageProjectUsers: 'Manage Project Users',
@@ -3611,6 +3624,18 @@ export const translations: Record<Language, Translations> = {
     projectEditNoPermission: '您没有权限编辑此项目',
     projectEditNotFound: '项目不存在，可能已被删除。',
     projectShareAsyncProcessing: '项目正在处理共享设置，请稍后刷新页面查看。',
+    // Issue #3372: Create project
+    createProject: '新建项目',
+    projectCreated: '项目创建成功',
+    projectAlreadyExists: '该项目路径已存在',
+    projectCreateNoPermission: '您没有权限创建此项目',
+    projectCreateFailed: '项目创建失败',
+    projectPathRequired: '项目路径不能为空',
+    projectPathAbsolute: '项目路径必须是绝对路径（以 / 开头）',
+    projectPathPlaceholder: '输入绝对路径，例如 /path/to/project',
+    projectCreatePathHint: '服务器上项目目录的绝对路径',
+    projectCreateDir: '目录不存在时自动创建',
+    projectCreateDirHint: '如果服务器上不存在该目录，将自动创建',
 
     // Project User Management (Issue #3275)
     manageProjectUsers: '管理项目用户',
@@ -5308,6 +5333,18 @@ export const translations: Record<Language, Translations> = {
     projectEditNoPermission: 'このプロジェクトを編集する権限がありません',
     projectEditNotFound: 'プロジェクトが見つかりません。削除された可能性があります。',
     projectShareAsyncProcessing: 'プロジェクトの共有処理中です。後ほどページを更新してください。',
+    // Issue #3372: Create project
+    createProject: '新規プロジェクト作成',
+    projectCreated: 'プロジェクトが正常に作成されました',
+    projectAlreadyExists: 'このパスのプロジェクトは既に存在します',
+    projectCreateNoPermission: 'このプロジェクトを作成する権限がありません',
+    projectCreateFailed: 'プロジェクトの作成に失敗しました',
+    projectPathRequired: 'プロジェクトパスは必須です',
+    projectPathAbsolute: 'プロジェクトパスは絶対パス（/ で始まる）である必要があります',
+    projectPathPlaceholder: '絶対パスを入力（例：/path/to/project）',
+    projectCreatePathHint: 'サーバー上のプロジェクトディレクトリの絶対パス',
+    projectCreateDir: 'ディレクトリが存在しない場合は自動作成',
+    projectCreateDirHint: 'サーバー上にディレクトリが存在しない場合、自動的に作成します',
 
     // Project User Management (Issue #3275)
     manageProjectUsers: 'プロジェクトユーザー管理',
@@ -7550,6 +7587,18 @@ export const translations: Record<Language, Translations> = {
     projectEditNoPermission: '이 프로젝트를 편집할 권한이 없습니다',
     projectEditNotFound: '프로젝트를 찾을 수 없습니다. 삭제되었을 수 있습니다.',
     projectShareAsyncProcessing: '프로젝트 공유 처리 중입니다. 잠시 후 페이지를 새로고침하세요.',
+    // Issue #3372: Create project
+    createProject: '프로젝트 생성',
+    projectCreated: '프로젝트가 성공적으로 생성되었습니다',
+    projectAlreadyExists: '이 경로의 프로젝트가 이미 존재합니다',
+    projectCreateNoPermission: '이 프로젝트를 생성할 권한이 없습니다',
+    projectCreateFailed: '프로젝트 생성에 실패했습니다',
+    projectPathRequired: '프로젝트 경로는 필수입니다',
+    projectPathAbsolute: '프로젝트 경로는 절대 경로(/로 시작)여야 합니다',
+    projectPathPlaceholder: '절대 경로 입력 (예: /path/to/project)',
+    projectCreatePathHint: '서버의 프로젝트 디렉토리 절대 경로',
+    projectCreateDir: '디렉토리가 없으면 자동 생성',
+    projectCreateDirHint: '서버에 디렉토리가 없으면 자동으로 생성합니다',
 
     // Project User Management (Issue #3275)
     manageProjectUsers: '프로젝트 사용자 관리',

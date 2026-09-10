@@ -110,6 +110,30 @@ export async function getProjectUsers(
 }
 
 /**
+ * Create a new project
+ * Issue #3372: Project management page create project functionality
+ */
+export async function createProject(data: {
+  path: string;
+  name?: string;
+  description?: string;
+  is_shared?: boolean;
+  create_dir?: boolean;
+}): Promise<{
+  success: boolean;
+  project: Project;
+  dir_created: boolean;
+  permission_warning?: string;
+}> {
+  return apiClient.post<{
+    success: boolean;
+    project: Project;
+    dir_created: boolean;
+    permission_warning?: string;
+  }>('/api/projects', data);
+}
+
+/**
  * Update project information
  * Issue #3064: Frontend project edit functionality
  */
