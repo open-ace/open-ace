@@ -23,7 +23,7 @@ class _StubManager:
         self.config.multi_user_mode = multi_user_mode
         self.launched_with = None
 
-    def get_user_webui_url(self, user_id, system_account, host_url):
+    def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
         self.launched_with = system_account
         return "http://127.0.0.1:3100", "tok"
 
@@ -264,7 +264,10 @@ def test_https_multi_user_returns_relative_webui_path(app, client, monkeypatch):
     # (_extract_token() 依次读 cookie → Bearer header,header 与 host 无关)。
     _deployment_supported(monkeypatch)
     stub = _StubManager()
-    stub.get_user_webui_url = lambda user_id, sa, host: ("http://10.0.0.1:3100", "tok")
+    stub.get_user_webui_url = lambda user_id, sa, host, required_isolation="": (
+        "http://10.0.0.1:3100",
+        "tok",
+    )
     patches = _patch_stack(_db_user("alice_acct"), stub)
     try:
         with patch("app.routes.workspace._load_user_from_token", return_value=MOCK_USER):

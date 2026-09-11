@@ -1,0 +1,443 @@
+"""Issue #3378: WebUIManager sandboxed-form fork (§7.2/§7.5 manager side).
+
+Fake-launcher injections pin the manager's half of the contract: the form fork
+in get_user_webui_url (no OS account, no pid, proxy-port URL, re-minted
+per-instance tokens on hit), the is_alive fork (health via the launcher),
+cross-form stop-and-restart, same-form port reuse, single-user sandboxed URL,
+idle-reclaim teardown, periodic maintenance (export + renew), shutdown, the
+prestart reorder, and the per-instance-secret token validation/refresh fork.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
+import pytest
+
+from app.services import workspace_isolation_contract as wic
+from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
+from app.services.webui_sandbox import mint_instance_token
+
+pytestmark = [pytest.mark.issue(3378)]
+
+
+class _FakeProxy:
+    """Stands in for SandboxWebuiProxy."""
+
+    def __init__(self, *, sandbox_id, upstream_resolver, on_activity=None, **kwargs):
+        self.sandbox_id = sandbox_id
+        self.started_port = None
+        self.stopped = False
+
+    def start(self, port=0):
+        self.started_port = port or 45678
+        return self.started_port
+
+    def stop(self):
+        self.stopped = True
+
+
+class _FakeLaunchResult:
+    def __init__(self, sandbox_id="sb-1", restore_confirmed=True):
+        self.sandbox_id = sandbox_id
+        self.tier = "kata"
+        self.token_secret = "a" * 64
+        self.restore_confirmed = restore_confirmed
+        self.proxy_token = "proxytok"
+        self.proxy_token_expires_at = datetime.now() + timedelta(hours=24)
+        self.proxy_token = "proxytok"
+        self.webui_port = 3100
+
+
+class _FakeLauncher:
+    """Stands in for SandboxedWebuiLauncher; records every call."""
+
+    def __init__(self, *, restore_confirmed=True, healthy=True):
+        self.launch_calls: list[dict] = []
+        self.destroy_calls: list[dict] = []
+        self.renew_calls: list[str] = []
+        self.exports: list[bool] = []
+        self.health_calls: list[dict] = []
+        self.snapshots: dict[int, bytes | None] = {}
+        self.persisted: dict[int, bytes] = {}
+        self.healthy = healthy
+        self._restore_confirmed = restore_confirmed
+        self._next_id = 0
+
+    def load_snapshot(self, user_id):
+        return self.snapshots.get(user_id)
+
+    def launch(self, *, user_id, callback_url, snapshot=None):
+        self.launch_calls.append(
+            {"user_id": user_id, "callback_url": callback_url, "snapshot": snapshot}
+        )
+        self._next_id += 1
+        return _FakeLaunchResult(
+            sandbox_id=f"sb-{user_id}-{self._next_id}",
+            restore_confirmed=self._restore_confirmed,
+        )
+
+    def resolve_webui_endpoint(self, sandbox_id):
+        return (f"http://upstream.invalid/{sandbox_id}", {"OpenSandbox-Ingress-To": "x"})
+
+    def health_check(self, *, proxy_port, token):
+        self.health_calls.append({"proxy_port": proxy_port, "token": token})
+        return self.healthy
+
+    def renew_expiration(self, sandbox_id, *, proxy_token):
+        self.renew_calls.append(sandbox_id)
+        return "2099-01-01T00:00:00"
+
+    def export_snapshot(self, sandbox_id, *, restore_confirmed):
+        self.exports.append(restore_confirmed)
+        return b"TAR"
+
+    def persist_snapshot(self, user_id, blob):
+        self.persisted[user_id] = blob
+        return f"/state/webui-{user_id}.tar"
+
+    def destroy(self, sandbox_id, user_id, *, restore_confirmed, final_export=True):
+        self.destroy_calls.append(
+            {
+                "sandbox_id": sandbox_id,
+                "user_id": user_id,
+                "restore_confirmed": restore_confirmed,
+                "final_export": final_export,
+            }
+        )
+
+
+def _manager(*, multi_user=True, launcher=None, **config_kwargs):
+    config_kwargs.setdefault("port_range_start", 3100)
+    config_kwargs.setdefault("port_range_end", 3200)
+    config = WorkspaceConfig(
+        enabled=True,
+        url="http://127.0.0.1",
+        multi_user_mode=multi_user,
+        webui_callback_url="http://openace.open-ace.svc.cluster.local:8080",
+        **config_kwargs,
+    )
+    manager = WebUIManager(config)
+    manager.stop_cleanup_thread()
+    if launcher is not None:
+        manager._sandbox_launcher = launcher
+    return manager
+
+
+@pytest.fixture(autouse=True)
+def _fake_proxy(monkeypatch):
+    monkeypatch.setattr("app.services.webui_sandbox.SandboxWebuiProxy", _FakeProxy)
+
+
+# ── multi-user sandboxed start ────────────────────────────────────────
+
+
+def test_sandboxed_start_launches_pod_and_returns_proxy_port_url():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    url, token = manager.get_user_webui_url(
+        7, "", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+
+    assert len(launcher.launch_calls) == 1
+    call = launcher.launch_calls[0]
+    assert call["user_id"] == 7
+    assert call["callback_url"] == "http://openace.open-ace.svc.cluster.local:8080"
+    assert call["snapshot"] is None  # first launch: no stored snapshot
+
+    instance = manager.get_user_instance(7)
+    assert instance.form == "sandboxed"
+    assert instance.sandbox_id == "sb-7-1"
+    assert instance.sandbox_tier == "kata"
+    assert instance.restore_confirmed is True
+    assert instance.token_secret == "a" * 64
+    assert instance.pid is None  # no OS process
+    assert instance.process is None
+    assert instance.proxy.started_port == instance.port
+    # URL: request host + the LOCAL proxy port (never the in-pod 3100).
+    assert url == f"http://192.168.1.5:{instance.port}"
+    # Token is v2 signed with the per-instance secret.
+    assert token.startswith("v2:7:")
+    expect = mint_instance_token(7, instance.port, "nope")
+    assert token != expect  # sanity: not minted with a foreign secret
+
+
+def test_sandboxed_hit_reuses_pod_and_remints_token():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    url1, token1 = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    url2, token2 = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+
+    assert len(launcher.launch_calls) == 1  # pod reused, not recreated
+    assert launcher.health_calls  # is_alive went through the launcher probe
+    assert token1 != token2  # re-minted per access (aligned with single-user)
+    assert token2.startswith("v2:7:")
+    instance = manager.get_user_instance(7)
+    assert token2 == instance.token
+
+
+def test_sandboxed_token_validates_against_instance_secret_and_dies_with_it():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    _url, token = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    valid, user_id, error = manager.validate_token(token)
+    assert valid is True and user_id == 7 and error is None
+
+    ok, new_token, err = manager.refresh_token(token)
+    assert ok is True and new_token and err is None
+
+    # Teardown: no matching instance → the token no longer validates (N8).
+    manager.stop_user_webui(7)
+    valid, user_id, error = manager.validate_token(token)
+    assert valid is False
+
+
+def test_is_alive_fork_declares_dead_after_consecutive_failures():
+    launcher = _FakeLauncher(healthy=False)
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    instance = manager.get_user_instance(7)
+    instance._health_check_ttl = 0.0  # bypass the cache window
+
+    for _ in range(instance._max_consecutive_failures - 1):
+        assert instance.is_alive() is True  # tolerant until the threshold
+    assert instance.is_alive() is False
+    # The failing health probe carried an instance-signed token + proxy port.
+    assert launcher.health_calls[0]["proxy_port"] == instance.port
+    assert launcher.health_calls[0]["token"].startswith("v2:7:")
+
+
+def test_cross_form_stop_and_restart():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    # A live LOCAL instance (form local) is serving user 7.
+    local = WebUIInstance(user_id=7, system_account="u7", port=3100, form="local")
+    local.is_alive = lambda: True
+    manager._instances[7] = local
+    manager._port_allocations[3100] = 7
+
+    url, _token = manager.get_user_webui_url(
+        7, "u7", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+    # The local instance was replaced by a sandboxed one.
+    instance = manager.get_user_instance(7)
+    assert instance.form == "sandboxed"
+    assert len(launcher.launch_calls) == 1
+
+
+def test_same_form_restart_reuses_previous_port():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    _url1, _t1 = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    port1 = manager.get_user_instance(7).port
+    manager.stop_user_webui(7)
+    assert manager.get_user_instance(7) is None
+
+    _url2, _t2 = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    port2 = manager.get_user_instance(7).port
+    assert port2 == port1  # SEC-Q4
+
+
+def test_idle_reclaim_exports_destroys_and_unproxies():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    instance = manager.get_user_instance(7)
+    proxy = instance.proxy
+
+    manager.cleanup_idle_instances()  # instance just started → not idle yet
+    assert launcher.destroy_calls == []
+
+    instance.last_activity = datetime.now() - timedelta(hours=2)
+    manager.cleanup_idle_instances()
+
+    assert len(launcher.destroy_calls) == 1
+    call = launcher.destroy_calls[0]
+    assert call["sandbox_id"] == instance.sandbox_id
+    assert call["restore_confirmed"] is True
+    assert call["final_export"] is True
+    assert proxy.stopped
+    assert manager.get_user_instance(7) is None
+    assert instance.port not in manager._port_allocations
+
+
+def test_periodic_maintenance_exports_and_renews_each_live_sandbox():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+
+    manager._maintain_sandboxed_instances()
+    assert launcher.exports == [True]
+    assert launcher.persisted == {7: b"TAR"}
+    assert launcher.renew_calls == [manager.get_user_instance(7).sandbox_id]
+
+
+def test_maintenance_is_fail_soft_per_instance():
+    class _ExplodingLauncher(_FakeLauncher):
+        def export_snapshot(self, sandbox_id, *, restore_confirmed):
+            raise RuntimeError("execd gone")
+
+    launcher = _ExplodingLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    manager._maintain_sandboxed_instances()  # must not raise
+    # The renew after the failed export never ran for this instance…
+    assert launcher.renew_calls == []
+
+
+def test_shutdown_exports_and_destroys_sandboxed_instances():
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    proxy = manager.get_user_instance(7).proxy
+
+    manager.stop_all_instances()
+    assert len(launcher.destroy_calls) == 1
+    assert proxy.stopped
+    assert manager.get_user_instance(7) is None
+
+
+# ── single-user sandboxed ─────────────────────────────────────────────
+
+
+def test_single_user_sandboxed_url_uses_proxy_port_not_3100():
+    launcher = _FakeLauncher()
+    # Range starts at 3200 so the allocator's answer is provably NOT the
+    # hardcoded single-user 3100.
+    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
+    url, token = manager.get_user_webui_url(
+        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+    instance = manager._single_user_instance
+    assert instance.form == "sandboxed"
+    assert instance.port == 3200  # §7.2: allocator port, not the hardcoded 3100
+    assert url == f"http://192.168.1.5:{instance.port}"
+    assert token.startswith("v2:3:")
+
+    # Hit: same pod, fresh token.
+    url2, token2 = manager.get_user_webui_url(
+        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+    assert len(launcher.launch_calls) == 1
+    assert token2 != token
+
+    # Shutdown path (server.py SIGTERM → shutdown_webui_manager).
+    manager.stop_all_instances()
+    assert len(launcher.destroy_calls) == 1
+    assert instance.proxy.stopped
+
+
+# ── prestart reorder (§7.7) ───────────────────────────────────────────
+
+
+def test_prestart_proceeds_without_mapping_when_floor_is_sandboxed(monkeypatch):
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    spawned = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
+    from app.services import workspace_isolation_contract as wic
+
+    class _SandboxSnapshot(wic.IsolationCapabilitySnapshot):
+        pass
+
+    snap = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend="opensandbox:kata",
+        isolation_level=wic.ISOLATION_LEVEL_SANDBOXED,
+        enforced=wic._SANDBOXED_ENFORCED,
+        unsupported=wic._SANDBOXED_UNSUPPORTED,
+        reasons=(),
+    )
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: snap, raising=True)
+    monkeypatch.setattr(wic, "resolve_required_floor", lambda config, s: "sandboxed")
+
+    manager.prestart_user_instance_async(7, "", "http://h")
+    assert len(spawned) == 1  # sandboxed prestart: no mapping required
+    # Run the spawned starter: it launches the sandbox form.
+    spawned[0]()
+    assert len(launcher.launch_calls) == 1
+
+
+def test_prestart_still_requires_mapping_for_os_user(monkeypatch):
+    manager = _manager()
+    spawned = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
+    from app.services import workspace_isolation_contract as wic
+
+    monkeypatch.setattr(wic, "resolve_required_floor", lambda config, s: "os_user")
+    monkeypatch.setattr(
+        wic,
+        "evaluate_isolation_requirement",
+        lambda required, **kw: None,  # gate passes; the no-account rule must fire
+    )
+    manager.prestart_user_instance_async(7, "", "http://h")
+    assert spawned == []
+
+
+# ── route passes the effective level through ─────────────────────────
+
+
+MOCK_USER = {"id": 7, "username": "alice", "role": "user", "tenant_id": 1}
+
+
+def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
+    class _StubManager:
+        def __init__(self):
+            import app.services.webui_manager as wm
+
+            self.config = wm.WorkspaceConfig(enabled=True, multi_user_mode=True)
+            self.received_isolation = None
+
+        def per_user_launch_readiness(self):
+            return None
+
+        def supports_per_user_launch(self, system_account):
+            return True, None
+
+        def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
+            self.received_isolation = required_isolation
+            return "http://127.0.0.1:3123", "tok"
+
+        def update_user_activity(self, user_id):
+            pass
+
+    stub = _StubManager()
+    # The gate consults the capability snapshot; a sandboxed snapshot lets a
+    # sandboxed request through so the route can reach the manager fork.
+    sandbox_snapshot = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend="opensandbox:kata",
+        isolation_level=wic.ISOLATION_LEVEL_SANDBOXED,
+        enforced=wic._SANDBOXED_ENFORCED,
+        unsupported=wic._SANDBOXED_UNSUPPORTED,
+        reasons=(),
+    )
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: sandbox_snapshot)
+    with (
+        patch("app.repositories.user_repo.UserRepository") as repo_cls,
+        patch("app.services.webui_manager.get_webui_manager", return_value=stub),
+    ):
+        repo_cls.return_value.get_user_by_id.return_value = {
+            **MOCK_USER,
+            "system_account": "alice_acct",
+        }
+        client.set_cookie("session_token", "test-token")
+        with patch("app.routes.workspace._load_user_from_token", return_value=MOCK_USER):
+            resp = client.get("/api/workspace/user-url?required_isolation=sandboxed")
+    assert resp.status_code == 200
+    assert stub.received_isolation == "sandboxed"
+
+
+# ── allocator form-awareness ──────────────────────────────────────────
+
+
+def test_allocator_keys_ports_by_user_and_form():
+    manager = _manager()
+    p_local = manager.allocate_port(9, "local")
+    manager.release_port(p_local, "local")
+    p_again = manager.allocate_port(9, "local")
+    assert p_again == p_local  # same form reuses its port
+    p_other = manager.allocate_port(9, "sandboxed")
+    # A different form may get a different port even while the memo holds.
+    assert p_other in range(3100, 3201)

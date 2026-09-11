@@ -2427,7 +2427,12 @@ def get_user_webui_url():
         # replaces it with request.host_url. Omitting this argument regresses
         # the workspace into a blank iframe.
         host_url = flask_request.host_url.rstrip("/")
-        url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
+        # Issue #3378: the effective level the gate resolved drives the
+        # manager's form fork (sandboxed → launcher branch; otherwise the
+        # os_user path is unchanged). The gate itself is contract-owned (T1).
+        url, token = manager.get_user_webui_url(
+            int(user_id), str(system_account), host_url, required_isolation=effective
+        )
 
         # Update activity timestamp
         manager.update_user_activity(user_id)
