@@ -66,12 +66,27 @@ from app.remote_ws_handler import RemoteWSHandler
 
 
 class TerminalGeventWorker(GeventPyWSGIWorker):
-    """Gevent pywsgi worker with remote terminal and VSCode WebSocket handler.
+    """Gunicorn pywsgi worker with remote terminal and VSCode WebSocket handler.
 
     This worker class:
     1. Inherits from GeventPyWSGIWorker (gevent-based worker)
     2. Uses RemoteWSHandler for WebSocket upgrade handling
-    3. Applies psycogreen patch for psycopg2 gevent compatibility (Issue #2187)
+    3. Applies psycogreen patch for gevent compatibility (Issue #2187)
+    4. Spawns the webui-pod orphan reconcile at worker start (Issue #3378)
+
+    The reconcile is env-gated (OPENACE_WEBUI_ORPHAN_RECONCILE=1, set only by
+    the web service entrypoint) and runs on its OWN greenlet — the sweep must
+    never run inline in a request-serving greenlet (design #3378 FEAS-R4-3).
     """
 
     wsgi_handler = RemoteWSHandler
+
+    def init_process(self) -> None:
+        """Run the parent init, then spawn the (gated) orphan reconcile."""
+        super().init_process()
+        try:
+            from app.services.webui_sandbox import maybe_spawn_webui_orphan_reconcile
+
+            maybe_spawn_webui_orphan_reconcile()
+        except Exception:  # noqa: BLE001 - fail-soft: boot must not fail
+            logger.exception("webui orphan reconcile spawn failed (fail-soft)")
