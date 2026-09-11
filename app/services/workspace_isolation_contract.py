@@ -100,6 +100,43 @@ SANDBOX_PROBE_REASON_CODES = (
     "sandbox_proxy_token_ttl_too_short",
 )
 
+# Issue #3378 (D3): the boot-probe upgrade memo. Kernel and egress enforcement
+# are only verifiable per-pod, so the sandboxed snapshot reports them unverified
+# until the WebUI launcher's first successful pod probe registers the upgrade
+# here. Deliberately a process-lifetime memo — a restart reverts the snapshot to
+# the static (unverified) view, which is the documented honesty contract.
+_SANDBOX_RUNTIME_MEMO: dict[str, bool] = {"verified": False, "kernel_enforced": False}
+
+
+def register_sandbox_runtime_verified(*, kernel_enforced: bool) -> None:
+    """Record that a sandbox pod's boot probes passed (launcher-side hook).
+
+    Called by ``SandboxedWebuiLauncher`` after the runtime-class and egress
+    probes confirm the pod. ``kernel_enforced`` distinguishes the two probe
+    directions (provider ``_run_probes``): gVisor identifies itself positively
+    in the kernel probe, while a Kata result is negative-only — it rules out
+    gVisor but cannot distinguish Kata from an unisolated runc container, so the
+    kernel dimension must NOT upgrade on it (reason
+    ``sandbox_runtime_kata_negative_only``).
+    """
+    _SANDBOX_RUNTIME_MEMO["verified"] = True
+    _SANDBOX_RUNTIME_MEMO["kernel_enforced"] = bool(kernel_enforced)
+
+
+def sandbox_runtime_verification() -> tuple[bool, bool]:
+    """Return ``(verified, kernel_enforced)`` — see :func:`register_sandbox_runtime_verified`."""
+    return (
+        _SANDBOX_RUNTIME_MEMO["verified"],
+        _SANDBOX_RUNTIME_MEMO["kernel_enforced"],
+    )
+
+
+def _reset_sandbox_runtime_verification() -> None:
+    """Reset the boot-probe memo (test isolation only)."""
+    _SANDBOX_RUNTIME_MEMO["verified"] = False
+    _SANDBOX_RUNTIME_MEMO["kernel_enforced"] = False
+
+
 # Static, revision-gated audit result (design doc §2.4). Values:
 # enforced | partial | separate_contract.
 ENTRY_POINT_STATUSES = {
@@ -363,6 +400,35 @@ def build_workspace_isolation_snapshot(
 
     sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
     if sandbox_ok:
+        # D3 two-state mapping: the static view reports kernel/egress
+        # unverified; once the launcher's first pod boot probe succeeded the
+        # in-process memo upgrades them (egress always — its enforcement plane
+        # was read live; kernel only for a positive gVisor identification).
+        verified, kernel_enforced = sandbox_runtime_verification()
+        if verified:
+            enforced: tuple[str, ...] = _SANDBOXED_ENFORCED + (DIMENSION_NETWORK_EGRESS,)
+            reasons: tuple[IsolationReason, ...] = ()
+            if kernel_enforced:
+                enforced = enforced + (DIMENSION_KERNEL,)
+            else:
+                reasons = (
+                    IsolationReason(
+                        "sandbox_runtime_kata_negative_only",
+                        "The runtime boot probe passed in the negative "
+                        "direction only (Kata rules out gVisor but no "
+                        "hypervisor signal is observable), so the kernel "
+                        "dimension stays unverified; network egress is "
+                        "verified against the tier's enforcement plane.",
+                    ),
+                )
+            return IsolationCapabilitySnapshot(
+                supported=True,
+                backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
+                isolation_level=ISOLATION_LEVEL_SANDBOXED,
+                enforced=enforced,
+                unsupported=tuple(d for d in ALL_DIMENSIONS if d not in enforced),
+                reasons=reasons,
+            )
         return IsolationCapabilitySnapshot(
             supported=True,
             backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
