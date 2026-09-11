@@ -186,6 +186,10 @@ class WorkspaceConfig:
     # multi_user_mode is on, else "none"); the request parameter can only
     # raise, never lower, this floor.
     required_isolation_level: str = ""
+    # Issue #3378: which sandbox-backends.json endpoint tier interactive
+    # sandboxed WebUIs launch on. Empty string falls back to the backend
+    # config's default_tier. Read by the isolation capability probe only.
+    sandbox_tier: str = ""
 
 
 def read_workspace_config() -> WorkspaceConfig:
@@ -220,6 +224,7 @@ def read_workspace_config() -> WorkspaceConfig:
             webui_path=workspace.get("webui_path", ""),
             webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
             required_isolation_level=(workspace.get("required_isolation_level", "") or "").strip(),
+            sandbox_tier=(workspace.get("sandbox_tier", "") or "").strip(),
         )
     except Exception as e:
         logger.error(f"Error loading config: {e}")
