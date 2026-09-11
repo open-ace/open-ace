@@ -2347,14 +2347,13 @@ def get_user_webui_url():
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
     from app.services.workspace_isolation_contract import (
-        ISOLATION_LEVEL_NONE,
-        ISOLATION_LEVEL_OS_USER,
         SUPPORTED_ISOLATION_LEVELS,
         IsolationReason,
         build_workspace_isolation_snapshot,
         evaluate_isolation_requirement,
         is_valid_isolation_level,
         isolation_level_at_least,
+        resolve_required_floor,
     )
 
     # Check if user is logged in
@@ -2378,23 +2377,13 @@ def get_user_webui_url():
         raw_system_account = user.get("system_account")
         system_account = raw_system_account or user.get("username")
 
-        # Issue #3374 (reviews #12/#14): the isolation floor is server-side —
-        # config required_isolation_level, defaulting to os_user in multi-user
-        # mode — and the request parameter can only RAISE it, never lower it.
-        # An empty/whitespace parameter counts as absent.
+        # Issue #3374 (reviews #12/#14 + round-2): the isolation floor is
+        # server-side — explicit config when valid, else derived from what
+        # this deployment actually verifies (snapshot.isolation_level) — and
+        # the request parameter can only RAISE it, never lower it. An
+        # empty/whitespace parameter counts as absent.
         isolation_snapshot = build_workspace_isolation_snapshot(manager)
-        config_floor = (getattr(manager.config, "required_isolation_level", "") or "").strip()
-        if not config_floor or not is_valid_isolation_level(config_floor):
-            # Unset — or a hand-edited invalid value — falls back to the
-            # derived default; an opaque KeyError must not reach the client.
-            if config_floor:
-                logger.warning(
-                    "Invalid workspace.required_isolation_level %r; using derived default",
-                    config_floor,
-                )
-            config_floor = (
-                ISOLATION_LEVEL_OS_USER if manager.config.multi_user_mode else ISOLATION_LEVEL_NONE
-            )
+        config_floor = resolve_required_floor(manager.config, isolation_snapshot)
         requested = (flask_request.args.get("required_isolation") or "").strip()
         if requested and not is_valid_isolation_level(requested):
             rejection = IsolationReason(

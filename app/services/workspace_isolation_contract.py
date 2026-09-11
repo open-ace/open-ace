@@ -17,9 +17,11 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
-from app.utils.workspace import _is_docker_multi_user_mode  # module-level patch seam
-
-POLICY_REVISION = "2026-09-11"
+# Revision 2 (2026-09-11.2, PR review round 2): the snapshot derives os_user
+# from the launch-path readiness probe instead of the Docker layout,
+# entry_points became a conditional key, and new reason codes were added
+# (launch_path_degraded / launch_path_unverified).
+POLICY_REVISION = "2026-09-11.2"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -186,16 +188,13 @@ def build_workspace_isolation_snapshot(
             "intentionally runs one shared instance.",
         )
 
-    if not _is_docker_multi_user_mode():
-        return _unsupported(
-            "identity_mapping_unverified",
-            "Multi-user mode is enabled, but Open ACE cannot verify per-user "
-            "identity mapping in this deployment form (verified os_user "
-            "requires the Docker multi-user layout: root with "
-            "WORKSPACE_BASE_DIR=/workspace). The deployment may still launch "
-            "per-user WebUIs; this contract only reports levels it can verify.",
-        )
-
+    # The launch-path readiness probe is the verification: it checks the
+    # actual per-user launch mechanism (WebUI resolution, dev-directory mode,
+    # launch wrapper, sudo) regardless of Docker vs package installation —
+    # a package-method host that really runs `sudo -u` reports os_user.
+    # Without a manager (read-only capability GET on a cold worker) the
+    # probe cannot run; the snapshot is reported as provisional via an
+    # explicit reason instead of silently claiming a verified level.
     if readiness_probe is not None:
         degradation = readiness_probe()
         if degradation:
@@ -205,6 +204,14 @@ def build_workspace_isolation_snapshot(
                 f"instances ({degradation}); see the workspace isolation "
                 "documentation.",
             )
+        return IsolationCapabilitySnapshot(
+            supported=True,
+            backend=BACKEND_PER_USER,
+            isolation_level=ISOLATION_LEVEL_OS_USER,
+            enforced=_OS_USER_ENFORCED,
+            unsupported=_OS_USER_UNSUPPORTED,
+            reasons=(),
+        )
 
     return IsolationCapabilitySnapshot(
         supported=True,
@@ -212,8 +219,39 @@ def build_workspace_isolation_snapshot(
         isolation_level=ISOLATION_LEVEL_OS_USER,
         enforced=_OS_USER_ENFORCED,
         unsupported=_OS_USER_UNSUPPORTED,
-        reasons=(),
+        reasons=(
+            IsolationReason(
+                "launch_path_unverified",
+                "The WebUI launch path has not been probed on this worker "
+                "yet; treat this level as provisional until the manager is "
+                "initialized.",
+            ),
+        ),
     )
+
+
+def resolve_required_floor(config: Any, snapshot: IsolationCapabilitySnapshot) -> str:
+    """Resolve the server-side isolation floor (Issue #3374 PR review round 2).
+
+    An explicitly configured ``workspace.required_isolation_level`` wins when
+    valid; unset — or a hand-edited invalid value (warned) — derives from what
+    the deployment actually verifies (``snapshot.isolation_level``), NOT from
+    a flat mode default: a package-method or launch-degraded host must not
+    have every default workspace request rejected by an unreachable floor.
+    The request parameter can only raise above this floor, never lower it.
+    """
+    explicit = (getattr(config, "required_isolation_level", "") or "").strip()
+    if explicit:
+        if is_valid_isolation_level(explicit):
+            return explicit
+        # Late import avoids a logging dependency at module import time.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Invalid workspace.required_isolation_level %r; using derived default",
+            explicit,
+        )
+    return snapshot.isolation_level
 
 
 def evaluate_isolation_requirement(

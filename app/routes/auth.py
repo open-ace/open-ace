@@ -110,15 +110,19 @@ def api_login():
             multi_user_mode = False
 
         if user_data:
-            system_account = user_data.get("system_account") or user_data.get("username")
-            if system_account:
-                # Idempotent update: set system_account if empty. In
-                # multi-user workspace mode this backfill is SKIPPED: the
-                # isolation gate treats an absent system_account as a
-                # missing identity mapping (identity_mapping_missing), and
-                # silently materializing the username convention would make
-                # that state unreachable (Issue #3374 review #1).
-                if not user_data.get("system_account") and not multi_user_mode:
+            raw_system_account = user_data.get("system_account")
+            system_account = raw_system_account or user.get("username")
+            # Issue #3374 review #1 (round 2): in multi-user mode BOTH the DB
+            # backfill and the host-side workspace provisioning use the raw
+            # mapping only — provisioning a username-convention OS account +
+            # /workspace/<username> home for a mapping-less user would leave
+            # orphan system users on the host even though the gate refuses to
+            # launch them.
+            provision_account = raw_system_account if multi_user_mode else system_account
+            if system_account and not multi_user_mode:
+                # Idempotent update: set system_account if empty (single-user
+                # mode only — see above).
+                if not raw_system_account:
                     try:
                         user_repo.update_user(user_id=user_id, system_account=system_account)
                         logger.info(
@@ -127,11 +131,12 @@ def api_login():
                     except Exception as e:
                         logger.warning(f"Failed to update system_account for user {user_id}: {e}")
 
-                # Ensure workspace directory exists
+            # Ensure workspace directory exists
+            if provision_account:
                 try:
-                    ensure_user_workspace(system_account)
+                    ensure_user_workspace(provision_account)
                 except Exception as e:
-                    logger.warning(f"Failed to ensure workspace for {system_account}: {e}")
+                    logger.warning(f"Failed to ensure workspace for {provision_account}: {e}")
 
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(jsonify({"success": True, "user": user}))

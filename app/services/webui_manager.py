@@ -1151,8 +1151,16 @@ class WebUIManager:
                 if not self._ensure_system_user(system_account):
                     raise ValueError(f"Failed to create system user: {system_account}")
 
-        # Find webui executable or project path
-        webui_cmd, webui_dir = self._find_webui_executable()
+        # Find webui executable or project path. Shares the successful-
+        # resolution memo with the readiness probe (Issue #3374 review #9
+        # round 2): both call sites see one resolution instead of diverging.
+        resolved = getattr(self, "_resolved_webui", None)
+        if resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable()
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
 
         if not webui_cmd:
             logger.error("qwen-code-webui executable not found")
@@ -1715,22 +1723,26 @@ class WebUIManager:
         if not self.config.multi_user_mode:
             return  # No pre-start needed in single-user mode
 
-        # Issue #3374 review #6: evaluate the server-side isolation floor
-        # (same contract as /user-url) before spawning anything.
+        # Issue #3374 review #6 (+ round-2 normalization): evaluate the
+        # server-side isolation floor (same contract as /user-url) before
+        # spawning anything. Floor resolution is shared with the route via
+        # resolve_required_floor — an invalid hand-edited config value must
+        # fall back fail-closed here too, not skip the gate entirely.
         if not system_account:
             logger.info("Skipping webui prestart for user %s: no explicit mapping", user_id)
             return
         from app.services.workspace_isolation_contract import (
             build_workspace_isolation_snapshot,
             evaluate_isolation_requirement,
-            is_valid_isolation_level,
+            resolve_required_floor,
         )
 
-        required = (self.config.required_isolation_level or "").strip() or "os_user"
-        if is_valid_isolation_level(required) and required != "none":
+        snapshot = build_workspace_isolation_snapshot(self)
+        required = resolve_required_floor(self.config, snapshot)
+        if required != "none":
             rejection = evaluate_isolation_requirement(
                 required,
-                snapshot=build_workspace_isolation_snapshot(self),
+                snapshot=snapshot,
                 system_account=system_account,
                 manager=self,
             )

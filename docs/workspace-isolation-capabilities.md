@@ -25,7 +25,7 @@ reason code 对照与已知缺口。关联 issue:#3374。
     "vscode": "partial",
     "autonomous": "separate_contract"
   },
-  "policy_revision": "2026-09-11"
+  "policy_revision": "2026-09-11.2"
 }
 ```
 
@@ -70,8 +70,8 @@ reason code 对照与已知缺口。关联 issue:#3374。
 | `webui_disabled` | WebUI 管理器未启用,无交互工作区运行时 |
 | `platform_unsupported` | 非 Linux 平台(Windows/macOS/其他) |
 | `multi_user_mode_disabled` | 多用户模式未启用(单用户轻量模式,预期状态而非缺陷) |
-| `identity_mapping_unverified` | 多用户已启用,但该部署形态无法**验证**每用户身份映射(需要 Docker 多用户布局);部署可能仍实际支持按用户启动,契约只报告它能验证的等级 |
-| `launch_path_degraded` | 部署形态达标但 WebUI 启动路径无法承载按用户实例(message 括注 §3.3 的具体原因,如 dev 目录模式/包装器缺失);契约与 /user-url 门闸看同一条路径,不会互相矛盾 |
+| `launch_path_degraded` | WebUI 启动路径无法承载按用户实例(message 括注 §3.3 的具体原因,如 dev 目录模式/包装器缺失);契约与 /user-url 门闸看同一条路径,不会互相矛盾 |
+| `launch_path_unverified` | 冷 worker 上 manager 尚未初始化、探针未运行:等级为 **provisional**(部署形态达标),manager 初始化后自动消除;按 revision 缓存/灰度的接入方应同时检查该码 |
 
 ### 3.2 门闸 `error_code`(请求级:`user-url?required_isolation=...` 的拒绝)
 
@@ -82,7 +82,7 @@ reason code 对照与已知缺口。关联 issue:#3374。
 | `identity_mapping_missing` | 用户在数据库中无 `system_account` 映射;显式要求隔离时不做 username 静默回退 |
 | `per_user_launch_unavailable` | 启动路径无法以该用户 UID 运行(message 内嵌 §3.3 的原因码) |
 
-易混对照:`identity_mapping_unverified`(部署级,契约里"这套部署建不了身份映射")
+易混对照:`launch_path_unverified`(部署级,"冷 worker 尚未探针,等级 provisional")
 vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映射")。
 
 ### 3.3 探针原因码(嵌在 `per_user_launch_unavailable` 的 message 中,或作为部署级 `launch_path_degraded` 的括注)
@@ -109,22 +109,24 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | vscode | partial | owner 记录为 machine.created_by;project_path 校验弱(已知缺口) |
 | autonomous | separate_contract | 沿用 #2022 sandbox 契约,不在本契约范围 |
 
-## 5. 多用户模式部署要求
+## 5. 多用户模式部署要求(policy revision 2026-09-11.2)
 
-要使契约报告 `supported/os_user`,部署必须满足:
+契约是否报告 `supported/os_user` 由**启动路径就绪探针**判定(§3.3:WebUI 解析、
+非 dev 目录模式、`openace-webui-launch` 包装器、sudo),不再以 Docker 布局为
+先决条件——包安装形态(scripts/install-central/package-method,`sudo -u` 与
+wrapper 齐备)同样可以验证并强制 os_user。
 
-1. 使用 `docker-compose.multi-user.yml` 叠加部署(或等价的裸机形态):
-   - 容器以 root 运行(user: "0"),并显式设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`;
-   - `WORKSPACE_BASE_DIR=/workspace`;
-   - `WORKSPACE_MULTI_USER_MODE=true`(entrypoint 会写入 config.json)。
-2. 镜像内可用 `useradd`(或 `OPENACE_USERADD_WRAPPER`)创建每用户系统账户,
-   以及 sudo/sudoers 中受限的 `openace-webui-launch` 包装器(镜像已内置)。
-3. 无内核特殊要求(无 namespace/seccomp 依赖;os_user 等级即 OS 账户边界)。
-4. 生产基线:强 `DB_PASSWORD`/`SECRET_KEY`/`OPENACE_ENCRYPTION_KEY`
-   (见 compose 文件内注释)。
+两种参考部署:
 
-不满足时契约如实返回 unsupported 与对应 reason——**不会**静默降级到共享账户后
-宣称支持。
+1. **Docker 多用户**:`docker-compose.multi-user.yml` 叠加(root + `OPENACE_ALLOW_ROOT_MULTI_USER=1` + `WORKSPACE_BASE_DIR=/workspace` + `WORKSPACE_MULTI_USER_MODE=true`),镜像内置 useradd 与 wrapper,系统账户自动供给;
+2. **包安装多用户**:installer 的 `_WS_MULTI_USER` 路径(非 root 运行 + `/home` 布局),探针健康即报告 os_user;每用户系统账户需已存在(getpwnam 可解析,uid ≥ 1000)。
+
+共同要求:sudo/sudoers 中受限的 `openace-webui-launch` 包装器;无内核特殊要求
+(os_user 等级即 OS 账户边界);生产基线密钥见 compose 注释。
+
+探针降级(dev 目录模式/缺 wrapper 等)时契约如实返回 `launch_path_degraded`
+unsupported——**不会**静默降级到共享账户后宣称支持;该形态下默认启动路径保持
+既有行为,显式 `required_isolation=os_user` 得到结构化拒绝。
 
 ## 6. 接入方用法
 
@@ -149,9 +151,11 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 **隔离下限是服务端的**(config.json `workspace.required_isolation_level`,
-缺省:多用户模式为 `os_user`,单用户模式为 `none`);`required_isolation`
-请求参数**只能抬高**下限,不能降低。空值/空白参数视为缺省。登录时的后台
-预启动(prestart)走同一评估——门闸会拒绝的启动不会发生。
+缺省从**契约快照实际验证到的等级**派生——探针健康的 Docker/包安装多用户形态
+为 `os_user`,单用户与探针降级形态为 `none`;显式配置可覆盖,无效值告警后回退
+派生值);`required_isolation` 请求参数**只能抬高**下限,不能降低。空值/空白
+参数视为缺省。登录时的后台预启动(prestart)与工作区目录供给走同一评估——
+门闸会拒绝的启动/供给不会发生。
 
 - 成功:响应含 `url`/`token`/`system_account` 与 `isolation`(部署已验证姿态
   快照;服务端下限保证默认路径同样经过门闸,回显与实际启动一致)。

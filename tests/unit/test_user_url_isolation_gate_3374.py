@@ -33,6 +33,14 @@ class _StubManager:
     def supports_per_user_launch(self, system_account):
         return True, None
 
+    def per_user_launch_readiness(self):
+        return None  # healthy launch path
+
+
+class _DegradedManager(_StubManager):
+    def per_user_launch_readiness(self):
+        return "launch_wrapper_missing"
+
 
 def _db_user(system_account):
     return {"id": 7, "username": "alice", "system_account": system_account}
@@ -55,7 +63,6 @@ def _patch_stack(repo_user, stub):
 
 def _deployment_supported(monkeypatch):
     monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
-    monkeypatch.setattr(wic, "_is_docker_multi_user_mode", lambda: True)
 
 
 def test_unauthenticated_request_is_401(app, client):
@@ -287,3 +294,64 @@ def test_invalid_config_floor_falls_back_to_derived_default(app, client, monkeyp
             p.stop()
     assert resp.status_code == 200
     assert resp_param.status_code == 200
+
+
+# --- package-method (non-Docker) form: PR review round 2 ---
+
+
+def test_package_mode_default_path_with_mapping_is_200(app, client, monkeypatch):
+    # 硬回归钉:包安装多用户形态(非 Docker 布局)默认路径不再全线 400——
+    # 下限从快照(探针验证的等级)派生,而非 Docker 布局
+    _deployment_supported(monkeypatch)
+    monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
+    stub = _StubManager()
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 200
+    assert resp.get_json()["system_account"] == "alice_acct"
+
+
+def test_package_mode_mappingless_default_is_identity_400(app, client, monkeypatch):
+    # 探针健康的包安装形态:快照 os_user → 下限 os_user → 缺映射仍拒绝
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    patches = _patch_stack(_db_user(None), stub)
+    try:
+        resp = _call(client, "")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 400
+    assert resp.get_json()["error_code"] == "identity_mapping_missing"
+
+
+def test_package_mode_degraded_default_path_restores_fallback(app, client, monkeypatch):
+    # 探针降级(如缺 wrapper)的包安装形态:快照 none → 下限 none → 默认路径
+    # 保持旧行为(username 回退),修复"全线 400"回归
+    _deployment_supported(monkeypatch)
+    stub = _DegradedManager()
+    patches = _patch_stack(_db_user(None), stub)
+    try:
+        resp = _call(client, "")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 200
+    assert resp.get_json()["system_account"] == "alice"
+
+
+def test_package_mode_degraded_explicit_os_user_is_rejected(app, client, monkeypatch):
+    _deployment_supported(monkeypatch)
+    stub = _DegradedManager()
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "?required_isolation=os_user")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 400
+    assert resp.get_json()["error_code"] == "isolation_level_unsupported"

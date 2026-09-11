@@ -25,7 +25,6 @@ class _StubManager:
 
 def _patch_deployment(monkeypatch, *, platform="linux", docker_multi_user=True):
     monkeypatch.setattr(wic, "_current_platform", lambda: platform)
-    monkeypatch.setattr(wic, "_is_docker_multi_user_mode", lambda: docker_multi_user)
 
 
 def _reason_codes(snapshot):
@@ -73,16 +72,28 @@ def test_root_single_user_reports_mode_not_mapping(monkeypatch):
     assert _reason_codes(snap) == ["multi_user_mode_disabled"]
 
 
-def test_non_docker_multi_user_reports_unverified(monkeypatch):
+def test_package_mode_multi_user_with_healthy_probe_reports_os_user(monkeypatch):
+    # PR review round 2 (hard regression): a package-method multi-user host
+    # (non-Docker layout, sudo+wrapper present) really runs per-user WebUIs;
+    # the probe is the verification, the Docker layout is not.
     _patch_deployment(monkeypatch, docker_multi_user=False)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    snap = wic.build_workspace_isolation_snapshot(_ReadyStubManager(readiness=None))
+    assert snap.supported is True
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
+
+
+def test_package_mode_multi_user_degraded_probe_reports_unsupported(monkeypatch):
+    _patch_deployment(monkeypatch, docker_multi_user=False)
+    snap = wic.build_workspace_isolation_snapshot(
+        _ReadyStubManager(readiness="launch_wrapper_missing")
+    )
     assert snap.supported is False
-    assert _reason_codes(snap) == ["identity_mapping_unverified"]
+    assert _reason_codes(snap) == ["launch_path_degraded"]
 
 
 def test_docker_multi_user_reports_os_user(monkeypatch):
     _patch_deployment(monkeypatch, docker_multi_user=True)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    snap = wic.build_workspace_isolation_snapshot(_ReadyStubManager(readiness=None))
     assert snap.supported is True
     assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
     assert snap.backend == wic.BACKEND_PER_USER
@@ -241,7 +252,8 @@ def test_snapshot_without_manager_reads_disk_config(monkeypatch):
         lambda: _DiskConfig(),
     )
     snap = wic.build_workspace_isolation_snapshot(None)
-    assert snap.supported is True  # 无法探测启动路径,按部署姿态报告(文档注明)
+    assert snap.supported is True  # 无法探测启动路径:provisional + 显式 reason
+    assert _reason_codes(snap) == ["launch_path_unverified"]
 
 
 def test_unsupported_snapshot_omits_entry_points(monkeypatch):
@@ -257,8 +269,63 @@ def test_supported_snapshot_keeps_entry_points(monkeypatch):
     assert data["entry_points"]["webui"] == "enforced"
 
 
-def test_unverified_message_clarifies_possibility(monkeypatch):
-    # 评审 #10:非 Docker 形态的措辞明示"可能仍支持,仅无法验证"
-    _patch_deployment(monkeypatch, docker_multi_user=False)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager())
-    assert "may still launch" in snap.reasons[0].message
+def test_cold_worker_snapshot_is_provisional(monkeypatch):
+    # PR review round 2: no manager (cold worker) cannot probe the launch
+    # path — report the level as provisional via an explicit reason instead
+    # of silently claiming a verified one.
+    _patch_deployment(monkeypatch)
+
+    class _DiskConfig:
+        enabled = True
+        multi_user_mode = True
+
+    monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
+    monkeypatch.setattr(
+        "app.services.webui_manager.read_workspace_config",
+        lambda: _DiskConfig(),
+    )
+    snap = wic.build_workspace_isolation_snapshot(None)
+    assert snap.supported is True
+    assert _reason_codes(snap) == ["launch_path_unverified"]
+    assert "provisional" in snap.reasons[0].message
+
+
+# --- resolve_required_floor (PR review round 2) ---
+
+
+def _floor_config(explicit=""):
+    return type("C", (), {"required_isolation_level": explicit})()
+
+
+def _floor_snapshot(level="os_user"):
+    return wic.IsolationCapabilitySnapshot(
+        supported=level != "none",
+        backend=wic.BACKEND_PER_USER if level != "none" else wic.BACKEND_SHARED,
+        isolation_level=level,
+        enforced=("identity",) if level != "none" else (),
+        unsupported=(),
+        reasons=(),
+    )
+
+
+def test_floor_defaults_to_verified_snapshot_level():
+    assert wic.resolve_required_floor(_floor_config(""), _floor_snapshot("os_user")) == "os_user"
+    assert wic.resolve_required_floor(_floor_config(""), _floor_snapshot("none")) == "none"
+
+
+def test_floor_explicit_valid_wins():
+    assert wic.resolve_required_floor(_floor_config("none"), _floor_snapshot("os_user")) == "none"
+    assert (
+        wic.resolve_required_floor(_floor_config("os_user"), _floor_snapshot("none")) == "os_user"
+    )
+
+
+def test_floor_invalid_explicit_falls_back_fail_closed(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        assert (
+            wic.resolve_required_floor(_floor_config("strong"), _floor_snapshot("os_user"))
+            == "os_user"
+        )
+    assert any("required_isolation_level" in r.message for r in caplog.records)

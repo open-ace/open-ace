@@ -306,3 +306,73 @@ def wic_reason(code, message):
     from app.services.workspace_isolation_contract import IsolationReason
 
     return IsolationReason(code, message)
+
+
+def test_prestart_invalid_config_floor_still_gates(monkeypatch):
+    # PR review round 2:无效 config 下限在 prestart 也 fail-closed(归一化回退
+    # 快照等级),不再跳过整个门闸
+    manager = _make()
+    manager.config = type(
+        "C", (), {"multi_user_mode": True, "required_isolation_level": "strong"}
+    )()
+    spawned = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
+
+    class _Contract:
+        @staticmethod
+        def build_workspace_config_snapshot(mgr):
+            return wic_snap()
+
+    rejected_with = []
+
+    def _eval(required, snapshot, system_account, manager):
+        rejected_with.append(required)
+        return wic_reason("identity_mapping_missing", "no mapping")
+
+    import app.services.workspace_isolation_contract as real_contract
+
+    monkeypatch.setattr(
+        "app.services.workspace_isolation_contract.build_workspace_isolation_snapshot",
+        lambda mgr: wic_snap(),
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_isolation_contract.evaluate_isolation_requirement",
+        _eval,
+    )
+    manager.prestart_user_instance_async(7, "alice_acct", "http://h")
+    assert spawned == []
+    assert rejected_with == ["os_user"]  # 归一化后按快照等级过闸
+
+
+def test_launch_path_shares_resolution_memo_with_probe(monkeypatch):
+    # PR review round 2 (遗留):启动路径复用探针的成功解析记忆,两个调用点
+    # 共享同一份解析结果
+    manager = _make()
+    manager._lock = __import__("gevent").lock.RLock()
+    manager._instances = {}
+    manager._port_allocations = {}
+    manager.config = type(
+        "C",
+        (),
+        {
+            "max_instances": 30,
+            "url": "http://127.0.0.1",
+            "multi_user_mode": True,
+        },
+    )()
+    calls = []
+
+    def _counting_find(probe_only=False):
+        calls.append(probe_only)
+        return "/usr/local/bin/qwen-code-webui", None
+
+    manager._find_webui_executable = _counting_find
+    import unittest.mock as _um
+
+    with _um.patch("app.utils.workspace._is_wrapper_available", return_value=True):
+        # 探针一次
+        assert manager.per_user_launch_readiness() is None
+    # 启动路径直接复用,不再解析
+    resolved = manager._resolved_webui
+    assert resolved == ("/usr/local/bin/qwen-code-webui", None)
+    assert calls == [True]
