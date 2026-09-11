@@ -2490,14 +2490,22 @@ def get_user_webui_url():
         # endpoint unresolved), which a client cannot fix by reshaping the
         # request — 502 distinguishes it from both the policy 400s and the
         # capacity 503, matching this endpoint's pattern of precise 5xx codes.
+        # The message is a fixed per-code wording, never str(e): the upstream
+        # exception chains embed internal lifecycle URLs and execd allowlist
+        # contents, and every other handler on this endpoint sanitizes its
+        # message. Full details stay in the logger.error below.
         reason_code = getattr(e, "reason_code", "") or "sandbox_create_failed"
-        reason = IsolationReason(reason_code, str(e))
+        reason = IsolationReason(
+            reason_code,
+            "The sandboxed WebUI runtime refused this launch "
+            f"({reason_code}); see the server log for details.",
+        )
         logger.error(f"Sandboxed webui launch failed at /user-url: {e}")
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": str(e),
+                    "error": reason.message,
                     "error_code": reason_code,
                     "reasons": [reason.public_dict()],
                     "isolation": isolation_snapshot.public_dict(),

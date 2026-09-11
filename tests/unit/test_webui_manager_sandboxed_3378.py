@@ -607,7 +607,9 @@ def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
 
         def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
             raise SandboxWebuiError(
-                "sandbox gateway could not resolve the pod's webui endpoint",
+                "sandbox gateway at https://lifecycle.internal:9443/v1 could not "
+                "resolve the pod's webui endpoint (allowlist=['lifecycle.internal']) "
+                "for sandbox sb-1234",
                 reason_code="sandbox_endpoint_unresolved",
             )
 
@@ -639,8 +641,15 @@ def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
     body = resp.get_json()
     assert body["success"] is False
     assert body["error_code"] == "sandbox_endpoint_unresolved"
-    assert body["error"]  # the exception's message, not "Internal server error"
+    # Sanitized per-code wording — the raw exception (internal lifecycle URL,
+    # execd allowlist contents, sandbox id) must NOT reach the response body;
+    # it stays in the server log (security review on bdf74d9e).
+    assert "lifecycle.internal" not in body["error"]
+    assert "allowlist=" not in body["error"]
+    assert "sb-1234" not in body["error"]
+    assert body["error"]  # a real message, not "Internal server error"
     assert body["reasons"][0]["code"] == "sandbox_endpoint_unresolved"
+    assert "lifecycle.internal" not in body["reasons"][0]["message"]
     assert body["isolation"]["isolation_level"] == "sandboxed"
 
 
