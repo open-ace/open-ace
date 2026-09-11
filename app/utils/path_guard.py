@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 
 # System-sensitive directories blacklist (Linux/Mac)
 # These directories should never be writable by users to prevent system damage
@@ -92,3 +93,72 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
             return False
 
     return True
+
+
+# Windows drive-absolute path, e.g. C:\workspace or C:/workspace.
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def is_valid_remote_path(value) -> bool:
+    r"""Structural validation for a path that lives on a REMOTE machine.
+
+    Review round 1 (#3376): the backend cannot resolve remote paths, so
+    ``is_valid_path``'s realpath / backend-platform / backend-blacklist
+    semantics are wrong here (they rejected the frontend's own defaults
+    ``C:\\workspace``, ``~/workspace``, ``/root/workspace`` because the
+    backend's blacklist contains /root). This validator only enforces
+    shape, delegating location policy to the remote agent:
+
+    - a non-empty string without NUL bytes;
+    - no ``..`` path segment (either separator flavor);
+    - POSIX-absolute (leading ``/``), home-relative (``~/`` or ``~\\``),
+      or Windows drive-absolute (``C:\\`` / ``C:/``).
+    """
+    if not isinstance(value, str):
+        return False
+    if not value:
+        return False
+    if "\x00" in value:
+        return False
+    if any(segment == ".." for segment in re.split(r"[\\/]", value)):
+        return False
+    return bool(
+        value.startswith("/")
+        or value.startswith("~/")
+        or value.startswith("~\\")
+        or _WINDOWS_DRIVE_RE.match(value)
+    )
+
+
+def shared_project_path_error(path: str, base_dirs: list[str], home_dirs: list[str]) -> str | None:
+    """Validate a shared-project path against the workspace topology.
+
+    Review round 1 (#3376): a shared project path extends every tenant
+    member's browse roots (``fs._allowed_roots_for_user``), so creating one
+    must not widen those roots past what the creator already owns. A
+    tenant member registering e.g. the workspace base dir itself — or
+    another user's home — as a "shared project" would make every other
+    home browsable by the whole tenant. Rejected shapes:
+
+    - anything ``is_valid_path`` rejects with *base_dirs* prefixes (``..``,
+      system-blacklisted, outside all workspace base dirs);
+    - a workspace base dir itself (equal, not just beneath);
+    - an ancestor of (or equal to) any user home directory, including the
+      creator's own.
+
+    Returns an error message when rejected, else ``None``.
+    """
+    bases = [b for b in (base_dirs or []) if b]
+    if not is_valid_path(path, allowed_prefixes=bases):
+        return "must be inside a workspace base directory (" + ", ".join(bases) + ")"
+    resolved = os.path.realpath(path)
+    for base in bases:
+        if resolved == os.path.realpath(base):
+            return "must not be a workspace base directory itself"
+    for home in home_dirs or []:
+        if not home:
+            continue
+        resolved_home = os.path.realpath(home)
+        if resolved_home == resolved or resolved_home.startswith(resolved + os.sep):
+            return "must not be a user home directory or one of its ancestors"
+    return None

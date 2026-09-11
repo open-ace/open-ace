@@ -16,7 +16,10 @@ from unittest.mock import patch
 
 import pytest
 
-project_root = str(Path(__file__).resolve().parent.parent.parent)
+# parents[3]: this file lives at <repo>/tests/integration/routes/, so the
+# repository root is three directories up (a bare parent.parent.parent chain
+# used to resolve to <repo>/tests and broke standalone runs).
+project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 

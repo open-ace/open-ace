@@ -10,9 +10,19 @@ from flask import Flask, g
 
 pytestmark = [pytest.mark.issue(3376)]
 
+# account = username (no system_account) → home roots are <base>/alice per
+# configured workspace base dir (review round 1: plural root resolution).
 USER = {"id": 7, "user_id": 7, "username": "alice", "role": "user", "tenant_id": 1}
 _NO_TENANT_USER = {"id": 8, "user_id": 8, "username": "bob", "role": "user", "tenant_id": None}
+_NO_IDENTITY_USER = {"id": 9, "user_id": 9, "role": "user", "tenant_id": 1}
 _CURRENT_USER: dict = {}
+
+# All user rows the (patched) UserRepository reports — alice + bob have
+# homes under the workspace base dir; used by the shared-root filter.
+_USER_ROWS = [
+    {"id": 7, "username": "alice", "system_account": None},
+    {"id": 8, "username": "bob", "system_account": None},
+]
 
 
 def _switch_user(user):
@@ -32,9 +42,9 @@ def workspace():
     ws = Path.home() / ".ace_fs_lock_test_3376"
     if ws.exists():
         shutil.rmtree(ws, ignore_errors=True)
-    home = ws / "home"
+    home = ws / "alice"
     shared = ws / "shared-proj"
-    other = ws / "someone-else"
+    other = ws / "bob"
     home.mkdir(parents=True)
     shared.mkdir()
     other.mkdir()
@@ -62,11 +72,11 @@ def fs_app(workspace):
 
     with (
         patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws)]),
-        patch("app.routes.fs.get_home_directory", return_value=str(home)),
         patch(
             "app.repositories.project_repo.ProjectRepository.get_shared_project_paths",
             lambda self, tenant_id=None: [str(shared)] if tenant_id == 1 else [],
         ),
+        patch("app.routes.fs.user_repo.get_all_users", return_value=list(_USER_ROWS)),
         patch(
             "app.routes.fs.get_directory_info",
             lambda path, sa: {
@@ -109,16 +119,26 @@ def test_browse_no_tenant_user_home_only(fs_app, workspace):
     ws, home, shared, other = workspace
     _switch_user(_NO_TENANT_USER)
     client = fs_app.test_client()
-    assert _browse(client, str(home)).status_code == 200
+    assert _browse(client, str(ws / "bob")).status_code == 200
     resp = _browse(client, str(shared))
     # shared 由 repo stub 按 tenant_id==1 过滤,None 拿不到
     assert resp.status_code == 400
 
 
-def test_check_path_outside_home_and_shared_rejected(fs_app, workspace):
+def test_check_path_first_level_under_base_validatable(fs_app, workspace):
+    """Review round 1 [5] / #2317: check-path admits the base dirs as roots."""
     ws, home, shared, other = workspace
     client = fs_app.test_client()
-    resp = client.post("/api/fs/check-path", json={"path": str(other)})
+    resp = client.post("/api/fs/check-path", json={"path": str(ws / "not-a-home-x")})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True
+
+
+def test_check_path_outside_workspace_rejected(fs_app, workspace):
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    # /etc-style path fails is_valid_path prefix check well before the lock
+    resp = client.post("/api/fs/check-path", json={"path": "/etc/random/dir"})
     assert resp.status_code == 400
     assert resp.get_json()["valid"] is False
 
@@ -132,11 +152,124 @@ def test_check_path_shared_root_allowed(fs_app, workspace):
 
 
 def test_browse_symlinked_home_allowed(fs_app, workspace):
-    # B2:home 根必须 realpath,符号链接 home 不能误拒
+    # B2:home 根必须 realpath,符号链接 base dir 不能误拒(review round 1:
+    # 复数根解析对每个 <base>/<account> realpath)
     ws, home, shared, other = workspace
-    link = ws / "home-link"
+    real_base = ws / "real-base"
+    real_base.mkdir()
+    (real_base / "alice").mkdir()
+    link = ws / "base-link"
     if not link.is_symlink():
-        link.symlink_to(home)
-    with patch("app.routes.fs.get_home_directory", return_value=str(link)):
+        link.symlink_to(real_base)
+    with patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws), str(link)]):
         client = fs_app.test_client()
-        assert _browse(client, str(home)).status_code == 200
+        # 通过符号链接 base 拼出的 home 根 realpath 到 real-base/alice
+        assert _browse(client, str(real_base / "alice")).status_code == 200
+        assert _browse(client, str(link / "alice")).status_code == 200
+
+
+# --- review round 1: [5] check-path admits base dirs, browse does not ---
+
+
+@pytest.mark.regression
+def test_check_path_base_dir_validatable_but_browse_locked(fs_app, workspace):
+    """#2317 flow: base dir is check-path valid; browse still refuses it."""
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    resp = client.post("/api/fs/check-path", json={"path": str(ws / "new-project")})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True
+
+    # the base dir itself is validatable ("可校验不可枚举")...
+    resp = client.post("/api/fs/check-path", json={"path": str(ws)})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True
+
+    # ...but browse keeps the home subtree lock (no enumeration).
+    resp = _browse(client, str(ws))
+    assert resp.status_code == 400
+    resp = _browse(client, str(ws / "new-project"))
+    assert resp.status_code == 400
+
+
+# --- review round 1: [8] plural workspace base dirs / identity fallback ---
+
+
+def test_multi_root_workspace_base_dir_homes(fs_app, workspace):
+    """WORKSPACE_BASE_DIR=/a,/b → home roots /a/alice AND /b/alice."""
+    ws, home, shared, other = workspace
+    base2 = ws / "base2"
+    base2.mkdir()
+    (base2 / "alice").mkdir()
+    (base2 / "bob").mkdir()
+    with patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws), str(base2)]):
+        client = fs_app.test_client()
+        assert _browse(client, str(ws / "alice")).status_code == 200
+        assert _browse(client, str(base2 / "alice")).status_code == 200
+        # bob 的 home 依然不可见
+        assert _browse(client, str(base2 / "bob")).status_code == 400
+
+
+def test_identityless_user_browse_rejected_not_process_home(fs_app, workspace):
+    """无 system_account 也无 username → 空根列表,绝不落回进程 home。"""
+    ws, home, shared, other = workspace
+    _switch_user(_NO_IDENTITY_USER)
+    client = fs_app.test_client()
+    # default "home" browse is rejected outright
+    resp = _browse(client, "home")
+    assert resp.status_code == 400
+    assert "process" not in resp.get_json().get("error", "").lower()
+    # explicit paths are rejected too (no root contains them)
+    assert _browse(client, str(home)).status_code == 400
+    assert _browse(client, str(Path.home())).status_code == 400
+
+
+# --- review round 1: [1] shared-project root self-expansion defense ---
+
+
+def _with_shared_paths(fs_app, workspace, paths):
+    """Point the repo stub at attacker-chosen shared paths."""
+    return patch(
+        "app.repositories.project_repo.ProjectRepository.get_shared_project_paths",
+        lambda self, tenant_id=None: list(paths) if tenant_id == 1 else [],
+    )
+
+
+@pytest.mark.regression
+def test_attack_chain_shared_base_dir_does_not_unlock_other_homes(fs_app, workspace):
+    """B 把 workspace 根注册为共享项目 → 他人 home 仍被拒。
+
+    复现 #3376 review round 1 item 1:租户成员 POST /api/projects
+    {"path": "/workspace", "is_shared": true} 后 browse 他人 home。
+    api_create_project 现在拒绝该请求;此处验证读侧纵深防御(历史脏行)
+    同样把它滤掉。
+    """
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    with _with_shared_paths(fs_app, workspace, [str(ws)]):
+        # the base dir itself stays browsable-NO: it is filtered as a root
+        assert _browse(client, str(ws)).status_code == 400
+        # ...and so does every home beneath it
+        assert _browse(client, str(other)).status_code == 400
+        assert _browse(client, str(home)).status_code == 200  # own home unaffected
+
+
+@pytest.mark.regression
+def test_attack_chain_shared_foreign_home_rejected(fs_app, workspace):
+    """B 把他人的 home 注册为共享项目 → 该 home 不进入允许根。"""
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    with _with_shared_paths(fs_app, workspace, [str(other), str(shared)]):
+        assert _browse(client, str(other)).status_code == 400
+        # legit deep shared project still works
+        assert _browse(client, str(shared)).status_code == 200
+
+
+def test_shared_first_level_non_home_path_still_allowed(fs_app, workspace):
+    """base dir 直系一级下不是任何用户 home 的路径(如 team-proj)仍可共享。"""
+    ws, home, shared, other = workspace
+    team = ws / "team-proj"
+    team.mkdir(exist_ok=True)
+    client = fs_app.test_client()
+    with _with_shared_paths(fs_app, workspace, [str(team)]):
+        assert _browse(client, str(team)).status_code == 200

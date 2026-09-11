@@ -20,7 +20,7 @@ from typing import IO, Any, cast
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
-from app.utils.path_guard import is_valid_path
+from app.utils.path_guard import is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
     OPENACE_RM_WRAPPER,
@@ -256,19 +256,93 @@ def _is_within_any_root(resolved: str, roots: list[str]) -> bool:
     return any(root and (resolved == root or resolved.startswith(root + os.sep)) for root in roots)
 
 
-def _allowed_roots_for_user(user) -> list[str]:
-    """Roots a user may browse/check (Issue #3376).
+def _home_roots_for_user(user) -> list[str]:
+    """Per-base home roots for the user (review round 1, #3376).
 
-    Own home plus the tenant's explicitly shared project paths, both
-    realpath'd so they compare equal against already-resolved request paths.
+    One root per configured workspace base dir: ``<base>/<account>`` where
+    account = system_account or username. WORKSPACE_BASE_DIR may be a
+    comma-separated list (``/a,/b``); the previous single-base resolution
+    produced the literal path ``/a,/b/<account>`` and locked browse out
+    entirely on multi-root deployments. Users with neither system_account
+    nor username get NO root (empty list) instead of the process home: an
+    identity-less user has no home subtree to browse.
     """
-    roots = [os.path.realpath(get_home_directory(user))]
+    account = (user or {}).get("system_account") or (user or {}).get("username")
+    if not account:
+        return []
+    return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in get_workspace_base_dirs()]
+
+
+def _shared_root_rejection_reason(path) -> str | None:
+    """Filter one shared-project root against the topology rule; None = accept.
+
+    Review round 1 (#3376): defense in depth for historical rows — a shared
+    project whose path is a workspace base dir or an ancestor of any user's
+    home would re-open other users' homes to the whole tenant even though
+    ``api_create_project`` now rejects creating such rows. Rejections are
+    logged as WARNING so operators can clean the projects table.
+
+    User homes are only enumerated when a candidate could actually be one
+    (the base dir itself or a first-level child of it), keeping the common
+    deep-path case free of extra DB reads.
+    """
+    if not isinstance(path, str) or not path:
+        return "shared project path must be a non-empty string"
+    base_dirs = get_workspace_base_dirs()
+    resolved = os.path.realpath(path)
+    needs_home_check = any(
+        resolved == os.path.realpath(base) or os.path.dirname(resolved) == os.path.realpath(base)
+        for base in base_dirs
+    )
+    home_dirs: list[str] = []
+    if needs_home_check:
+        try:
+            rows = user_repo.get_all_users(include_inactive=True) or []
+        except Exception as e:
+            logger.warning("Failed to enumerate users for shared root filter: %s", e)
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            account = row.get("system_account") or row.get("username")
+            if account:
+                home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
+    reason = shared_project_path_error(path, base_dirs, home_dirs)
+    if reason:
+        logger.warning(
+            "Shared project root rejected by home lock (legacy/dirty row?): %s (%s)",
+            path,
+            reason,
+        )
+    return reason
+
+
+def _allowed_roots_for_user(user, include_base_dirs: bool = False) -> list[str]:
+    """Roots a user may browse/check (Issue #3376; review round 1).
+
+    Own home roots (one per workspace base dir — see ``_home_roots_for_user``)
+    plus the tenant's explicitly shared project paths, both realpath'd so
+    they compare equal against already-resolved request paths. Shared paths
+    are re-filtered against the shared-project topology rule
+    (``_shared_root_rejection_reason``) so historical rows cannot widen the
+    lock.
+
+    ``include_base_dirs=True`` additionally admits the workspace base dirs
+    themselves — used ONLY by check-path (#2317 flow: creating a project
+    directly under the workspace root must stay validatable). browse keeps
+    the home subtree lock: base dirs are validatable but not enumerable.
+    """
+    roots = _home_roots_for_user(user)
+    if include_base_dirs:
+        roots.extend(get_workspace_base_dirs())
     try:
         from app.repositories.project_repo import ProjectRepository
 
         tenant_id = (user or {}).get("tenant_id")
         if tenant_id is not None:
-            roots.extend(ProjectRepository().get_shared_project_paths(tenant_id))
+            for candidate in ProjectRepository().get_shared_project_paths(tenant_id):
+                if _shared_root_rejection_reason(candidate) is None and candidate not in roots:
+                    roots.append(candidate)
     except Exception as e:
         logger.warning("Failed to load shared project roots: %s", e)
     return roots
@@ -544,7 +618,17 @@ def api_browse_directory():
 
     # Handle special path values
     if not path or path.lower() == "home":
-        path = get_home_directory(user)
+        # Review round 1 (#3376, item 8): default to the first per-base home
+        # root instead of get_home_directory()'s single-base (or process-home
+        # fallback) value. An identity-less user has no home root at all and
+        # must be rejected rather than dropped into the process home.
+        home_roots = _home_roots_for_user(user)
+        if not home_roots:
+            return (
+                jsonify({"error": "No home directory available for this user"}),
+                400,
+            )
+        path = home_roots[0]
     else:
         # Validate and resolve path — restrict to workspace base dirs
         base_dirs = get_workspace_base_dirs()
@@ -854,9 +938,14 @@ def api_check_path():
 
     path = os.path.realpath(path)
 
-    # Issue #3376: home subtree lock; explicitly shared project roots
-    # stay reachable (read-side parity with the #1813 write lock).
-    if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+    # Issue #3376: home subtree lock; explicitly shared project roots stay
+    # reachable (read-side parity with the #1813 write lock). Review round 1
+    # (#2317 regression): check-path is a pure validation endpoint, so the
+    # workspace base dirs themselves are admissible roots — creating a
+    # project directly under the workspace root must stay validatable.
+    # browse keeps the stricter home-roots-only set ("validatable but not
+    # enumerable").
+    if not _is_within_any_root(path, _allowed_roots_for_user(user, include_base_dirs=True)):
         return (
             jsonify(
                 {

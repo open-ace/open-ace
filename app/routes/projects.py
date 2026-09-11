@@ -35,11 +35,13 @@ from app.services.permission_task_service import (
     PERMISSION_SYNC_THRESHOLD,
     get_permission_task_service,
 )
+from app.utils.path_guard import shared_project_path_error
 from app.utils.request_context import get_current_tenant_id
 from app.utils.validators import validate_project_name
 from app.utils.workspace import (
     _is_docker_multi_user_mode,
     estimate_file_count_fast,
+    get_workspace_base_dirs,
     setup_permissions_with_depth_limit,
 )
 
@@ -217,6 +219,34 @@ def api_create_project():
     # Check for path traversal
     if ".." in path:
         return jsonify({"error": "Path traversal not allowed"}), 400
+
+    # Issue #3376 review round 1: a shared project's path extends every
+    # tenant member's fs browse roots (fs._allowed_roots_for_user). Without
+    # this check any tenant member could register e.g. the workspace base
+    # dir itself — or another user's home — as a "shared project" and make
+    # the whole tenant able to browse other users' files. The same filter
+    # runs read-side in fs.py as defense in depth (covers paths that enter
+    # the projects table by other routes, e.g. a later is_shared flip).
+    if is_shared:
+        base_dirs = get_workspace_base_dirs()
+        home_dirs: list[str] = []
+        try:
+            rows = user_repo.get_all_users(include_inactive=True) or []
+        except Exception as e:
+            logger.warning("Failed to enumerate user homes for shared path check: %s", e)
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            account = row.get("system_account") or row.get("username")
+            if account:
+                home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
+        reason = shared_project_path_error(path, base_dirs, home_dirs)
+        if reason is not None:
+            return (
+                jsonify({"error": f"Invalid shared project path: {reason}"}),
+                400,
+            )
 
     # Check if project already exists
     existing = project_repo.get_project_by_path(path, tenant_id=tenant_id)

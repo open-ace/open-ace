@@ -259,6 +259,10 @@ class VSCodeOwnerStore:
     in-memory bridge links the two (single web worker: gunicorn
     --workers 1 with the gevent worker class). Absent entries fall back
     to machine.created_by at report time.
+
+    Review round 1: the agent re-reports 'running' on every re-attach, so
+    resolution uses the non-consuming ``peek`` — ownership only changes on
+    a new ``/vscode/start`` (``record`` overwrites the entry).
     """
 
     def __init__(self, ttl: float = VSCODE_SESSION_TTL):
@@ -295,6 +299,25 @@ class VSCodeOwnerStore:
         """
         with self._lock:
             entry = self._owners.pop(vscode_id, None)
+            if not entry:
+                return None
+            machine_id, user_id, tenant_id, recorded_at = entry
+            if time.time() - recorded_at > self._ttl:
+                return None
+            return machine_id, user_id, tenant_id
+
+    def peek(self, vscode_id: str) -> tuple[str, int, int | None] | None:
+        """Non-consuming read of the recorded owner; None when absent/expired.
+
+        Review round 1 (#3376): agents re-report ``running`` on every
+        re-attach, and consuming the record with ``pop`` handed the second
+        and later reports to the ``machine.created_by`` fallback — silently
+        transferring session ownership. Resolution now peeks; the entry is
+        only overwritten by a new ``/vscode/start`` (``record``) and ages
+        out via the same TTL as ``pop``.
+        """
+        with self._lock:
+            entry = self._owners.get(vscode_id)
             if not entry:
                 return None
             machine_id, user_id, tenant_id, recorded_at = entry
