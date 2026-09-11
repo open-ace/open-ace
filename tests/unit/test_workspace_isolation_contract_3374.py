@@ -31,6 +31,16 @@ def _reason_codes(snapshot):
     return [r.code for r in snapshot.reasons]
 
 
+def _patch_sandbox_probe(monkeypatch, *, ok, tier="kata", reason_code="webui_image_missing"):
+    """Stub the #3378 sandboxed probe without touching the sandbox config."""
+    reason = (
+        None
+        if ok
+        else wic.IsolationReason(reason_code, f"stubbed sandbox probe failure {reason_code}")
+    )
+    monkeypatch.setattr(wic, "_sandboxed_readiness", lambda config: (ok, tier, reason))
+
+
 def test_webui_disabled_reports_unsupported(monkeypatch):
     _patch_deployment(monkeypatch, docker_multi_user=True)
     snap = wic.build_workspace_isolation_snapshot(_StubManager(enabled=False))
@@ -48,6 +58,11 @@ def test_non_linux_platform_reports_unsupported(monkeypatch, platform):
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert snap.supported is False
     assert _reason_codes(snap) == ["platform_unsupported"]
+    # Issue #3378 form-scoping: the platform gate is os_user-specific — a
+    # passing sandboxed probe overrides it (pods live on a remote cluster).
+    _patch_sandbox_probe(monkeypatch, ok=True)
+    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
 
 
 def test_platform_reason_message_has_no_deployment_details(monkeypatch):
@@ -62,6 +77,11 @@ def test_single_user_mode_reports_unsupported(monkeypatch):
     snap = wic.build_workspace_isolation_snapshot(_StubManager(multi_user_mode=False))
     assert snap.supported is False
     assert _reason_codes(snap) == ["multi_user_mode_disabled"]
+    # Issue #3378 form-scoping: single-user + sandboxed is a legitimate
+    # hardening deployment; the mode gate only governs the os_user chain.
+    _patch_sandbox_probe(monkeypatch, ok=True)
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(multi_user_mode=False))
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
 
 
 def test_root_single_user_reports_mode_not_mapping(monkeypatch):
@@ -103,7 +123,13 @@ def test_docker_multi_user_reports_os_user(monkeypatch):
         wic.DIMENSION_ENVIRONMENT,
         wic.DIMENSION_PROCESS,
     )
-    assert snap.unsupported == (wic.DIMENSION_RESOURCES, wic.DIMENSION_NETWORK_EGRESS)
+    # Issue #3378: kernel joined the dimension vocabulary; os_user shares the
+    # host kernel by definition, so it lands in unsupported (3-tuple).
+    assert snap.unsupported == (
+        wic.DIMENSION_RESOURCES,
+        wic.DIMENSION_NETWORK_EGRESS,
+        wic.DIMENSION_KERNEL,
+    )
     assert snap.reasons == ()
 
 

@@ -9,6 +9,12 @@ isolation (no namespaces, no egress policy). Reason messages stay free of
 deployment specifics; see docs/workspace-isolation-capabilities.md for
 deployment requirements. Bump POLICY_REVISION whenever derivation semantics
 or the entry-point matrix change.
+
+Issue #3378 adds the ``sandboxed`` level (WebUI pods on an OpenSandbox
+backend). Its kernel/egress enforcement is only verifiable per-pod via boot
+probes, so the sandboxed snapshot reports those dimensions as unsupported
+with an explicit ``sandbox_runtime_unverified`` reason until the first
+successful pod probe memoizes the upgrade (in-process; resets on restart).
 """
 
 from __future__ import annotations
@@ -17,11 +23,14 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
-# Revision 2 (2026-09-11.2, PR review round 2): the snapshot derives os_user
-# from the launch-path readiness probe instead of the Docker layout,
-# entry_points became a conditional key, and new reason codes were added
-# (launch_path_degraded / launch_path_unverified).
-POLICY_REVISION = "2026-09-11.2"
+# Revision 3 (2026-09-12.1, Issue #3378): new sandboxed level with a zero-pod
+# fail-closed probe; new ``kernel`` dimension (os_user reports it unsupported
+# — shared host kernel); sandboxed snapshots report
+# enforced=(identity, filesystem, environment, process, resources) with
+# kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
+# gates sandboxed requests on the probe reasons instead of the OS-account
+# chain.
+POLICY_REVISION = "2026-09-12.1"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -40,6 +49,7 @@ DIMENSION_ENVIRONMENT = "environment"
 DIMENSION_PROCESS = "process"
 DIMENSION_RESOURCES = "resources"
 DIMENSION_NETWORK_EGRESS = "network_egress"
+DIMENSION_KERNEL = "kernel"
 
 ALL_DIMENSIONS = (
     DIMENSION_IDENTITY,
@@ -48,6 +58,7 @@ ALL_DIMENSIONS = (
     DIMENSION_PROCESS,
     DIMENSION_RESOURCES,
     DIMENSION_NETWORK_EGRESS,
+    DIMENSION_KERNEL,
 )
 
 _OS_USER_ENFORCED = (
@@ -56,10 +67,38 @@ _OS_USER_ENFORCED = (
     DIMENSION_ENVIRONMENT,
     DIMENSION_PROCESS,
 )
-_OS_USER_UNSUPPORTED = (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS)
+# Issue #3378: os_user shares the host kernel by definition (module docstring),
+# so the kernel dimension is honestly reported as unsupported.
+_OS_USER_UNSUPPORTED = (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS, DIMENSION_KERNEL)
+
+# Config-derived facts for sandboxed WebUI pods: one pod per instance with a
+# per-instance token secret, an image_allowlisted digest-pinned image, and
+# resource limits that build_create_request always attaches (defaults are
+# bounds too). Kernel and egress enforcement need a live pod probe (D3).
+_SANDBOXED_ENFORCED = (
+    DIMENSION_IDENTITY,
+    DIMENSION_FILESYSTEM,
+    DIMENSION_ENVIRONMENT,
+    DIMENSION_PROCESS,
+    DIMENSION_RESOURCES,
+)
+_SANDBOXED_UNSUPPORTED = (DIMENSION_KERNEL, DIMENSION_NETWORK_EGRESS)
 
 BACKEND_PER_USER = "qwen-code-webui-per-user"
 BACKEND_SHARED = "qwen-code-webui-shared"
+BACKEND_OPENSANDBOX = "opensandbox"
+
+# Reason codes produced by the sandboxed readiness probe; the user-url gate
+# surfaces one of these when a sandboxed request outruns the snapshot level.
+SANDBOX_PROBE_REASON_CODES = (
+    "sandbox_backend_unconfigured",
+    "sandbox_tier_missing",
+    "webui_image_missing",
+    "webui_image_not_pinned",
+    "webui_image_not_allowed",
+    "sandbox_proxy_unreachable",
+    "sandbox_proxy_token_ttl_too_short",
+)
 
 # Static, revision-gated audit result (design doc §2.4). Values:
 # enforced | partial | separate_contract.
@@ -139,6 +178,148 @@ def _unsupported(reason_code: str, message: str) -> IsolationCapabilitySnapshot:
     )
 
 
+def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None]:
+    """Zero-pod fail-closed probe for the sandboxed level (Issue #3378).
+
+    Verifies the configuration plane only — backend config parses, a tier
+    exists, a digest-pinned allowlisted webui image is set, the control
+    plane's LLM-proxy URL would be reachable under the tier's egress policy,
+    and the effective webui proxy-token TTL covers the pod TTL. Never creates
+    a pod; kernel/egress enforcement stays ``sandbox_runtime_unverified``
+    until the first successful pod boot probe upgrades it (launcher-side,
+    in-process memo).
+
+    Returns ``(ok, tier, reason)``; on failure ``reason`` carries one of
+    :data:`SANDBOX_PROBE_REASON_CODES`.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import load_backend_config
+
+    try:
+        backend_cfg = load_backend_config()
+    except Exception as exc:  # noqa: BLE001 - fail closed on any config error
+        return (
+            False,
+            "",
+            IsolationReason(
+                "sandbox_backend_unconfigured",
+                f"The sandbox backend config cannot be loaded ({exc}); the "
+                "sandboxed isolation level is unavailable until it is repaired.",
+            ),
+        )
+    if backend_cfg is None:
+        return (
+            False,
+            "",
+            IsolationReason(
+                "sandbox_backend_unconfigured",
+                "No OpenSandbox backend is configured on this deployment; the "
+                "sandboxed isolation level is unavailable.",
+            ),
+        )
+
+    tier = (getattr(config, "sandbox_tier", "") or "").strip() or backend_cfg.default_tier
+    endpoint = backend_cfg.endpoints.get(tier)
+    if endpoint is None:
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_tier_missing",
+                f"Sandbox endpoint tier {tier!r} does not exist in the backend "
+                "config; the sandboxed isolation level is unavailable.",
+            ),
+        )
+
+    image = (endpoint.webui_image or "").strip()
+    if not image:
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "webui_image_missing",
+                f"Sandbox endpoint tier {tier!r} has no webui_image configured; "
+                "the sandboxed isolation level needs an image containing "
+                "qwen-code-webui.",
+            ),
+        )
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
+
+    try:
+        # Same digest-pinning discipline as default_image, but validated here
+        # so a bad value degrades only the sandboxed level, not the shared
+        # backend config autonomous tasks depend on.
+        from app.modules.workspace.autonomous.sandbox.opensandbox.config import (
+            _require_digest_pinned,
+        )
+
+        _require_digest_pinned(image, f"endpoint {tier!r} webui_image")
+    except SandboxConfigError as exc:
+        return False, tier, IsolationReason("webui_image_not_pinned", str(exc))
+    if backend_cfg.image_allowlist and image not in backend_cfg.image_allowlist:
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "webui_image_not_allowed",
+                f"webui_image for tier {tier!r} is not in image_allowlist; "
+                "refusing to launch interactive pods from an unlisted image.",
+            ),
+        )
+
+    # Proxy reachability: the pod must reach the control plane's LLM proxy.
+    # The static probe needs a URL without a request in hand, so it uses the
+    # configured webui_callback_url — deployments wanting the sandboxed level
+    # must set it (the per-request host is only known at launch time).
+    callback_url = (getattr(config, "webui_callback_url", "") or "").strip()
+    if not callback_url:
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_proxy_unreachable",
+                "workspace.webui_callback_url is not set; the control-plane URL "
+                "sandbox pods must reach back for the LLM proxy cannot be "
+                "verified without it.",
+            ),
+        )
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy as sandbox_policy
+
+    try:
+        sandbox_policy.assert_proxy_reachable({"OPENACE_PROXY_URL": callback_url}, endpoint)
+    except Exception as exc:  # noqa: BLE001 - fail closed on any reachability error
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_proxy_unreachable",
+                f"The sandbox egress policy would block the control-plane LLM " f"proxy ({exc}).",
+            ),
+        )
+
+    # Proxy-token TTL must cover the pod TTL: the token is baked into the pod
+    # env at create time and cannot be refreshed without a restart, so a
+    # shorter effective TTL would strand sessions with dead LLM auth while
+    # health checks still pass.
+    from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
+    from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+    effective_ttl_minutes = get_api_key_proxy_service().effective_proxy_token_ttl_minutes("webui")
+    if effective_ttl_minutes * 60 < WEBUI_TOKEN_TTL_SECONDS:
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_proxy_token_ttl_too_short",
+                f"The effective webui proxy-token TTL ({effective_ttl_minutes}m) "
+                f"is shorter than the WebUI token TTL "
+                f"({WEBUI_TOKEN_TTL_SECONDS}s) a sandboxed pod is created with; "
+                "raise OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES to at least the "
+                "pod TTL or the pod outlives its LLM credentials.",
+            ),
+        )
+    return True, tier, None
+
+
 def build_workspace_isolation_snapshot(
     manager: Any = None,
 ) -> IsolationCapabilitySnapshot:
@@ -150,6 +331,15 @@ def build_workspace_isolation_snapshot(
     (read-only capability GET before any workspace activity) the snapshot is
     derived from disk config only and cannot verify the launch path — that
     limitation is documented in the capability docs.
+
+    Issue #3378: the sandboxed probe runs first and independently — it does
+    not check platform or multi_user_mode (the pods live on a remote
+    cluster; single-user + sandboxed is a legitimate hardening). When it
+    passes the snapshot reports the sandboxed level with kernel/egress
+    unverified-until-probed. When it fails the os_user chain below runs
+    exactly as before, with the sandbox failure reason attached whenever a
+    sandbox backend is actually configured (an unconfigured backend adds no
+    noise — that is every default deployment).
     """
     readiness_probe = None
     config: Any = None
@@ -171,21 +361,52 @@ def build_workspace_isolation_snapshot(
             "WebUI manager is disabled; no interactive workspace runtime " "is available.",
         )
 
+    sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
+    if sandbox_ok:
+        return IsolationCapabilitySnapshot(
+            supported=True,
+            backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
+            isolation_level=ISOLATION_LEVEL_SANDBOXED,
+            enforced=_SANDBOXED_ENFORCED,
+            unsupported=_SANDBOXED_UNSUPPORTED,
+            reasons=(
+                IsolationReason(
+                    "sandbox_runtime_unverified",
+                    "The sandboxed level is verified on the configuration "
+                    "plane only; kernel and egress enforcement are confirmed "
+                    "per-pod by boot probes after the first launch (resets "
+                    "on control-plane restart).",
+                ),
+            ),
+        )
+    # A configured-but-failing sandbox backend is observable on the os_user
+    # snapshot so the gate can surface the exact reason for sandboxed
+    # requests; an absent backend (every default deployment) stays silent.
+    sandbox_reasons: tuple[IsolationReason, ...] = ()
+    if sandbox_reason is not None and sandbox_reason.code != "sandbox_backend_unconfigured":
+        sandbox_reasons = (sandbox_reason,)
+
     # Linux only: macOS skips system-user creation (utils/workspace.py), so
     # Open ACE cannot establish or verify the identity mapping there; Windows
     # forces a single shared instance.
     if _current_platform() != "linux":
-        return _unsupported(
-            "platform_unsupported",
-            "Per-user workspace isolation is supported on Linux deployments "
-            "only; this platform runs a single shared WebUI instance.",
+        return _with_extra_reasons(
+            _unsupported(
+                "platform_unsupported",
+                "Per-user workspace isolation is supported on Linux deployments "
+                "only; this platform runs a single shared WebUI instance.",
+            ),
+            sandbox_reasons,
         )
 
     if not getattr(config, "multi_user_mode", False):
-        return _unsupported(
-            "multi_user_mode_disabled",
-            "Multi-user workspace mode is disabled; the interactive workspace "
-            "intentionally runs one shared instance.",
+        return _with_extra_reasons(
+            _unsupported(
+                "multi_user_mode_disabled",
+                "Multi-user workspace mode is disabled; the interactive workspace "
+                "intentionally runs one shared instance.",
+            ),
+            sandbox_reasons,
         )
 
     # The launch-path readiness probe is the verification: it checks the
@@ -198,11 +419,14 @@ def build_workspace_isolation_snapshot(
     if readiness_probe is not None:
         degradation = readiness_probe()
         if degradation:
-            return _unsupported(
-                "launch_path_degraded",
-                "This deployment's WebUI launch path cannot host per-user "
-                f"instances ({degradation}); see the workspace isolation "
-                "documentation.",
+            return _with_extra_reasons(
+                _unsupported(
+                    "launch_path_degraded",
+                    "This deployment's WebUI launch path cannot host per-user "
+                    f"instances ({degradation}); see the workspace isolation "
+                    "documentation.",
+                ),
+                sandbox_reasons,
             )
         return IsolationCapabilitySnapshot(
             supported=True,
@@ -210,7 +434,7 @@ def build_workspace_isolation_snapshot(
             isolation_level=ISOLATION_LEVEL_OS_USER,
             enforced=_OS_USER_ENFORCED,
             unsupported=_OS_USER_UNSUPPORTED,
-            reasons=(),
+            reasons=sandbox_reasons,
         )
 
     return IsolationCapabilitySnapshot(
@@ -226,7 +450,23 @@ def build_workspace_isolation_snapshot(
                 "yet; treat this level as provisional until the manager is "
                 "initialized.",
             ),
-        ),
+        )
+        + sandbox_reasons,
+    )
+
+
+def _with_extra_reasons(
+    snapshot: IsolationCapabilitySnapshot, extra: tuple[IsolationReason, ...]
+) -> IsolationCapabilitySnapshot:
+    if not extra:
+        return snapshot
+    return IsolationCapabilitySnapshot(
+        supported=snapshot.supported,
+        backend=snapshot.backend,
+        isolation_level=snapshot.isolation_level,
+        enforced=snapshot.enforced,
+        unsupported=snapshot.unsupported,
+        reasons=snapshot.reasons + extra,
     )
 
 
@@ -315,6 +555,23 @@ def evaluate_isolation_requirement(
             f"{', '.join(SUPPORTED_ISOLATION_LEVELS)}.",
         )
     if required_level == ISOLATION_LEVEL_NONE:
+        return None
+    if required_level == ISOLATION_LEVEL_SANDBOXED:
+        # Issue #3378: identity for sandboxed pods is the per-instance webui
+        # token, not an OS account — the identity_mapping / per-user-launch
+        # chain below is os_user-specific and does not apply. The gate is the
+        # capability snapshot itself: when the level is unmet, surface the
+        # sandbox probe's exact reason instead of the generic level message.
+        if not isolation_level_at_least(snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED):
+            for reason in snapshot.reasons:
+                if reason.code in SANDBOX_PROBE_REASON_CODES:
+                    return reason
+            return IsolationReason(
+                "isolation_level_unsupported",
+                f"Requested isolation level 'sandboxed' exceeds what this "
+                f"deployment enforces ('{snapshot.isolation_level}'); refusing to "
+                "silently launch with weaker isolation.",
+            )
         return None
     if not isolation_level_at_least(snapshot.isolation_level, required_level):
         return IsolationReason(
