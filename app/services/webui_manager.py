@@ -193,6 +193,11 @@ def _read_secret_file(secret_path: str) -> tuple[str | None, bool]:
     try:
         with open(secret_path) as f:
             value = f.read().strip()
+    except UnicodeDecodeError:
+        # Binary garbage is the same failure class as non-hex text: treat as
+        # non-empty invalid so the caller unlinks and regenerates.
+        logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
+        return None, True
     except OSError:
         return None, False
     if len(value) >= 64 and all(c in "0123456789abcdef" for c in value):
