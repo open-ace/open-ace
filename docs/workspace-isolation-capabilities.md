@@ -150,12 +150,17 @@ curl -H "Authorization: Bearer <token>" \
   "https://<open-ace>/api/workspace/user-url?required_isolation=os_user"
 ```
 
-**隔离下限是服务端的**(config.json `workspace.required_isolation_level`,
-缺省从**契约快照实际验证到的等级**派生——探针健康的 Docker/包安装多用户形态
-为 `os_user`,单用户与探针降级形态为 `none`;显式配置可覆盖,无效值告警后回退
-派生值);`required_isolation` 请求参数**只能抬高**下限,不能降低。空值/空白
-参数视为缺省。登录时的后台预启动(prestart)与工作区目录供给走同一评估——
-门闸会拒绝的启动/供给不会发生。
+**隔离要求是服务端的**(config.json `workspace.required_isolation_level`):
+多用户安装形态(docker-entrypoint 首启生成 / package installer)会**显式写入
+`os_user`**,`WORKSPACE_REQUIRED_ISOLATION_LEVEL` 环境变量可覆盖;未显式配置时
+从契约快照实际验证到的等级**派生**。**诚实声明**:派生值是一面镜子而非下限——
+启动路径因运维动作退化(重跑 installer 冲掉 wrapper、`webui_path` 改指 dev
+checkout、sudo 被移除)时,派生值会跟着降到 `none`,默认路径保持旧行为(共享
+账户启动)而非报错;该降级会打 WARNING 日志并在响应的 `isolation.reasons` 中
+可见,但不会自动拒绝。需要真正的硬下限,请保留/设置显式
+`required_isolation_level`。`required_isolation` 请求参数**只能抬高**要求,不能
+降低;空值/空白参数视为缺省。登录时的后台预启动(prestart)与工作区目录供给
+走同一评估——门闸会拒绝的启动/供给不会发生。
 
 - 成功:响应含 `url`/`token`/`system_account` 与 `isolation`(部署已验证姿态
   快照;服务端下限保证默认路径同样经过门闸,回显与实际启动一致)。

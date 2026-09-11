@@ -837,6 +837,13 @@ generate_default_config() {
     if [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" != "true" ]; then
         DEFAULT_WORKSPACE_MULTI_USER_MODE="false"
     fi
+    # Issue #3374 (PR review round 3): multi-user installs pin an explicit
+    # isolation floor so a later launch-path degradation cannot silently
+    # drop per-user isolation. WORKSPACE_REQUIRED_ISOLATION_LEVEL overrides.
+    DEFAULT_REQUIRED_ISOLATION="${WORKSPACE_REQUIRED_ISOLATION_LEVEL:-}"
+    if [ -z "$DEFAULT_REQUIRED_ISOLATION" ] && [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        DEFAULT_REQUIRED_ISOLATION="os_user"
+    fi
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -871,6 +878,7 @@ generate_default_config() {
     "enabled": true,
     "url": "http://${SERVER_IP}",
     "multi_user_mode": ${DEFAULT_WORKSPACE_MULTI_USER_MODE},
+    "required_isolation_level": "${DEFAULT_REQUIRED_ISOLATION}",
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,

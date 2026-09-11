@@ -329,3 +329,50 @@ def test_floor_invalid_explicit_falls_back_fail_closed(caplog):
             == "os_user"
         )
     assert any("required_isolation_level" in r.message for r in caplog.records)
+
+
+def test_degraded_multi_user_floor_logs_warning(caplog):
+    # PR review round 3:派生下限只会跟着降——多用户 + 探针降级时必须打
+    # WARNING,让运维动作引发的降级在日志里可见
+    import logging
+
+    degraded = wic.IsolationCapabilitySnapshot(
+        supported=False,
+        backend=wic.BACKEND_SHARED,
+        isolation_level=wic.ISOLATION_LEVEL_NONE,
+        enforced=(),
+        unsupported=(),
+        reasons=(wic.IsolationReason("launch_path_degraded", "wrapper gone"),),
+    )
+    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, degraded) == "none"
+    assert any("launch path degraded" in r.message for r in caplog.records)
+
+
+def test_healthy_multi_user_floor_is_silent(caplog):
+    import logging
+
+    healthy = _floor_snapshot("os_user")
+    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, healthy) == "os_user"
+    assert not caplog.records
+
+
+def test_single_user_degraded_floor_is_silent(caplog):
+    # 单用户形态派生 none 是预期而非降级,不告警
+    import logging
+
+    degraded = wic.IsolationCapabilitySnapshot(
+        supported=False,
+        backend=wic.BACKEND_SHARED,
+        isolation_level=wic.ISOLATION_LEVEL_NONE,
+        enforced=(),
+        unsupported=(),
+        reasons=(wic.IsolationReason("multi_user_mode_disabled", "by design"),),
+    )
+    cfg = type("C", (), {"multi_user_mode": False, "required_isolation_level": ""})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, degraded) == "none"
+    assert not caplog.records

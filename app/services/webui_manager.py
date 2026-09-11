@@ -1604,8 +1604,15 @@ class WebUIManager:
         try:
             target_pw = pwd.getpwnam(system_account)
         except KeyError:
-            # OS account absent: in verified multi-user mode ensure_system_user
-            # provisions it at launch; its absence is not a probe failure.
+            # OS account absent. Provisioning only happens in the Docker
+            # multi-user form (ensure_system_user skips creation elsewhere,
+            # #3130) — outside that form an absent account can never be
+            # created, so sudo -u would fail at launch: a probe failure,
+            # not a tolerated pending state (PR review round 3).
+            from app.utils.workspace import _is_docker_multi_user_mode
+
+            if not _is_docker_multi_user_mode():
+                return False, "identity_account_missing"
             target_pw = None
         if target_pw is not None:
             if target_pw.pw_uid == 0:

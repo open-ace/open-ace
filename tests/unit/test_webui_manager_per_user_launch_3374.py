@@ -151,22 +151,36 @@ def test_rejects_reserved_system_account(monkeypatch):
     assert ok is False and reason == "reserved_system_account"
 
 
-def test_absent_os_account_is_not_a_probe_failure(monkeypatch):
-    # in verified multi-user mode ensure_system_user provisions the account
-    # at launch time
+def _patch_missing_account(monkeypatch):
+    def _missing(name):
+        raise KeyError(name)
+
     monkeypatch.setattr(
         "app.services.webui_manager.pwd.getpwuid",
         lambda uid: _PwEntry("open-ace"),
     )
-
-    def _missing(name):
-        raise KeyError(name)
-
     monkeypatch.setattr("app.services.webui_manager.pwd.getpwnam", _missing)
     _patch_identity(monkeypatch)
     monkeypatch.setattr("app.services.webui_manager.pwd.getpwnam", _missing)
+
+
+def test_absent_os_account_tolerated_where_provisioned(monkeypatch):
+    # Docker multi-user form: ensure_system_user provisions the account at
+    # launch time, so its absence is a pending state, not a probe failure
+    _patch_missing_account(monkeypatch)
+    monkeypatch.setattr("app.utils.workspace._is_docker_multi_user_mode", lambda: True)
     ok, reason = _make().supports_per_user_launch("newuser_acct")
     assert ok is True and reason is None
+
+
+def test_absent_os_account_fails_probe_outside_docker(monkeypatch):
+    # PR review round 3: provisioning only exists in the Docker form
+    # (#3130 skips creation elsewhere) — outside it, an absent account can
+    # never be created and sudo -u would fail at launch
+    _patch_missing_account(monkeypatch)
+    monkeypatch.setattr("app.utils.workspace._is_docker_multi_user_mode", lambda: False)
+    ok, reason = _make().supports_per_user_launch("newuser_acct")
+    assert ok is False and reason == "identity_account_missing"
 
 
 def test_degraded_readiness_short_circuits_account_checks(monkeypatch):
@@ -283,10 +297,13 @@ def test_prestart_skips_when_gate_rejects(monkeypatch):
     assert spawned == []
 
 
-def test_prestart_skips_without_explicit_mapping():
+def test_prestart_skips_without_explicit_mapping(monkeypatch):
     manager = _make()
     manager.config = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
-    manager.prestart_user_instance_async(7, "", "http://h")  # no spawn, no raise
+    spawned = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
+    manager.prestart_user_instance_async(7, "", "http://h")
+    assert spawned == []  # 无显式映射:不拉起(评审 #6 钉住,勿再空过)
 
 
 def wic_snap():

@@ -1365,6 +1365,11 @@ def bash_to_bool(val):
 
 config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
 config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
+# Issue #3374 (PR review round 3): multi-user installs pin an explicit
+# isolation floor so a later launch-path degradation (wrapper removed,
+# webui_path repointed) cannot silently drop per-user isolation.
+if config['workspace']['multi_user_mode'] and not config['workspace'].get('required_isolation_level'):
+    config['workspace']['required_isolation_level'] = 'os_user'
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))

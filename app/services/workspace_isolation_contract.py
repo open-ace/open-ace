@@ -251,7 +251,38 @@ def resolve_required_floor(config: Any, snapshot: IsolationCapabilitySnapshot) -
             "Invalid workspace.required_isolation_level %r; using derived default",
             explicit,
         )
-    return snapshot.isolation_level
+    derived = snapshot.isolation_level
+    if (
+        getattr(config, "multi_user_mode", False)
+        and derived == ISOLATION_LEVEL_NONE
+        and _reason_is_degraded(snapshot)
+    ):
+        # The derived floor follows verified capability — it can only mirror
+        # a degradation downward, never detect one. Make that audible: a
+        # multi-user host whose launch path just degraded will keep serving
+        # default launches on the shared account (PR review round 3), and
+        # the only signals are this log and the contract's reasons[].
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Multi-user workspace isolation floor derived as 'none' "
+            "(launch path degraded: %s); default launches will NOT be "
+            "per-user isolated — set workspace.required_isolation_level "
+            "to pin a hard floor",
+            _first_degradation(snapshot),
+        )
+    return derived
+
+
+def _reason_is_degraded(snapshot: IsolationCapabilitySnapshot) -> bool:
+    return any(r.code in ("launch_path_degraded",) for r in snapshot.reasons)
+
+
+def _first_degradation(snapshot: IsolationCapabilitySnapshot) -> str:
+    for r in snapshot.reasons:
+        if r.code == "launch_path_degraded":
+            return r.message
+    return "unknown"
 
 
 def evaluate_isolation_requirement(
