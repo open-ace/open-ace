@@ -298,12 +298,13 @@ def _run_script(script_name: str) -> subprocess.CompletedProcess:
     return _SUITE_RESULTS[script_name]
 
 
-def _assert_scenario(script_name: str, scenario: str) -> None:
+def _assert_scenario(script_name: str, scenario: str) -> bool:
     result = _run_script(script_name)
     assert f"SCENARIO {scenario} OK" in result.stdout, (
         f"scenario {scenario!r} did not pass in {script_name}\n"
         f"exit: {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
+    return True
 
 
 _SCENARIOS = "webui_sandbox_proxy_scenarios_3378.py"
@@ -315,96 +316,96 @@ _WS = "webui_sandbox_proxy_ws_3378.py"
 
 @pytest.mark.security
 def test_http_passthrough_injects_headers_and_overrides_client():
-    _assert_scenario(_SCENARIOS, "http_passthrough_injects_headers_and_overrides_client")
+    assert _assert_scenario(_SCENARIOS, "http_passthrough_injects_headers_and_overrides_client")
 
 
 def test_post_body_forwarded_with_content_length():
-    _assert_scenario(_SCENARIOS, "post_body_forwarded_with_content_length")
+    assert _assert_scenario(_SCENARIOS, "post_body_forwarded_with_content_length")
 
 
 @pytest.mark.security
 def test_content_length_and_transfer_encoding_coexist_is_400():
-    _assert_scenario(_SCENARIOS, "content_length_and_transfer_encoding_coexist_is_400")
+    assert _assert_scenario(_SCENARIOS, "content_length_and_transfer_encoding_coexist_is_400")
 
 
 @pytest.mark.security
 def test_duplicate_injection_header_is_400():
-    _assert_scenario(_SCENARIOS, "duplicate_injection_header_is_400")
+    assert _assert_scenario(_SCENARIOS, "duplicate_injection_header_is_400")
 
 
 def test_sse_streams_through_until_upstream_closes():
-    _assert_scenario(_SCENARIOS, "sse_streams_through_until_upstream_closes")
+    assert _assert_scenario(_SCENARIOS, "sse_streams_through_until_upstream_closes")
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────
 
 
 def test_websocket_upgrade_and_bidirectional_splice():
-    _assert_scenario(_WS, "websocket_upgrade_and_bidirectional_splice")
+    assert _assert_scenario(_WS, "websocket_upgrade_and_bidirectional_splice")
 
 
 def test_websocket_upgrade_recognizes_comma_list_without_spaces():
-    _assert_scenario(_WS, "websocket_upgrade_recognizes_comma_list_without_spaces")
+    assert _assert_scenario(_WS, "websocket_upgrade_recognizes_comma_list_without_spaces")
 
 
 # ── failure and lifecycle paths ────────────────────────────────────────
 
 
 def test_unreachable_upstream_is_502():
-    _assert_scenario(_SCENARIOS, "unreachable_upstream_is_502")
+    assert _assert_scenario(_SCENARIOS, "unreachable_upstream_is_502")
 
 
 def test_stop_closes_port_and_terminates_greenlets():
-    _assert_scenario(_SCENARIOS, "stop_closes_port_and_terminates_greenlets")
+    assert _assert_scenario(_SCENARIOS, "stop_closes_port_and_terminates_greenlets")
 
 
 # ── M2: the connect budget must not leak into the stream ───────────────
 
 
 def test_stream_survives_idle_gap_longer_than_connect_budget():
-    _assert_scenario(_SCENARIOS, "stream_survives_idle_gap_longer_than_connect_budget")
+    assert _assert_scenario(_SCENARIOS, "stream_survives_idle_gap_longer_than_connect_budget")
 
 
 def test_upstream_that_never_answers_is_502_within_head_budget():
-    _assert_scenario(_SCENARIOS, "upstream_that_never_answers_is_502_within_head_budget")
+    assert _assert_scenario(_SCENARIOS, "upstream_that_never_answers_is_502_within_head_budget")
 
 
 # ── m2: request-parse errors are 400, upstream garbage is 502 ──────────
 
 
 def test_malformed_request_head_line_is_400():
-    _assert_scenario(_SCENARIOS, "malformed_request_head_line_is_400")
+    assert _assert_scenario(_SCENARIOS, "malformed_request_head_line_is_400")
 
 
 @pytest.mark.security
 def test_duplicate_content_length_is_400():
-    _assert_scenario(_SCENARIOS, "duplicate_content_length_is_400")
+    assert _assert_scenario(_SCENARIOS, "duplicate_content_length_is_400")
 
 
 def test_malformed_upstream_response_head_is_502():
-    _assert_scenario(_SCENARIOS, "malformed_upstream_response_head_is_502")
+    assert _assert_scenario(_SCENARIOS, "malformed_upstream_response_head_is_502")
 
 
 # ── m3: chunked request bodies ─────────────────────────────────────────
 
 
 def test_chunked_request_body_is_dechunked_and_forwarded():
-    _assert_scenario(_SCENARIOS, "chunked_request_body_is_dechunked_and_forwarded")
+    assert _assert_scenario(_SCENARIOS, "chunked_request_body_is_dechunked_and_forwarded")
 
 
 def test_negative_chunk_size_is_400():
-    _assert_scenario(_SCENARIOS, "negative_chunk_size_is_400")
+    assert _assert_scenario(_SCENARIOS, "negative_chunk_size_is_400")
 
 
 # ── m6a: the REAL launcher.health_check through the real proxy ────────
 
 
 def test_launcher_health_check_true_through_real_proxy():
-    _assert_scenario(_SCENARIOS, "launcher_health_check_true_through_real_proxy")
+    assert _assert_scenario(_SCENARIOS, "launcher_health_check_true_through_real_proxy")
 
 
 def test_launcher_health_check_false_on_401_from_pod():
-    _assert_scenario(_SCENARIOS, "launcher_health_check_false_on_401_from_pod")
+    assert _assert_scenario(_SCENARIOS, "launcher_health_check_false_on_401_from_pod")
 
 
 def test_launcher_health_check_false_on_connection_refused():
