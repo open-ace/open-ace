@@ -84,6 +84,33 @@ def test_corrupt_secret_file_is_regenerated(tmp_path, monkeypatch):
     assert WebUIManager().config.token_secret == mgr.config.token_secret
 
 
+def test_binary_corrupt_secret_file_is_regenerated(tmp_path, monkeypatch):
+    # 二进制垃圾(不可解码)与文本损坏同语义:unlink 重建而非抛
+    # UnicodeDecodeError(按请求构造路径不能因损坏文件持续崩溃)
+    cd = _config_dir(tmp_path, monkeypatch)
+    _write_config_json(cd)
+    (cd / SECRET_FILENAME).write_bytes(b"\xff\xfe\x00\x81B")
+    mgr = WebUIManager()
+    assert len(mgr.config.token_secret) >= 64
+    assert (cd / SECRET_FILENAME).read_text().strip() == mgr.config.token_secret
+    assert WebUIManager().config.token_secret == mgr.config.token_secret
+
+
+def test_makedirs_failure_degrades_to_memory(tmp_path, monkeypatch, caplog):
+    # CONFIG_DIR 无法创建(os.makedirs 抛 OSError)→ 同一降级路径:内存态 + 告警
+    cd = _config_dir(tmp_path, monkeypatch)
+    _write_config_json(cd)
+
+    def _failing_makedirs(path, *a, **kw):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("app.services.webui_manager.os.makedirs", _failing_makedirs)
+    with caplog.at_level(logging.WARNING, logger="app.services.webui_manager"):
+        mgr = WebUIManager()
+    assert len(mgr.config.token_secret) >= 64
+    assert any("token secret" in r.message.lower() for r in caplog.records)
+
+
 def test_empty_secret_file_degrades_to_memory_without_deleting(tmp_path, monkeypatch, caplog):
     # 空文件 = 胜者在途写入/崩溃残留:保守处理,不 unlink(拆在途胜者会造成双
     # secret),内存态 + 告警,文件保留待运维清理
