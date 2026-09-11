@@ -178,6 +178,111 @@ class WorkspaceConfig:
     webui_callback_url: str = ""
 
 
+_TOKEN_SECRET_FILENAME = "webui_token_secret"
+
+
+def _read_secret_file(secret_path: str) -> tuple[str | None, bool]:
+    """Read the persisted WebUI token secret.
+
+    Returns (secret, was_nonempty_invalid): secret is None when absent,
+    empty, or malformed. was_nonempty_invalid is True only for non-empty
+    content that failed validation (caller may unlink + regenerate); empty
+    content is treated as an in-flight/crashed writer and is left alone
+    (unstaking a live winner would cause diverging secrets).
+    """
+    try:
+        with open(secret_path) as f:
+            value = f.read().strip()
+    except OSError:
+        return None, False
+    if len(value) >= 64 and all(c in "0123456789abcdef" for c in value):
+        return value, False
+    if value:
+        logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
+        return None, True
+    logger.warning(
+        "Empty WebUI token secret file %s (interrupted writer?); using an "
+        "in-memory secret — delete the file to restore persistence",
+        secret_path,
+    )
+    return None, False
+
+
+def _persist_secret_file(secret_path: str, value: str) -> bool:
+    """Atomically create the secret file (0600). False when unavailable.
+
+    O_CREAT|O_EXCL makes concurrent first-boot races safe: exactly one
+    writer wins; losers re-read the winner's value.
+    """
+    try:
+        os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+        fd = os.open(secret_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, value.encode())
+        finally:
+            os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError as e:
+        logger.warning(
+            "Cannot persist WebUI token secret to %s (%s); tokens will " "not survive restarts",
+            secret_path,
+            e,
+        )
+        return False
+
+
+def _resolve_token_secret(config: WorkspaceConfig) -> str:
+    """Issue #3377: resolve the WebUI token secret.
+
+    Order: config.json value (entrypoint-managed) → persisted secret file →
+    generate once and persist (0600, O_EXCL race-safe; non-empty malformed
+    files are unlinked and rebuilt, empty ones are conservatively kept).
+    Only called on the self-loaded-config path; injected configs stay
+    in-memory (tests must not touch the host config dir).
+    """
+    if config.token_secret:
+        return config.token_secret
+    from app.repositories.database import CONFIG_DIR
+
+    secret_path = os.path.join(CONFIG_DIR, _TOKEN_SECRET_FILENAME)
+    existing, nonempty_invalid = _read_secret_file(secret_path)
+    if existing:
+        return existing
+    if nonempty_invalid:
+        try:
+            os.unlink(secret_path)
+        except OSError as e:
+            logger.warning(
+                "Cannot remove malformed WebUI token secret file %s (%s)",
+                secret_path,
+                e,
+            )
+    generated = secrets.token_hex(32)
+    persisted_ok = _persist_secret_file(secret_path, generated)
+    persisted = _read_secret_file(secret_path)[0]
+    if persisted:
+        if persisted_ok:
+            logger.warning(
+                "WebUI token secret not configured; generated and persisted to %s",
+                secret_path,
+            )
+        else:
+            # O_EXCL lost a concurrent first-boot race: adopt the winner.
+            logger.warning(
+                "WebUI token secret not configured; adopted the secret "
+                "persisted by a concurrent worker at %s",
+                secret_path,
+            )
+        return persisted
+    logger.warning(
+        "WebUI token secret not configured; generated an in-memory secret "
+        "(tokens will not survive restarts)"
+    )
+    return generated
+
+
 class WebUIManager:
     """
     Manages per-user qwen-code-webui processes.
@@ -214,8 +319,12 @@ class WebUIManager:
         self._single_user_instance: WebUIInstance | None = None
         self._single_user_lock = gevent_lock.RLock()  # Lock for single-user instance startup
 
-        # Generate token secret if not configured
-        if not self.config.token_secret:
+        # Issue #3377: resolve the token secret (config.json → persisted
+        # file → generate once). Only the self-loaded-config path persists;
+        # injected configs stay in-memory so tests never touch the host.
+        if config is None:
+            self.config.token_secret = _resolve_token_secret(self.config)
+        elif not self.config.token_secret:
             self.config.token_secret = secrets.token_hex(32)
 
         # Platform detection
