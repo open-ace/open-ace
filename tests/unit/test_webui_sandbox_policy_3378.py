@@ -84,7 +84,7 @@ def test_entrypoint_suffix_preserves_bootstrap_verbatim():
         "/home/agent/.local/share /home/agent /workspace"
     )
     assert script.startswith(bootstrap_prefix)
-    assert f"chown -R 1000:1000 /home/agent /workspace || true; " in script
+    assert "chown -R 1000:1000 /home/agent /workspace || true; " in script
     assert "git config --global --add safe.directory /workspace || true; " in script
     # The suffix REPLACES the placeholder exec, and follows the bootstrap.
     assert "exec tail -f /dev/null" not in script
@@ -99,7 +99,7 @@ def test_entrypoint_without_suffix_unchanged():
 
 def test_entrypoint_suffix_replaces_placeholder_before_exec():
     """A restore gate between the bootstrap and the exec stays in order."""
-    suffix = "i=0; until [ -f /workspace/.openace-restore-done ] || [ \"$i\" -ge 300 ]; do sleep 0.2; i=$((i+1)); done; exec qwen-code-webui --port 3100"
+    suffix = 'i=0; until [ -f /workspace/.openace-restore-done ] || [ "$i" -ge 300 ]; do sleep 0.2; i=$((i+1)); done; exec qwen-code-webui --port 3100'
     script = _create(entrypoint_suffix=suffix)["entrypoint"][2]
     assert script.index("mkdir -p") < script.index(".openace-restore-done")
     assert script.index(".openace-restore-done") < script.index("exec qwen-code-webui")
@@ -167,7 +167,9 @@ def _fake_with_sandbox() -> tuple[FakeOpenSandboxApi, str]:
 
 def test_fake_background_command_completes_immediately_without_output_events():
     fake, sid = _fake_with_sandbox()
-    events = list(fake.run_command(sid, {"command": "tar -xf /tmp/webui-state.tar", "background": True}))
+    events = list(
+        fake.run_command(sid, {"command": "tar -xf /tmp/webui-state.tar", "background": True})
+    )
     kinds = [e["type"] for e in events]
     # Upstream: execution_complete fires immediately after launch; NO
     # stdout/stderr SSE events at all (policy.py:652-657).
@@ -178,7 +180,9 @@ def test_fake_background_command_completes_immediately_without_output_events():
 def test_fake_background_command_status_is_pollable():
     fake, sid = _fake_with_sandbox()
     events = list(
-        fake.run_command(sid, {"command": "touch /workspace/.openace-restore-done", "background": True})
+        fake.run_command(
+            sid, {"command": "touch /workspace/.openace-restore-done", "background": True}
+        )
     )
     command_id = next(e["text"] for e in events if e["type"] == "init")
     status = fake.command_status(sid, command_id)
