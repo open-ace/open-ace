@@ -2897,13 +2897,17 @@ def agent_message():
             browser_token = _secrets.token_hex(32)
 
             # Issue #2183: Inject tenant_id and owner_user_id from machine
+            # Issue #3376: owner prefers the recorded requester over the
+            # machine creator (falls back when no record survived).
             tenant_id = None
             owner_user_id = None
             try:
                 machine = agent_mgr.get_machine(machine_id_for_vs)
                 if machine:
                     tenant_id = machine.get("tenant_id")
-                    owner_user_id = machine.get("created_by")
+                    owner_user_id = _resolve_vscode_reported_owner(
+                        agent_mgr, machine_id_for_vs, vscode_id
+                    )
                 else:
                     logger.error(
                         "Cannot create VSCode session: machine %s not found",
@@ -4759,6 +4763,68 @@ def remote_git_file(machine_id):
 # ── Remote VSCode (code-server) endpoints ───────────────────────────
 
 
+def _resolve_vscode_reported_owner(agent_mgr, machine_id: str, vscode_id: str) -> int | None:
+    """Issue #3376: prefer the recorded requester over machine.created_by."""
+    from app.modules.workspace.vscode_store import vscode_owner_store
+
+    pending = vscode_owner_store.pop(vscode_id)
+    if pending and pending[0] == machine_id:
+        return pending[1]
+    if pending:
+        logger.info(
+            "VSCode %s owner record machine mismatch; falling back to creator",
+            vscode_id[:8],
+        )
+    machine = agent_mgr.get_machine(machine_id) or {}
+    return machine.get("created_by")
+
+
+def _check_vscode_session_access(machine_id: str, vscode_id: str, info: dict):
+    """Issue #3376: VSCode endpoints follow the #2183 proxy-auth role set.
+
+    Allowed: platform admin, session owner, same-tenant tenant admin,
+    machine-level admin permission. Everyone else (including cross-tenant
+    tenant admins) gets 403. Returns an error response tuple or None.
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    if is_platform_admin_role(g.user.get("role")):
+        return None
+    session_tenant = info.get("tenant_id")
+    user_tenant = g.user.get("tenant_id")
+    if session_tenant is not None and user_tenant != session_tenant:
+        audit_logger.log(
+            action="CROSS_TENANT_VSCODE_ACCESS_ATTEMPT",
+            severity="warning",
+            user_id=g.user.get("id"),
+            details={
+                "user_tenant_id": user_tenant,
+                "target_tenant_id": session_tenant,
+                "vscode_id": vscode_id[:8],
+            },
+        )
+        logger.warning(
+            "VSCode ownership denied (cross-tenant): user_id=%s, session tenant=%s",
+            g.user.get("id"),
+            session_tenant,
+        )
+        return jsonify({"error": "Access denied"}), 403
+    if g.user.get("id") == info.get("owner_user_id"):
+        return None
+    if g.user.get("role") == "tenant_admin" and (
+        session_tenant is None or user_tenant == session_tenant
+    ):
+        return None
+    if get_remote_agent_manager().get_user_permission(machine_id, g.user.get("id")) == "admin":
+        return None
+    logger.warning(
+        "VSCode ownership denied: user_id=%s is not owner %s",
+        g.user.get("id"),
+        info.get("owner_user_id"),
+    )
+    return jsonify({"error": "Access denied"}), 403
+
+
 @remote_bp.route("/vscode/start", methods=["POST"])
 @machine_access_required
 def remote_vscode_start():
@@ -4789,6 +4855,12 @@ def remote_vscode_start():
         return jsonify({"success": False, "error": "Agent is not connected"}), 503
 
     vscode_id = str(uuid.uuid4())
+
+    # Issue #3376: remember the requester; the agent's async 'running'
+    # report only carries machine context.
+    from app.modules.workspace.vscode_store import vscode_owner_store
+
+    vscode_owner_store.record(vscode_id, machine_id, g.user["id"], g.user.get("tenant_id"))
     agent_mgr.send_command(
         machine_id,
         {
@@ -4815,6 +4887,17 @@ def remote_vscode_stop():
     if not vscode_id:
         return jsonify({"success": False, "error": "vscode_id is required"}), 400
 
+    # Issue #3376: stopping someone else's session is a destructive action;
+    # apply the same ownership gate as status/attach.
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if found:
+        found_machine_id, found_info = found
+        gate = _check_vscode_session_access(found_machine_id, vscode_id, found_info)
+        if gate is not None:
+            return gate
+
     agent_mgr.send_command(
         machine_id,
         {
@@ -4825,8 +4908,6 @@ def remote_vscode_stop():
     )
 
     # Issue #2183: Mark as stopped to invalidate token immediately
-    from app.modules.workspace.vscode_store import vscode_info_store
-
     vscode_info_store.mark_stopped(machine_id, vscode_id)
 
     return jsonify({"success": True})
@@ -4872,6 +4953,11 @@ def remote_vscode_status(vscode_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: session ownership; machine access alone is not enough.
+    gate = _check_vscode_session_access(machine_id, vscode_id, info)
+    if gate is not None:
+        return gate
 
     status = info.get("status", "unknown")
     response = {"success": True, "status": status}
@@ -4928,6 +5014,16 @@ def remote_vscode_attach(vscode_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: session ownership; machine access alone is not enough.
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if found:
+        found_machine_id, found_info = found
+        gate = _check_vscode_session_access(found_machine_id, vscode_id, found_info)
+        if gate is not None:
+            return gate
 
     agent_mgr.send_command(
         machine_id,

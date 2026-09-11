@@ -249,3 +249,50 @@ class VSCodeInfoStore:
 # Module-level singleton — cleanup timer is started lazily on first use
 # to avoid spawning a background thread at import time.
 vscode_info_store = VSCodeInfoStore()
+
+
+class VSCodeOwnerStore:
+    """Issue #3376: remember which user requested a VSCode session.
+
+    /vscode/start knows the requester; the agent later reports 'running'
+    via /api/remote/agent/message, which only has machine context. This
+    in-memory bridge links the two (single web worker: gunicorn
+    --workers 1 with the gevent worker class). Absent entries fall back
+    to machine.created_by at report time.
+    """
+
+    def __init__(self, ttl: float = VSCODE_SESSION_TTL):
+        self._lock = threading.Lock()
+        self._ttl = ttl
+        # vscode_id -> (machine_id, user_id, tenant_id, recorded_at)
+        self._owners: dict[str, tuple[str, int, int | None, float]] = {}
+
+    def record(self, vscode_id: str, machine_id: str, user_id: int, tenant_id: int | None) -> None:
+        with self._lock:
+            self._owners[vscode_id] = (machine_id, user_id, tenant_id, time.time())
+
+    def pop(self, vscode_id: str) -> tuple[str, int, int | None] | None:
+        """Consume the recorded owner; None when absent/expired.
+
+        A lookup for a different machine consumes the entry defensively
+        (never returns a cross-machine owner).
+        """
+        with self._lock:
+            entry = self._owners.pop(vscode_id, None)
+            if not entry:
+                return None
+            machine_id, user_id, tenant_id, recorded_at = entry
+            if time.time() - recorded_at > self._ttl:
+                return None
+            return machine_id, user_id, tenant_id
+
+    def cleanup_stale(self) -> int:
+        now = time.time()
+        with self._lock:
+            stale = [k for k, v in self._owners.items() if now - v[3] > self._ttl]
+            for k in stale:
+                del self._owners[k]
+            return len(stale)
+
+
+vscode_owner_store = VSCodeOwnerStore()
