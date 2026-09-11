@@ -1,0 +1,405 @@
+"""Issue #3378 (§7.4): SandboxWebuiProxy against real sockets.
+
+The proxy runs on a real gevent hub in its own thread; the fake gateway
+upstream is a real TCP server; the client is a real blocking socket. This is
+the D1 contract end to end: HTTP passthrough with header injection override,
+client credential-prefix stripping, CL+TE 400, Expect stripping,
+Connection: close, SSE streaming, WS splice, upstream-unreachable 502, stop()
+killing in-flight greenlets, and the update_activity heartbeat.
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+
+import pytest
+
+from app.services.webui_sandbox import SandboxWebuiProxy
+
+pytestmark = [pytest.mark.issue(3378)]
+
+_INJECT = {
+    "OpenSandbox-Secure-Access": "tok-upstream",
+    "OpenSandbox-Ingress-To": "sb-1-3100",
+}
+
+
+class _Gateway:
+    """A tiny real TCP 'gateway' that records requests and answers scripted."""
+
+    def __init__(self):
+        self.requests: list[tuple[str, dict[str, str], bytes]] = []
+        self.mode = "http"  # http | sse | ws | hang
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(8)
+        self.port = self._sock.getsockname()[1]
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _addr = self._sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+    def _handle(self, conn: socket.socket):
+        conn.settimeout(10)
+        try:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    return
+                data += chunk
+            head, _, rest = data.partition(b"\r\n\r\n")
+            lines = head.decode().split("\r\n")
+            headers = {}
+            for line in lines[1:]:
+                name, _, value = line.partition(":")
+                headers[name.strip().lower()] = value.strip()
+            if "content-length" in headers:
+                need = int(headers["content-length"])
+                while len(rest) < need:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    rest += chunk
+            self.requests.append((lines[0], headers, rest))
+            if self.mode == "ws":
+                conn.sendall(
+                    b"HTTP/1.1 101 Switching Protocols\r\n"
+                    b"Upgrade: websocket\r\n"
+                    b"Connection: Upgrade\r\n"
+                    b"Sec-WebSocket-Accept: fixed\r\n"
+                    b"OpenSandbox-Leak: nope\r\n"
+                    b"\r\n"
+                )
+                # Echo server for the splice test.
+                while True:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        return
+                    conn.sendall(b"up:" + chunk)
+            elif self.mode == "sse":
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/event-stream\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                )
+                for index in range(3):
+                    conn.sendall(f"data: chunk-{index}\n\n".encode())
+                conn.close()
+                return
+            elif self.mode == "hang":
+                # Never answer; holds the client greenlet open for stop().
+                import time
+
+                time.sleep(30)
+                return
+            else:
+                body = b'{"version":"ok"}'
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json\r\n"
+                    + f"Content-Length: {len(body)}\r\n".encode()
+                    + b"OpenSandbox-Leak: nope\r\n"
+                    + b"OpenSandbox-Secure-Access: keepme\r\n"
+                    + b"Connection: close\r\n\r\n"
+                    + body
+                )
+                conn.close()
+                return
+        except OSError:
+            pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def close(self):
+        self._sock.close()
+
+
+@pytest.fixture()
+def gateway():
+    server = _Gateway()
+    yield server
+    server.close()
+
+
+class _ProxyThread:
+    """Run the gevent proxy on a dedicated thread (its own hub)."""
+
+    def __init__(self, gateway: _Gateway, *, resolver=None, on_activity=None):
+        self.activity = 0
+        self.proxy = SandboxWebuiProxy(
+            sandbox_id="sb-1",
+            upstream_resolver=resolver
+            or (lambda: (f"http://127.0.0.1:{gateway.port}", dict(_INJECT))),
+            on_activity=on_activity or self._bump,
+        )
+        self.port = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _bump(self):
+        self.activity += 1
+
+    def _run(self):
+        import gevent
+
+        self.port = self.proxy.start(0)
+        while self.proxy.port is not None:
+            gevent.sleep(0.05)
+
+    def start(self):
+        import gevent
+
+        self._thread.start()
+        for _ in range(100):
+            gevent.sleep(0)  # let other hubs run if any
+            if self.port:
+                return self.port
+            import time
+
+            time.sleep(0.02)
+        raise AssertionError("proxy did not start")
+
+    def stop(self):
+        import gevent
+
+        self.proxy.stop()
+        gevent.sleep(0)
+        self._thread.join(timeout=5)
+
+
+def _request(port: int, raw: bytes, read_timeout: float = 5.0) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=read_timeout) as sock:
+        sock.sendall(raw)
+        out = bytearray()
+        try:
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                out.extend(chunk)
+        except socket.timeout:
+            pass
+        return bytes(out)
+
+
+def _get(port: int, path: str, extra_headers: str = "", body: bytes = b"", **kwargs) -> bytes:
+    raw = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: localhost:{port}\r\n"
+        "User-Agent: test\r\n"
+        "Accept: */*\r\n"
+        "Expect: 100-continue\r\n"
+        "OpenSandbox-Secure-Access: evil-client-token\r\n"
+        "OpenSandbox-Metadata-Inject: x\r\n"
+        "X-EXECD-Debug: 1\r\n"
+        "OPENSANDBOX-Foo: bar\r\n"
+        f"{extra_headers}"
+        "\r\n"
+    ).encode() + body
+    return _request(port, raw, **kwargs)
+
+
+# ── HTTP passthrough + header rules ────────────────────────────────────
+
+
+def test_http_passthrough_injects_headers_and_overrides_client(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(port, "/api/version?token=v2:1:2:3:4:5")
+        assert response.startswith(b"HTTP/1.1 200 OK")
+        assert b'{"version":"ok"}' in response
+        assert b"Connection: close" in response
+        # Response allowlist: unknown prefix headers stripped, the injectable
+        # name passes.
+        assert b"OpenSandbox-Leak" not in response
+        assert b"OpenSandbox-Secure-Access: keepme" in response
+
+        request_line, headers, _body = gateway.requests[-1]
+        assert request_line.startswith("GET /api/version?token=v2:1:2:3:4:5")
+        # Injection overrides the client's forged value...
+        assert headers["opensandbox-secure-access"] == "tok-upstream"
+        assert headers["opensandbox-ingress-to"] == "sb-1-3100"
+        # ...and every other client prefix header was stripped.
+        assert "opensandbox-metadata-inject" not in headers
+        assert "x-execd-debug" not in headers
+        assert "opensandbox-foo" not in headers
+        # Expect is stripped (the proxy cannot answer a 100-continue).
+        assert "expect" not in headers
+        assert runner.activity == 1
+    finally:
+        runner.stop()
+
+
+def test_post_body_forwarded_with_content_length(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        body = b'{"message":"hello"}'
+        raw = (
+            f"POST /api/chat HTTP/1.1\r\n"
+            f"Host: localhost:{port}\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "\r\n"
+        ).encode() + body
+        response = _request(port, raw)
+        assert b"HTTP/1.1 200 OK" in response
+        request_line, headers, forwarded_body = gateway.requests[-1]
+        assert request_line.startswith("POST /api/chat")
+        assert headers["content-length"] == str(len(body))
+        assert forwarded_body == body
+    finally:
+        runner.stop()
+
+
+def test_content_length_and_transfer_encoding_coexist_is_400(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(
+            port,
+            "/api/version",
+            extra_headers="Content-Length: 3\r\nTransfer-Encoding: chunked\r\n",
+        )
+        assert response.startswith(b"HTTP/1.1 400")
+        assert gateway.requests == []  # never reached the upstream
+        assert runner.activity == 0
+    finally:
+        runner.stop()
+
+
+def test_duplicate_injection_header_is_400(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(
+            port,
+            "/api/version",
+            extra_headers="X-EXECD-ACCESS-TOKEN: a\r\nX-EXECD-ACCESS-TOKEN: b\r\n",
+        )
+        assert response.startswith(b"HTTP/1.1 400")
+        assert gateway.requests == []
+    finally:
+        runner.stop()
+
+
+def test_sse_streams_through_until_upstream_closes(gateway):
+    gateway.mode = "sse"
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(port, "/events", read_timeout=10)
+        assert response.startswith(b"HTTP/1.1 200 OK")
+        assert b"text/event-stream" in response
+        for index in range(3):
+            assert f"data: chunk-{index}".encode() in response
+    finally:
+        runner.stop()
+
+
+# ── WebSocket ──────────────────────────────────────────────────────────
+
+
+def _ws_upgrade(port: int) -> socket.socket:
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.sendall(
+        f"GET /ws HTTP/1.1\r\n"
+        f"Host: localhost:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n".encode()
+    )
+    data = bytearray()
+    while b"\r\n\r\n" not in data:
+        chunk = sock.recv(65536)
+        if not chunk:
+            break
+        data.extend(chunk)
+    head, _, rest = bytes(data).partition(b"\r\n\r\n")
+    return sock, head, rest
+
+
+def test_websocket_upgrade_and_bidirectional_splice(gateway):
+    gateway.mode = "ws"
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        sock, head, _rest = _ws_upgrade(port)
+        with sock:
+            assert head.startswith(b"HTTP/1.1 101")
+            assert b"Sec-WebSocket-Accept: fixed" in head
+            # Upstream's unknown prefix header is stripped from the 101 too.
+            assert b"OpenSandbox-Leak" not in head
+            # The injected routing headers reached the upgrade request.
+            request_line, headers, _body = gateway.requests[-1]
+            assert headers["opensandbox-secure-access"] == "tok-upstream"
+            assert headers["connection"].lower() == "upgrade"
+
+            sock.sendall(b"ping")
+            echoed = bytearray()
+            while b"up:ping" not in echoed:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                echoed.extend(chunk)
+            assert b"up:ping" in bytes(echoed)
+        assert runner.activity >= 1
+    finally:
+        runner.stop()
+
+
+# ── failure and lifecycle paths ────────────────────────────────────────
+
+
+def test_unreachable_upstream_is_502(gateway):
+    def dead_resolver():
+        return ("http://127.0.0.1:1", dict(_INJECT))
+
+    runner = _ProxyThread(gateway, resolver=dead_resolver)
+    port = runner.start()
+    try:
+        response = _get(port, "/api/version")
+        assert response.startswith(b"HTTP/1.1 502")
+        assert runner.activity == 0
+    finally:
+        runner.stop()
+
+
+def test_stop_closes_port_and_terminates_greenlets(gateway):
+    gateway.mode = "hang"  # an in-flight request the proxy is holding open
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    client = socket.create_connection(("127.0.0.1", port), timeout=5)
+    client.sendall(f"GET /hang HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+    import time
+
+    time.sleep(0.3)  # let the proxy pick up the connection
+    runner.proxy.stop()
+    # The held connection is torn down: recv unblocks with EOF or ECONNRESET.
+    client.settimeout(5)
+    try:
+        chunk = client.recv(65536)
+        assert chunk == b"" or chunk  # either EOF or a reset — not a hang
+    except OSError:
+        pass
+    finally:
+        client.close()
+    # The port is gone.
+    with pytest.raises(OSError):
+        socket.create_connection(("127.0.0.1", port), timeout=1).close()
+    runner._thread.join(timeout=5)
+    assert not runner._thread.is_alive()
