@@ -13,6 +13,7 @@ import os
 import platform
 import pwd
 import secrets
+import shutil
 import socket
 import subprocess
 import time
@@ -220,6 +221,10 @@ class WebUIManager:
 
         # Platform detection
         self._platform = platform.system().lower()
+
+        # Issue #3374: memoized successful WebUI executable resolution for the
+        # per-user launch probe (supports_per_user_launch).
+        self._resolved_webui: tuple[str, str | None] | None = None
 
         # Windows doesn't support multi-user mode
         if self._platform == "windows" and self.config.multi_user_mode:
@@ -1486,6 +1491,42 @@ class WebUIManager:
         """
         with self._lock:
             self._stop_instance_internal(user_id)
+
+    def supports_per_user_launch(self, system_account: str) -> tuple[bool, str | None]:
+        """Report whether a WebUI for ``system_account`` would run as that OS user.
+
+        Issue #3374 isolation gate: multi-user mode must not silently run user
+        WebUIs under the shared service account. Returns ``(True, None)`` when a
+        per-user launch is possible, else ``(False, reason_code)``.
+
+        Resolution of the WebUI executable is memoized on success only: probing
+        may trigger an expensive build detection (see _find_webui_executable),
+        and a successful resolution is stable for the process lifetime, while a
+        failed one must stay re-probeable (e.g. webui installed later).
+        """
+        if self._platform not in ("linux", "darwin"):
+            return False, "platform_unsupported"
+        resolved = getattr(self, "_resolved_webui", None)
+        if resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable()
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
+        if not webui_cmd:
+            return False, "webui_executable_missing"
+        try:
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+        except (KeyError, OSError):
+            return False, "current_user_unresolved"
+        if current_user == system_account:
+            return True, None
+        if webui_dir:
+            # Dev-directory mode runs `node` as the service user with no UID switch.
+            return False, "dev_directory_mode_shared_account"
+        if shutil.which("sudo") is None:
+            return False, "sudo_unavailable"
+        return True, None
 
     def stop_all_instances(self):
         """Stop all running webui instances."""
