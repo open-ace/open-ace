@@ -2384,7 +2384,14 @@ def get_user_webui_url():
         # An empty/whitespace parameter counts as absent.
         isolation_snapshot = build_workspace_isolation_snapshot(manager)
         config_floor = (getattr(manager.config, "required_isolation_level", "") or "").strip()
-        if not config_floor:
+        if not config_floor or not is_valid_isolation_level(config_floor):
+            # Unset — or a hand-edited invalid value — falls back to the
+            # derived default; an opaque KeyError must not reach the client.
+            if config_floor:
+                logger.warning(
+                    "Invalid workspace.required_isolation_level %r; using derived default",
+                    config_floor,
+                )
             config_floor = (
                 ISOLATION_LEVEL_OS_USER if manager.config.multi_user_mode else ISOLATION_LEVEL_NONE
             )

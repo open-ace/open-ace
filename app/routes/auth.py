@@ -97,11 +97,17 @@ def api_login():
 
         # Fetch the workspace manager once: it decides whether the
         # convention backfill below is allowed (Issue #3374 review #1) and
-        # drives the multi-user pre-start gate further below.
-        from app.services.webui_manager import get_webui_manager
+        # drives the multi-user pre-start gate further below. Failure here
+        # must not fail the login itself.
+        try:
+            from app.services.webui_manager import get_webui_manager
 
-        manager = get_webui_manager()
-        multi_user_mode = bool(manager.config.enabled and manager.config.multi_user_mode)
+            manager = get_webui_manager()
+            multi_user_mode = bool(manager.config.enabled and manager.config.multi_user_mode)
+        except Exception as e:
+            logger.warning(f"Failed to init webui manager on login: {e}")
+            manager = None
+            multi_user_mode = False
 
         if user_data:
             system_account = user_data.get("system_account") or user_data.get("username")

@@ -271,3 +271,19 @@ def test_https_multi_user_returns_relative_webui_path(app, client, monkeypatch):
             p.stop()
     assert resp.status_code == 200
     assert resp.get_json()["url"] == "/webui/3100/"
+
+
+def test_invalid_config_floor_falls_back_to_derived_default(app, client, monkeypatch):
+    # 手写的无效 config 下限不得让路由 500(KeyError),回退派生默认
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    stub.config.required_isolation_level = "bogus"
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "")
+        resp_param = _call(client, "?required_isolation=os_user")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 200
+    assert resp_param.status_code == 200
