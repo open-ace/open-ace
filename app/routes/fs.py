@@ -251,6 +251,29 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None]:
     return resolved, system_account
 
 
+def _is_within_any_root(resolved: str, roots: list[str]) -> bool:
+    """Boundary-safe containment: equal or beneath (path-separator aware)."""
+    return any(root and (resolved == root or resolved.startswith(root + os.sep)) for root in roots)
+
+
+def _allowed_roots_for_user(user) -> list[str]:
+    """Roots a user may browse/check (Issue #3376).
+
+    Own home plus the tenant's explicitly shared project paths, both
+    realpath'd so they compare equal against already-resolved request paths.
+    """
+    roots = [os.path.realpath(get_home_directory(user))]
+    try:
+        from app.repositories.project_repo import ProjectRepository
+
+        tenant_id = (user or {}).get("tenant_id")
+        if tenant_id is not None:
+            roots.extend(ProjectRepository().get_shared_project_paths(tenant_id))
+    except Exception as e:
+        logger.warning("Failed to load shared project roots: %s", e)
+    return roots
+
+
 def _chown_to_user(path: str, system_account: str | None) -> bool:
     """Change ownership of *path* to *system_account*.
 
@@ -533,6 +556,14 @@ def api_browse_directory():
             )
 
         path = os.path.realpath(path)
+
+        # Issue #3376: home subtree lock; explicitly shared project roots
+        # stay reachable (read-side parity with the #1813 write lock).
+        if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+            return (
+                jsonify({"error": "Path must be inside your home directory or a shared project"}),
+                400,
+            )
 
     # Check if path exists and is readable
     dir_info = get_directory_info(path, system_account)
@@ -822,6 +853,20 @@ def api_check_path():
         )
 
     path = os.path.realpath(path)
+
+    # Issue #3376: home subtree lock; explicitly shared project roots
+    # stay reachable (read-side parity with the #1813 write lock).
+    if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": "Path must be inside your home directory or a shared project. "
+                    f"Provided path: {path}",
+                }
+            ),
+            400,
+        )
 
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None
