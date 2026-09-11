@@ -2,9 +2,11 @@
 Open ACE - Workspace Isolation Capability Endpoint (Issue #3374).
 
 GET /api/workspace/isolation-capabilities returns the versioned capability
-contract for local interactive workspace multi-user isolation. Admins and
-trusted integrators query this contract instead of relying on README claims
-or client-side capability booleans.
+contract for local interactive workspace multi-user isolation. Available to
+any authenticated user (session cookie or Bearer): the contract carries no
+secrets, and issue #3374 asks for admin AND trusted-integrator access —
+WebUI-token iframe callers are not served here (they use their own
+per-resource tokens; this endpoint is not part of the iframe flow).
 """
 
 import logging
@@ -28,9 +30,16 @@ def get_isolation_capabilities():
         JSON contract: local_workspace_multi_user, backend, isolation_level,
         enforced/unsupported dimension lists, reasons, entry_points, and
         policy_revision. See docs/workspace-isolation-capabilities.md.
+
+    Read-only by construction: never creates the WebUI manager (which would
+    mint a token secret and spawn a cleanup greenlet) — when no manager
+    exists yet the snapshot is derived from disk config only.
     """
     try:
-        snapshot = build_workspace_isolation_snapshot()
+        from app.services.webui_manager import peek_webui_manager
+
+        manager = peek_webui_manager()
+        snapshot = build_workspace_isolation_snapshot(manager)
     except Exception as e:
         logger.error("Failed to build isolation capability snapshot: %s", e)
         return jsonify({"error": "Internal server error"}), 500

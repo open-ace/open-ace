@@ -170,6 +170,10 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
     instance.port = 3123
     instance.token = "instance-token"
     instance.url = "http://172.17.0.1:3123"  # stale container-IP url
+    # Issue #3374 review #2: the reuse branch compares the instance's launch
+    # account with the requested one — keep them equal so the live instance
+    # is reused (a mismatch would trigger a restart under the new mapping).
+    instance.system_account = "testuser"
     manager._instances = {1: instance}
 
     # Fake request context: the browser hits 192.168.1.169:19888 while the

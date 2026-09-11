@@ -198,3 +198,67 @@ def test_gate_passes_when_all_conditions_hold(monkeypatch):
         )
         is None
     )
+
+
+class _ReadyStubManager(_StubManager):
+    def __init__(self, readiness):
+        super().__init__()
+        self._readiness = readiness
+
+    def per_user_launch_readiness(self):
+        return self._readiness
+
+
+def test_snapshot_consults_launch_readiness(monkeypatch):
+    # 评审 #4:快照必须与 /user-url 闸门看同一个启动路径——dev 目录模式等
+    # 降级形态下契约不再宣称 os_user
+    _patch_deployment(monkeypatch, docker_multi_user=True)
+    snap = wic.build_workspace_isolation_snapshot(
+        _ReadyStubManager(readiness="dev_directory_mode_shared_account")
+    )
+    assert snap.supported is False
+    assert _reason_codes(snap) == ["launch_path_degraded"]
+    assert "dev_directory_mode_shared_account" in snap.reasons[0].message
+
+
+def test_snapshot_ok_when_readiness_clean(monkeypatch):
+    _patch_deployment(monkeypatch, docker_multi_user=True)
+    snap = wic.build_workspace_isolation_snapshot(_ReadyStubManager(readiness=None))
+    assert snap.supported is True
+
+
+def test_snapshot_without_manager_reads_disk_config(monkeypatch):
+    # 评审 #13:无 manager 单例时按磁盘配置推导,不构造 manager、不探测启动路径
+    _patch_deployment(monkeypatch, docker_multi_user=True)
+
+    class _DiskConfig:
+        enabled = True
+        multi_user_mode = True
+
+    monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
+    monkeypatch.setattr(
+        "app.services.webui_manager.read_workspace_config",
+        lambda: _DiskConfig(),
+    )
+    snap = wic.build_workspace_isolation_snapshot(None)
+    assert snap.supported is True  # 无法探测启动路径,按部署姿态报告(文档注明)
+
+
+def test_unsupported_snapshot_omits_entry_points(monkeypatch):
+    # 评审 #11:unsupported 快照不再输出"webui: enforced"式入口矩阵
+    _patch_deployment(monkeypatch)
+    data = wic.build_workspace_isolation_snapshot(_StubManager(enabled=False)).public_dict()
+    assert "entry_points" not in data
+
+
+def test_supported_snapshot_keeps_entry_points(monkeypatch):
+    _patch_deployment(monkeypatch, docker_multi_user=True)
+    data = wic.build_workspace_isolation_snapshot(_ReadyStubManager(readiness=None)).public_dict()
+    assert data["entry_points"]["webui"] == "enforced"
+
+
+def test_unverified_message_clarifies_possibility(monkeypatch):
+    # 评审 #10:非 Docker 形态的措辞明示"可能仍支持,仅无法验证"
+    _patch_deployment(monkeypatch, docker_multi_user=False)
+    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    assert "may still launch" in snap.reasons[0].message

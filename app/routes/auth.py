@@ -94,11 +94,25 @@ def api_login():
         # Ensure workspace directory exists on login
         user_id = int(user.get("id", 0))
         user_data = user_repo.get_user_by_id(user_id)
+
+        # Fetch the workspace manager once: it decides whether the
+        # convention backfill below is allowed (Issue #3374 review #1) and
+        # drives the multi-user pre-start gate further below.
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        multi_user_mode = bool(manager.config.enabled and manager.config.multi_user_mode)
+
         if user_data:
             system_account = user_data.get("system_account") or user_data.get("username")
             if system_account:
-                # Idempotent update: set system_account if empty
-                if not user_data.get("system_account"):
+                # Idempotent update: set system_account if empty. In
+                # multi-user workspace mode this backfill is SKIPPED: the
+                # isolation gate treats an absent system_account as a
+                # missing identity mapping (identity_mapping_missing), and
+                # silently materializing the username convention would make
+                # that state unreachable (Issue #3374 review #1).
+                if not user_data.get("system_account") and not multi_user_mode:
                     try:
                         user_repo.update_user(user_id=user_id, system_account=system_account)
                         logger.info(
@@ -126,23 +140,17 @@ def api_login():
 
         # Pre-start webui instance for user (in multi-user mode)
         try:
-            from app.services.webui_manager import get_webui_manager
-
-            manager = get_webui_manager()
-            if manager.config.enabled and manager.config.multi_user_mode:
+            if multi_user_mode:
                 user_id = int(user.get("id", 0))
-                # Get user's system_account
+                # Get user's EXPLICIT system_account — prestart never falls
+                # back to username and goes through the same isolation gate
+                # as /user-url (Issue #3374 review #6): it must not launch
+                # what the gate would reject.
                 user_data = user_repo.get_user_by_id(user_id)
-                system_account = (
-                    user_data.get("system_account") or user_data.get("username")
-                    if user_data
-                    else None
-                )
-                if user_id and system_account:
-                    logger.info(
-                        f"Pre-starting webui for user {user_id} ({system_account}) on login"
-                    )
-                    manager.prestart_user_instance_async(user_id, system_account, request.host_url)
+                raw_account = user_data.get("system_account") if user_data else None
+                if user_id and raw_account:
+                    logger.info(f"Pre-starting webui for user {user_id} ({raw_account}) on login")
+                    manager.prestart_user_instance_async(user_id, raw_account, request.host_url)
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")
 

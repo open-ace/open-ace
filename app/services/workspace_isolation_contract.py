@@ -109,16 +109,21 @@ class IsolationCapabilitySnapshot:
     policy_revision: str = POLICY_REVISION
 
     def public_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "local_workspace_multi_user": "supported" if self.supported else "unsupported",
             "backend": self.backend,
             "isolation_level": self.isolation_level,
             "enforced": list(self.enforced),
             "unsupported": list(self.unsupported),
             "reasons": [r.public_dict() for r in self.reasons],
-            "entry_points": dict(ENTRY_POINT_STATUSES),
             "policy_revision": self.policy_revision,
         }
+        # Issue #3374 review #11: the entry-point matrix describes multi-user
+        # enforcement; emitting it on an unsupported snapshot would claim
+        # "webui: enforced" next to "no isolation at all".
+        if self.supported:
+            data["entry_points"] = dict(ENTRY_POINT_STATUSES)
+        return data
 
 
 def _unsupported(reason_code: str, message: str) -> IsolationCapabilitySnapshot:
@@ -135,13 +140,29 @@ def _unsupported(reason_code: str, message: str) -> IsolationCapabilitySnapshot:
 def build_workspace_isolation_snapshot(
     manager: Any = None,
 ) -> IsolationCapabilitySnapshot:
-    """Derive the isolation capability snapshot from live runtime state."""
+    """Derive the isolation capability snapshot from live runtime state.
+
+    When a manager is available the snapshot also consults the launch-path
+    readiness probe, so the contract and the /user-url gate can never
+    disagree about the same host (Issue #3374 review #4). Without a manager
+    (read-only capability GET before any workspace activity) the snapshot is
+    derived from disk config only and cannot verify the launch path — that
+    limitation is documented in the capability docs.
+    """
+    readiness_probe = None
+    config: Any = None
     if manager is None:
-        from app.services.webui_manager import get_webui_manager
+        from app.services.webui_manager import peek_webui_manager
 
-        manager = get_webui_manager()
+        manager = peek_webui_manager()
+    if manager is None:
+        from app.services.webui_manager import read_workspace_config
 
-    config = getattr(manager, "config", None)
+        config = read_workspace_config()
+    else:
+        config = getattr(manager, "config", None)
+        readiness_probe = getattr(manager, "per_user_launch_readiness", None)
+
     if config is None or not getattr(config, "enabled", False):
         return _unsupported(
             "webui_disabled",
@@ -168,10 +189,22 @@ def build_workspace_isolation_snapshot(
     if not _is_docker_multi_user_mode():
         return _unsupported(
             "identity_mapping_unverified",
-            "Multi-user mode is enabled, but this deployment cannot create "
-            "or verify per-user system accounts; see deployment requirements "
-            "in the workspace isolation documentation.",
+            "Multi-user mode is enabled, but Open ACE cannot verify per-user "
+            "identity mapping in this deployment form (verified os_user "
+            "requires the Docker multi-user layout: root with "
+            "WORKSPACE_BASE_DIR=/workspace). The deployment may still launch "
+            "per-user WebUIs; this contract only reports levels it can verify.",
         )
+
+    if readiness_probe is not None:
+        degradation = readiness_probe()
+        if degradation:
+            return _unsupported(
+                "launch_path_degraded",
+                "This deployment's WebUI launch path cannot host per-user "
+                f"instances ({degradation}); see the workspace isolation "
+                "documentation.",
+            )
 
     return IsolationCapabilitySnapshot(
         supported=True,

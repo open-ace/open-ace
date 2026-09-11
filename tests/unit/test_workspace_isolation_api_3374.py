@@ -3,13 +3,16 @@
 from unittest.mock import patch
 
 import pytest
-from flask import Flask
 
 from app.services import workspace_isolation_contract as wic
 
 pytestmark = [pytest.mark.issue(3374)]
 
 MOCK_SESSION = (True, {"user_id": 42, "username": "alice", "role": "user", "tenant_id": 1})
+
+# 真实 URL(app/__init__.py 的注册与 url_prefix);评审 #15:此前的独立蓝图
+# fixture 自己复述了 prefix,删掉注册行的守卫能力是假的。
+URL = "/api/workspace/isolation-capabilities"
 
 
 class _StubConfig:
@@ -22,28 +25,18 @@ class _StubManager:
 
 
 @pytest.fixture
-def isolation_app():
-    """Flask app with only the workspace_isolation blueprint (production prefix)."""
-    from app.routes.workspace_isolation import workspace_isolation_bp
-
-    app = Flask(__name__)
-    app.config["TESTING"] = True
-    app.register_blueprint(workspace_isolation_bp, url_prefix="/api")
-    return app
-
-
-@pytest.fixture
 def stub_snapshot():
     return wic.build_workspace_isolation_snapshot(_StubManager())
 
 
-def test_requires_authentication(isolation_app):
-    resp = isolation_app.test_client().get("/api/workspace/isolation-capabilities")
+def test_requires_authentication(app, client):
+    resp = client.get(URL)
     assert resp.status_code == 401
 
 
-def test_returns_contract_for_authenticated_user(isolation_app, stub_snapshot):
-    client = isolation_app.test_client()
+def test_returns_contract_for_authenticated_user(app, client, stub_snapshot, monkeypatch):
+    # 不构造真实 manager(只读端点不得铸造 secret/起清理 greenlet,评审 #13)
+    monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
     with (
         patch(
             "app.routes.workspace_isolation.build_workspace_isolation_snapshot",
@@ -51,16 +44,13 @@ def test_returns_contract_for_authenticated_user(isolation_app, stub_snapshot):
         ),
         patch("app.auth.decorators._authenticate", return_value=MOCK_SESSION),
     ):
-        resp = client.get(
-            "/api/workspace/isolation-capabilities",
-            headers={"Authorization": "Bearer test-token"},
-        )
+        resp = client.get(URL, headers={"Authorization": "Bearer test-token"})
     assert resp.status_code == 200
     assert resp.get_json() == stub_snapshot.public_dict()
 
 
-def test_internal_error_is_structured(isolation_app):
-    client = isolation_app.test_client()
+def test_internal_error_is_structured(app, client, monkeypatch):
+    monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
     with (
         patch(
             "app.routes.workspace_isolation.build_workspace_isolation_snapshot",
@@ -68,9 +58,6 @@ def test_internal_error_is_structured(isolation_app):
         ),
         patch("app.auth.decorators._authenticate", return_value=MOCK_SESSION),
     ):
-        resp = client.get(
-            "/api/workspace/isolation-capabilities",
-            headers={"Authorization": "Bearer test-token"},
-        )
+        resp = client.get(URL, headers={"Authorization": "Bearer test-token"})
     assert resp.status_code == 500
     assert resp.get_json() == {"error": "Internal server error"}

@@ -14,11 +14,13 @@ MOCK_USER = {"id": 7, "user_id": 7, "username": "alice", "role": "user", "tenant
 class _Config:
     enabled = True
     multi_user_mode = True
+    required_isolation_level = ""
 
 
 class _StubManager:
-    def __init__(self):
+    def __init__(self, multi_user_mode=True):
         self.config = _Config()
+        self.config.multi_user_mode = multi_user_mode
         self.launched_with = None
 
     def get_user_webui_url(self, user_id, system_account, host_url):
@@ -74,11 +76,10 @@ def test_unknown_user_is_404(app, client):
 
 @pytest.mark.regression
 @pytest.mark.parametrize("query", ["", "?required_isolation=none"])
-def test_default_path_preserves_username_fallback(app, client, monkeypatch, query):
-    # 回归保护:显式隔离要求缺席(或显式 none)时,username 回退(既有映射约定)
-    # 必须保留——设计 §4.1 将缺省与 required_isolation=none 定义为等价。
-    _deployment_supported(monkeypatch)
-    stub = _StubManager()
+def test_single_user_mode_preserves_username_fallback(app, client, monkeypatch, query):
+    # 回归保护:单用户模式(隔离下限为 none)下,username 回退(既有映射约定)
+    # 必须保留——多用户模式的默认 fail-closed 见下方用例(评审 #12)。
+    stub = _StubManager(multi_user_mode=False)
     patches = _patch_stack(_db_user(None), stub)
     try:
         resp = _call(client, query)
@@ -90,7 +91,70 @@ def test_default_path_preserves_username_fallback(app, client, monkeypatch, quer
     assert body["success"] is True
     assert body["system_account"] == "alice"  # username 回退保留
     assert stub.launched_with == "alice"
-    assert body["isolation"]["local_workspace_multi_user"] == "supported"
+    assert body["isolation"]["local_workspace_multi_user"] == "unsupported"
+
+
+@pytest.mark.regression
+def test_multi_user_default_path_fails_closed_without_mapping(app, client, monkeypatch):
+    # 评审 #1/#12:多用户模式下隔离下限默认为 os_user,登录不再回填
+    # system_account,缺映射的默认路径(无参数)结构化拒绝而非静默启动
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    patches = _patch_stack(_db_user(None), stub)
+    try:
+        resp = _call(client, "")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body["error_code"] == "identity_mapping_missing"
+    assert stub.launched_with is None
+
+
+def test_param_cannot_lower_config_floor(app, client, monkeypatch):
+    # 评审 #12:请求参数只能抬高下限——多用户模式下 ?required_isolation=none
+    # 不会把默认的 os_user 下限降级
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    patches = _patch_stack(_db_user(None), stub)
+    try:
+        resp = _call(client, "?required_isolation=none")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 400
+    assert resp.get_json()["error_code"] == "identity_mapping_missing"
+
+
+def test_multi_user_default_path_with_explicit_mapping(app, client, monkeypatch):
+    # 评审 #12:多用户模式默认路径对有显式映射的用户正常放行(默认 UI 不退化)
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 200
+    assert resp.get_json()["system_account"] == "alice_acct"
+    assert stub.launched_with == "alice_acct"
+
+
+def test_empty_param_counts_as_absent(app, client, monkeypatch):
+    # 评审 #14:?required_isolation=(空串/空白)视为缺省,不产生 invalid 400
+    _deployment_supported(monkeypatch)
+    stub = _StubManager()
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "?required_isolation=")
+        resp_ws = _call(client, "?required_isolation=%20")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 200
+    assert resp_ws.status_code == 200
 
 
 def test_gate_rejects_missing_identity_mapping(app, client, monkeypatch):
@@ -132,6 +196,25 @@ def test_gate_rejects_invalid_level(app, client):
             p.stop()
     assert resp.status_code == 400
     assert resp.get_json()["error_code"] == "invalid_isolation_level"
+
+
+def test_rejection_reasons_keep_both_namespaces(app, client, monkeypatch):
+    # 评审 #7:部署级 reasons 与请求级拒绝并存——参数笔误不应顶掉部署原因
+    _deployment_supported(monkeypatch)
+    # 平台改回真实值使快照带部署级 reason
+    monkeypatch.setattr(wic, "_current_platform", lambda: "darwin")
+    stub = _StubManager()
+    patches = _patch_stack(_db_user("alice_acct"), stub)
+    try:
+        resp = _call(client, "?required_isolation=strong")
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status_code == 400
+    body = resp.get_json()
+    codes = [r["code"] for r in body["reasons"]]
+    assert "platform_unsupported" in codes
+    assert "invalid_isolation_level" in codes
 
 
 def test_gate_rejects_shared_account_launch(app, client, monkeypatch):

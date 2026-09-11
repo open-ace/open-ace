@@ -2347,8 +2347,14 @@ def get_user_webui_url():
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
     from app.services.workspace_isolation_contract import (
+        ISOLATION_LEVEL_NONE,
+        ISOLATION_LEVEL_OS_USER,
+        SUPPORTED_ISOLATION_LEVELS,
+        IsolationReason,
         build_workspace_isolation_snapshot,
         evaluate_isolation_requirement,
+        is_valid_isolation_level,
+        isolation_level_at_least,
     )
 
     # Check if user is logged in
@@ -2372,34 +2378,51 @@ def get_user_webui_url():
         raw_system_account = user.get("system_account")
         system_account = raw_system_account or user.get("username")
 
-        # Issue #3374: explicit isolation requirements are gated BEFORE the
-        # username fallback — a missing identity mapping is a structured
-        # rejection, never a silent convention-derived/shared account.
-        required_isolation = flask_request.args.get("required_isolation")
+        # Issue #3374 (reviews #12/#14): the isolation floor is server-side —
+        # config required_isolation_level, defaulting to os_user in multi-user
+        # mode — and the request parameter can only RAISE it, never lower it.
+        # An empty/whitespace parameter counts as absent.
         isolation_snapshot = build_workspace_isolation_snapshot(manager)
-        if required_isolation is not None:
+        config_floor = (getattr(manager.config, "required_isolation_level", "") or "").strip()
+        if not config_floor:
+            config_floor = (
+                ISOLATION_LEVEL_OS_USER if manager.config.multi_user_mode else ISOLATION_LEVEL_NONE
+            )
+        requested = (flask_request.args.get("required_isolation") or "").strip()
+        if requested and not is_valid_isolation_level(requested):
+            rejection = IsolationReason(
+                "invalid_isolation_level",
+                f"Unknown isolation level '{requested}'; expected one of "
+                f"{', '.join(SUPPORTED_ISOLATION_LEVELS)}.",
+            )
+        else:
+            effective = config_floor
+            if requested and isolation_level_at_least(requested, config_floor):
+                effective = requested
             rejection = evaluate_isolation_requirement(
-                required_isolation,
+                effective,
                 snapshot=isolation_snapshot,
                 system_account=raw_system_account,
                 manager=manager,
             )
-            if rejection is not None:
-                reasons = [r.public_dict() for r in isolation_snapshot.reasons]
-                if not reasons:
-                    reasons = [rejection.public_dict()]
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": rejection.message,
-                            "error_code": rejection.code,
-                            "reasons": reasons,
-                            "isolation": isolation_snapshot.public_dict(),
-                        }
-                    ),
-                    400,
-                )
+        if rejection is not None:
+            # Two disjoint reason namespaces (reviews #7): deployment-level
+            # snapshot reasons plus the request-level rejection, appended —
+            # consumers keying on reasons[0] still get the deployment story.
+            reasons = [r.public_dict() for r in isolation_snapshot.reasons]
+            reasons.append(rejection.public_dict())
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": rejection.message,
+                        "error_code": rejection.code,
+                        "reasons": reasons,
+                        "isolation": isolation_snapshot.public_dict(),
+                    }
+                ),
+                400,
+            )
 
         # Get or create user's webui instance.
         # Pass host_url so the iframe URL uses the browser-visible host instead

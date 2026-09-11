@@ -34,7 +34,11 @@ reason code 对照与已知缺口。关联 issue:#3374。
   `qwen-code-webui-shared`(共享单实例)。
 - `isolation_level` / `enforced` / `unsupported`:见下节。
 - `reasons`:unsupported 时的机器可读原因(可能为空)。
-- `entry_points`:各入口的隔离覆盖状态(§4)。
+- `entry_points`:各入口的隔离覆盖状态(§4)。**仅在 supported 快照中输出**——
+  入口矩阵描述的是多用户隔离的覆盖面,unsupported(单用户/未验证/降级)部署
+  不携带该矩阵,避免"无隔离"与"webui: enforced"同帧自相矛盾。该矩阵为静态
+  审计结论,随 `policy_revision` 版本化;各入口与代码的 conformance 绑定为
+  后续工作(§7)。
 - `policy_revision`:契约语义版本;推导逻辑或入口矩阵变化时递增。
 
 ## 2. 隔离等级语义
@@ -66,7 +70,8 @@ reason code 对照与已知缺口。关联 issue:#3374。
 | `webui_disabled` | WebUI 管理器未启用,无交互工作区运行时 |
 | `platform_unsupported` | 非 Linux 平台(Windows/macOS/其他) |
 | `multi_user_mode_disabled` | 多用户模式未启用(单用户轻量模式,预期状态而非缺陷) |
-| `identity_mapping_unverified` | 多用户已启用,但该部署形态无法创建/验证每用户系统账户 |
+| `identity_mapping_unverified` | 多用户已启用,但该部署形态无法**验证**每用户身份映射(需要 Docker 多用户布局);部署可能仍实际支持按用户启动,契约只报告它能验证的等级 |
+| `launch_path_degraded` | 部署形态达标但 WebUI 启动路径无法承载按用户实例(message 括注 §3.3 的具体原因,如 dev 目录模式/包装器缺失);契约与 /user-url 门闸看同一条路径,不会互相矛盾 |
 
 ### 3.2 门闸 `error_code`(请求级:`user-url?required_isolation=...` 的拒绝)
 
@@ -80,7 +85,7 @@ reason code 对照与已知缺口。关联 issue:#3374。
 易混对照:`identity_mapping_unverified`(部署级,契约里"这套部署建不了身份映射")
 vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映射")。
 
-### 3.3 探针原因码(嵌在 `per_user_launch_unavailable` 的 message 中)
+### 3.3 探针原因码(嵌在 `per_user_launch_unavailable` 的 message 中,或作为部署级 `launch_path_degraded` 的括注)
 
 | code | 含义 |
 |---|---|
@@ -88,7 +93,10 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `webui_executable_missing` | 找不到 qwen-code-webui 可执行文件 |
 | `current_user_unresolved` | 服务进程自身 UID 无法解析 |
 | `dev_directory_mode_shared_account` | dev 目录模式以服务用户运行 node,不切换 UID |
-| `sudo_unavailable` | 无 sudo 可用于降权到目标系统账户 |
+| `launch_wrapper_missing` | `openace-webui-launch` 包装器未安装或不可执行(sudo 路径的真实前置) |
+| `sudo_unavailable` | 无 sudo 二进制 |
+| `privileged_system_account` | 目标系统账户 uid 为 0(如映射到 root) |
+| `reserved_system_account` | 目标系统账户 uid < 1000(系统保留段) |
 
 ## 4. 入口覆盖矩阵
 
@@ -127,6 +135,12 @@ curl -H "Authorization: Bearer <token>" \
   https://<open-ace>/api/workspace/isolation-capabilities
 ```
 
+- 端点为只读构造:不创建 WebUI manager(即不铸造 token secret、不启动清理
+  greenlet);manager 尚未存在时快照按磁盘配置推导,无法验证启动路径(该限制
+  体现在 `launch_path_degraded` 只在 manager 活跃时可能出现)。
+- 鉴权:任意已认证用户(session cookie 或 Bearer)。契约不含机密;WebUI-token
+  iframe 调用方不在此端点服务范围内(iframe 流程使用各自的 per-resource token)。
+
 带隔离要求启动工作区(能力不足时得到结构化 400,而非静默弱启动):
 
 ```bash
@@ -134,13 +148,25 @@ curl -H "Authorization: Bearer <token>" \
   "https://<open-ace>/api/workspace/user-url?required_isolation=os_user"
 ```
 
-- 成功:响应含 `url`/`token`/`system_account` 与 `isolation`(实际生效策略快照)。
-- 失败:`success:false` + `error_code`(§3.2)+ `reasons` + `isolation`。
-- 不带 `required_isolation` 的调用保持既有行为(兼容默认 UI)。
+**隔离下限是服务端的**(config.json `workspace.required_isolation_level`,
+缺省:多用户模式为 `os_user`,单用户模式为 `none`);`required_isolation`
+请求参数**只能抬高**下限,不能降低。空值/空白参数视为缺省。登录时的后台
+预启动(prestart)走同一评估——门闸会拒绝的启动不会发生。
 
-探针取舍说明:`supports_per_user_launch` 复用 WebUI 可执行文件的解析路径,
-该解析可能触发一次构建探测;**成功**的解析结果在进程内记忆化(失败不缓存,
-安装 webui 后无需重启即可恢复)。
+- 成功:响应含 `url`/`token`/`system_account` 与 `isolation`(部署已验证姿态
+  快照;服务端下限保证默认路径同样经过门闸,回显与实际启动一致)。
+- 失败:`success:false` + `error_code`(§3.2)+ `reasons`(部署级与请求级两个
+  命名空间并存)+ `isolation`。
+- 单用户模式(下限 none)下不带参数的调用保持既有行为。
+- **行为变化**:多用户模式下 `system_account` 为空的用户,默认路径(无参数)
+  也会得到 `identity_mapping_missing` 400——登录不再自动回填 username 约定,
+  需管理员显式设置映射;缓存实例的启动账户与当前映射不符时会自动重启到新账户。
+
+探针取舍说明:`supports_per_user_launch`/`per_user_launch_readiness` 以
+**probe-only** 方式解析 WebUI 可执行文件(绝不触发 npm build);就绪结果
+(含降级态)在进程内按 30 秒 TTL 双向记忆化,成功解析额外永久缓存。sudo
+路径的真实前置是 `openace-webui-launch` 包装器已安装且可执行(sudoers 规则
+本身无法廉价验证);目标系统账户拒绝 uid 0 与保留段(uid<1000)。
 
 ## 7. 已知缺口与后续路线
 
