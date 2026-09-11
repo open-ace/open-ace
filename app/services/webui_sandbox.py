@@ -827,3 +827,472 @@ class SandboxedWebuiLauncher:
             logger.warning("webui sandbox %s delete failed: %s", sandbox_id, exc)
         except Exception as exc:  # noqa: BLE001 - destroy stays idempotent
             logger.warning("webui sandbox %s delete failed: %s", sandbox_id, exc)
+
+
+# ── D1: the per-instance browser proxy ──────────────────────────────────────
+
+# Client headers never forwarded upstream (beyond the credential prefixes):
+# hop-by-hop headers per RFC 7230 §6.1 plus Expect (a 100-continue the proxy
+# cannot answer would wedge the upstream).
+_HOP_BY_HOP_REQUEST_HEADERS = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "expect",
+    }
+)
+
+# The credential/routing header namespace. Everything the client sends under
+# these prefixes is stripped — the browser is the untrusted party here, and
+# the ONLY legitimate source of these headers is the server-resolved endpoint
+# map injected below.
+_INJECTED_HEADER_PREFIXES = ("opensandbox-", "x-execd-")
+
+# The four names the endpoint resolution may legitimately inject (mirrors
+# client._ALLOWED_ENDPOINT_HEADER_KEYS — the complete set upstream ever sends).
+_INJECTABLE_HEADER_NAMES = frozenset(
+    {
+        "opensandbox-secure-access",
+        "opensandbox-ingress-to",
+        "x-execd-access-token",
+        "opensandbox-egress-auth",
+    }
+)
+
+# Bounded buffering: a runaway head or chunked body fails loudly instead of
+# being absorbed into control-plane memory.
+_MAX_HEAD_BYTES = 64 * 1024
+_MAX_DECHUNK_BYTES = 16 * 1024 * 1024
+
+
+def _parse_head(head: bytes) -> tuple[str, list[tuple[str, str]]]:
+    """Split a raw request/response head into its start line + header pairs."""
+    text = head.decode("iso-8859-1")
+    lines = text.split("\r\n")
+    start_line = lines[0]
+    headers: list[tuple[str, str]] = []
+    for line in lines[1:]:
+        if not line:
+            continue
+        if ":" not in line:
+            raise ValueError(f"malformed header line {line!r}")
+        name, _, value = line.partition(":")
+        headers.append((name.strip(), value.strip()))
+    return start_line, headers
+
+
+def _serialize_head(start_line: str, headers: list[tuple[str, str]]) -> bytes:
+    """Assemble a start line + headers back into wire bytes."""
+    lines = [start_line] + [f"{name}: {value}" for name, value in headers]
+    return ("\r\n".join(lines) + "\r\n\r\n").encode("iso-8859-1")
+
+
+class _BufferedSock:
+    """A gevent socket plus the bytes overread past the last head/line read.
+
+    ``recv`` semantics differ from a raw socket on purpose: ``read_head`` /
+    ``read_line`` buffer until their terminator, and everything they read past
+    it stays buffered so the body reader never blocks on bytes it already has.
+    """
+
+    def __init__(self, sock: Any) -> None:
+        """Wrap *sock*; all I/O cooperates because *sock* is a gevent socket."""
+        self._sock = sock
+        self._pending = bytearray()
+
+    def read_head(self, max_bytes: int = _MAX_HEAD_BYTES) -> bytes:
+        """Read through the blank line; return the head WITHOUT its terminator."""
+        while b"\r\n\r\n" not in self._pending:
+            if len(self._pending) > max_bytes:
+                raise _BadRequest("head over the proxy size limit")
+            chunk = self._sock.recv(65536)
+            if not chunk:
+                raise OSError("connection closed before the head completed")
+            self._pending.extend(chunk)
+        head, _, rest = bytes(self._pending).partition(b"\r\n\r\n")
+        self._pending = bytearray(rest)
+        return head
+
+    def read_line(self, max_bytes: int = 8192) -> bytes:
+        r"""Read one ``\n``-terminated line, returning it WITH the newline."""
+        while b"\n" not in self._pending:
+            if len(self._pending) > max_bytes:
+                raise _BadRequest("overlong framing line")
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                raise OSError("connection closed mid-line")
+            self._pending.extend(chunk)
+        line, _, rest = bytes(self._pending).partition(b"\n")
+        self._pending = bytearray(rest)
+        return line + b"\n"
+
+    def read_exact(self, count: int) -> bytes:
+        """Read exactly *count* bytes (short only on peer close)."""
+        while len(self._pending) < count:
+            chunk = self._sock.recv(min(65536, count - len(self._pending)))
+            if not chunk:
+                break
+            self._pending.extend(chunk)
+        out = bytes(self._pending[:count])
+        del self._pending[:count]
+        return out
+
+    def pending_bytes(self) -> int:
+        """How many buffered bytes are already in hand."""
+        return len(self._pending)
+
+    def drain_pending(self) -> bytes:
+        """Return and forget the buffered overread."""
+        out = bytes(self._pending)
+        self._pending = bytearray()
+        return out
+
+    def sendall(self, data: bytes) -> None:
+        """Write bytes to the peer."""
+        self._sock.sendall(data)
+
+    def pump_from(self) -> bytes:
+        """One receive step: buffered overread first, then a fresh recv."""
+        if self._pending:
+            return self.drain_pending()
+        try:
+            chunk: bytes = self._sock.recv(65536)
+            return chunk
+        except OSError:
+            return b""
+
+    def close(self) -> None:
+        """Close the underlying socket (best effort)."""
+        try:
+            self._sock.close()
+        except Exception:  # noqa: BLE001 - teardown is best effort
+            pass
+
+
+class SandboxWebuiProxy:
+    """Dumb byte pipe from one local port to one pod's webui endpoint (D1).
+
+    Port-shaped on purpose: a path-shaped proxy would depend on the webui
+    frontend using relative paths everywhere — an external application whose
+    behavior we cannot verify. Port-shaped, the origin is the root path and no
+    rewriting assumption exists.
+
+    HTTP mode is one request per connection (``Connection: close`` on both
+    legs; SSE is unaffected because the response body streams until the
+    upstream closes). WS mode forwards the client's Upgrade with the injected
+    headers and, on 101, splices the two sockets in both directions.
+
+    Authentication is NOT the proxy's business (D1: a dumb pipe): the pod's
+    webui validates tokens end-to-end against the per-instance secret, so a
+    local open port is equivalent to today's local webui port. Every
+    successful forward reports through ``on_activity`` — this is the only
+    heartbeat the single-user form has.
+    """
+
+    def __init__(
+        self,
+        *,
+        sandbox_id: str,
+        upstream_resolver: Callable[[], tuple[str, dict[str, str]]],
+        on_activity: Callable[[], None] | None = None,
+        bind_host: str = "0.0.0.0",  # noqa: S104 - same exposure as the local webui port
+    ) -> None:
+        """Store wiring; nothing binds until :meth:`start`."""
+        self.sandbox_id = sandbox_id
+        self._upstream_resolver = upstream_resolver
+        self._on_activity = on_activity
+        self._bind_host = bind_host
+        self._server: Any = None
+        self.port: int | None = None
+        self._greenlets: set[Any] = set()
+
+    # ── lifecycle ────────────────────────────────────────────────────
+
+    def start(self, port: int = 0) -> int:
+        """Bind and start serving; returns the bound port."""
+        import gevent.server
+
+        if self._server is not None:
+            return int(self.port or 0)
+        self._server = gevent.server.StreamServer((self._bind_host, port), self._handle)
+        self._server.start()  # cooperative: serves on this thread's hub
+        self.port = int(self._server.address[1])
+        logger.info(
+            "webui proxy for sandbox %s listening on %s:%s",
+            self.sandbox_id,
+            self._bind_host,
+            self.port,
+        )
+        return self.port
+
+    def stop(self) -> None:
+        """Close the listening socket and kill every in-flight greenlet."""
+        import gevent
+
+        greenlets = list(self._greenlets)
+        self._greenlets.clear()
+        for greenlet in greenlets:
+            try:
+                greenlet.kill()
+            except Exception:  # noqa: BLE001 - stop must always succeed
+                pass
+        if self._server is not None:
+            try:
+                self._server.stop()
+            except Exception:  # noqa: BLE001 - stop must always succeed
+                pass
+            self._server = None
+        gevent.sleep(0)
+        self.port = None
+
+    # ── connection handling ──────────────────────────────────────────
+
+    def _handle(self, client_sock: Any, _address: Any) -> None:
+        """Serve exactly one client connection (HTTP or WS upgrade)."""
+        import gevent
+
+        greenlet = gevent.getcurrent()
+        self._greenlets.add(greenlet)
+        client = _BufferedSock(client_sock)
+        upstream: _BufferedSock | None = None
+        try:
+            head = client.read_head()
+            start_line, headers = _parse_head(head)
+            self._validate_request(headers)
+            method, path, _version = self._split_request_line(start_line)
+
+            url, inject_headers = self._upstream_resolver()
+            outbound = self._build_outbound_headers(headers, inject_headers)
+
+            # A chunked request body is de-chunked BEFORE the head is sent:
+            # its TE header is stripped (hop-by-hop), so the upstream needs a
+            # real Content-Length instead of framing nothing.
+            request_body: bytes | None = None
+            lowered = {name.lower(): value for name, value in headers}
+            if "transfer-encoding" in lowered:
+                request_body = self._dechunk(client)
+                outbound.append(("Content-Length", str(len(request_body))))
+            elif "content-length" in lowered:
+                try:
+                    length = int(lowered["content-length"])
+                except ValueError as exc:
+                    raise _BadRequest("invalid Content-Length") from exc
+                request_body = client.read_exact(length) if length else b""
+
+            if self._is_websocket_upgrade(headers):
+                outbound = [
+                    (name, value) for name, value in outbound if name.lower() != "connection"
+                ] + [("Connection", "Upgrade")]
+
+            sock, base_path = self._connect_upstream(url)
+            upstream = _BufferedSock(sock)
+            target = f"{base_path.rstrip('/')}{path}" if base_path.rstrip("/") else path
+            upstream.sendall(_serialize_head(f"{method} {target} HTTP/1.1", outbound))
+            if request_body:
+                upstream.sendall(request_body)
+
+            response_head = upstream.read_head()
+            status_line, response_headers = _parse_head(response_head)
+            is_101 = status_line.split(" ", 2)[1:2] == ["101"]
+            if self._is_websocket_upgrade(headers) and is_101:
+                client.sendall(
+                    _serialize_head(status_line, self._clean_response_headers(response_headers))
+                )
+                self._notify_activity()
+                self._splice(client, upstream)
+                upstream = None  # splice owns both sockets now
+                return
+            cleaned = [
+                (name, value)
+                for name, value in self._clean_response_headers(response_headers)
+                if name.lower() != "connection"
+            ] + [("Connection", "close")]
+            client.sendall(_serialize_head(status_line, cleaned))
+            self._notify_activity()
+            # Single request per connection: relay the body raw (SSE included)
+            # until the upstream closes, then the finally block closes client.
+            self._pump(upstream, client)
+        except _BadRequest as exc:
+            self._send_simple(client, 400, "Bad Request", str(exc))
+        except (_UpstreamError, OSError):
+            self._send_simple(client, 502, "Bad Gateway", "upstream unavailable")
+        except Exception:  # noqa: BLE001 - a dead connection must not kill the hub
+            logger.exception("webui proxy error for sandbox %s", self.sandbox_id)
+            self._send_simple(client, 502, "Bad Gateway", "proxy error")
+        finally:
+            self._greenlets.discard(greenlet)
+            client.close()
+            if upstream is not None:
+                upstream.close()
+
+    def _validate_request(self, headers: list[tuple[str, str]]) -> None:
+        """Reject the two malformed shapes D1 names: CL+TE, duplicate injects."""
+        names = [name.lower() for name, _ in headers]
+        if "content-length" in names and "transfer-encoding" in names:
+            raise _BadRequest("Content-Length and Transfer-Encoding are mutually exclusive")
+        duplicated = sorted(name for name in _INJECTABLE_HEADER_NAMES if names.count(name) > 1)
+        if duplicated:
+            raise _BadRequest(f"duplicated injection headers: {duplicated}")
+
+    def _build_outbound_headers(
+        self, headers: list[tuple[str, str]], inject_headers: dict[str, str]
+    ) -> list[tuple[str, str]]:
+        """Strip client prefixes/hop-by-hop, then force-append the inject set.
+
+        The inject map is appended AFTER the strip, so an injected name always
+        overwrites whatever the client tried to send under the same name — and
+        every client header in the credential prefixes is dropped regardless.
+        """
+        outbound: list[tuple[str, str]] = []
+        for name, value in headers:
+            lowered = name.lower()
+            if lowered in _HOP_BY_HOP_REQUEST_HEADERS:
+                continue
+            if lowered.startswith(_INJECTED_HEADER_PREFIXES):
+                continue
+            outbound.append((name, value))
+        outbound.append(("Connection", "close"))
+        outbound.extend((str(key), str(value)) for key, value in inject_headers.items())
+        return outbound
+
+    def _clean_response_headers(self, headers: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Strip credential-namespace headers the browser never needs.
+
+        The four injectable names are allowlisted through (the gateway may
+        legitimately set them); anything else under the OpenSandbox-/
+        X-EXECD-/OPENSANDBOX- prefixes is dropped before the bytes reach the
+        browser. Framing headers (Content-Length / Transfer-Encoding) are kept
+        verbatim because the body is relayed raw behind them.
+        """
+        cleaned: list[tuple[str, str]] = []
+        for name, value in headers:
+            lowered = name.lower()
+            if lowered.startswith(_INJECTED_HEADER_PREFIXES) and (
+                lowered not in _INJECTABLE_HEADER_NAMES
+            ):
+                continue
+            cleaned.append((name, value))
+        return cleaned
+
+    def _dechunk(self, client: _BufferedSock) -> bytes:
+        """Read one chunked body to its terminator, bounded."""
+        body = bytearray()
+        while True:
+            size_line = client.read_line()
+            try:
+                size = int(size_line.split(b";", 1)[0].strip() or b"0", 16)
+            except ValueError as exc:
+                raise _BadRequest("malformed chunk size") from exc
+            if size == 0:
+                while True:  # trailers up to the blank line
+                    line = client.read_line()
+                    if line.strip() in (b"", b"\r\n"):
+                        break
+                break
+            if len(body) + size > _MAX_DECHUNK_BYTES:
+                raise _BadRequest("chunked request body over the proxy limit")
+            body.extend(client.read_exact(size))
+            client.read_line()  # the CRLF after each chunk
+        return bytes(body)
+
+    def _splice(self, client: _BufferedSock, upstream: _BufferedSock) -> None:
+        """Two-direction raw pump for an established 101 connection."""
+        import gevent
+
+        def pump(source: _BufferedSock, destination: _BufferedSock) -> None:
+            try:
+                self._pump(source, destination)
+            finally:
+                source.close()
+                destination.close()
+
+        up_greenlet = gevent.spawn(pump, client, upstream)
+        down_greenlet = gevent.spawn(pump, upstream, client)
+        self._greenlets.add(up_greenlet)
+        self._greenlets.add(down_greenlet)
+        try:
+            gevent.joinall([up_greenlet, down_greenlet], raise_error=True)
+        finally:
+            self._greenlets.discard(up_greenlet)
+            self._greenlets.discard(down_greenlet)
+
+    def _pump(self, source: _BufferedSock, destination: _BufferedSock) -> None:
+        """Relay raw bytes until the source closes or a write fails."""
+        while True:
+            chunk = source.pump_from()
+            if not chunk:
+                return
+            destination.sendall(chunk)
+
+    @staticmethod
+    def _split_request_line(start_line: str) -> tuple[str, str, str]:
+        """Split ``METHOD PATH HTTP/x``; refuse anything else."""
+        parts = start_line.split(" ", 2)
+        if len(parts) != 3:
+            raise _BadRequest(f"malformed request line {start_line!r}")
+        return parts[0], parts[1], parts[2]
+
+    @staticmethod
+    def _is_websocket_upgrade(headers: list[tuple[str, str]]) -> bool:
+        """Return True when the request asks for a websocket Upgrade."""
+        lowered = {name.lower(): value.lower() for name, value in headers}
+        return lowered.get("upgrade", "") == "websocket" and "upgrade" in lowered.get(
+            "connection", ""
+        ).split(", ")
+
+    def _connect_upstream(self, url: str) -> tuple[Any, str]:
+        """Open the upstream connection (url from the endpoint resolver)."""
+        from urllib.parse import urlparse
+
+        from gevent import socket as gevent_socket
+
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if not host:
+            raise _UpstreamError(f"upstream url {url!r} has no host")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            sock = gevent_socket.create_connection((host, port), timeout=15)
+        except OSError as exc:
+            raise _UpstreamError(f"upstream {host}:{port} unreachable: {exc}") from exc
+        if parsed.scheme == "https":
+            from gevent import ssl as gevent_ssl
+
+            sock = gevent_ssl.wrap_socket(sock, server_hostname=host)
+        return sock, parsed.path or ""
+
+    def _notify_activity(self) -> None:
+        """Report one successful forward to the activity callback."""
+        if self._on_activity is None:
+            return
+        try:
+            self._on_activity()
+        except Exception:  # noqa: BLE001 - bookkeeping must never break the pipe
+            logger.exception("webui proxy activity callback failed")
+
+    def _send_simple(self, sock: _BufferedSock, status: int, phrase: str, reason: str) -> None:
+        """Write a minimal error response (best effort)."""
+        body = reason.encode()
+        head = (
+            f"HTTP/1.1 {status} {phrase}\r\n"
+            "Content-Type: text/plain\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode()
+        try:
+            sock.sendall(head + body)
+        except Exception:  # noqa: BLE001 - the client may already be gone
+            pass
+
+
+class _BadRequest(Exception):
+    """A client request the D1 rules refuse with 400."""
+
+
+class _UpstreamError(Exception):
+    """The upstream endpoint could not be reached (502)."""
