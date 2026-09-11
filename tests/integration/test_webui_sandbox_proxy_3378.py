@@ -189,7 +189,7 @@ def _request(port: int, raw: bytes, read_timeout: float = 5.0) -> bytes:
                 if not chunk:
                     break
                 out.extend(chunk)
-        except socket.timeout:
+        except TimeoutError:
             pass
         return bytes(out)
 
@@ -384,7 +384,7 @@ def test_stop_closes_port_and_terminates_greenlets(gateway):
     runner = _ProxyThread(gateway)
     port = runner.start()
     client = socket.create_connection(("127.0.0.1", port), timeout=5)
-    client.sendall(f"GET /hang HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+    client.sendall(b"GET /hang HTTP/1.1\r\nHost: x\r\n\r\n")
     import time
 
     time.sleep(0.3)  # let the proxy pick up the connection
