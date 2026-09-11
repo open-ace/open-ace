@@ -6,12 +6,21 @@ the D1 contract end to end: HTTP passthrough with header injection override,
 client credential-prefix stripping, CL+TE 400, Expect stripping,
 Connection: close, SSE streaming, WS splice, upstream-unreachable 502, stop()
 killing in-flight greenlets, and the update_activity heartbeat.
+
+The gevent-thread scenarios execute in SUBPROCESSES (scripts under
+tests/integration/subprocess/): under pytest-xdist workers, killing or
+splicing greenlets over native sockets is the #2457 worker-crash class, which
+``--timeout-method thread`` cannot interrupt (two CI crashes on this file
+before the conversion). This module keeps the helpers the scripts import and
+maps every scenario to a thin runner test.
 """
 
 from __future__ import annotations
 
 import os
 import socket
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -158,13 +167,6 @@ class _Gateway:
         self._sock.close()
 
 
-@pytest.fixture()
-def gateway():
-    server = _Gateway()
-    yield server
-    server.close()
-
-
 class _ProxyThread:
     """Run the gevent proxy on a dedicated thread (its own hub)."""
 
@@ -243,120 +245,18 @@ def _get(port: int, path: str, extra_headers: str = "", body: bytes = b"", **kwa
     return _request(port, raw, **kwargs)
 
 
-# ── HTTP passthrough + header rules ────────────────────────────────────
-
-
-@pytest.mark.security
-def test_http_passthrough_injects_headers_and_overrides_client(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(port, "/api/version?token=v2:1:2:3:4:5")
-        assert response.startswith(b"HTTP/1.1 200 OK")
-        assert b'{"version":"ok"}' in response
-        assert b"Connection: close" in response
-        # Response allowlist: unknown prefix headers stripped, the injectable
-        # name passes.
-        assert b"OpenSandbox-Leak" not in response
-        assert b"OpenSandbox-Secure-Access: keepme" in response
-
-        request_line, headers, _body = gateway.requests[-1]
-        assert request_line.startswith("GET /api/version?token=v2:1:2:3:4:5")
-        # Injection overrides the client's forged value...
-        assert headers["opensandbox-secure-access"] == "tok-upstream"
-        assert headers["opensandbox-ingress-to"] == "sb-1-3100"
-        # ...and every other client prefix header was stripped.
-        assert "opensandbox-metadata-inject" not in headers
-        assert "x-execd-debug" not in headers
-        assert "opensandbox-foo" not in headers
-        # Expect is stripped (the proxy cannot answer a 100-continue).
-        assert "expect" not in headers
-        assert runner.activity == 1
-    finally:
-        runner.stop()
-
-
-def test_post_body_forwarded_with_content_length(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        body = b'{"message":"hello"}'
-        raw = (
-            f"POST /api/chat HTTP/1.1\r\n"
-            f"Host: localhost:{port}\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "\r\n"
-        ).encode() + body
-        response = _request(port, raw)
-        assert b"HTTP/1.1 200 OK" in response
-        request_line, headers, forwarded_body = gateway.requests[-1]
-        assert request_line.startswith("POST /api/chat")
-        assert headers["content-length"] == str(len(body))
-        assert forwarded_body == body
-    finally:
-        runner.stop()
-
-
-@pytest.mark.security
-def test_content_length_and_transfer_encoding_coexist_is_400(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(
-            port,
-            "/api/version",
-            extra_headers="Content-Length: 3\r\nTransfer-Encoding: chunked\r\n",
-        )
-        assert response.startswith(b"HTTP/1.1 400")
-        assert gateway.requests == []  # never reached the upstream
-        assert runner.activity == 0
-    finally:
-        runner.stop()
-
-
-@pytest.mark.security
-def test_duplicate_injection_header_is_400(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(
-            port,
-            "/api/version",
-            extra_headers="X-EXECD-ACCESS-TOKEN: a\r\nX-EXECD-ACCESS-TOKEN: b\r\n",
-        )
-        assert response.startswith(b"HTTP/1.1 400")
-        assert gateway.requests == []
-    finally:
-        runner.stop()
-
-
-def test_sse_streams_through_until_upstream_closes(gateway):
-    gateway.mode = "sse"
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(port, "/events", read_timeout=10)
-        assert response.startswith(b"HTTP/1.1 200 OK")
-        assert b"text/event-stream" in response
-        for index in range(3):
-            assert f"data: chunk-{index}".encode() in response
-    finally:
-        runner.stop()
-
-
-# ── WebSocket ──────────────────────────────────────────────────────────
-
-
 def _ws_upgrade(port: int, connection: str = "Upgrade") -> tuple[socket.socket, bytes, bytes]:
     sock = socket.create_connection(("127.0.0.1", port), timeout=5)
     sock.sendall(
-        f"GET /ws HTTP/1.1\r\n"
-        f"Host: localhost:{port}\r\n"
-        "Upgrade: websocket\r\n"
-        f"Connection: {connection}\r\n"
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-        "Sec-WebSocket-Version: 13\r\n"
-        "\r\n".encode()
+        (
+            f"GET /ws HTTP/1.1\r\n"
+            f"Host: localhost:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            f"Connection: {connection}\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        ).encode()
     )
     data = bytearray()
     while b"\r\n\r\n" not in data:
@@ -368,224 +268,6 @@ def _ws_upgrade(port: int, connection: str = "Upgrade") -> tuple[socket.socket, 
     return sock, head, rest
 
 
-def test_websocket_upgrade_and_bidirectional_splice(gateway):
-    # #3378 CI: the WS splice drives gevent greenlets + native threads in one
-    # process; under pytest-xdist workers that is the #2457 crash class (the
-    # worker dies in ways --timeout cannot interrupt). The scenario runs in a
-    # subprocess script (repo precedent: test_terminal_ws_handler_process.py);
-    # this runner keeps it in the pytest surface. The gateway fixture is unused
-    # here but kept so the file's socket machinery stays warmed up identically.
-    import subprocess
-    import sys
-
-    script = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "subprocess",
-        "webui_sandbox_proxy_ws_3378.py",
-    )
-    result = subprocess.run(
-        [sys.executable, script],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert (
-        result.returncode == 0
-    ), f"WS splice subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    assert "WS SPLICE OK" in result.stdout
-
-
-# ── failure and lifecycle paths ────────────────────────────────────────
-
-
-def test_unreachable_upstream_is_502(gateway):
-    def dead_resolver():
-        return ("http://127.0.0.1:1", dict(_INJECT))
-
-    runner = _ProxyThread(gateway, resolver=dead_resolver)
-    port = runner.start()
-    try:
-        response = _get(port, "/api/version")
-        assert response.startswith(b"HTTP/1.1 502")
-        assert runner.activity == 0
-    finally:
-        runner.stop()
-
-
-def test_stop_closes_port_and_terminates_greenlets(gateway):
-    gateway.mode = "hang"  # an in-flight request the proxy is holding open
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    client = socket.create_connection(("127.0.0.1", port), timeout=5)
-    client.sendall(b"GET /hang HTTP/1.1\r\nHost: x\r\n\r\n")
-    import time
-
-    time.sleep(0.3)  # let the proxy pick up the connection
-    runner.proxy.stop()
-    # The held connection is torn down: recv unblocks with EOF or ECONNRESET.
-    client.settimeout(5)
-    try:
-        chunk = client.recv(65536)
-        assert chunk == b"" or chunk  # either EOF or a reset — not a hang
-    except OSError:
-        pass
-    finally:
-        client.close()
-    # The port is gone.
-    with pytest.raises(OSError):
-        socket.create_connection(("127.0.0.1", port), timeout=1).close()
-    runner._thread.join(timeout=5)
-    assert not runner._thread.is_alive()
-
-
-# ── M2: the connect budget must not leak into the stream ───────────────
-
-
-def test_stream_survives_idle_gap_longer_than_connect_budget(gateway):
-    """M2: create_connection installs its timeout on the socket; unless it is
-    cleared after establishment, the body pump (which treats socket.timeout
-    as peer-close) truncates any stream that idles longer than the budget.
-    The budgets are configurable — the test shrinks them to 0.5s and the
-    upstream idles 1.5s mid-stream, the same regression at test scale."""
-    gateway.mode = "slow-stream"
-    runner = _ProxyThread(
-        gateway,
-        timeouts={
-            "upstream_connect_timeout_seconds": 0.5,
-            "upstream_head_timeout_seconds": 0.5,
-        },
-    )
-    port = runner.start()
-    try:
-        response = _get(port, "/stream", read_timeout=10)
-        assert response.startswith(b"HTTP/1.1 200 OK")
-        for marker in (b"data-1", b"data-2", b"data-3"):
-            assert marker in response  # the 1.5s idle gap did not cut the stream
-    finally:
-        runner.stop()
-
-
-def test_upstream_that_never_answers_is_502_within_head_budget(gateway):
-    """M2: the head phase keeps its own bounded window — an upstream that
-    accepted the connection but never answers must 502, not pin a greenlet."""
-    gateway.mode = "hang"
-    runner = _ProxyThread(gateway, timeouts={"upstream_head_timeout_seconds": 0.5})
-    port = runner.start()
-    try:
-        response = _get(port, "/hang", read_timeout=5)
-        assert response.startswith(b"HTTP/1.1 502")
-    finally:
-        runner.stop()
-
-
-# ── m2: request-parse errors are 400, upstream garbage is 502 ──────────
-
-
-def test_malformed_request_head_line_is_400(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        raw = b"GET / HTTP/1.1\r\nHost: x\r\nno-colon-line\r\n\r\n"
-        response = _request(port, raw)
-        assert response.startswith(b"HTTP/1.1 400")
-        assert gateway.requests == []  # never reached the upstream
-    finally:
-        runner.stop()
-
-
-@pytest.mark.security
-def test_duplicate_content_length_is_400(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(
-            port,
-            "/api/version",
-            extra_headers="Content-Length: 3\r\nContent-Length: 4\r\n",
-        )
-        assert response.startswith(b"HTTP/1.1 400")
-        assert gateway.requests == []  # RFC 7230 §3.3.2 MUST-reject
-    finally:
-        runner.stop()
-
-
-def test_malformed_upstream_response_head_is_502(gateway):
-    gateway.mode = "garbage"
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        response = _get(port, "/api/version")
-        assert response.startswith(b"HTTP/1.1 502")  # upstream garbage, not 400
-    finally:
-        runner.stop()
-
-
-# ── m3: chunked request bodies ─────────────────────────────────────────
-
-
-def test_chunked_request_body_is_dechunked_and_forwarded(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        chunked = b"5\r\nhello\r\ne\r\n chunked world\r\n0\r\n\r\n"
-        raw = (
-            f"POST /api/chat HTTP/1.1\r\n"
-            f"Host: localhost:{port}\r\n"
-            "Transfer-Encoding: chunked\r\n"
-            "\r\n"
-        ).encode() + chunked
-        response = _request(port, raw)
-        assert b"HTTP/1.1 200 OK" in response
-        request_line, headers, forwarded_body = gateway.requests[-1]
-        assert request_line.startswith("POST /api/chat")
-        # De-chunked and re-framed with a real Content-Length upstream.
-        assert forwarded_body == b"hello chunked world"
-        assert headers["content-length"] == "19"
-        assert "transfer-encoding" not in headers
-    finally:
-        runner.stop()
-
-
-def test_negative_chunk_size_is_400(gateway):
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        raw = (
-            f"POST /api/chat HTTP/1.1\r\n"
-            f"Host: localhost:{port}\r\n"
-            "Transfer-Encoding: chunked\r\n"
-            "\r\n"
-        ).encode() + b"-5\r\nhello"
-        response = _request(port, raw)
-        assert response.startswith(b"HTTP/1.1 400")
-        assert gateway.requests == []  # refused before contacting the upstream
-    finally:
-        runner.stop()
-
-
-# ── m7: Connection header token list parsing ───────────────────────────
-
-
-def test_websocket_upgrade_recognizes_comma_list_without_spaces(gateway):
-    """m7: ``Connection: Upgrade,keep-alive`` (comma, no space) is still an
-    upgrade request — tokens are stripped individually."""
-    gateway.mode = "ws"
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        sock, head, _rest = _ws_upgrade(port, connection="Upgrade,keep-alive")
-        with sock:
-            assert head.startswith(b"HTTP/1.1 101")
-            request_line, headers, _body = gateway.requests[-1]
-            assert headers["upgrade"] == "websocket"
-            assert headers["connection"].lower() == "upgrade"
-    finally:
-        runner.stop()
-
-
-# ── m6a: the REAL launcher.health_check through the real proxy ────────
-
-
 def _real_launcher() -> SandboxedWebuiLauncher:
     """A launcher wired only for health_check (sockets only — no backend)."""
     return SandboxedWebuiLauncher(
@@ -594,38 +276,140 @@ def _real_launcher() -> SandboxedWebuiLauncher:
     )
 
 
-def test_launcher_health_check_true_through_real_proxy(gateway):
-    """m6a: /api/version?token= 200 through the real proxy → True. The probe's
-    raw-socket HTTP/1.0 + Connection: close shape must survive the proxy, and
-    the token it mints must reach the upstream query string."""
-    launcher = _real_launcher()
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        assert launcher.health_check(proxy_port=port, token="v2:3:%d:1:2:abcdef" % port) is True
-        request_line, headers, _body = gateway.requests[-1]
-        assert request_line.startswith("GET /api/version?token=v2%3A3%3A")
-        assert headers["connection"] == "close"  # health probes never hold sockets
-    finally:
-        runner.stop()
+# ── subprocess runners (#2457 class: gevent+threads crash xdist workers) ─
 
 
-def test_launcher_health_check_false_on_401_from_pod(gateway):
-    """m6a: the webui answering 401 (token did not validate) → False."""
-    gateway.mode = "unauthorized"
-    launcher = _real_launcher()
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        assert launcher.health_check(proxy_port=port, token="v2:3:1:2:3:4:5") is False
-    finally:
-        runner.stop()
+_SUITE_RESULTS: dict[str, subprocess.CompletedProcess] = {}
+
+
+def _run_script(script_name: str) -> subprocess.CompletedProcess:
+    if script_name not in _SUITE_RESULTS:
+        script = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "subprocess",
+            script_name,
+        )
+        _SUITE_RESULTS[script_name] = subprocess.run(
+            [sys.executable, script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    return _SUITE_RESULTS[script_name]
+
+
+def _assert_scenario(script_name: str, scenario: str) -> None:
+    result = _run_script(script_name)
+    assert f"SCENARIO {scenario} OK" in result.stdout, (
+        f"scenario {scenario!r} did not pass in {script_name}\n"
+        f"exit: {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+_SCENARIOS = "webui_sandbox_proxy_scenarios_3378.py"
+_WS = "webui_sandbox_proxy_ws_3378.py"
+
+
+# ── HTTP passthrough + header rules ────────────────────────────────────
+
+
+@pytest.mark.security
+def test_http_passthrough_injects_headers_and_overrides_client():
+    _assert_scenario(_SCENARIOS, "http_passthrough_injects_headers_and_overrides_client")
+
+
+def test_post_body_forwarded_with_content_length():
+    _assert_scenario(_SCENARIOS, "post_body_forwarded_with_content_length")
+
+
+@pytest.mark.security
+def test_content_length_and_transfer_encoding_coexist_is_400():
+    _assert_scenario(_SCENARIOS, "content_length_and_transfer_encoding_coexist_is_400")
+
+
+@pytest.mark.security
+def test_duplicate_injection_header_is_400():
+    _assert_scenario(_SCENARIOS, "duplicate_injection_header_is_400")
+
+
+def test_sse_streams_through_until_upstream_closes():
+    _assert_scenario(_SCENARIOS, "sse_streams_through_until_upstream_closes")
+
+
+# ── WebSocket ──────────────────────────────────────────────────────────
+
+
+def test_websocket_upgrade_and_bidirectional_splice():
+    _assert_scenario(_WS, "websocket_upgrade_and_bidirectional_splice")
+
+
+def test_websocket_upgrade_recognizes_comma_list_without_spaces():
+    _assert_scenario(_WS, "websocket_upgrade_recognizes_comma_list_without_spaces")
+
+
+# ── failure and lifecycle paths ────────────────────────────────────────
+
+
+def test_unreachable_upstream_is_502():
+    _assert_scenario(_SCENARIOS, "unreachable_upstream_is_502")
+
+
+def test_stop_closes_port_and_terminates_greenlets():
+    _assert_scenario(_SCENARIOS, "stop_closes_port_and_terminates_greenlets")
+
+
+# ── M2: the connect budget must not leak into the stream ───────────────
+
+
+def test_stream_survives_idle_gap_longer_than_connect_budget():
+    _assert_scenario(_SCENARIOS, "stream_survives_idle_gap_longer_than_connect_budget")
+
+
+def test_upstream_that_never_answers_is_502_within_head_budget():
+    _assert_scenario(_SCENARIOS, "upstream_that_never_answers_is_502_within_head_budget")
+
+
+# ── m2: request-parse errors are 400, upstream garbage is 502 ──────────
+
+
+def test_malformed_request_head_line_is_400():
+    _assert_scenario(_SCENARIOS, "malformed_request_head_line_is_400")
+
+
+@pytest.mark.security
+def test_duplicate_content_length_is_400():
+    _assert_scenario(_SCENARIOS, "duplicate_content_length_is_400")
+
+
+def test_malformed_upstream_response_head_is_502():
+    _assert_scenario(_SCENARIOS, "malformed_upstream_response_head_is_502")
+
+
+# ── m3: chunked request bodies ─────────────────────────────────────────
+
+
+def test_chunked_request_body_is_dechunked_and_forwarded():
+    _assert_scenario(_SCENARIOS, "chunked_request_body_is_dechunked_and_forwarded")
+
+
+def test_negative_chunk_size_is_400():
+    _assert_scenario(_SCENARIOS, "negative_chunk_size_is_400")
+
+
+# ── m6a: the REAL launcher.health_check through the real proxy ────────
+
+
+def test_launcher_health_check_true_through_real_proxy():
+    _assert_scenario(_SCENARIOS, "launcher_health_check_true_through_real_proxy")
+
+
+def test_launcher_health_check_false_on_401_from_pod():
+    _assert_scenario(_SCENARIOS, "launcher_health_check_false_on_401_from_pod")
 
 
 def test_launcher_health_check_false_on_connection_refused():
     """m6a: nothing listening on the proxy port (proxy crashed/stopped) →
-    False, not an exception."""
-    # Reserve then release a port so nothing is bound to it.
+    False, not an exception. No proxy is spawned, so this stays in-process."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         dead_port = probe.getsockname()[1]
