@@ -3353,6 +3353,44 @@ def agent_message():
 # ==================== Terminal Management ====================
 
 
+def _check_terminal_session_access(terminal_id: str):
+    """Issue #3376: terminal endpoints require session ownership.
+
+    Allowed: platform admin (strict-role check), same-tenant tenant admin,
+    the session owner. The agent_sessions row is created by start_terminal
+    and outlives the in-memory terminal info (30-day session GC vs 24h
+    store TTL), so a missing row fails closed with 404. Returns an error
+    response tuple or None when access is allowed.
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    if is_platform_admin_role(g.user.get("role")):
+        return None
+    from app.modules.workspace.session_manager import get_session_manager
+
+    session = get_session_manager().get_session(terminal_id)
+    if session is None:
+        logger.warning(
+            "Terminal ownership denied: no session record for %s (user_id=%s)",
+            terminal_id[:8],
+            g.user.get("id"),
+        )
+        return jsonify({"error": "Terminal session not found"}), 404
+    if g.user.get("role") == "tenant_admin" and (
+        session.tenant_id is None or session.tenant_id == g.user.get("tenant_id")
+    ):
+        return None
+    if session.user_id != g.user.get("id"):
+        logger.warning(
+            "Terminal ownership denied: user_id=%s is not owner %s of %s",
+            g.user.get("id"),
+            session.user_id,
+            terminal_id[:8],
+        )
+        return jsonify({"error": "Access denied"}), 403
+    return None
+
+
 @remote_bp.route("/terminal/start", methods=["POST"])
 @machine_access_required
 def start_terminal():
@@ -3673,6 +3711,11 @@ def stop_terminal():
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
 
+    # Issue #3376: the terminal session itself must belong to the caller.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
+
     agent_mgr = get_remote_agent_manager()
     cmd = {
         "type": "command",
@@ -3733,6 +3776,11 @@ def attach_terminal(terminal_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: the terminal session itself must belong to the caller.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
 
     # Get machine's tenant_id for token generation
     attach_machine = agent_mgr.get_machine(machine_id)
@@ -3901,8 +3949,17 @@ def get_terminal_status(terminal_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
+    # Issue #3376: session ownership; machine access alone is not enough.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
+
     if info:
-        return jsonify({"success": True, "terminal": info})
+        # Issue #3376: agent-side bridge credentials never go to browsers.
+        public_info = {
+            k: v for k, v in info.items() if k not in ("original_token", "original_ws_url")
+        }
+        return jsonify({"success": True, "terminal": public_info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})
 
 
