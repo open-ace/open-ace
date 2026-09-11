@@ -100,41 +100,46 @@ SANDBOX_PROBE_REASON_CODES = (
     "sandbox_proxy_token_ttl_too_short",
 )
 
-# Issue #3378 (D3): the boot-probe upgrade memo. Kernel and egress enforcement
-# are only verifiable per-pod, so the sandboxed snapshot reports them unverified
-# until the WebUI launcher's first successful pod probe registers the upgrade
-# here. Deliberately a process-lifetime memo — a restart reverts the snapshot to
-# the static (unverified) view, which is the documented honesty contract.
-_SANDBOX_RUNTIME_MEMO: dict[str, bool] = {"verified": False, "kernel_enforced": False}
+# Issue #3378 (D3): the boot-probe upgrade memo, keyed per tier. Kernel and
+# egress enforcement are only verifiable per-pod, so the sandboxed snapshot
+# reports them unverified until the WebUI launcher's first successful pod probe
+# on THAT tier registers the upgrade here. Per-tier keying (conformance review
+# Q1): in a multi-tier deployment (gVisor + Kata) a later Kata pod must not
+# overwrite a gVisor tier's earlier positive kernel upgrade (and vice versa) —
+# each snapshot consults only its own tier's memo. Still a process-lifetime
+# memo — a restart reverts every tier to the static (unverified) view, which is
+# the documented honesty contract.
+_SANDBOX_RUNTIME_MEMO: dict[str, dict[str, bool]] = {}
 
 
-def register_sandbox_runtime_verified(*, kernel_enforced: bool) -> None:
-    """Record that a sandbox pod's boot probes passed (launcher-side hook).
+def register_sandbox_runtime_verified(*, tier: str, kernel_enforced: bool) -> None:
+    """Record that a sandbox pod's boot probes passed on ``tier`` (launcher hook).
 
     Called by ``SandboxedWebuiLauncher`` after the runtime-class and egress
-    probes confirm the pod. ``kernel_enforced`` distinguishes the two probe
-    directions (provider ``_run_probes``): gVisor identifies itself positively
-    in the kernel probe, while a Kata result is negative-only — it rules out
-    gVisor but cannot distinguish Kata from an unisolated runc container, so the
-    kernel dimension must NOT upgrade on it (reason
-    ``sandbox_runtime_kata_negative_only``).
+    probes confirm the pod on the tier the pod was launched against.
+    ``kernel_enforced`` distinguishes the two probe directions (provider
+    ``_run_probes``): gVisor identifies itself positively in the kernel probe,
+    while a Kata result is negative-only — it rules out gVisor but cannot
+    distinguish Kata from an unisolated runc container, so the kernel dimension
+    must NOT upgrade on it (reason ``sandbox_runtime_kata_negative_only``).
     """
-    _SANDBOX_RUNTIME_MEMO["verified"] = True
-    _SANDBOX_RUNTIME_MEMO["kernel_enforced"] = bool(kernel_enforced)
+    _SANDBOX_RUNTIME_MEMO[str(tier)] = {
+        "verified": True,
+        "kernel_enforced": bool(kernel_enforced),
+    }
 
 
-def sandbox_runtime_verification() -> tuple[bool, bool]:
-    """Return ``(verified, kernel_enforced)`` — see :func:`register_sandbox_runtime_verified`."""
-    return (
-        _SANDBOX_RUNTIME_MEMO["verified"],
-        _SANDBOX_RUNTIME_MEMO["kernel_enforced"],
-    )
+def sandbox_runtime_verification(tier: str) -> tuple[bool, bool]:
+    """Return ``(verified, kernel_enforced)`` for *tier* — see register hook."""
+    state = _SANDBOX_RUNTIME_MEMO.get(str(tier))
+    if state is None:
+        return (False, False)
+    return (state["verified"], state["kernel_enforced"])
 
 
 def _reset_sandbox_runtime_verification() -> None:
-    """Reset the boot-probe memo (test isolation only)."""
-    _SANDBOX_RUNTIME_MEMO["verified"] = False
-    _SANDBOX_RUNTIME_MEMO["kernel_enforced"] = False
+    """Reset the boot-probe memo for every tier (test isolation only)."""
+    _SANDBOX_RUNTIME_MEMO.clear()
 
 
 # Static, revision-gated audit result (design doc §2.4). Values:
@@ -329,7 +334,7 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
             tier,
             IsolationReason(
                 "sandbox_proxy_unreachable",
-                f"The sandbox egress policy would block the control-plane LLM " f"proxy ({exc}).",
+                f"The sandbox egress policy would block the control-plane LLM proxy ({exc}).",
             ),
         )
 
@@ -395,7 +400,7 @@ def build_workspace_isolation_snapshot(
     if config is None or not getattr(config, "enabled", False):
         return _unsupported(
             "webui_disabled",
-            "WebUI manager is disabled; no interactive workspace runtime " "is available.",
+            "WebUI manager is disabled; no interactive workspace runtime is available.",
         )
 
     sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
@@ -404,7 +409,9 @@ def build_workspace_isolation_snapshot(
         # unverified; once the launcher's first pod boot probe succeeded the
         # in-process memo upgrades them (egress always — its enforcement plane
         # was read live; kernel only for a positive gVisor identification).
-        verified, kernel_enforced = sandbox_runtime_verification()
+        # The memo is keyed per tier (review Q1): a pod verified on another tier
+        # never upgrades THIS tier's snapshot.
+        verified, kernel_enforced = sandbox_runtime_verification(sandbox_tier)
         if verified:
             enforced: tuple[str, ...] = _SANDBOXED_ENFORCED + (DIMENSION_NETWORK_EGRESS,)
             reasons: tuple[IsolationReason, ...] = ()
@@ -657,7 +664,6 @@ def evaluate_isolation_requirement(
     if not launch_ok:
         return IsolationReason(
             "per_user_launch_unavailable",
-            f"Cannot launch the WebUI under system account "
-            f"'{system_account}' ({launch_reason}).",
+            f"Cannot launch the WebUI under system account '{system_account}' ({launch_reason}).",
         )
     return None

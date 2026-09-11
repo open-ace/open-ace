@@ -15,7 +15,7 @@ import threading
 
 import pytest
 
-from app.services.webui_sandbox import SandboxWebuiProxy
+from app.services.webui_sandbox import SandboxedWebuiLauncher, SandboxWebuiProxy
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -30,7 +30,7 @@ class _Gateway:
 
     def __init__(self):
         self.requests: list[tuple[str, dict[str, str], bytes]] = []
-        self.mode = "http"  # http | sse | ws | hang | slow-stream | garbage
+        self.mode = "http"  # http | sse | ws | hang | slow-stream | garbage | unauthorized
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("127.0.0.1", 0))
@@ -102,10 +102,7 @@ class _Gateway:
                 import time
 
                 conn.sendall(
-                    b"HTTP/1.1 200 OK\r\n"
-                    b"Content-Type: text/plain\r\n"
-                    b"Connection: close\r\n"
-                    b"\r\n"
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
                 )
                 conn.sendall(b"data-1\n")
                 time.sleep(0.3)
@@ -117,6 +114,16 @@ class _Gateway:
             elif self.mode == "garbage":
                 # m2: an upstream head that does not parse (no colon).
                 conn.sendall(b"HTTP/1.1 200 OK\r\nno-colon-here\r\n\r\n")
+                conn.close()
+                return
+            elif self.mode == "unauthorized":
+                # m6a: the webui answers, but the token does not validate.
+                conn.sendall(
+                    b"HTTP/1.1 401 Unauthorized\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
                 conn.close()
                 return
             elif self.mode == "hang":
@@ -238,6 +245,7 @@ def _get(port: int, path: str, extra_headers: str = "", body: bytes = b"", **kwa
 # ── HTTP passthrough + header rules ────────────────────────────────────
 
 
+@pytest.mark.security
 def test_http_passthrough_injects_headers_and_overrides_client(gateway):
     runner = _ProxyThread(gateway)
     port = runner.start()
@@ -288,6 +296,7 @@ def test_post_body_forwarded_with_content_length(gateway):
         runner.stop()
 
 
+@pytest.mark.security
 def test_content_length_and_transfer_encoding_coexist_is_400(gateway):
     runner = _ProxyThread(gateway)
     port = runner.start()
@@ -304,6 +313,7 @@ def test_content_length_and_transfer_encoding_coexist_is_400(gateway):
         runner.stop()
 
 
+@pytest.mark.security
 def test_duplicate_injection_header_is_400(gateway):
     runner = _ProxyThread(gateway)
     port = runner.start()
@@ -484,6 +494,7 @@ def test_malformed_request_head_line_is_400(gateway):
         runner.stop()
 
 
+@pytest.mark.security
 def test_duplicate_content_length_is_400(gateway):
     runner = _ProxyThread(gateway)
     port = runner.start()
@@ -571,3 +582,53 @@ def test_websocket_upgrade_recognizes_comma_list_without_spaces(gateway):
             assert headers["connection"].lower() == "upgrade"
     finally:
         runner.stop()
+
+
+# ── m6a: the REAL launcher.health_check through the real proxy ────────
+
+
+def _real_launcher() -> SandboxedWebuiLauncher:
+    """A launcher wired only for health_check (sockets only — no backend)."""
+    return SandboxedWebuiLauncher(
+        api_factory=lambda endpoint: None,
+        proxy_service_factory=lambda: None,
+    )
+
+
+def test_launcher_health_check_true_through_real_proxy(gateway):
+    """m6a: /api/version?token= 200 through the real proxy → True. The probe's
+    raw-socket HTTP/1.0 + Connection: close shape must survive the proxy, and
+    the token it mints must reach the upstream query string."""
+    launcher = _real_launcher()
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        assert launcher.health_check(proxy_port=port, token="v2:3:%d:1:2:abcdef" % port) is True
+        request_line, headers, _body = gateway.requests[-1]
+        assert request_line.startswith("GET /api/version?token=v2%3A3%3A")
+        assert headers["connection"] == "close"  # health probes never hold sockets
+    finally:
+        runner.stop()
+
+
+def test_launcher_health_check_false_on_401_from_pod(gateway):
+    """m6a: the webui answering 401 (token did not validate) → False."""
+    gateway.mode = "unauthorized"
+    launcher = _real_launcher()
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        assert launcher.health_check(proxy_port=port, token="v2:3:1:2:3:4:5") is False
+    finally:
+        runner.stop()
+
+
+def test_launcher_health_check_false_on_connection_refused():
+    """m6a: nothing listening on the proxy port (proxy crashed/stopped) →
+    False, not an exception."""
+    # Reserve then release a port so nothing is bound to it.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+    launcher = _real_launcher()
+    assert launcher.health_check(proxy_port=dead_port, token="v2:3:1:2:3:4:5") is False

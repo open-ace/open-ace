@@ -224,7 +224,7 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
 | pod create timeout | min(WebUI token TTL, 生效 proxy token TTL) | 启动器 launch 时计算 |
 | pod renew 目标 | min(now + WebUI token TTL, proxy token 过期时刻)——pod 至多活到其 LLM 凭证失效;钳制点之后由空闲回收正常拆除,下次 `/user-url` 重建 + 快照恢复 | 启动器 renew 钳制 |
 | 空闲回收 | 30min(默认) | `workspace.idle_timeout_minutes` |
-| 周期快照导出 + renew | 5min | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300 |
+| 周期快照导出 + renew | 默认 5min,实际随 cleanup 间隔:维护检查搭载在 cleanup 循环里,`workspace.cleanup_interval_minutes`(默认 5)> 5min 时实际导出间隔 = cleanup 间隔 | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300(下限)+ cleanup 循环 sleep |
 | 默认 proxy token TTL | 240min(申报 sandboxed 须抬到 ≥ 1440) | `DEFAULT_PROXY_TOKEN_TTL_MINUTES`,env `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES` |
 
 token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用现行 token
@@ -238,7 +238,8 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
   kernel 保持 unsupported + `sandbox_runtime_kata_negative_only`;gVisor 正向
   识别才升级 enforced。
 - **会话历史**:整目录 tar 快照(存于独立根,键 `webui-<user_id>.tar`);
-  控制面 crash 丢失 ≤5min 增量;**降级启动(restore 门 60s 超时、恢复未确认)
+  控制面 crash 丢失 ≤ 一轮导出间隔的增量(默认 5min;导出搭载 cleanup 循环,
+  `cleanup_interval_minutes` 拉长时丢失窗口随之拉长);**降级启动(restore 门 60s 超时、恢复未确认)
   的实例不导出**——宁可保住旧快照,也不让空树覆盖完好快照;快照上界默认
   16MiB(`OPENACE_WEBUI_STATE_MAX_BYTES` 可调),越限跳过导出——该用户历史
   **冻结在最后一份完好快照**,直到手工清理;**无自动 GC**。

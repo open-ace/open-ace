@@ -567,8 +567,7 @@ class WebUIManager:
                 and now - single.last_activity > timeout
             ):
                 logger.info(
-                    "Cleaning up idle single-user sandboxed webui instance "
-                    "(sandbox=%s, port=%s)",
+                    "Cleaning up idle single-user sandboxed webui instance (sandbox=%s, port=%s)",
                     single.sandbox_id,
                     single.port,
                 )
@@ -998,11 +997,29 @@ class WebUIManager:
             with self._single_user_lock:
                 # Check if instance exists and is alive
                 if self._single_user_instance is not None and self._single_user_instance.is_alive():
-                    self._single_user_instance.update_activity()
-                    logger.debug(
-                        f"Single-user WebUI instance already running: "
-                        f"pid={self._single_user_instance.pid}, port={self._single_user_instance.port}"
-                    )
+                    if (
+                        getattr(self._single_user_instance, "form", WEBUI_FORM_LOCAL)
+                        != WEBUI_FORM_LOCAL
+                    ):
+                        # Issue #3378 review (MINOR-2): a live SANDBOXED instance
+                        # must not keep serving a LOCAL-form request — the old
+                        # path returned the hardcoded 3100 plus a global-secret
+                        # token the remote pod cannot validate. Mirror the
+                        # multi-user form-mismatch stop-and-restart (and the
+                        # sandboxed branch's cross-form handling above): stop
+                        # the old form, then start under the requested one.
+                        logger.warning(
+                            "Restarting single-user webui: running form "
+                            f"'{self._single_user_instance.form}' != requested 'local'"
+                        )
+                        self._stop_single_user_instance_internal()
+                        self._start_single_user_instance(user_id, system_account, base_url)
+                    else:
+                        self._single_user_instance.update_activity()
+                        logger.debug(
+                            f"Single-user WebUI instance already running: "
+                            f"pid={self._single_user_instance.pid}, port={self._single_user_instance.port}"
+                        )
                 else:
                     # Instance not running or dead, start a new one
                     if self._single_user_instance is not None:

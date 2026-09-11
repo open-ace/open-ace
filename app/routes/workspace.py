@@ -2346,6 +2346,7 @@ def get_user_webui_url():
     """
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.services.webui_sandbox import SandboxWebuiError
     from app.services.workspace_isolation_contract import (
         SUPPORTED_ISOLATION_LEVELS,
         IsolationReason,
@@ -2476,6 +2477,34 @@ def get_user_webui_url():
             ),
             503,
         )  # Service Unavailable (e.g., max instances reached)
+
+    except SandboxWebuiError as e:
+        # Issue #3378 review (MINOR-5): the launcher's fail-closed refusals
+        # carry a machine-readable reason code (§5 vocabulary) that the generic
+        # handler below collapsed into an opaque 500. Surface them with the
+        # SAME body shape as the gate rejections above (success/error/
+        # error_code/reasons/isolation) so clients keying on error_code keep
+        # working — the snapshot is always computed before the launch can
+        # fail. 502 (not 400): the request already passed the isolation gate;
+        # this is the upstream sandbox runtime refusing (create failed,
+        # endpoint unresolved), which a client cannot fix by reshaping the
+        # request — 502 distinguishes it from both the policy 400s and the
+        # capacity 503, matching this endpoint's pattern of precise 5xx codes.
+        reason_code = getattr(e, "reason_code", "") or "sandbox_create_failed"
+        reason = IsolationReason(reason_code, str(e))
+        logger.error(f"Sandboxed webui launch failed at /user-url: {e}")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "error_code": reason_code,
+                    "reasons": [reason.public_dict()],
+                    "isolation": isolation_snapshot.public_dict(),
+                }
+            ),
+            502,
+        )
 
     except Exception as e:
         logger.error(f"Error getting user webui URL: {e}")
