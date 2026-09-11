@@ -21,8 +21,18 @@ from app.modules.workspace.autonomous.sandbox.opensandbox.config import parse_ba
 from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import FakeOpenSandboxApi
 from app.modules.workspace.autonomous.sandbox.opensandbox.policy import PROVIDER_NAME
 from app.services import webui_sandbox as ws
+from app.services import workspace_isolation_contract as wic
 
 pytestmark = [pytest.mark.issue(3378)]
+
+
+@pytest.fixture(autouse=True)
+def _reset_contract_memo():
+    """Isolate the boot-probe contract memo (a launch here can set it)."""
+    wic._reset_sandbox_runtime_verification()
+    yield
+    wic._reset_sandbox_runtime_verification()
+
 
 _AGENT_IMAGE = "ghcr.io/open-ace/agent@sha256:" + "a" * 64
 _WEBUI_IMAGE = "ghcr.io/open-ace/webui@sha256:" + "b" * 64
