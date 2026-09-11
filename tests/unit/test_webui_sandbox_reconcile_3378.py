@@ -153,6 +153,61 @@ def test_reconcile_exports_orphan_with_marker_and_persists_by_owner(tmp_path):
     assert any("tar -cf" in c for c in commands)
 
 
+def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
+    """m6c: strict ORDERING, not just occurrence — the export (tar + download)
+    of an orphan must complete before its delete_sandbox, or the destroy of a
+    not-yet-exported pod would lose the user's last session snapshot."""
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    sid = orphan["id"]
+    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+
+    # Record the API calls as a single ordered event stream.
+    events: list[tuple[str, str]] = []
+    original_run = fake.run_command
+    original_download = fake.download_file
+    original_delete = fake.delete_sandbox
+
+    def run_recorder(sandbox_id, body):
+        events.append(("run_command", str(body.get("command", ""))))
+        return original_run(sandbox_id, body)
+
+    def download_recorder(sandbox_id, path, *, max_bytes=0):
+        events.append(("download_file", path))
+        return original_download(sandbox_id, path, max_bytes=max_bytes)
+
+    def delete_recorder(sandbox_id):
+        events.append(("delete_sandbox", sandbox_id))
+        return original_delete(sandbox_id)
+
+    fake.run_command = run_recorder
+    fake.download_file = download_recorder
+    fake.delete_sandbox = delete_recorder
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == [sid]
+    kinds = [kind for kind, _detail in events]
+    # The marker probe (a download of RESTORE_MARKER_PATH) legitimately runs
+    # FIRST — the ordering that matters is: state tar → state download → delete.
+    tar_index = next(
+        i
+        for i, (kind, detail) in enumerate(events)
+        if kind == "run_command" and "tar -cf" in detail
+    )
+    state_download_index = next(
+        i
+        for i, (kind, detail) in enumerate(events)
+        if kind == "download_file" and detail == ws.WEBUI_STATE_TAR_PATH
+    )
+    delete_index = kinds.index("delete_sandbox")
+    assert tar_index < state_download_index < delete_index
+
+
 def test_reconcile_skips_export_for_degraded_orphan_without_marker(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
@@ -342,6 +397,7 @@ def test_gunicorn_worker_hook_triggers_gated_reconcile(monkeypatch):
 # ── provider.reconcile_orphans exclusion contract (N7) ─────────────────
 
 
+@pytest.mark.security
 def test_provider_orphan_sweep_excludes_webui_pods():
     from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
 

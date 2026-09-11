@@ -314,7 +314,7 @@ def test_kata_probes_do_not_upgrade_kernel_dimension():
     fake = FakeOpenSandboxApi()  # default kernel string is not gVisor
     launcher, _svc = _launcher(fake)  # kata-qemu tier
     _launch(launcher)
-    verified, kernel_enforced = wic.sandbox_runtime_verification()
+    verified, kernel_enforced = wic.sandbox_runtime_verification("kata")
     assert verified is True
     assert kernel_enforced is False
 
@@ -355,7 +355,7 @@ def test_gvisor_probes_upgrade_kernel_and_egress():
     fake = FakeOpenSandboxApi(runtime_kernel="Linux version 4.4.0 (gvisor) #1 SMP")
     launcher, _svc = _launcher(fake, backend=_gvisor_backend())
     _launch(launcher)
-    verified, kernel_enforced = wic.sandbox_runtime_verification()
+    verified, kernel_enforced = wic.sandbox_runtime_verification("kata")
     assert verified is True
     assert kernel_enforced is True
 
@@ -368,7 +368,7 @@ def test_probe_failure_destroys_pod_and_raises():
         _launch(launcher)
     assert excinfo.value.reason_code == "runtime_class_mismatch"
     assert fake.deleted, "an unverifiable webui pod must not survive"
-    assert wic.sandbox_runtime_verification() == (False, False)
+    assert wic.sandbox_runtime_verification("kata") == (False, False)
 
 
 def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
@@ -408,18 +408,147 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
     assert [r.code for r in snap.reasons] == ["sandbox_runtime_unverified"]
 
-    wic.register_sandbox_runtime_verified(kernel_enforced=True)
+    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=True)
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert wic.DIMENSION_KERNEL in snap.enforced
     assert wic.DIMENSION_NETWORK_EGRESS in snap.enforced
     assert snap.reasons == ()
 
     wic._reset_sandbox_runtime_verification()
-    wic.register_sandbox_runtime_verified(kernel_enforced=False)
+    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=False)
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert wic.DIMENSION_KERNEL in snap.unsupported
     assert wic.DIMENSION_NETWORK_EGRESS in snap.enforced
     assert [r.code for r in snap.reasons] == ["sandbox_runtime_kata_negative_only"]
+
+
+def _two_tier_backend():
+    """gVisor (CNI egress) + Kata (sidecar egress) endpoints side by side."""
+    return parse_backend_config(
+        {
+            "installation_id": "openace-test",
+            "default_tier": "gvisor",
+            "endpoints": {
+                "gvisor": {
+                    "base_url": "http://osb:8080/v1",
+                    "api_key_env": "OSB_KEY",
+                    "execd_token_env": "OSB_EXECD_TOKEN",
+                    "runtime_class": "gvisor",
+                    "default_image": _AGENT_IMAGE,
+                    "webui_image": _WEBUI_IMAGE,
+                    "egress_allow_hosts": [],
+                    "attestations": {
+                        **{
+                            k: v
+                            for k, v in _FULL_ATTESTATIONS.items()
+                            if k not in ("egress_enforced", "egress_mode_dns_nft")
+                        },
+                        "egress_cni_default_deny": True,
+                    },
+                },
+                "kata": {
+                    "base_url": "http://osb:8080/v1",
+                    "api_key_env": "OSB_KEY",
+                    "execd_token_env": "OSB_EXECD_TOKEN",
+                    "runtime_class": "kata-qemu",
+                    "default_image": _AGENT_IMAGE,
+                    "webui_image": _WEBUI_IMAGE,
+                    "egress_allow_hosts": ["api.anthropic.com"],
+                    "attestations": _FULL_ATTESTATIONS,
+                },
+            },
+            "image_allowlist": [_AGENT_IMAGE, _WEBUI_IMAGE],
+            "sandbox_ttl_seconds": 3600,
+        }
+    )
+
+
+def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypatch):
+    """Q1: the boot-probe memo is keyed by tier. A gVisor pod's positive kernel
+    upgrade must survive a LATER Kata launch on the sibling tier — the old
+    process-global memo let the last probe win, silently un-verifying the
+    gVisor tier's kernel dimension for every snapshot built after it."""
+    backend = _two_tier_backend()
+    fakes = {
+        "gvisor": FakeOpenSandboxApi(runtime_kernel="Linux version 4.4.0 (gvisor) #1 SMP"),
+        "kata": FakeOpenSandboxApi(),  # plain Linux guest kernel
+    }
+    proxy_service = _FakeProxyService()
+
+    def _launcher_for(tier: str):
+        return ws.SandboxedWebuiLauncher(
+            backend_config=backend,
+            tier=tier,
+            api_factory=lambda endpoint: fakes[endpoint.tier],
+            proxy_service_factory=lambda: proxy_service,
+            restore_timeout_seconds=5.0,
+            poll_interval_seconds=0.01,
+        )
+
+    gvisor_launcher = _launcher_for("gvisor")
+    gvisor_launcher.launch(
+        user_id=7,
+        callback_url="http://openace.open-ace.svc.cluster.local:8080",
+        snapshot=None,
+    )
+    assert wic.sandbox_runtime_verification("gvisor") == (True, True)
+    assert wic.sandbox_runtime_verification("kata") == (False, False)
+
+    # The Kata pod starts afterwards — its negative-only probes must register
+    # on the kata key ONLY, never touch the gVisor tier's memo entry.
+    kata_launcher = _launcher_for("kata")
+    kata_launcher.launch(
+        user_id=7,
+        callback_url="http://openace.open-ace.svc.cluster.local:8080",
+        snapshot=None,
+    )
+    assert wic.sandbox_runtime_verification("gvisor") == (True, True)
+    assert wic.sandbox_runtime_verification("kata") == (True, False)
+
+    # And the contract snapshot consults its OWN tier's entry (review Q1): a
+    # gvisor-configured deployment still reports kernel enforced, while the
+    # kata tier stays kernel-unverified (negative-only direction).
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    class _Endpoint:
+        tier = "unused"
+        webui_image = _WEBUI_IMAGE
+        egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
+
+        class attestations:
+            egress_enforced = True
+
+    class _TwoTierCfg:
+        default_tier = "gvisor"
+        endpoints = {"gvisor": _Endpoint(), "kata": _Endpoint()}
+        image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
+
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _TwoTierCfg())
+    monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
+
+    class _Cfg:
+        enabled = True
+        multi_user_mode = True
+        webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
+        required_isolation_level = ""
+
+        def __init__(self, sandbox_tier: str):
+            self.sandbox_tier = sandbox_tier
+
+    class _StubManager:
+        def __init__(self, sandbox_tier: str):
+            self.config = _Cfg(sandbox_tier)
+
+        per_user_launch_readiness = lambda: None  # noqa: E731
+
+    snap_gvisor = wic.build_workspace_isolation_snapshot(_StubManager("gvisor"))
+    assert wic.DIMENSION_KERNEL in snap_gvisor.enforced
+    assert wic.DIMENSION_NETWORK_EGRESS in snap_gvisor.enforced
+    assert snap_gvisor.reasons == ()
+
+    snap_kata = wic.build_workspace_isolation_snapshot(_StubManager("kata"))
+    assert wic.DIMENSION_KERNEL in snap_kata.unsupported
+    assert [r.code for r in snap_kata.reasons] == ["sandbox_runtime_kata_negative_only"]
 
 
 # ── renew clamp (D5) ──────────────────────────────────────────────────

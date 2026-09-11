@@ -11,7 +11,7 @@ prestart reorder, and the per-instance-secret token validation/refresh fork.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -48,7 +48,6 @@ class _FakeLaunchResult:
         self.restore_confirmed = restore_confirmed
         self.proxy_token = "proxytok"
         self.proxy_token_expires_at = datetime.now() + timedelta(hours=24)
-        self.proxy_token = "proxytok"
         self.webui_port = 3100
 
 
@@ -432,6 +431,61 @@ def test_idle_local_single_user_instance_is_never_reaped():
     assert manager._single_user_instance is local
 
 
+def test_single_user_local_request_restarts_live_sandboxed_instance(monkeypatch):
+    """MINOR-2: a single-user SANDBOXED instance is alive while the request
+    resolves to the LOCAL form (e.g. the backend was unconfigured between
+    launches). The old branch answered "already running" with the hardcoded
+    3100 plus a global-secret token the remote pod cannot validate; the fix
+    mirrors the multi-user form-mismatch stop-and-restart."""
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher)
+    sandboxed = WebUIInstance(
+        user_id=3,
+        system_account="u3",
+        port=45678,
+        form="sandboxed",
+        sandbox_id="sb-live",
+        token_secret="s" * 64,
+        launcher=launcher,
+        proxy=_FakeProxy(sandbox_id="sb-live", upstream_resolver=lambda: ("http://up", {})),
+    )
+    sandboxed.is_alive = lambda: True
+    manager._single_user_instance = sandboxed
+    manager._port_allocations[45678] = (3, "sandboxed")
+
+    # The local start path must not spawn a real webui process.
+    def fake_launch(user_id, system_account, port, base_url):
+        process = MagicMock()
+        process.pid = 4242
+        return process, MagicMock()
+
+    manager._launch_webui_process = MagicMock(side_effect=fake_launch)
+    manager._wait_for_service_ready = MagicMock(return_value=True)
+
+    # Floor derives local for this request (sandbox probe no longer passes).
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: None)
+    monkeypatch.setattr(wic, "resolve_required_floor", lambda config, snap: "os_user")
+
+    url, token = manager.get_user_webui_url(3, "u3", "http://192.168.1.5:19888")
+
+    # The sandboxed instance was stopped-and-restarted, not "already running":
+    assert len(launcher.destroy_calls) == 1
+    assert launcher.destroy_calls[0]["sandbox_id"] == "sb-live"
+    assert launcher.destroy_calls[0]["final_export"] is True
+    assert sandboxed.proxy.stopped
+    assert 45678 not in manager._port_allocations
+    # ...and the replacement is a LOCAL single-user instance on the fixed port.
+    replacement = manager._single_user_instance
+    assert replacement is not sandboxed
+    assert replacement.form == "local"
+    assert replacement.port == 3100
+    assert url == "http://192.168.1.5:3100"
+    # The token is the local-form (global-secret) token for 3100 — minted for
+    # the NEW instance, not a stale sandboxed-form artifact.
+    assert token.startswith("v2:3:3100:")
+    assert manager._launch_webui_process.call_count == 1
+
+
 # ── prestart reorder (§7.7) ───────────────────────────────────────────
 
 
@@ -531,6 +585,63 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
             resp = client.get("/api/workspace/user-url?required_isolation=sandboxed")
     assert resp.status_code == 200
     assert stub.received_isolation == "sandboxed"
+
+
+def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
+    """MINOR-5: a launcher SandboxWebuiError must cross the API boundary with
+    its machine-readable reason code (gate-rejection body shape), not collapse
+    into the generic 500 "Internal server error"."""
+    from app.services.webui_sandbox import SandboxWebuiError
+
+    class _StubManager:
+        def __init__(self):
+            import app.services.webui_manager as wm
+
+            self.config = wm.WorkspaceConfig(enabled=True, multi_user_mode=True)
+
+        def per_user_launch_readiness(self):
+            return None
+
+        def supports_per_user_launch(self, system_account):
+            return True, None
+
+        def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
+            raise SandboxWebuiError(
+                "sandbox gateway could not resolve the pod's webui endpoint",
+                reason_code="sandbox_endpoint_unresolved",
+            )
+
+        def update_user_activity(self, user_id):
+            pass
+
+    stub = _StubManager()
+    sandbox_snapshot = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend="opensandbox:kata",
+        isolation_level=wic.ISOLATION_LEVEL_SANDBOXED,
+        enforced=wic._SANDBOXED_ENFORCED,
+        unsupported=wic._SANDBOXED_UNSUPPORTED,
+        reasons=(),
+    )
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: sandbox_snapshot)
+    with (
+        patch("app.repositories.user_repo.UserRepository") as repo_cls,
+        patch("app.services.webui_manager.get_webui_manager", return_value=stub),
+    ):
+        repo_cls.return_value.get_user_by_id.return_value = {
+            **MOCK_USER,
+            "system_account": "alice_acct",
+        }
+        client.set_cookie("session_token", "test-token")
+        with patch("app.routes.workspace._load_user_from_token", return_value=MOCK_USER):
+            resp = client.get("/api/workspace/user-url?required_isolation=sandboxed")
+    assert resp.status_code == 502  # upstream sandbox refusal, not a policy 400
+    body = resp.get_json()
+    assert body["success"] is False
+    assert body["error_code"] == "sandbox_endpoint_unresolved"
+    assert body["error"]  # the exception's message, not "Internal server error"
+    assert body["reasons"][0]["code"] == "sandbox_endpoint_unresolved"
+    assert body["isolation"]["isolation_level"] == "sandboxed"
 
 
 # ── allocator form-awareness ──────────────────────────────────────────

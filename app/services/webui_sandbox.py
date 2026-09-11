@@ -18,7 +18,7 @@ long-lived interactive pod. What IS reused, by name:
 Design decisions pinned by docs/superpowers/plans/2026-09-12-issue-3378-*.md
 (v5): D2 (bootstrap-prefixed entrypoint + restore gate + per-instance secret),
 D5 (renew clamped to the proxy-token expiry so a pod never outlives its baked-in
-LLLM credentials), D6 (export guarded on the restore-done ground truth).
+LLM credentials), D6 (export guarded on the restore-done ground truth).
 """
 
 from __future__ import annotations
@@ -496,13 +496,21 @@ class SandboxedWebuiLauncher:
         the pod is destroyed — an unverifiable webui pod must not survive, the
         same rule the provider applies to agent pods.
         """
+        # The provider resolves its endpoint via the config's default_tier
+        # (tenant/project unset); re-point that at THIS pod's tier so the probe
+        # verdict matches the runtime class the pod was actually created with
+        # — otherwise a sandbox_tier different from default_tier probes the
+        # wrong tier's declaration (review Q1, multi-tier deployments).
+        import dataclasses
+
         from app.modules.workspace.autonomous.sandbox.opensandbox.provider import (
             OpenSandboxProvider,
         )
         from app.modules.workspace.autonomous.sandbox.types import SandboxHandle
 
         provider = OpenSandboxProvider(
-            self._require_backend_config(), api_factory=lambda _endpoint: api
+            dataclasses.replace(self._require_backend_config(), default_tier=endpoint.tier),
+            api_factory=lambda _endpoint: api,
         )
         handle = SandboxHandle(
             sandbox_id=sandbox_id,
@@ -523,7 +531,10 @@ class SandboxedWebuiLauncher:
         kernel_enforced = family == "gvisor"
         from app.services.workspace_isolation_contract import register_sandbox_runtime_verified
 
-        register_sandbox_runtime_verified(kernel_enforced=kernel_enforced)
+        # Per-tier memo (review Q1): this pod's verification upgrades only the
+        # tier it was launched against — a Kata pod starting later must not
+        # downgrade an already-verified gVisor tier's snapshot (or vice versa).
+        register_sandbox_runtime_verified(tier=endpoint.tier, kernel_enforced=kernel_enforced)
         logger.info(
             "webui sandbox %s boot probes passed (runtime family %r; kernel_enforced=%s)",
             sandbox_id,
@@ -752,8 +763,7 @@ class SandboxedWebuiLauncher:
             return None
         api = self._current_api()
         command = (
-            f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} "
-            f"-C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
+            f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} -C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
         )
         if not self._run_background_command(api, sandbox_id, command):
             logger.warning("webui sandbox %s: snapshot tar did not confirm", sandbox_id)
@@ -764,7 +774,7 @@ class SandboxedWebuiLauncher:
             )
         except OpenSandboxApiError as exc:
             logger.warning(
-                "webui sandbox %s: snapshot download failed (%s); keeping the " "previous snapshot",
+                "webui sandbox %s: snapshot download failed (%s); keeping the previous snapshot",
                 sandbox_id,
                 exc,
             )
@@ -1487,9 +1497,7 @@ def _export_orphan(
             sandbox_id,
         )
         return
-    command = (
-        f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} " f"-C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
-    )
+    command = f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} -C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
     launcher = SandboxedWebuiLauncher(
         backend_config=None,
         # m5: the tier's endpoint must be injected explicitly — the exporter
@@ -1505,11 +1513,13 @@ def _export_orphan(
         return
     try:
         blob = api.download_file(
-            sandbox_id, WEBUI_STATE_TAR_PATH, max_bytes=launcher._max_state_bytes  # noqa: SLF001
+            sandbox_id,
+            WEBUI_STATE_TAR_PATH,
+            max_bytes=launcher._max_state_bytes,  # noqa: SLF001
         )
     except OpenSandboxApiError as exc:
         logger.warning(
-            "webui orphan %s: snapshot download failed (%s); keeping the " "previous snapshot",
+            "webui orphan %s: snapshot download failed (%s); keeping the previous snapshot",
             sandbox_id,
             exc,
         )
