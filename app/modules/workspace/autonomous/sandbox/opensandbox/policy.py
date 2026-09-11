@@ -61,6 +61,17 @@ PROVIDER_NAME = "opensandbox"
 # drift apart.
 INSTALLATION_METADATA_KEY = "openace.installation"
 
+# Issue #3378: metadata namespace for interactive WebUI pods. Deliberately
+# independent of ``openace.generation`` (the workflow-generation key, F33) —
+# ``process_generation`` carries the web PROCESS's uuid so the web worker's
+# reconcile can distinguish its own pods from a dead predecessor's. Lives here
+# (not in app/services) so the provider's orphan sweep can honour the kind
+# exclusion contract without importing a service module.
+WEBUI_METADATA_KIND = "openace.webui.kind"
+WEBUI_METADATA_GENERATION = "openace.webui.process_generation"
+WEBUI_METADATA_OWNER = "openace.webui.owner"
+WEBUI_METADATA_KIND_VALUE = "webui"
+
 # Upstream CreateSandboxRequest.timeout is seconds with minimum 60.
 _MIN_TTL_SECONDS = 60
 

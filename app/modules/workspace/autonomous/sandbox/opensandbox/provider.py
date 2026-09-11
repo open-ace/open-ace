@@ -868,6 +868,15 @@ class OpenSandboxProvider:
                 continue
             if metadata.get(policy_mod.INSTALLATION_METADATA_KEY) != installation:
                 continue
+            # Issue #3378 (N7 exclusion contract): interactive WebUI pods are
+            # tagged openace.webui.kind=webui and are NOT workflow-bound — no
+            # workflow row will ever claim them, so without this exclusion
+            # every scheduler sweep would destroy live user webuis. Their
+            # lifecycle belongs to the WEB process's generation reconcile
+            # (app/services/webui_sandbox.py). Declared in
+            # docs/sandbox-backends.md.
+            if metadata.get(policy_mod.WEBUI_METADATA_KIND) == policy_mod.WEBUI_METADATA_KIND_VALUE:
+                continue
             if not sandbox_id or sandbox_id in live:
                 continue
             self._safe_destroy(sandbox_id)

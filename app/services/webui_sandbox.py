@@ -87,12 +87,13 @@ STATE_ROOT_ENV = "OPENACE_WEBUI_STATE_ROOT"
 RESTORE_GATE_ATTEMPTS = 300
 RESTORE_GATE_SLEEP_SECONDS = 0.2
 
-# Metadata keys for the webui process namespace (D5/FEAS-Q1). Deliberately
-# independent of openace.generation, which carries the workflow generation.
-WEBUI_METADATA_KIND = "openace.webui.kind"
-WEBUI_METADATA_GENERATION = "openace.webui.process_generation"
-WEBUI_METADATA_OWNER = "openace.webui.owner"
-WEBUI_METADATA_KIND_VALUE = "webui"
+# Metadata keys for the webui process namespace (D5/FEAS-Q1). Defined ONCE in
+# policy.py (the provider's orphan sweep needs them too — N7 exclusion
+# contract); re-exported here for the launcher's callers.
+WEBUI_METADATA_KIND = sandbox_policy_mod.WEBUI_METADATA_KIND
+WEBUI_METADATA_GENERATION = sandbox_policy_mod.WEBUI_METADATA_GENERATION
+WEBUI_METADATA_OWNER = sandbox_policy_mod.WEBUI_METADATA_OWNER
+WEBUI_METADATA_KIND_VALUE = sandbox_policy_mod.WEBUI_METADATA_KIND_VALUE
 
 # Per-process generation: reconcile destroys webui pods whose generation is not
 # this value (D5). Module-level so every launcher in this process agrees with
@@ -1296,3 +1297,200 @@ class _BadRequest(Exception):
 
 class _UpstreamError(Exception):
     """The upstream endpoint could not be reached (502)."""
+
+
+# ── D5: orphan reconcile (positive-trigger, web-process-hosted) ──────────────
+
+# The ONLY production host of the reconcile is the gunicorn worker startup
+# hook (app/gunicorn_worker.py), env-gated below; server.py's dev __main__
+# path spawns the same helper on its own greenlet. Management scripts import
+# create_app without ever setting this env, so they can never reconcile.
+RECONCILE_ENV = "OPENACE_WEBUI_ORPHAN_RECONCILE"
+
+
+def reconcile_webui_orphans(
+    *,
+    backend_config: SandboxBackendConfig | None = None,
+    api_factory: Callable[[EndpointConfig], OpenSandboxApi] | None = None,
+    state_root_override: str | None = None,
+) -> list[str]:
+    """Destroy webui pods whose process generation is not this process's.
+
+    Belt-and-braces filtering (D5): the list query carries the provider +
+    installation keys AND ``openace.webui.kind=webui``; the client-side pass
+    re-checks all of them and skips anything stamped with THIS process's
+    generation — a live webui pod can never be its own orphan.
+
+    Export-before-destroy (FEAS-R4-1): each orphan's export is gated on the
+    pod's OWN restore-done marker, probed via execd ``/files/download`` — a
+    degraded launch (the touch never succeeded) leaves no marker and skips the
+    export, so an empty tree can never overwrite a user's last good snapshot.
+    The destroy itself is idempotent (404 = success) and never blocked by an
+    export failure.
+    """
+    try:
+        cfg = (
+            backend_config
+            if backend_config is not None
+            else sandbox_config_mod.load_backend_config()
+        )
+    except Exception:  # noqa: BLE001 - fail-soft: a corrupt sandbox-backends.json
+        # must never break the web boot that triggered this sweep.
+        logger.exception("webui orphan reconcile: backend config unreadable (fail-soft)")
+        return []
+    if cfg is None:
+        return []
+    destroyed: list[str] = []
+    mine = current_process_generation()
+    query = {
+        "openace.provider": sandbox_policy_mod.PROVIDER_NAME,
+        sandbox_policy_mod.INSTALLATION_METADATA_KEY: cfg.installation_id,
+        WEBUI_METADATA_KIND: WEBUI_METADATA_KIND_VALUE,
+    }
+    for endpoint in cfg.endpoints.values():
+        api = api_factory(endpoint) if api_factory is not None else _default_api_factory(endpoint)
+        try:
+            rows = api.list_sandboxes(query)
+        except Exception as exc:  # noqa: BLE001 - one bad tier must not stop the sweep
+            logger.warning("webui orphan reconcile: list failed on %s: %s", endpoint.tier, exc)
+            continue
+        for row in rows:
+            metadata = row.get("metadata") or {}
+            sandbox_id = str(row.get("id") or "")
+            # Client-side re-check: a server that ignored the query filters
+            # must not be able to hand us another installation's pods.
+            if metadata.get("openace.provider") != sandbox_policy_mod.PROVIDER_NAME:
+                continue
+            if metadata.get(sandbox_policy_mod.INSTALLATION_METADATA_KEY) != cfg.installation_id:
+                continue
+            if metadata.get(WEBUI_METADATA_KIND) != WEBUI_METADATA_KIND_VALUE:
+                continue
+            if metadata.get(WEBUI_METADATA_GENERATION) == mine:
+                continue  # ours: a live pod of this very process
+            if not sandbox_id:
+                continue
+            _export_orphan(api, sandbox_id, metadata, state_root_override)
+            _delete_orphan(api, sandbox_id)
+            destroyed.append(sandbox_id)
+    if destroyed:
+        logger.info(
+            "webui orphan reconcile destroyed %d stale pod(s): %s", len(destroyed), destroyed
+        )
+    return destroyed
+
+
+def _export_orphan(
+    api: OpenSandboxApi,
+    sandbox_id: str,
+    metadata: dict,
+    state_root_override: str | None,
+) -> None:
+    """Best-effort export of one orphan, gated on the pod's restore marker."""
+    owner_raw = str(metadata.get(WEBUI_METADATA_OWNER) or "").strip()
+    try:
+        owner = int(owner_raw)
+    except ValueError:
+        logger.warning(
+            "webui orphan %s: owner %r is not a user id; skipping export",
+            sandbox_id,
+            owner_raw,
+        )
+        return
+    marker_present = True
+    try:
+        api.download_file(sandbox_id, RESTORE_MARKER_PATH, max_bytes=1)
+    except OpenSandboxApiError as exc:
+        if exc.status_code == 404 or exc.code == "NOT_FOUND":
+            marker_present = False
+        else:
+            logger.warning(
+                "webui orphan %s: restore marker probe failed (%s); skipping export",
+                sandbox_id,
+                exc,
+            )
+            return
+    except Exception as exc:  # noqa: BLE001 - export is best effort
+        logger.warning("webui orphan %s: restore marker probe failed: %s", sandbox_id, exc)
+        return
+    if not marker_present:
+        # FEAS-R4-1: degraded launch — the control plane's touch never
+        # succeeded, so the pod's tree never replaced the stored snapshot.
+        logger.info(
+            "webui orphan %s: no restore-done marker (degraded launch); "
+            "skipping export, keeping the stored snapshot",
+            sandbox_id,
+        )
+        return
+    command = (
+        f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} " f"-C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
+    )
+    launcher = SandboxedWebuiLauncher(
+        backend_config=None,
+        state_root_override=state_root_override,
+    )
+    # Reuse the launcher's background-command + bounded-download machinery.
+    if not launcher._run_background_command(api, sandbox_id, command):  # noqa: SLF001 - same module
+        logger.warning("webui orphan %s: snapshot tar did not confirm", sandbox_id)
+        return
+    try:
+        blob = api.download_file(
+            sandbox_id, WEBUI_STATE_TAR_PATH, max_bytes=launcher._max_state_bytes  # noqa: SLF001
+        )
+    except OpenSandboxApiError as exc:
+        logger.warning(
+            "webui orphan %s: snapshot download failed (%s); keeping the " "previous snapshot",
+            sandbox_id,
+            exc,
+        )
+        return
+    try:
+        launcher.persist_snapshot(owner, blob)
+    except OSError as exc:
+        logger.warning("webui orphan %s: snapshot persist failed: %s", sandbox_id, exc)
+
+
+def _delete_orphan(api: OpenSandboxApi, sandbox_id: str) -> None:
+    """Idempotent delete; failures are logged, never raised (retry next boot)."""
+    try:
+        api.delete_sandbox(sandbox_id)
+    except OpenSandboxApiError as exc:
+        if exc.status_code != 404:
+            logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
+    except Exception as exc:  # noqa: BLE001 - the sweep must go on
+        logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
+
+
+def _default_api_factory(endpoint: EndpointConfig) -> OpenSandboxApi:
+    """Build the production HTTP API for *endpoint*."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
+
+    return HttpOpenSandboxApi(endpoint)
+
+
+def maybe_spawn_webui_orphan_reconcile() -> bool:
+    """Env-gated, TESTING-guarded, fail-soft reconcile spawn (D5/FEAS-R4-3).
+
+    Returns True when a reconcile greenlet was spawned. The reconcile work
+    (list + per-orphan export + destroy + polling) NEVER runs inline in the
+    caller's greenlet — the worker boot hook and server.py's dev path both
+    spawn it separately, so a slow sweep cannot block request serving.
+    """
+    if os.environ.get(RECONCILE_ENV) != "1":
+        return False
+    # TESTING guard (FEAS-M3), matching the app/__init__.py precedent: a test
+    # process must never sweep real sandbox backends.
+    if os.environ.get("PYTEST_VERSION") or os.environ.get("TESTING"):
+        logger.info("webui orphan reconcile skipped (test process)")
+        return False
+
+    def _run() -> None:
+        try:
+            reconcile_webui_orphans()
+        except Exception:  # noqa: BLE001 - fail-soft: web boot must not fail
+            logger.exception("webui orphan reconcile failed (fail-soft)")
+
+    import gevent
+
+    gevent.spawn(_run)
+    logger.info("webui orphan reconcile spawned (worker startup)")
+    return True
