@@ -187,3 +187,50 @@ def test_race_loser_reads_winner_secret(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "open", _race_open)
     mgr = WebUIManager()
     assert mgr.config.token_secret == winner
+
+
+def test_write_failure_after_create_leaves_no_residual_file(tmp_path, monkeypatch):
+    # Issue #3377 review: ENOSPC/EIO on os.write after O_EXCL succeeded must
+    # not leave a 0-byte file behind — that residual would make every later
+    # boot take the conservative empty-file path and permanently disable
+    # persistence (the bug this PR fixes).
+    import app.services.webui_manager as wm
+
+    cd = _config_dir(tmp_path, monkeypatch)
+    _write_config_json(cd)
+
+    def _failing_write(fd, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "write", _failing_write)
+    ok = wm._persist_secret_file(str(cd / SECRET_FILENAME), "a" * 64)
+    assert ok is False
+    assert not (cd / SECRET_FILENAME).exists()
+
+
+def test_unreadable_secret_file_logs_read_error_not_not_configured(tmp_path, monkeypatch, caplog):
+    # Issue #3377 review: a present-but-unreadable file (owner/permission
+    # drift) must not be reported as "not configured" — the opposite of the
+    # truth and a dead end for operators.
+    import app.services.webui_manager as wm
+
+    cd = _config_dir(tmp_path, monkeypatch)
+    _write_config_json(cd)
+    secret_file = cd / SECRET_FILENAME
+    secret_file.write_text("b" * 64)
+    secret_file.chmod(0o000)
+
+    try:
+        value, nonempty_invalid, unreadable = wm._read_secret_file(str(secret_file))
+        assert value is None
+        assert nonempty_invalid is False
+        assert unreadable is True
+
+        with caplog.at_level(logging.WARNING, logger="app.services.webui_manager"):
+            mgr = WebUIManager()
+        assert len(mgr.config.token_secret) >= 64
+        messages = [r.message for r in caplog.records]
+        assert any("cannot be read" in m for m in messages)
+        assert not any("not configured; generated an in-memory" in m for m in messages)
+    finally:
+        secret_file.chmod(0o600)

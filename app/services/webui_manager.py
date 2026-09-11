@@ -181,14 +181,19 @@ class WorkspaceConfig:
 _TOKEN_SECRET_FILENAME = "webui_token_secret"
 
 
-def _read_secret_file(secret_path: str) -> tuple[str | None, bool]:
+def _read_secret_file(secret_path: str) -> tuple[str | None, bool, bool]:
     """Read the persisted WebUI token secret.
 
-    Returns (secret, was_nonempty_invalid): secret is None when absent,
-    empty, or malformed. was_nonempty_invalid is True only for non-empty
-    content that failed validation (caller may unlink + regenerate); empty
-    content is treated as an in-flight/crashed writer and is left alone
-    (unstaking a live winner would cause diverging secrets).
+    Returns ``(secret, was_nonempty_invalid, unreadable)``: secret is None
+    when absent, empty, or malformed. was_nonempty_invalid is True only for
+    non-empty content that failed validation (caller may unlink +
+    regenerate); empty content is treated as an in-flight/crashed writer and
+    is left alone (unstaking a live winner would cause diverging secrets).
+    ``unreadable`` means the file exists but this process cannot read it
+    (owner/permission drift — e.g. a management command run as another
+    account left a 0600 file behind); the caller must report that
+    distinctly from "not configured" or the log points operators at the
+    opposite of the truth (Issue #3377 review).
     """
     try:
         with open(secret_path) as f:
@@ -197,20 +202,27 @@ def _read_secret_file(secret_path: str) -> tuple[str | None, bool]:
         # Binary garbage is the same failure class as non-hex text: treat as
         # non-empty invalid so the caller unlinks and regenerates.
         logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
-        return None, True
-    except OSError:
-        return None, False
+        return None, True, False
+    except OSError as e:
+        logger.warning(
+            "Cannot read WebUI token secret file %s (%s); check its owner "
+            "and permissions — persistence stays disabled until it is "
+            "readable by this service user",
+            secret_path,
+            e,
+        )
+        return None, False, True
     if len(value) >= 64 and all(c in "0123456789abcdef" for c in value):
-        return value, False
+        return value, False, False
     if value:
         logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
-        return None, True
+        return None, True, False
     logger.warning(
         "Empty WebUI token secret file %s (interrupted writer?); using an "
         "in-memory secret — delete the file to restore persistence",
         secret_path,
     )
-    return None, False
+    return None, False, False
 
 
 def _persist_secret_file(secret_path: str, value: str) -> bool:
@@ -230,6 +242,15 @@ def _persist_secret_file(secret_path: str, value: str) -> bool:
     except FileExistsError:
         return False
     except OSError as e:
+        # Remove the file O_EXCL just created: a 0-byte or partial leftover
+        # makes every later boot take the conservative empty-file path and
+        # permanently disables persistence — the exact bug this issue fixes
+        # (Issue #3377 review). The FileExistsError branch above keeps the
+        # concurrent-winner's file untouched.
+        try:
+            os.unlink(secret_path)
+        except OSError:
+            pass
         logger.warning(
             "Cannot persist WebUI token secret to %s (%s); tokens will " "not survive restarts",
             secret_path,
@@ -252,7 +273,7 @@ def _resolve_token_secret(config: WorkspaceConfig) -> str:
     from app.repositories.database import CONFIG_DIR
 
     secret_path = os.path.join(CONFIG_DIR, _TOKEN_SECRET_FILENAME)
-    existing, nonempty_invalid = _read_secret_file(secret_path)
+    existing, nonempty_invalid, unreadable = _read_secret_file(secret_path)
     if existing:
         return existing
     if nonempty_invalid:
@@ -281,10 +302,21 @@ def _resolve_token_secret(config: WorkspaceConfig) -> str:
                 secret_path,
             )
         return persisted
-    logger.warning(
-        "WebUI token secret not configured; generated an in-memory secret "
-        "(tokens will not survive restarts)"
-    )
+    if unreadable:
+        # The file exists but cannot be read: "not configured" would be the
+        # opposite of the truth and send operators hunting a missing setting
+        # instead of the file's owner/mode (Issue #3377 review).
+        logger.warning(
+            "WebUI token secret file %s exists but cannot be read by this "
+            "service user; generated an in-memory secret (tokens will not "
+            "survive restarts until the file's owner/permissions are fixed)",
+            secret_path,
+        )
+    else:
+        logger.warning(
+            "WebUI token secret not configured; generated an in-memory secret "
+            "(tokens will not survive restarts)"
+        )
     return generated
 
 
