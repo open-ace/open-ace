@@ -81,12 +81,20 @@ class TerminalGeventWorker(GeventPyWSGIWorker):
 
     wsgi_handler = RemoteWSHandler
 
-    def init_process(self) -> None:
-        """Run the parent init, then spawn the (gated) orphan reconcile."""
-        super().init_process()
+    def run(self) -> None:
+        """Spawn the (gated) orphan reconcile, THEN enter the serving loop.
+
+        Issue #3378 review (B1): gunicorn's ``Worker.init_process`` ends with
+        ``self.run()`` and blocks there for the worker's entire life, so a hook
+        placed AFTER ``super().init_process()`` would only execute at shutdown,
+        when no greenlet hub drives it anymore. Overriding ``run()`` instead
+        puts the spawn right before the service loop starts (the reconcile
+        itself only spawns a greenlet — serving is never delayed by the sweep).
+        """
         try:
             from app.services.webui_sandbox import maybe_spawn_webui_orphan_reconcile
 
             maybe_spawn_webui_orphan_reconcile()
         except Exception:  # noqa: BLE001 - fail-soft: boot must not fail
             logger.exception("webui orphan reconcile spawn failed (fail-soft)")
+        super().run()

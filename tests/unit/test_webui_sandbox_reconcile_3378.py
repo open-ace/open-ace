@@ -188,6 +188,35 @@ def test_reconcile_export_failure_does_not_block_destroy(tmp_path):
     assert not (tmp_path / "webui-7.tar").exists()
 
 
+def test_reconcile_export_tar_runs_under_exec_identity(tmp_path):
+    """m5: the exporter's in-pod tar must carry the tier's uid/gid — the
+    launcher gets the reconcile loop's endpoint injected explicitly (an
+    endpoint-less launcher silently skips the credential switch)."""
+    import dataclasses
+
+    cfg = _backend()
+    cfg.endpoints["kata"] = dataclasses.replace(cfg.endpoints["kata"], exec_uid=2000, exec_gid=3000)
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    sid = orphan["id"]
+    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+
+    ws.reconcile_webui_orphans(
+        backend_config=cfg,
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    tar_bodies = [b for b in fake.command_bodies if "tar -cf" in b["command"]]
+    assert tar_bodies, "the orphan export must run the in-pod tar"
+    for body in tar_bodies:
+        # execd is not attested to run as the exec identity on this tier, so
+        # the uid/gid switch from the ENDPOINT (not the 1000 default) must be
+        # applied to the export command.
+        assert body["uid"] == 2000
+        assert body["gid"] == 3000
+
+
 def test_reconcile_is_idempotent_on_rerun(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
@@ -282,19 +311,32 @@ def test_maybe_spawn_runs_reconcile_on_separate_greenlet_fail_soft(monkeypatch):
 
 
 def test_gunicorn_worker_hook_triggers_gated_reconcile(monkeypatch):
+    """The reconcile spawn precedes the serving loop (B1).
+
+    gunicorn's ``Worker.init_process`` ends by calling ``self.run()`` and
+    blocks there for the worker's whole life — a hook after
+    ``super().init_process()`` would fire only at shutdown. The production
+    override therefore lives in ``run()``; this test patches the PARENT's
+    ``run`` (the serving loop itself) and asserts the spawn happened before
+    it was entered, without masking any of the real control flow above it.
+    """
     from gunicorn.workers.ggevent import GeventPyWSGIWorker
 
     from app.gunicorn_worker import TerminalGeventWorker
 
     worker = TerminalGeventWorker.__new__(TerminalGeventWorker)
-    triggered = []
+    events: list[str] = []
     monkeypatch.setattr(
         "app.services.webui_sandbox.maybe_spawn_webui_orphan_reconcile",
-        lambda: triggered.append(1) or True,
+        lambda: events.append("reconcile-spawned") or True,
     )
-    with patch.object(GeventPyWSGIWorker, "init_process", lambda self: None):
-        worker.init_process()
-    assert triggered == [1]
+
+    def _serving_loop(self):
+        events.append("serving")
+
+    with patch.object(GeventPyWSGIWorker, "run", _serving_loop):
+        worker.run()
+    assert events == ["reconcile-spawned", "serving"]
 
 
 # ── provider.reconcile_orphans exclusion contract (N7) ─────────────────

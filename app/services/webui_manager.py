@@ -320,7 +320,10 @@ class WebUIManager:
         """
         self.config = config or self._load_config()
         self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
-        self._port_allocations: dict[int, int] = {}  # port -> user_id
+        # port -> (user_id, form). Issue #3378 review (m4): the value carries
+        # the form so every holder check can key on (user_id, form) — a
+        # cross-form allocate must never return the other form's port.
+        self._port_allocations: dict[int, tuple[int, str]] = {}
         self._lock = gevent_lock.RLock()  # gevent-safe reentrant lock
         self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
@@ -548,6 +551,29 @@ class WebUIManager:
                 logger.info(f"Cleaning up idle instance for user {user_id}")
                 self._stop_instance_internal(user_id)
 
+        # Issue #3378 review (m1): the single-user SANDBOXED instance holds a
+        # remote pod plus a proxy port, so it must not be exempt from idle
+        # reaping — its last_activity is fed by the proxy's on_activity
+        # heartbeat and by /user-url hits. The LOCAL single-user instance
+        # keeps its historic never-reaped semantics (shared, fixed port 3100,
+        # no remote resource; restart-on-dead already covers it). Taken AFTER
+        # the _lock block: teardown reaches release_port (which takes _lock),
+        # and the codebase's established order is _single_user_lock → _lock.
+        with self._single_user_lock:
+            single = self._single_user_instance
+            if (
+                single is not None
+                and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+                and now - single.last_activity > timeout
+            ):
+                logger.info(
+                    "Cleaning up idle single-user sandboxed webui instance "
+                    "(sandbox=%s, port=%s)",
+                    single.sandbox_id,
+                    single.port,
+                )
+                self._stop_single_user_instance_internal()
+
     def allocate_port(self, user_id: int, form: str = WEBUI_FORM_LOCAL) -> int:
         """
         Allocate a port for a user.
@@ -567,9 +593,11 @@ class WebUIManager:
         """
         with self._lock:
             # Still holding a port for this (user_id, form)? Return it — a
-            # repeated allocate must never hand out a second port.
-            for port, uid in self._port_allocations.items():
-                if uid == user_id:
+            # repeated allocate must never hand out a second port, and a
+            # CROSS-form allocate must never steal the other form's port
+            # (Issue #3378 review, m4: the key includes the form).
+            for port, (uid, held_form) in self._port_allocations.items():
+                if uid == user_id and held_form == form:
                     return port
 
             # Same-form restart: prefer the port this (user, form) last held
@@ -581,7 +609,7 @@ class WebUIManager:
                 and previous not in self._port_allocations
                 and self._is_port_available(previous)
             ):
-                self._port_allocations[previous] = user_id
+                self._port_allocations[previous] = (user_id, form)
                 logger.info(f"Re-allocated port {previous} for user {user_id} ({form} form)")
                 return previous
 
@@ -590,7 +618,7 @@ class WebUIManager:
                 if port not in self._port_allocations:
                     # Verify port is actually available
                     if self._is_port_available(port):
-                        self._port_allocations[port] = user_id
+                        self._port_allocations[port] = (user_id, form)
                         logger.info(f"Allocated port {port} for user {user_id} ({form} form)")
                         return port
 
@@ -648,10 +676,10 @@ class WebUIManager:
         """
         with self._lock:
             if port in self._port_allocations:
-                user_id = self._port_allocations.pop(port)
+                user_id, held_form = self._port_allocations.pop(port)
                 if form is not None:
                     self._form_last_ports[(user_id, form)] = port
-                logger.info(f"Released port {port} from user {user_id}")
+                logger.info(f"Released port {port} from user {user_id} ({held_form} form)")
 
     def generate_token(self, user_id: int, port: int) -> str:
         """
@@ -994,6 +1022,16 @@ class WebUIManager:
             url = f"{base_url_no_port}:3100"
             return url, token
 
+        # KNOWN LIMITATION (Issue #3378 review, m6 — documented, deliberately
+        # not restructured): the instance-START path below (subprocess launch
+        # with up to ~15s readiness wait, or a sandboxed pod create + snapshot
+        # restore that can take tens of seconds) runs while this manager lock
+        # is held, so concurrent FIRST hits by DIFFERENT users serialize
+        # behind the first start. This is the pre-existing pattern (#3129/#3374
+        # era) and deliberately kept: handing starts off to per-user locks
+        # would add a concurrency regression surface (port allocation, form
+        # switching, and the instance cap all rely on this mutual exclusion).
+        # The hit path (instance exists and is alive) never blocks on a start.
         with self._lock:
             # Check if user already has an instance
             if user_id in self._instances:
@@ -1161,6 +1199,21 @@ class WebUIManager:
             return
 
         instance = self._single_user_instance
+        # Issue #3378 review (Q1): revoke the instance's proxy tokens before
+        # teardown — same precedent as _stop_instance_internal for the
+        # multi-user form. Without this, a stopped instance leaves a
+        # still-validatable webui:<user> session behind.
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+            get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                f"webui:{instance.user_id}",
+                reason="webui_stopped",
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to revoke WebUI proxy tokens for user %s: %s", instance.user_id, e
+            )
         if getattr(instance, "form", WEBUI_FORM_LOCAL) == WEBUI_FORM_SANDBOXED:
             logger.info(
                 "Stopping single-user sandboxed WebUI instance: sandbox=%s, port=%s",
@@ -1314,10 +1367,19 @@ class WebUIManager:
         result = launcher.launch(user_id=user_id, callback_url=callback_url, snapshot=snapshot)
 
         port = self.allocate_port(user_id, WEBUI_FORM_SANDBOXED)
+        # The instance object does not exist until after the proxy starts, so
+        # the activity callback closes over a holder cell filled below. Every
+        # successful proxy forward then refreshes instance.last_activity —
+        # the only heartbeat the single-user sandboxed form gets (m1), and the
+        # signal the idle reaper below keys on.
+        instance_holder: list[WebUIInstance] = []
         try:
             proxy = SandboxWebuiProxy(
                 sandbox_id=result.sandbox_id,
                 upstream_resolver=lambda: launcher.resolve_webui_endpoint(result.sandbox_id),
+                on_activity=lambda: (
+                    instance_holder[0].update_activity() if instance_holder else None
+                ),
             )
             proxy.start(port)
         except Exception:
@@ -1348,6 +1410,7 @@ class WebUIManager:
             proxy=proxy,
             url=f"{self._remove_port_from_url(base_url)}:{port}",
         )
+        instance_holder.append(instance)
         self._mint_sandboxed_token(instance)
         return instance
 
@@ -2083,9 +2146,30 @@ class WebUIManager:
         return count
 
     def get_user_instance(self, user_id: int) -> WebUIInstance | None:
-        """Get the instance for a specific user."""
+        """Get the instance for a specific user.
+
+        Issue #3378 review (M1): a single-user SANDBOXED instance lives in
+        ``_single_user_instance``, not ``_instances`` — the LLM-proxy token
+        lifecycle check (``api_key_proxy._webui_instance_alive``) resolves the
+        pod's baked-in token through this method, so without the fallback every
+        proxy-token validation of the single-user sandboxed form would 401.
+        Multi-user semantics are unchanged (``_instances`` stays keyed by
+        user_id); the shared instance only answers for the user whose pod
+        token it carries. Read lock-free like the other advisory single-user
+        reads (a concurrent stop just makes the answer None).
+        """
         with self._lock:
-            return self._instances.get(user_id)
+            instance = self._instances.get(user_id)
+        if instance is not None:
+            return instance
+        single = self._single_user_instance
+        if (
+            single is not None
+            and single.user_id == user_id
+            and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+        ):
+            return single
+        return None
 
     def get_all_instances(self) -> list[dict[str, Any]]:
         """Get information about all instances."""

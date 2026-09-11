@@ -271,6 +271,7 @@ class SandboxedWebuiLauncher:
         *,
         backend_config: SandboxBackendConfig | None = None,
         tier: str = "",
+        endpoint: EndpointConfig | None = None,
         api_factory: Callable[[EndpointConfig], OpenSandboxApi] | None = None,
         proxy_service_factory: Callable[[], Any] | None = None,
         restore_timeout_seconds: float = 90.0,
@@ -288,7 +289,10 @@ class SandboxedWebuiLauncher:
         self._max_state_bytes = state_max_bytes(max_state_bytes)
         self._state_root_override = state_root_override
         self._api: OpenSandboxApi | None = None
-        self._endpoint: EndpointConfig | None = None
+        # Issue #3378 review (m5): an explicit endpoint can be injected for
+        # callers that never resolve one themselves (the orphan exporter) —
+        # _run_background_command's uid/gid credential switch keys on it.
+        self._endpoint: EndpointConfig | None = endpoint
         # sandbox_id -> (url, headers) for the pod's webui port (D1 upstream).
         self._webui_endpoints: dict[str, tuple[str, dict[str, str]]] = {}
 
@@ -517,9 +521,7 @@ class SandboxedWebuiLauncher:
             ) from exc
         family = sandbox_config_mod.runtime_family(endpoint.runtime_class)
         kernel_enforced = family == "gvisor"
-        from app.services.workspace_isolation_contract import (
-            register_sandbox_runtime_verified,
-        )
+        from app.services.workspace_isolation_contract import register_sandbox_runtime_verified
 
         register_sandbox_runtime_verified(kernel_enforced=kernel_enforced)
         logger.info(
@@ -872,7 +874,12 @@ _MAX_DECHUNK_BYTES = 16 * 1024 * 1024
 
 
 def _parse_head(head: bytes) -> tuple[str, list[tuple[str, str]]]:
-    """Split a raw request/response head into its start line + header pairs."""
+    """Split a raw request/response head into its start line + header pairs.
+
+    Raises :class:`_MalformedHead` (not a bare ValueError) so the handler can
+    classify: a malformed CLIENT head is a 400, a malformed UPSTREAM head a
+    502 (m2).
+    """
     text = head.decode("iso-8859-1")
     lines = text.split("\r\n")
     start_line = lines[0]
@@ -881,7 +888,7 @@ def _parse_head(head: bytes) -> tuple[str, list[tuple[str, str]]]:
         if not line:
             continue
         if ":" not in line:
-            raise ValueError(f"malformed header line {line!r}")
+            raise _MalformedHead(f"malformed header line {line!r}")
         name, _, value = line.partition(":")
         headers.append((name.strip(), value.strip()))
     return start_line, headers
@@ -1002,12 +1009,23 @@ class SandboxWebuiProxy:
         upstream_resolver: Callable[[], tuple[str, dict[str, str]]],
         on_activity: Callable[[], None] | None = None,
         bind_host: str = "0.0.0.0",  # noqa: S104 - same exposure as the local webui port
+        upstream_connect_timeout_seconds: float = 15.0,
+        upstream_head_timeout_seconds: float = 15.0,
     ) -> None:
-        """Store wiring; nothing binds until :meth:`start`."""
+        """Store wiring; nothing binds until :meth:`start`.
+
+        The two upstream timeouts are phase-scoped on purpose (M2): the
+        connect budget applies only while dialing, the head budget only while
+        waiting for the upstream's answer. Neither may leak into the body
+        pump — a streaming response (SSE/WS) may legitimately idle between
+        bytes far longer than either budget.
+        """
         self.sandbox_id = sandbox_id
         self._upstream_resolver = upstream_resolver
         self._on_activity = on_activity
         self._bind_host = bind_host
+        self._upstream_connect_timeout_seconds = upstream_connect_timeout_seconds
+        self._upstream_head_timeout_seconds = upstream_head_timeout_seconds
         self._server: Any = None
         self.port: int | None = None
         self._greenlets: set[Any] = set()
@@ -1063,7 +1081,12 @@ class SandboxWebuiProxy:
         upstream: _BufferedSock | None = None
         try:
             head = client.read_head()
-            start_line, headers = _parse_head(head)
+            try:
+                start_line, headers = _parse_head(head)
+            except _MalformedHead as exc:
+                # Client garbage (m2): 400, not 502 — the upstream was never
+                # contacted.
+                raise _BadRequest(f"malformed request head: {exc}") from exc
             self._validate_request(headers)
             method, path, _version = self._split_request_line(start_line)
 
@@ -1097,8 +1120,22 @@ class SandboxWebuiProxy:
             if request_body:
                 upstream.sendall(request_body)
 
-            response_head = upstream.read_head()
-            status_line, response_headers = _parse_head(response_head)
+            # M2: a bounded window for the upstream's ANSWER only. A gateway
+            # that accepted the connection but never responds must not pin a
+            # greenlet forever; once the head is in, the budget is cleared so
+            # the body pump (SSE included) can idle between bytes unboundedly.
+            sock.settimeout(self._upstream_head_timeout_seconds)
+            try:
+                response_head = upstream.read_head()
+            except OSError as exc:
+                raise _UpstreamError(f"upstream did not answer in time: {exc}") from exc
+            finally:
+                sock.settimeout(None)
+            try:
+                status_line, response_headers = _parse_head(response_head)
+            except _MalformedHead as exc:
+                # Upstream garbage (m2): 502 — the client's request was fine.
+                raise _UpstreamError(f"malformed upstream response head: {exc}") from exc
             is_101 = status_line.split(" ", 2)[1:2] == ["101"]
             if self._is_websocket_upgrade(headers) and is_101:
                 client.sendall(
@@ -1132,8 +1169,15 @@ class SandboxWebuiProxy:
                 upstream.close()
 
     def _validate_request(self, headers: list[tuple[str, str]]) -> None:
-        """Reject the two malformed shapes D1 names: CL+TE, duplicate injects."""
+        """Reject the malformed shapes D1 names: CL+TE, duplicate CL/injects.
+
+        Duplicate Content-Length is a MUST-reject (RFC 7230 §3.3.2): a
+        request smuggling vector, refused before the upstream is contacted —
+        same 400 treatment as duplicated injection names (m2).
+        """
         names = [name.lower() for name, _ in headers]
+        if names.count("content-length") > 1:
+            raise _BadRequest("duplicate Content-Length header")
         if "content-length" in names and "transfer-encoding" in names:
             raise _BadRequest("Content-Length and Transfer-Encoding are mutually exclusive")
         duplicated = sorted(name for name in _INJECTABLE_HEADER_NAMES if names.count(name) > 1)
@@ -1189,6 +1233,10 @@ class SandboxWebuiProxy:
                 size = int(size_line.split(b";", 1)[0].strip() or b"0", 16)
             except ValueError as exc:
                 raise _BadRequest("malformed chunk size") from exc
+            if size < 0:
+                # int(hex) happily parses "-5"; a negative size is framing
+                # garbage and must be refused, not "read" (m3).
+                raise _BadRequest("negative chunk size")
             if size == 0:
                 while True:  # trailers up to the blank line
                     line = client.read_line()
@@ -1240,11 +1288,15 @@ class SandboxWebuiProxy:
 
     @staticmethod
     def _is_websocket_upgrade(headers: list[tuple[str, str]]) -> bool:
-        """Return True when the request asks for a websocket Upgrade."""
+        """Return True when the request asks for a websocket Upgrade.
+
+        Connection tokens are comma-separated with OPTIONAL whitespace (RFC
+        7230 §6.1 list syntax), so ``Upgrade,keep-alive`` (no space) must
+        still register (m7).
+        """
         lowered = {name.lower(): value.lower() for name, value in headers}
-        return lowered.get("upgrade", "") == "websocket" and "upgrade" in lowered.get(
-            "connection", ""
-        ).split(", ")
+        connection_tokens = [token.strip() for token in lowered.get("connection", "").split(",")]
+        return lowered.get("upgrade", "") == "websocket" and "upgrade" in connection_tokens
 
     def _connect_upstream(self, url: str) -> tuple[Any, str]:
         """Open the upstream connection (url from the endpoint resolver)."""
@@ -1258,13 +1310,22 @@ class SandboxWebuiProxy:
             raise _UpstreamError(f"upstream url {url!r} has no host")
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         try:
-            sock = gevent_socket.create_connection((host, port), timeout=15)
+            sock = gevent_socket.create_connection(
+                (host, port), timeout=self._upstream_connect_timeout_seconds
+            )
         except OSError as exc:
             raise _UpstreamError(f"upstream {host}:{port} unreachable: {exc}") from exc
         if parsed.scheme == "https":
             from gevent import ssl as gevent_ssl
 
             sock = gevent_ssl.wrap_socket(sock, server_hostname=host)
+        # Issue #3378 review (M2): create_connection leaves its connect
+        # timeout installed on the socket; it must be cleared or it becomes
+        # a whole-session read timeout, and pump_from treats a read timeout
+        # as peer-close — truncating any stream that idles longer than the
+        # connect budget. The response head keeps its own bounded window in
+        # _handle; the body pump is deliberately unbounded.
+        sock.settimeout(None)
         return sock, parsed.path or ""
 
     def _notify_activity(self) -> None:
@@ -1293,6 +1354,10 @@ class SandboxWebuiProxy:
 
 class _BadRequest(Exception):
     """A client request the D1 rules refuse with 400."""
+
+
+class _MalformedHead(Exception):
+    """A head that does not parse as start-line + colon-separated headers."""
 
 
 class _UpstreamError(Exception):
@@ -1369,7 +1434,7 @@ def reconcile_webui_orphans(
                 continue  # ours: a live pod of this very process
             if not sandbox_id:
                 continue
-            _export_orphan(api, sandbox_id, metadata, state_root_override)
+            _export_orphan(api, sandbox_id, metadata, state_root_override, endpoint)
             _delete_orphan(api, sandbox_id)
             destroyed.append(sandbox_id)
     if destroyed:
@@ -1384,6 +1449,7 @@ def _export_orphan(
     sandbox_id: str,
     metadata: dict,
     state_root_override: str | None,
+    endpoint: EndpointConfig,
 ) -> None:
     """Best-effort export of one orphan, gated on the pod's restore marker."""
     owner_raw = str(metadata.get(WEBUI_METADATA_OWNER) or "").strip()
@@ -1426,6 +1492,11 @@ def _export_orphan(
     )
     launcher = SandboxedWebuiLauncher(
         backend_config=None,
+        # m5: the tier's endpoint must be injected explicitly — the exporter
+        # never resolves one itself, and without it _run_background_command
+        # skips the uid/gid credential switch the endpoint's attestations
+        # require for the in-pod tar.
+        endpoint=endpoint,
         state_root_override=state_root_override,
     )
     # Reuse the launcher's background-command + bounded-download machinery.

@@ -27,6 +27,8 @@ class _FakeProxy:
 
     def __init__(self, *, sandbox_id, upstream_resolver, on_activity=None, **kwargs):
         self.sandbox_id = sandbox_id
+        self.upstream_resolver = upstream_resolver
+        self.on_activity = on_activity
         self.started_port = None
         self.stopped = False
 
@@ -215,7 +217,7 @@ def test_cross_form_stop_and_restart():
     local = WebUIInstance(user_id=7, system_account="u7", port=3100, form="local")
     local.is_alive = lambda: True
     manager._instances[7] = local
-    manager._port_allocations[3100] = 7
+    manager._port_allocations[3100] = (7, "local")
 
     url, _token = manager.get_user_webui_url(
         7, "u7", "http://192.168.1.5:19888", required_isolation="sandboxed"
@@ -328,6 +330,108 @@ def test_single_user_sandboxed_url_uses_proxy_port_not_3100():
     assert instance.proxy.stopped
 
 
+def test_single_user_sandboxed_instance_resolves_for_proxy_token_lifecycle(monkeypatch, tmp_path):
+    """M1: the pod's baked-in LLM proxy token only validates while its
+    instance resolves as alive — api_key_proxy._webui_instance_alive goes
+    through WebUIManager.get_user_instance, which must recognize the
+    single-user SANDBOXED registry (a plain _instances lookup returns None in
+    single-user mode, so every pod-side LLM call would 401)."""
+    import os
+
+    from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher)
+    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
+    instance = manager._single_user_instance
+
+    # Resolution: the shared instance answers only for the user whose pod
+    # token it carries; other users (multi-user registry empty here) do not.
+    assert manager.get_user_instance(3) is instance
+    assert manager.get_user_instance(4) is None
+
+    with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "unit-3378-encryption-key"}):
+        service = APIKeyProxyService(db_path=str(tmp_path / "proxy_tokens.db"))
+    revoked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        service,
+        "revoke_proxy_tokens_for_session",
+        lambda session_id, reason="session_revoked": revoked.append((session_id, reason)) or 1,
+    )
+    monkeypatch.setattr(
+        "app.modules.workspace.api_key_proxy.get_api_key_proxy_service", lambda: service
+    )
+    monkeypatch.setattr("app.services.webui_manager.get_webui_manager", lambda: manager)
+
+    # The REAL _webui_instance_alive path resolves the instance and keeps the
+    # pod's proxy token alive while the instance lives...
+    assert service._webui_instance_alive(f"webui:{instance.user_id}", instance.user_id) is True
+    # ...and stopping revokes the session (Q1) and kills the resolution.
+    manager.stop_all_instances()
+    assert revoked == [("webui:3", "webui_stopped")]
+    assert service._webui_instance_alive("webui:3", 3) is False
+
+
+def test_single_user_sandboxed_proxy_activity_updates_last_activity():
+    """m1: the proxy's on_activity heartbeat reaches the instance."""
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher)
+    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
+    instance = manager._single_user_instance
+    assert instance.proxy.on_activity is not None
+    instance.last_activity = datetime.now() - timedelta(hours=3)
+    stale = instance.last_activity
+    instance.proxy.on_activity()
+    assert instance.last_activity > stale
+
+
+def test_multi_user_sandboxed_proxy_activity_updates_last_activity():
+    """m1: same wiring on the multi-user branch (shared _launch_sandboxed)."""
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    instance = manager.get_user_instance(7)
+    assert instance.proxy.on_activity is not None
+    instance.last_activity = datetime.now() - timedelta(hours=3)
+    stale = instance.last_activity
+    instance.proxy.on_activity()
+    assert instance.last_activity > stale
+
+
+def test_idle_single_user_sandboxed_instance_is_reaped():
+    """m1: the single-user sandboxed instance holds a pod + a proxy port —
+    the idle reaper must cover it, not just the _instances registry."""
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher)
+    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
+    instance = manager._single_user_instance
+    proxy = instance.proxy
+
+    manager.cleanup_idle_instances()  # fresh start → not idle yet
+    assert launcher.destroy_calls == []
+
+    instance.last_activity = datetime.now() - timedelta(hours=2)
+    manager.cleanup_idle_instances()
+    assert len(launcher.destroy_calls) == 1
+    assert proxy.stopped
+    assert manager._single_user_instance is None
+    assert instance.port not in manager._port_allocations
+
+
+def test_idle_local_single_user_instance_is_never_reaped():
+    """m1: the LOCAL single-user instance keeps its historic semantics
+    (shared, fixed port, no remote resource) — only the sandboxed form is
+    idle-reaped."""
+    manager = _manager(multi_user=False)
+    local = WebUIInstance(user_id=3, system_account="u3", port=3100, form="local")
+    local.is_alive = lambda: True
+    local.last_activity = datetime.now() - timedelta(hours=2)
+    manager._single_user_instance = local
+
+    manager.cleanup_idle_instances()
+    assert manager._single_user_instance is local
+
+
 # ── prestart reorder (§7.7) ───────────────────────────────────────────
 
 
@@ -435,9 +539,14 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
 def test_allocator_keys_ports_by_user_and_form():
     manager = _manager()
     p_local = manager.allocate_port(9, "local")
-    manager.release_port(p_local, "local")
-    p_again = manager.allocate_port(9, "local")
-    assert p_again == p_local  # same form reuses its port
+    # STILL-HOLDING check keys on (user_id, form) (m4): a repeated same-form
+    # allocate returns the held port, but a cross-form allocate for the SAME
+    # user must never steal the other form's port.
+    assert manager.allocate_port(9, "local") == p_local
     p_other = manager.allocate_port(9, "sandboxed")
-    # A different form may get a different port even while the memo holds.
+    assert p_other != p_local
+    assert manager._port_allocations[p_other] == (9, "sandboxed")
     assert p_other in range(3100, 3201)
+    # After release, a same-form restart prefers its previous port (SEC-Q4).
+    manager.release_port(p_local, "local")
+    assert manager.allocate_port(9, "local") == p_local
