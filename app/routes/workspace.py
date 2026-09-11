@@ -2346,6 +2346,15 @@ def get_user_webui_url():
     """
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.services.workspace_isolation_contract import (
+        SUPPORTED_ISOLATION_LEVELS,
+        IsolationReason,
+        build_workspace_isolation_snapshot,
+        evaluate_isolation_requirement,
+        is_valid_isolation_level,
+        isolation_level_at_least,
+        resolve_required_floor,
+    )
 
     # Check if user is logged in
     if not hasattr(g, "user") or not g.user:
@@ -2363,7 +2372,53 @@ def get_user_webui_url():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        system_account = user.get("system_account") or user.get("username")
+        from flask import request as flask_request
+
+        raw_system_account = user.get("system_account")
+        system_account = raw_system_account or user.get("username")
+
+        # Issue #3374 (reviews #12/#14 + round-2): the isolation floor is
+        # server-side — explicit config when valid, else derived from what
+        # this deployment actually verifies (snapshot.isolation_level) — and
+        # the request parameter can only RAISE it, never lower it. An
+        # empty/whitespace parameter counts as absent.
+        isolation_snapshot = build_workspace_isolation_snapshot(manager)
+        config_floor = resolve_required_floor(manager.config, isolation_snapshot)
+        requested = (flask_request.args.get("required_isolation") or "").strip()
+        if requested and not is_valid_isolation_level(requested):
+            rejection = IsolationReason(
+                "invalid_isolation_level",
+                f"Unknown isolation level '{requested}'; expected one of "
+                f"{', '.join(SUPPORTED_ISOLATION_LEVELS)}.",
+            )
+        else:
+            effective = config_floor
+            if requested and isolation_level_at_least(requested, config_floor):
+                effective = requested
+            rejection = evaluate_isolation_requirement(
+                effective,
+                snapshot=isolation_snapshot,
+                system_account=raw_system_account,
+                manager=manager,
+            )
+        if rejection is not None:
+            # Two disjoint reason namespaces (reviews #7): deployment-level
+            # snapshot reasons plus the request-level rejection, appended —
+            # consumers keying on reasons[0] still get the deployment story.
+            reasons = [r.public_dict() for r in isolation_snapshot.reasons]
+            reasons.append(rejection.public_dict())
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": rejection.message,
+                        "error_code": rejection.code,
+                        "reasons": reasons,
+                        "isolation": isolation_snapshot.public_dict(),
+                    }
+                ),
+                400,
+            )
 
         # Get or create user's webui instance.
         # Pass host_url so the iframe URL uses the browser-visible host instead
@@ -2371,8 +2426,6 @@ def get_user_webui_url():
         # container-detected IP that the browser cannot reach; webui_manager
         # replaces it with request.host_url. Omitting this argument regresses
         # the workspace into a blank iframe.
-        from flask import request as flask_request
-
         host_url = flask_request.host_url.rstrip("/")
         url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
 
@@ -2402,6 +2455,8 @@ def get_user_webui_url():
                 "system_account": system_account,
                 "multi_user_mode": manager.config.multi_user_mode,
                 "openace_url": openace_url,
+                # Issue #3374: report the policy actually in effect.
+                "isolation": isolation_snapshot.public_dict(),
             }
         )
 

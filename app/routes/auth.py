@@ -94,11 +94,35 @@ def api_login():
         # Ensure workspace directory exists on login
         user_id = int(user.get("id", 0))
         user_data = user_repo.get_user_by_id(user_id)
+
+        # Fetch the workspace manager once: it decides whether the
+        # convention backfill below is allowed (Issue #3374 review #1) and
+        # drives the multi-user pre-start gate further below. Failure here
+        # must not fail the login itself.
+        try:
+            from app.services.webui_manager import get_webui_manager
+
+            manager = get_webui_manager()
+            multi_user_mode = bool(manager.config.enabled and manager.config.multi_user_mode)
+        except Exception as e:
+            logger.warning(f"Failed to init webui manager on login: {e}")
+            manager = None
+            multi_user_mode = False
+
         if user_data:
-            system_account = user_data.get("system_account") or user_data.get("username")
-            if system_account:
-                # Idempotent update: set system_account if empty
-                if not user_data.get("system_account"):
+            raw_system_account = user_data.get("system_account")
+            system_account = raw_system_account or user.get("username")
+            # Issue #3374 review #1 (round 2): in multi-user mode BOTH the DB
+            # backfill and the host-side workspace provisioning use the raw
+            # mapping only — provisioning a username-convention OS account +
+            # /workspace/<username> home for a mapping-less user would leave
+            # orphan system users on the host even though the gate refuses to
+            # launch them.
+            provision_account = raw_system_account if multi_user_mode else system_account
+            if system_account and not multi_user_mode:
+                # Idempotent update: set system_account if empty (single-user
+                # mode only — see above).
+                if not raw_system_account:
                     try:
                         user_repo.update_user(user_id=user_id, system_account=system_account)
                         logger.info(
@@ -107,11 +131,12 @@ def api_login():
                     except Exception as e:
                         logger.warning(f"Failed to update system_account for user {user_id}: {e}")
 
-                # Ensure workspace directory exists
+            # Ensure workspace directory exists
+            if provision_account:
                 try:
-                    ensure_user_workspace(system_account)
+                    ensure_user_workspace(provision_account)
                 except Exception as e:
-                    logger.warning(f"Failed to ensure workspace for {system_account}: {e}")
+                    logger.warning(f"Failed to ensure workspace for {provision_account}: {e}")
 
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(jsonify({"success": True, "user": user}))
@@ -126,23 +151,17 @@ def api_login():
 
         # Pre-start webui instance for user (in multi-user mode)
         try:
-            from app.services.webui_manager import get_webui_manager
-
-            manager = get_webui_manager()
-            if manager.config.enabled and manager.config.multi_user_mode:
+            if multi_user_mode:
                 user_id = int(user.get("id", 0))
-                # Get user's system_account
+                # Get user's EXPLICIT system_account — prestart never falls
+                # back to username and goes through the same isolation gate
+                # as /user-url (Issue #3374 review #6): it must not launch
+                # what the gate would reject.
                 user_data = user_repo.get_user_by_id(user_id)
-                system_account = (
-                    user_data.get("system_account") or user_data.get("username")
-                    if user_data
-                    else None
-                )
-                if user_id and system_account:
-                    logger.info(
-                        f"Pre-starting webui for user {user_id} ({system_account}) on login"
-                    )
-                    manager.prestart_user_instance_async(user_id, system_account, request.host_url)
+                raw_account = user_data.get("system_account") if user_data else None
+                if user_id and raw_account:
+                    logger.info(f"Pre-starting webui for user {user_id} ({raw_account}) on login")
+                    manager.prestart_user_instance_async(user_id, raw_account, request.host_url)
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")
 

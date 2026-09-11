@@ -1365,6 +1365,11 @@ def bash_to_bool(val):
 
 config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
 config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
+# Issue #3374 (PR review round 5): required_isolation_level is NOT pinned
+# here. This runs before the webui-launch wrapper step, and the wrapper
+# install is non-fatal; pinning 'os_user' on a host without the wrapper
+# rejects every launch at runtime (probe reports launch_path_degraded).
+# The pin happens after the wrapper lands — see pin_workspace_isolation_floor.
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))
@@ -2330,6 +2335,53 @@ install_webui_launch_wrapper() {
     chown root:root "$dst" 2>/dev/null || true
     chmod 755 "$dst"
     print_success "Installed webui-launch wrapper to $dst"
+    return 0
+}
+
+# Pin workspace.required_isolation_level='os_user' for multi-user installs
+# (Issue #3374). Must be called only AFTER install_webui_launch_wrapper and
+# only when the wrapper is executable: the runtime probe keys off the
+# wrapper, so a pin on a wrapper-less host reports launch_path_degraded and
+# rejects every launch — an installed-but-bricked deployment (PR review
+# round 5). Reuses the same executable check the sudoers rule keys off.
+pin_workspace_isolation_floor() {
+    local config_file="$1"
+
+    if ! command -v python3 &>/dev/null; then
+        print_warning "python3 not found; cannot pin required_isolation_level in $config_file"
+        return 1
+    fi
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file $config_file not found; cannot pin required_isolation_level"
+        return 1
+    fi
+
+    _CONFIG_FILE="$config_file" python3 << 'EOF'
+import json
+import os
+
+path = os.environ['_CONFIG_FILE']
+with open(path, 'r') as f:
+    config = json.load(f)
+
+workspace = config.setdefault('workspace', {})
+# PR review round 6: report only what was actually configured — a flat
+# else would tell single-user/disagreeing configs an isolation floor
+# exists when none was pinned.
+if not workspace.get('multi_user_mode'):
+    print("multi-user mode off; no isolation floor needed")
+elif workspace.get('required_isolation_level'):
+    print("required_isolation_level already set; keeping existing floor")
+else:
+    workspace['required_isolation_level'] = 'os_user'
+    with open(path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print("Pinned workspace.required_isolation_level=os_user")
+EOF
+    if [ $? -ne 0 ]; then
+        print_warning "Failed to pin required_isolation_level in $config_file"
+        return 1
+    fi
     return 0
 }
 
@@ -4506,6 +4558,19 @@ install_local() {
         # Install the webui-launch wrapper BEFORE configure_sudoers (Issue #2305):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
         install_webui_launch_wrapper "$sudoers_install_dir"
+
+        # Issue #3374 (PR review round 5): pin the isolation floor only when
+        # the launch wrapper actually landed — same executable check the
+        # sudoers rule uses. Without the wrapper the runtime probe reports
+        # launch_path_degraded and a pinned 'os_user' floor would reject
+        # every launch, so leave the floor derived (plus a runtime WARNING)
+        # instead of installing a bricked deployment.
+        if [ -x /usr/local/bin/openace-webui-launch ]; then
+            pin_workspace_isolation_floor "$config_dir/config.json"
+        else
+            print_warning "openace-webui-launch wrapper not installed; NOT pinning required_isolation_level."
+            print_warning "Multi-user workspaces will serve WITHOUT per-user OS isolation until the wrapper is installed (re-run this installer as root)."
+        fi
 
         # Install security wrappers BEFORE configure_sudoers (Issue #2349):
         # These wrappers provide secure alternatives to chown, useradd, cat, mkdir, and rm

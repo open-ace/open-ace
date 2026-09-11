@@ -181,6 +181,10 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
     instance.port = 3123
     instance.token = "instance-token"
     instance.url = f"{UNREACHABLE_CONTAINER_IP}:3123"  # stale container-IP url
+    # Issue #3374 review: the reuse branch compares the instance's launch
+    # account with the requested one — keep them equal so the live instance
+    # is reused (a mismatch would trigger a restart under the new mapping).
+    instance.system_account = MOCK_USER["username"]
     manager._instances = {MOCK_USER["id"]: instance}
 
     mock_get_manager.return_value = manager

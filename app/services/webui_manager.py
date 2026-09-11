@@ -13,6 +13,7 @@ import os
 import platform
 import pwd
 import secrets
+import shutil
 import socket
 import subprocess
 import time
@@ -58,6 +59,10 @@ _WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
 # passthrough via /usr/bin/env without granting unrestricted env access
 # in sudoers (Issue #2305 review).
 _WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
+
+# Readiness-probe memoization window (both directions) so degraded hosts
+# cannot be loop-polled into repeated probe work (Issue #3374 review #9).
+_PROBE_MEMO_TTL_SECONDS = 30.0
 
 
 @dataclass
@@ -176,6 +181,49 @@ class WorkspaceConfig:
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
+    # Issue #3374 review #12: server-side minimum isolation requirement for
+    # user-url launches. Empty string derives the default ("os_user" when
+    # multi_user_mode is on, else "none"); the request parameter can only
+    # raise, never lower, this floor.
+    required_isolation_level: str = ""
+
+
+def read_workspace_config() -> WorkspaceConfig:
+    """Read WorkspaceConfig from disk WITHOUT constructing a manager.
+
+    Issue #3374 review #13: capability reads must not mint token secrets or
+    spawn cleanup greenlets; the snapshot path uses this when no manager
+    singleton exists yet (launch-path readiness is only probed when a
+    manager is available — see the capability docs).
+    """
+    from app.repositories.database import CONFIG_DIR
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+    if not os.path.exists(config_path):
+        logger.warning(f"Config file not found: {config_path}")
+        return WorkspaceConfig()
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+
+        workspace = config.get("workspace", {})
+        return WorkspaceConfig(
+            enabled=workspace.get("enabled", False),
+            url=workspace.get("url", "http://localhost"),
+            multi_user_mode=workspace.get("multi_user_mode", False),
+            port_range_start=workspace.get("port_range_start", 3100),
+            port_range_end=workspace.get("port_range_end", 3200),
+            max_instances=workspace.get("max_instances", 30),
+            idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
+            cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
+            token_secret=workspace.get("token_secret", ""),
+            webui_path=workspace.get("webui_path", ""),
+            webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
+            required_isolation_level=(workspace.get("required_isolation_level", "") or "").strip(),
+        )
+    except Exception as e:
+        logger.error(f"Error loading config: {e}")
+        return WorkspaceConfig()
 
 
 class WebUIManager:
@@ -221,6 +269,12 @@ class WebUIManager:
         # Platform detection
         self._platform = platform.system().lower()
 
+        # Issue #3374: memoized successful WebUI executable resolution for the
+        # per-user launch probe (supports_per_user_launch), plus a short-TTL
+        # readiness memo that also caches degraded states.
+        self._resolved_webui: tuple[str, str | None] | None = None
+        self._readiness_memo: tuple[float, str | None] | None = None
+
         # Windows doesn't support multi-user mode
         if self._platform == "windows" and self.config.multi_user_mode:
             logger.warning(
@@ -236,35 +290,7 @@ class WebUIManager:
 
     def _load_config(self) -> WorkspaceConfig:
         """Load workspace configuration from config.json."""
-        from app.repositories.database import CONFIG_DIR
-
-        config_path = os.path.join(CONFIG_DIR, "config.json")
-
-        if not os.path.exists(config_path):
-            logger.warning(f"Config file not found: {config_path}")
-            return WorkspaceConfig()
-
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            workspace = config.get("workspace", {})
-            return WorkspaceConfig(
-                enabled=workspace.get("enabled", False),
-                url=workspace.get("url", "http://localhost"),
-                multi_user_mode=workspace.get("multi_user_mode", False),
-                port_range_start=workspace.get("port_range_start", 3100),
-                port_range_end=workspace.get("port_range_end", 3200),
-                max_instances=workspace.get("max_instances", 30),
-                idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
-                cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
-                token_secret=workspace.get("token_secret", ""),
-                webui_path=workspace.get("webui_path", ""),
-                webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
-            )
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-            return WorkspaceConfig()
+        return read_workspace_config()
 
     def _remove_port_from_url(self, url: str) -> str:
         """Remove any existing port from URL, keeping only scheme and host.
@@ -761,12 +787,23 @@ class WebUIManager:
             if user_id in self._instances:
                 instance = self._instances[user_id]
                 if instance.is_alive():
-                    instance.update_activity()
-                    # Use dynamic base_url if provided, otherwise use stored instance.url
-                    if host_url:
-                        url = f"{base_url}:{instance.port}"
-                        return url, instance.token
-                    return instance.url, instance.token
+                    if instance.system_account != system_account:
+                        # Issue #3374 review #2: the cached instance was started
+                        # under a different mapping (e.g. the admin changed
+                        # system_account since); restart under the current
+                        # mapping instead of silently serving the stale identity.
+                        logger.warning(
+                            f"Restarting webui for user {user_id}: instance account "
+                            f"'{instance.system_account}' != requested '{system_account}'"
+                        )
+                        self._stop_instance_internal(user_id)
+                    else:
+                        instance.update_activity()
+                        # Use dynamic base_url if provided, otherwise use stored instance.url
+                        if host_url:
+                            url = f"{base_url}:{instance.port}"
+                            return url, instance.token
+                        return instance.url, instance.token
                 else:
                     # Process declared dead after consecutive health check failures
                     logger.warning(
@@ -1114,8 +1151,16 @@ class WebUIManager:
                 if not self._ensure_system_user(system_account):
                     raise ValueError(f"Failed to create system user: {system_account}")
 
-        # Find webui executable or project path
-        webui_cmd, webui_dir = self._find_webui_executable()
+        # Find webui executable or project path. Shares the successful-
+        # resolution memo with the readiness probe (Issue #3374 review #9
+        # round 2): both call sites see one resolution instead of diverging.
+        resolved = getattr(self, "_resolved_webui", None)
+        if resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable()
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
 
         if not webui_cmd:
             logger.error("qwen-code-webui executable not found")
@@ -1339,14 +1384,19 @@ class WebUIManager:
             logger.error(f"Failed to launch webui process: {e}")
             return None, model_pool
 
-    def _find_webui_executable(self) -> tuple[str | None, str | None]:
+    def _find_webui_executable(self, probe_only: bool = False) -> tuple[str | None, str | None]:
         """
-        Find the qwen-code-webui executable.
+        Locate the qwen-code-webui executable or project entry.
+
+        Args:
+            probe_only: Skip side effects (npm build) — used by capability
+                probes that must never produce build artifacts or block a
+                worker for the 60s build timeout (Issue #3374 review #9).
 
         Returns:
-            Tuple of (executable_path, working_directory).
-            If running from project directory, executable_path is the node.js entry
-            and working_directory is the backend directory.
+            Tuple of (webui_cmd, webui_dir). If running from a project
+            directory, webui_dir is the backend directory and webui_cmd is
+            the node entry; working_directory is None for global installs.
             If running global executable, working_directory is None.
         """
         # Check webui_path from config
@@ -1371,6 +1421,13 @@ class WebUIManager:
 
             # Check if project needs to be built
             if os.path.isdir(webui_backend):
+                if probe_only:
+                    # Capability probes must not build (60s subprocess). Keep
+                    # the directory so readiness classifies this checkout as
+                    # dev-directory (shared-account) mode rather than
+                    # "executable missing".
+                    logger.info("WebUI project not built; probe-only resolution skips build")
+                    return None, webui_backend
                 logger.warning(f"WebUI project found but not built: {node_entry} not found")
                 # Try to build it
                 try:
@@ -1487,6 +1544,90 @@ class WebUIManager:
         with self._lock:
             self._stop_instance_internal(user_id)
 
+    def per_user_launch_readiness(self) -> str | None:
+        """Account-independent per-user launch readiness (Issue #3374 reviews).
+
+        Returns a degradation reason code, or None when the launch PATH can
+        host per-user WebUIs: platform, WebUI resolution (probe-only: never
+        builds), dev-directory mode, the audited launch wrapper, and the
+        sudo binary. The result is memoized for _PROBE_MEMO_TTL_SECONDS in
+        BOTH directions so repeated GETs cannot loop a probe on a degraded
+        host; successful resolution is additionally cached permanently for
+        the real launch path.
+        """
+        now = time.monotonic()
+        cached = self._readiness_memo
+        if cached is not None and now - cached[0] < _PROBE_MEMO_TTL_SECONDS:
+            return cached[1]
+        reason = self._compute_launch_readiness()
+        self._readiness_memo = (now, reason)
+        return reason
+
+    def _compute_launch_readiness(self) -> str | None:
+        if self._platform not in ("linux", "darwin"):
+            return "platform_unsupported"
+        resolved = getattr(self, "_resolved_webui", None)
+        if resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable(probe_only=True)
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
+        if webui_dir:
+            # Dev-directory mode runs `node` as the service user with no UID
+            # switch — this holds for built and unbuilt checkouts alike.
+            return "dev_directory_mode_shared_account"
+        if not webui_cmd:
+            return "webui_executable_missing"
+        # The sudo path execs the audited launch wrapper; the wrapper being
+        # installed and executable is the real precondition (the sudoers
+        # rule itself cannot be verified cheaply here).
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_LAUNCH_WRAPPER):
+            return "launch_wrapper_missing"
+        if shutil.which("sudo") is None:
+            return "sudo_unavailable"
+        return None
+
+    def supports_per_user_launch(self, system_account: str) -> tuple[bool, str | None]:
+        """Report whether a WebUI for ``system_account`` would run as that OS user.
+
+        Issue #3374 isolation gate: multi-user mode must not silently run user
+        WebUIs under the shared service account (or a privileged/reserved
+        account that merely shares the name). Returns ``(True, None)`` when a
+        per-user launch is possible, else ``(False, reason_code)``.
+        """
+        readiness = self.per_user_launch_readiness()
+        if readiness:
+            return False, readiness
+        try:
+            target_pw = pwd.getpwnam(system_account)
+        except KeyError:
+            # OS account absent. Provisioning only happens in the Docker
+            # multi-user form (ensure_system_user skips creation elsewhere,
+            # #3130) — outside that form an absent account can never be
+            # created, so sudo -u would fail at launch: a probe failure,
+            # not a tolerated pending state (PR review round 3).
+            from app.utils.workspace import _is_docker_multi_user_mode
+
+            if not _is_docker_multi_user_mode():
+                return False, "identity_account_missing"
+            target_pw = None
+        if target_pw is not None:
+            if target_pw.pw_uid == 0:
+                return False, "privileged_system_account"
+            if target_pw.pw_uid < 1000:
+                return False, "reserved_system_account"
+        try:
+            pwd.getpwuid(os.getuid())
+        except (KeyError, OSError):
+            return False, "current_user_unresolved"
+        # current_user == system_account is fine here: the only supported
+        # multi-user form runs the service as root, and root is refused above;
+        # single-user mode does not consult this probe.
+        return True, None
+
     def stop_all_instances(self):
         """Stop all running webui instances."""
         # Stop single-user instance first (Issue #3129)
@@ -1578,13 +1719,43 @@ class WebUIManager:
 
         Args:
             user_id: User ID.
-            system_account: User's system account name.
+            system_account: User's system account name. Callers must pass the
+                EXPLICIT DB mapping — prestart never falls back to username
+                (Issue #3374 review #6: it goes through the same isolation
+                gate as /user-url and must not launch what the gate rejects).
             host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:19888").
                       Used to replace container-detected IP with user's actual access IP.
                       Required for Docker deployments where container cannot detect host's real IP.
         """
         if not self.config.multi_user_mode:
             return  # No pre-start needed in single-user mode
+
+        # Issue #3374 review #6 (+ round-2 normalization): evaluate the
+        # server-side isolation floor (same contract as /user-url) before
+        # spawning anything. Floor resolution is shared with the route via
+        # resolve_required_floor — an invalid hand-edited config value must
+        # fall back fail-closed here too, not skip the gate entirely.
+        if not system_account:
+            logger.info("Skipping webui prestart for user %s: no explicit mapping", user_id)
+            return
+        from app.services.workspace_isolation_contract import (
+            build_workspace_isolation_snapshot,
+            evaluate_isolation_requirement,
+            resolve_required_floor,
+        )
+
+        snapshot = build_workspace_isolation_snapshot(self)
+        required = resolve_required_floor(self.config, snapshot)
+        if required != "none":
+            rejection = evaluate_isolation_requirement(
+                required,
+                snapshot=snapshot,
+                system_account=system_account,
+                manager=self,
+            )
+            if rejection is not None:
+                logger.info("Skipping webui prestart for user %s: %s", user_id, rejection.code)
+                return
 
         # Check if already has an instance
         with self._lock:
@@ -1612,12 +1783,22 @@ _manager: WebUIManager | None = None
 
 
 def get_webui_manager() -> WebUIManager:
-    """Get the global WebUI manager instance."""
+    """Get the global WebUI manager instance, creating it if needed."""
     global _manager
     if _manager is None:
         _manager = WebUIManager()
         # Start cleanup thread when manager is created
         _manager.start_cleanup_thread()
+    return _manager
+
+
+def peek_webui_manager() -> WebUIManager | None:
+    """Return the existing manager singleton WITHOUT creating one.
+
+    Issue #3374 review #13: read-only capability paths use this —
+    constructing a manager mints a token secret and spawns a resident
+    cleanup greenlet, which a pure capability GET must not do.
+    """
     return _manager
 
 
