@@ -30,7 +30,7 @@ class _Gateway:
 
     def __init__(self):
         self.requests: list[tuple[str, dict[str, str], bytes]] = []
-        self.mode = "http"  # http | sse | ws | hang
+        self.mode = "http"  # http | sse | ws | hang | slow-stream | garbage
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("127.0.0.1", 0))
@@ -96,6 +96,29 @@ class _Gateway:
                     conn.sendall(f"data: chunk-{index}\n\n".encode())
                 conn.close()
                 return
+            elif self.mode == "slow-stream":
+                # M2: body chunks with a mid-stream idle gap LONGER than the
+                # proxy's connect/head budget — the stream must survive it.
+                import time
+
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                )
+                conn.sendall(b"data-1\n")
+                time.sleep(0.3)
+                conn.sendall(b"data-2\n")
+                time.sleep(1.5)  # > the 0.5s budgets the test configures
+                conn.sendall(b"data-3\n")
+                conn.close()
+                return
+            elif self.mode == "garbage":
+                # m2: an upstream head that does not parse (no colon).
+                conn.sendall(b"HTTP/1.1 200 OK\r\nno-colon-here\r\n\r\n")
+                conn.close()
+                return
             elif self.mode == "hang":
                 # Never answer; holds the client greenlet open for stop().
                 import time
@@ -137,13 +160,14 @@ def gateway():
 class _ProxyThread:
     """Run the gevent proxy on a dedicated thread (its own hub)."""
 
-    def __init__(self, gateway: _Gateway, *, resolver=None, on_activity=None):
+    def __init__(self, gateway: _Gateway, *, resolver=None, on_activity=None, timeouts=None):
         self.activity = 0
         self.proxy = SandboxWebuiProxy(
             sandbox_id="sb-1",
             upstream_resolver=resolver
             or (lambda: (f"http://127.0.0.1:{gateway.port}", dict(_INJECT))),
             on_activity=on_activity or self._bump,
+            **(timeouts or {}),
         )
         self.port = None
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -312,13 +336,13 @@ def test_sse_streams_through_until_upstream_closes(gateway):
 # ── WebSocket ──────────────────────────────────────────────────────────
 
 
-def _ws_upgrade(port: int) -> socket.socket:
+def _ws_upgrade(port: int, connection: str = "Upgrade") -> tuple[socket.socket, bytes, bytes]:
     sock = socket.create_connection(("127.0.0.1", port), timeout=5)
     sock.sendall(
         f"GET /ws HTTP/1.1\r\n"
         f"Host: localhost:{port}\r\n"
         "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
+        f"Connection: {connection}\r\n"
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
         "Sec-WebSocket-Version: 13\r\n"
         "\r\n".encode()
@@ -403,3 +427,147 @@ def test_stop_closes_port_and_terminates_greenlets(gateway):
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
     runner._thread.join(timeout=5)
     assert not runner._thread.is_alive()
+
+
+# ── M2: the connect budget must not leak into the stream ───────────────
+
+
+def test_stream_survives_idle_gap_longer_than_connect_budget(gateway):
+    """M2: create_connection installs its timeout on the socket; unless it is
+    cleared after establishment, the body pump (which treats socket.timeout
+    as peer-close) truncates any stream that idles longer than the budget.
+    The budgets are configurable — the test shrinks them to 0.5s and the
+    upstream idles 1.5s mid-stream, the same regression at test scale."""
+    gateway.mode = "slow-stream"
+    runner = _ProxyThread(
+        gateway,
+        timeouts={
+            "upstream_connect_timeout_seconds": 0.5,
+            "upstream_head_timeout_seconds": 0.5,
+        },
+    )
+    port = runner.start()
+    try:
+        response = _get(port, "/stream", read_timeout=10)
+        assert response.startswith(b"HTTP/1.1 200 OK")
+        for marker in (b"data-1", b"data-2", b"data-3"):
+            assert marker in response  # the 1.5s idle gap did not cut the stream
+    finally:
+        runner.stop()
+
+
+def test_upstream_that_never_answers_is_502_within_head_budget(gateway):
+    """M2: the head phase keeps its own bounded window — an upstream that
+    accepted the connection but never answers must 502, not pin a greenlet."""
+    gateway.mode = "hang"
+    runner = _ProxyThread(gateway, timeouts={"upstream_head_timeout_seconds": 0.5})
+    port = runner.start()
+    try:
+        response = _get(port, "/hang", read_timeout=5)
+        assert response.startswith(b"HTTP/1.1 502")
+    finally:
+        runner.stop()
+
+
+# ── m2: request-parse errors are 400, upstream garbage is 502 ──────────
+
+
+def test_malformed_request_head_line_is_400(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        raw = b"GET / HTTP/1.1\r\nHost: x\r\nno-colon-line\r\n\r\n"
+        response = _request(port, raw)
+        assert response.startswith(b"HTTP/1.1 400")
+        assert gateway.requests == []  # never reached the upstream
+    finally:
+        runner.stop()
+
+
+def test_duplicate_content_length_is_400(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(
+            port,
+            "/api/version",
+            extra_headers="Content-Length: 3\r\nContent-Length: 4\r\n",
+        )
+        assert response.startswith(b"HTTP/1.1 400")
+        assert gateway.requests == []  # RFC 7230 §3.3.2 MUST-reject
+    finally:
+        runner.stop()
+
+
+def test_malformed_upstream_response_head_is_502(gateway):
+    gateway.mode = "garbage"
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        response = _get(port, "/api/version")
+        assert response.startswith(b"HTTP/1.1 502")  # upstream garbage, not 400
+    finally:
+        runner.stop()
+
+
+# ── m3: chunked request bodies ─────────────────────────────────────────
+
+
+def test_chunked_request_body_is_dechunked_and_forwarded(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        chunked = b"5\r\nhello\r\ne\r\n chunked world\r\n0\r\n\r\n"
+        raw = (
+            f"POST /api/chat HTTP/1.1\r\n"
+            f"Host: localhost:{port}\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+        ).encode() + chunked
+        response = _request(port, raw)
+        assert b"HTTP/1.1 200 OK" in response
+        request_line, headers, forwarded_body = gateway.requests[-1]
+        assert request_line.startswith("POST /api/chat")
+        # De-chunked and re-framed with a real Content-Length upstream.
+        assert forwarded_body == b"hello chunked world"
+        assert headers["content-length"] == "19"
+        assert "transfer-encoding" not in headers
+    finally:
+        runner.stop()
+
+
+def test_negative_chunk_size_is_400(gateway):
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        raw = (
+            f"POST /api/chat HTTP/1.1\r\n"
+            f"Host: localhost:{port}\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+        ).encode() + b"-5\r\nhello"
+        response = _request(port, raw)
+        assert response.startswith(b"HTTP/1.1 400")
+        assert gateway.requests == []  # refused before contacting the upstream
+    finally:
+        runner.stop()
+
+
+# ── m7: Connection header token list parsing ───────────────────────────
+
+
+def test_websocket_upgrade_recognizes_comma_list_without_spaces(gateway):
+    """m7: ``Connection: Upgrade,keep-alive`` (comma, no space) is still an
+    upgrade request — tokens are stripped individually."""
+    gateway.mode = "ws"
+    runner = _ProxyThread(gateway)
+    port = runner.start()
+    try:
+        sock, head, _rest = _ws_upgrade(port, connection="Upgrade,keep-alive")
+        with sock:
+            assert head.startswith(b"HTTP/1.1 101")
+            request_line, headers, _body = gateway.requests[-1]
+            assert headers["upgrade"] == "websocket"
+            assert headers["connection"].lower() == "upgrade"
+    finally:
+        runner.stop()
