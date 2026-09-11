@@ -1051,6 +1051,10 @@ def register_blueprints(app):
     from app.routes.feature_flags import feature_flags_bp
 
     app.register_blueprint(feature_flags_bp)
+    # workspace isolation capability contract (Issue #3374)
+    from app.routes.workspace_isolation import workspace_isolation_bp
+
+    app.register_blueprint(workspace_isolation_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
     # Frontend error reporting endpoint
     from app.routes.frontend_errors import frontend_errors_bp
