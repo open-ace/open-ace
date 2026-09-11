@@ -38,6 +38,7 @@ from app.modules.workspace.remote_session_manager import get_remote_session_mana
 from app.modules.workspace.session_access import _set_user_from_token, _set_user_from_webui_token
 from app.modules.workspace.terminal_store import terminal_info_store
 from app.repositories.database import adapt_sql
+from app.utils.path_guard import is_valid_path
 
 logger = logging.getLogger(__name__)
 
@@ -3366,6 +3367,21 @@ def start_terminal():
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
 
+    # Issue #3376: server-side work_dir validation. Remote-machine paths are
+    # not backend-local, so no base_dirs prefix applies here — enforce
+    # absoluteness, no "..", and the resolved system-directory blacklist.
+    if work_dir and not is_valid_path(work_dir):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid work_dir: must be an absolute path outside "
+                    "system directories, without '..'",
+                }
+            ),
+            400,
+        )
+
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
@@ -4698,6 +4714,19 @@ def remote_vscode_start():
 
     if not project_path:
         return jsonify({"success": False, "error": "project_path is required"}), 400
+
+    # Issue #3376: same remote-path semantics as terminal work_dir.
+    if not is_valid_path(project_path):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid project_path: must be an absolute path "
+                    "outside system directories, without '..'",
+                }
+            ),
+            400,
+        )
 
     if not agent_mgr.is_agent_connected(machine_id):
         return jsonify({"success": False, "error": "Agent is not connected"}), 503
