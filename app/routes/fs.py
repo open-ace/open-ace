@@ -10,7 +10,6 @@ Used by project selector UI to browse directories.
 import logging
 import mimetypes
 import os
-import platform
 import pwd
 import re
 import subprocess
@@ -21,6 +20,7 @@ from typing import IO, Any, cast
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
+from app.utils.path_guard import is_valid_path
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
     OPENACE_RM_WRAPPER,
@@ -45,39 +45,8 @@ MAX_UPLOAD_SIZE_MB = int(os.environ.get("OPENACE_MAX_UPLOAD_SIZE_MB", "100"))
 
 # Filename sanitization: strip control chars and path separators. We use
 # basename() upstream too, but this defends in depth against embedded
-# separators / NULs that could slip past naive handling.
+# separators / NULs that can slip past naive handling.
 _UNSAFE_FILENAME_CHARS = re.compile(r"[\x00-\x1f\\/:]")
-
-# System-sensitive directories blacklist (Linux/Mac)
-# These directories should never be writable by users to prevent system damage
-BLACKLISTED_PATHS = [
-    "/etc",  # System configuration
-    "/bin",  # Binary executables
-    "/sbin",  # System binaries
-    "/usr",  # All user system files (covers /usr/bin, /usr/sbin, /usr/lib, etc.)
-    "/usr/local",  # User-installed software
-    "/usr/share",  # Shared data files
-    "/root",  # Root user home
-    "/boot",  # Boot files
-    "/dev",  # Device files
-    "/proc",  # Process information
-    "/sys",  # System information
-    "/var",  # System variable data (covers /var/log, /var/lib, etc.)
-    "/opt",  # Optional software packages
-    "/tmp",  # Temporary files (security risk for arbitrary creation)
-    "/lib",  # Shared libraries
-    "/lib64",  # 64-bit libraries
-]
-
-# Resolved blacklist used for matching: each literal is canonicalized through
-# realpath so symlinked entries still match. On macOS /etc → /private/etc,
-# /var → /private/var, /tmp → /private/tmp; without this, a path like /etc
-# (realpath /private/etc) would slip past the literal /etc check. Keep both the
-# literal (for readability/docs above) and its realpath here.
-_BLACKLISTED_RESOLVED = {
-    *BLACKLISTED_PATHS,
-    *(os.path.realpath(p) for p in BLACKLISTED_PATHS),
-}
 
 
 @fs_bp.before_request
@@ -232,58 +201,6 @@ def get_home_directory(user=None):
             return user_home
     # Fallback to process user's home
     return str(Path.home())
-
-
-def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
-    """Check if path is valid for browsing.
-
-    Optionally restricts the resolved path to a list of allowed prefix
-    directories (e.g. workspace base dir). If allowed_prefixes is None,
-    no prefix restriction is applied (backward compatible).
-
-    Also checks against system-sensitive directory blacklist to prevent
-    users from writing to /etc, /bin, /root, etc.
-    """
-    if not path:
-        return False
-
-    # Check for path traversal in the original input
-    if ".." in path:
-        return False
-
-    # Platform-specific validation for original path
-    system = platform.system()
-    if system == "Windows":
-        # Windows: must be a valid drive path
-        if not (len(path) >= 2 and path[1] == ":"):
-            return False
-    else:
-        # Mac/Linux: must start with / (absolute path required)
-        if not path.startswith("/"):
-            return False
-
-    # Resolve to absolute path, following symlinks to detect traversal
-    try:
-        abs_path = os.path.realpath(path)
-    except Exception:
-        return False
-
-    # Blacklist check for Linux/Mac - protect system directories
-    if system != "Windows":
-        for blocked in _BLACKLISTED_RESOLVED:
-            if abs_path == blocked or abs_path.startswith(blocked + os.sep):
-                return False
-
-    # Restrict resolved path to allowed prefixes if provided.
-    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
-    if allowed_prefixes:
-        if not any(
-            abs_path == prefix or abs_path.startswith(prefix + os.sep)
-            for prefix in allowed_prefixes
-        ):
-            return False
-
-    return True
 
 
 def _sanitize_filename(name: str) -> str | None:
