@@ -151,13 +151,23 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 **隔离要求是服务端的**(config.json `workspace.required_isolation_level`):
-多用户安装形态(docker-entrypoint 首启生成 / package installer)会**显式写入
-`os_user`**,`WORKSPACE_REQUIRED_ISOLATION_LEVEL` 环境变量可覆盖;未显式配置时
-从契约快照实际验证到的等级**派生**。**诚实声明**:派生值是一面镜子而非下限——
-启动路径因运维动作退化(重跑 installer 冲掉 wrapper、`webui_path` 改指 dev
-checkout、sudo 被移除)时,派生值会跟着降到 `none`,默认路径保持旧行为(共享
-账户启动)而非报错;该降级会打 WARNING 日志并在响应的 `isolation.reasons` 中
-可见,但不会自动拒绝。需要真正的硬下限,请保留/设置显式
+多用户安装形态会**显式写入 `os_user`**——docker-entrypoint 首启生成
+(`WORKSPACE_REQUIRED_ISOLATION_LEVEL` 环境变量可覆盖);package installer
+则在 `openace-webui-launch` wrapper **实际安装成功之后**才 pin(复用 sudoers
+规则的可执行判据 `[ -x /usr/local/bin/openace-webui-launch ]`),wrapper 缺失时
+**不 pin**并给出明确安装 warning——避免装出「pin 了 `os_user` 却没有 wrapper」
+的全线 400 部署。未显式配置时从契约快照实际验证到的等级**派生**。
+**诚实声明**:派生值是一面镜子而非下限——启动路径因运维动作退化(重跑
+installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时,
+派生值会跟着降到 `none`,默认路径保持旧行为(共享账户启动)而非报错。
+两个方向都会打 WARNING 日志,并在响应的 `isolation.reasons` 中可见:
+
+- **派生路径**降级:继续以弱隔离服务,WARNING 提示默认启动不再按用户隔离;
+- **pin 过的部署**降级:下限高于宿主可验证的能力,所有启动被
+  `isolation_level_unsupported` 拒绝,WARNING 提示修复启动路径前全线 REJECT
+  ——拒绝不会静默发生。
+
+需要真正的硬下限,请保留/设置显式
 `required_isolation_level`。`required_isolation` 请求参数**只能抬高**要求,不能
 降低;空值/空白参数视为缺省。登录时的后台预启动(prestart)与工作区目录供给
 走同一评估——门闸会拒绝的启动/供给不会发生。

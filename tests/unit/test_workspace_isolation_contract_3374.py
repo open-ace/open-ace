@@ -331,12 +331,8 @@ def test_floor_invalid_explicit_falls_back_fail_closed(caplog):
     assert any("required_isolation_level" in r.message for r in caplog.records)
 
 
-def test_degraded_multi_user_floor_logs_warning(caplog):
-    # PR review round 3:派生下限只会跟着降——多用户 + 探针降级时必须打
-    # WARNING,让运维动作引发的降级在日志里可见
-    import logging
-
-    degraded = wic.IsolationCapabilitySnapshot(
+def _degraded_snapshot():
+    return wic.IsolationCapabilitySnapshot(
         supported=False,
         backend=wic.BACKEND_SHARED,
         isolation_level=wic.ISOLATION_LEVEL_NONE,
@@ -344,10 +340,51 @@ def test_degraded_multi_user_floor_logs_warning(caplog):
         unsupported=(),
         reasons=(wic.IsolationReason("launch_path_degraded", "wrapper gone"),),
     )
+
+
+def test_degraded_multi_user_floor_logs_warning(caplog):
+    # PR review round 3:派生下限只会跟着降——多用户 + 探针降级时必须打
+    # WARNING,让运维动作引发的降级在日志里可见
+    import logging
+
+    degraded = _degraded_snapshot()
     cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
     with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
         assert wic.resolve_required_floor(cfg, degraded) == "none"
     assert any("launch path degraded" in r.message for r in caplog.records)
+
+
+def test_pinned_floor_above_degraded_snapshot_warns_reject_all(caplog):
+    # PR review round 5:pin os_user + 探针降级 → 运行期全线 400,这一侧必须
+    # 打 WARNING;不能只给结果良性的派生路径(弱隔离继续服务)告警
+    import logging
+
+    degraded = _degraded_snapshot()
+    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "os_user"})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, degraded) == "os_user"
+    msgs = [r.message for r in caplog.records]
+    assert any("REJECT all launches" in m for m in msgs)
+    # 拒绝路径不应再收到"将继续弱隔离服务"的旧文案
+    assert not any("will NOT be per-user isolated" in m for m in msgs)
+
+    # 运行期结论(钉住 install.sh 审查场景):默认请求 = floor os_user,
+    # 快照只能验证 none → 门闸拒绝 isolation_level_unsupported
+    rejection = wic.evaluate_isolation_requirement(
+        "os_user", snapshot=degraded, system_account="alice", manager=None
+    )
+    assert rejection is not None
+    assert rejection.code == "isolation_level_unsupported"
+
+
+def test_pinned_floor_on_healthy_snapshot_stays_silent(caplog):
+    # 安装器正常形态(wrapper 已装):pin 不产生任何告警
+    import logging
+
+    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "os_user"})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, _floor_snapshot("os_user")) == "os_user"
+    assert not caplog.records
 
 
 def test_healthy_multi_user_floor_is_silent(caplog):
