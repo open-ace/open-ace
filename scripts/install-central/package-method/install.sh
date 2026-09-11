@@ -2365,17 +2365,20 @@ with open(path, 'r') as f:
     config = json.load(f)
 
 workspace = config.setdefault('workspace', {})
-if workspace.get('multi_user_mode') and not workspace.get('required_isolation_level'):
+# PR review round 6: report only what was actually configured — a flat
+# else would tell single-user/disagreeing configs an isolation floor
+# exists when none was pinned.
+if not workspace.get('multi_user_mode'):
+    print("multi-user mode off; no isolation floor needed")
+elif workspace.get('required_isolation_level'):
+    print("required_isolation_level already set; keeping existing floor")
+else:
     workspace['required_isolation_level'] = 'os_user'
     with open(path, 'w') as f:
         json.dump(config, f, indent=2)
     print("Pinned workspace.required_isolation_level=os_user")
-else:
-    print("required_isolation_level already set; keeping existing floor")
 EOF
-    if [ $? -eq 0 ]; then
-        print_success "Workspace isolation floor configured"
-    else
+    if [ $? -ne 0 ]; then
         print_warning "Failed to pin required_isolation_level in $config_file"
         return 1
     fi

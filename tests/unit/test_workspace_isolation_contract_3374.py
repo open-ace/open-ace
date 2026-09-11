@@ -377,6 +377,22 @@ def test_pinned_floor_above_degraded_snapshot_warns_reject_all(caplog):
     assert rejection.code == "isolation_level_unsupported"
 
 
+def test_invalid_pin_with_degraded_falls_to_derived_warning(caplog):
+    # PR review round 6:invalid pin 不得打 REJECT 告警——实际 floor 落到
+    # none、默认请求 200 放行,谎称"全线拒绝"比静默更危险
+    import logging
+
+    degraded = _degraded_snapshot()
+    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "strong"})()
+    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
+        assert wic.resolve_required_floor(cfg, degraded) == "none"
+    msgs = [r.message for r in caplog.records]
+    assert not any("REJECT all launches" in m for m in msgs)
+    # 无效值落到派生分支:弱隔离告警 + invalid 告警各一条
+    assert any("will NOT be per-user isolated" in m for m in msgs)
+    assert any("Invalid workspace.required_isolation_level" in m for m in msgs)
+
+
 def test_pinned_floor_on_healthy_snapshot_stays_silent(caplog):
     # 安装器正常形态(wrapper 已装):pin 不产生任何告警
     import logging

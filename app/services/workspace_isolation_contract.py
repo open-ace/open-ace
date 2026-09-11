@@ -251,7 +251,10 @@ def resolve_required_floor(config: Any, snapshot: IsolationCapabilitySnapshot) -
         # Late import avoids a logging dependency at module import time.
         import logging
 
-        if explicit and explicit != ISOLATION_LEVEL_NONE:
+        # PR review round 6: only a VALID pin above the degraded probe
+        # actually rejects; an invalid value falls through to the derived
+        # floor below and must not claim rejections that are not happening.
+        if explicit and is_valid_isolation_level(explicit) and explicit != ISOLATION_LEVEL_NONE:
             logging.getLogger(__name__).warning(
                 "Workspace launch path is degraded (%s); the pinned "
                 "required_isolation_level '%s' is above what this host can "
