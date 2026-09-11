@@ -174,6 +174,10 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
     # account with the requested one — keep them equal so the live instance
     # is reused (a mismatch would trigger a restart under the new mapping).
     instance.system_account = "testuser"
+    # Issue #3378: the reuse branch also compares the instance's form; a real
+    # WebUIInstance always carries one ("local" here — MagicMock would
+    # auto-attribute anything else).
+    instance.form = "local"
     manager._instances = {1: instance}
 
     # Fake request context: the browser hits 192.168.1.169:19888 while the

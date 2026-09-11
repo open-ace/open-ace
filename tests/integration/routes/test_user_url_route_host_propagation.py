@@ -185,6 +185,10 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
     # account with the requested one — keep them equal so the live instance
     # is reused (a mismatch would trigger a restart under the new mapping).
     instance.system_account = MOCK_USER["username"]
+    # Issue #3378: the reuse branch also compares the instance's form; a real
+    # WebUIInstance always carries one ("local" here — MagicMock would
+    # auto-attribute anything else).
+    instance.form = "local"
     manager._instances = {MOCK_USER["id"]: instance}
 
     mock_get_manager.return_value = manager
