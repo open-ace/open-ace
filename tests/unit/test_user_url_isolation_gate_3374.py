@@ -73,13 +73,15 @@ def test_unknown_user_is_404(app, client):
 
 
 @pytest.mark.regression
-def test_default_path_preserves_username_fallback(app, client, monkeypatch):
-    # 回归保护:显式隔离要求缺席时,username 回退(既有映射约定)必须保留。
+@pytest.mark.parametrize("query", ["", "?required_isolation=none"])
+def test_default_path_preserves_username_fallback(app, client, monkeypatch, query):
+    # 回归保护:显式隔离要求缺席(或显式 none)时,username 回退(既有映射约定)
+    # 必须保留——设计 §4.1 将缺省与 required_isolation=none 定义为等价。
     _deployment_supported(monkeypatch)
     stub = _StubManager()
     patches = _patch_stack(_db_user(None), stub)
     try:
-        resp = _call(client)
+        resp = _call(client, query)
     finally:
         for p in patches:
             p.stop()

@@ -23,12 +23,12 @@ class _StubManager:
 
 @pytest.fixture
 def isolation_app():
-    """Flask app with only the workspace_isolation blueprint."""
+    """Flask app with only the workspace_isolation blueprint (production prefix)."""
     from app.routes.workspace_isolation import workspace_isolation_bp
 
     app = Flask(__name__)
     app.config["TESTING"] = True
-    app.register_blueprint(workspace_isolation_bp)
+    app.register_blueprint(workspace_isolation_bp, url_prefix="/api")
     return app
 
 
@@ -38,7 +38,7 @@ def stub_snapshot():
 
 
 def test_requires_authentication(isolation_app):
-    resp = isolation_app.test_client().get("/workspace/isolation-capabilities")
+    resp = isolation_app.test_client().get("/api/workspace/isolation-capabilities")
     assert resp.status_code == 401
 
 
@@ -52,7 +52,7 @@ def test_returns_contract_for_authenticated_user(isolation_app, stub_snapshot):
         patch("app.auth.decorators._authenticate", return_value=MOCK_SESSION),
     ):
         resp = client.get(
-            "/workspace/isolation-capabilities",
+            "/api/workspace/isolation-capabilities",
             headers={"Authorization": "Bearer test-token"},
         )
     assert resp.status_code == 200
@@ -69,7 +69,7 @@ def test_internal_error_is_structured(isolation_app):
         patch("app.auth.decorators._authenticate", return_value=MOCK_SESSION),
     ):
         resp = client.get(
-            "/workspace/isolation-capabilities",
+            "/api/workspace/isolation-capabilities",
             headers={"Authorization": "Bearer test-token"},
         )
     assert resp.status_code == 500
