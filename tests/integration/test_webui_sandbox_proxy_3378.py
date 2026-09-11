@@ -10,6 +10,7 @@ killing in-flight greenlets, and the update_activity heartbeat.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 
@@ -368,32 +369,30 @@ def _ws_upgrade(port: int, connection: str = "Upgrade") -> tuple[socket.socket, 
 
 
 def test_websocket_upgrade_and_bidirectional_splice(gateway):
-    gateway.mode = "ws"
-    runner = _ProxyThread(gateway)
-    port = runner.start()
-    try:
-        sock, head, _rest = _ws_upgrade(port)
-        with sock:
-            assert head.startswith(b"HTTP/1.1 101")
-            assert b"Sec-WebSocket-Accept: fixed" in head
-            # Upstream's unknown prefix header is stripped from the 101 too.
-            assert b"OpenSandbox-Leak" not in head
-            # The injected routing headers reached the upgrade request.
-            request_line, headers, _body = gateway.requests[-1]
-            assert headers["opensandbox-secure-access"] == "tok-upstream"
-            assert headers["connection"].lower() == "upgrade"
+    # #3378 CI: the WS splice drives gevent greenlets + native threads in one
+    # process; under pytest-xdist workers that is the #2457 crash class (the
+    # worker dies in ways --timeout cannot interrupt). The scenario runs in a
+    # subprocess script (repo precedent: test_terminal_ws_handler_process.py);
+    # this runner keeps it in the pytest surface. The gateway fixture is unused
+    # here but kept so the file's socket machinery stays warmed up identically.
+    import subprocess
+    import sys
 
-            sock.sendall(b"ping")
-            echoed = bytearray()
-            while b"up:ping" not in echoed:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                echoed.extend(chunk)
-            assert b"up:ping" in bytes(echoed)
-        assert runner.activity >= 1
-    finally:
-        runner.stop()
+    script = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "subprocess",
+        "webui_sandbox_proxy_ws_3378.py",
+    )
+    result = subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert (
+        result.returncode == 0
+    ), f"WS splice subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "WS SPLICE OK" in result.stdout
 
 
 # ── failure and lifecycle paths ────────────────────────────────────────
