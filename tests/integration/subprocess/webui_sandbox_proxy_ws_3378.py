@@ -34,6 +34,17 @@ def main() -> int:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
+    scenarios = {
+        "websocket_upgrade_and_bidirectional_splice": _scenario_splice,
+        "websocket_upgrade_recognizes_comma_list_without_spaces": _scenario_comma_list,
+    }
+    for name, fn in scenarios.items():
+        fn(mod)
+        print(f"SCENARIO {name} OK")
+    return 0
+
+
+def _scenario_splice(mod):
     gateway = mod._Gateway()
     gateway.mode = "ws"
     runner = mod._ProxyThread(gateway)
@@ -59,8 +70,26 @@ def main() -> int:
         assert runner.activity >= 1, "WS upgrade did not feed the activity heartbeat"
     finally:
         runner.stop()
-    print("WS SPLICE OK")
-    return 0
+        gateway.close()
+
+
+def _scenario_comma_list(mod):
+    """m7: ``Connection: Upgrade,keep-alive`` (comma, no space) is still an
+    upgrade request — tokens are stripped individually."""
+    gateway = mod._Gateway()
+    gateway.mode = "ws"
+    runner = mod._ProxyThread(gateway)
+    port = runner.start()
+    try:
+        sock, head, _rest = mod._ws_upgrade(port, connection="Upgrade,keep-alive")
+        with sock:
+            assert head.startswith(b"HTTP/1.1 101")
+            request_line, headers, _body = gateway.requests[-1]
+            assert headers["upgrade"] == "websocket"
+            assert headers["connection"].lower() == "upgrade"
+    finally:
+        runner.stop()
+        gateway.close()
 
 
 if __name__ == "__main__":
