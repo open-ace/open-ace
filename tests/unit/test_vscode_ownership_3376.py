@@ -94,6 +94,15 @@ def test_owner_store_lookup_is_keyed_by_vscode_id():
     assert vscode_owner_store.pop(VS_ID) == (MACHINE_ID, 7, 1)
 
 
+def test_owner_store_expired_entry_returns_none(monkeypatch):
+    from app.modules.workspace.vscode_store import VSCodeOwnerStore
+
+    store = VSCodeOwnerStore(ttl=0.0)
+    store.record(VS_ID, MACHINE_ID, 7, 1)
+    assert store.pop(VS_ID) is None  # recorded_at 已超 ttl
+    assert store._owners == {}  # 过期条目被 pop 消费,不驻留
+
+
 # --- reported owner resolution ---
 
 

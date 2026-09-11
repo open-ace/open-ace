@@ -266,9 +266,25 @@ class VSCodeOwnerStore:
         self._ttl = ttl
         # vscode_id -> (machine_id, user_id, tenant_id, recorded_at)
         self._owners: dict[str, tuple[str, int, int | None, float]] = {}
+        self._cleanup_timer: threading.Timer | None = None
+        self._timer_started = False
+
+    def _schedule_cleanup(self) -> None:
+        self._cleanup_timer = threading.Timer(CLEANUP_INTERVAL, self._cleanup_loop)
+        self._cleanup_timer.daemon = True
+        self._cleanup_timer.start()
+
+    def _cleanup_loop(self) -> None:
+        self.cleanup_stale()
+        self._schedule_cleanup()
 
     def record(self, vscode_id: str, machine_id: str, user_id: int, tenant_id: int | None) -> None:
         with self._lock:
+            # Lazy-start cleanup timer on first record: start requests whose
+            # agent never reports 'running' would otherwise accumulate.
+            if not self._timer_started:
+                self._timer_started = True
+                self._schedule_cleanup()
             self._owners[vscode_id] = (machine_id, user_id, tenant_id, time.time())
 
     def pop(self, vscode_id: str) -> tuple[str, int, int | None] | None:

@@ -3412,7 +3412,7 @@ def start_terminal():
     # Issue #3376: server-side work_dir validation. Remote-machine paths are
     # not backend-local, so no base_dirs prefix applies here — enforce
     # absoluteness, no "..", and the resolved system-directory blacklist.
-    if work_dir and not is_valid_path(work_dir):
+    if work_dir and (not isinstance(work_dir, str) or not is_valid_path(work_dir)):
         return (
             jsonify(
                 {
@@ -4839,7 +4839,7 @@ def remote_vscode_start():
         return jsonify({"success": False, "error": "project_path is required"}), 400
 
     # Issue #3376: same remote-path semantics as terminal work_dir.
-    if not is_valid_path(project_path):
+    if not isinstance(project_path, str) or not is_valid_path(project_path):
         return (
             jsonify(
                 {

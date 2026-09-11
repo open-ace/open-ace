@@ -44,7 +44,7 @@ def _auth(monkeypatch):
     monkeypatch.setattr("app.routes.remote._set_user_from_token", _set_user)
 
 
-@pytest.mark.parametrize("bad", ["../../etc", "relative/dir", "/etc/x", "/opt/tool"])
+@pytest.mark.parametrize("bad", ["../../etc", "relative/dir", "/etc/x", "/opt/tool", 5, ["a", "b"]])
 def test_terminal_invalid_work_dir_rejected(app, client, monkeypatch, bad):
     _auth(monkeypatch)
     agent_mgr = _StubAgentMgr()
@@ -66,7 +66,7 @@ def test_terminal_invalid_work_dir_rejected(app, client, monkeypatch, bad):
     assert agent_mgr.sent is None
 
 
-@pytest.mark.parametrize("bad", ["../../etc", "relative/dir", "/etc/x"])
+@pytest.mark.parametrize("bad", ["../../etc", "relative/dir", "/etc/x", 5])
 def test_vscode_invalid_project_path_rejected(app, client, monkeypatch, bad):
     _auth(monkeypatch)
     agent_mgr = _StubAgentMgr()
