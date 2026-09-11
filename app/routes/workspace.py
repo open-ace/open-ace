@@ -2346,6 +2346,10 @@ def get_user_webui_url():
     """
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.services.workspace_isolation_contract import (
+        build_workspace_isolation_snapshot,
+        evaluate_isolation_requirement,
+    )
 
     # Check if user is logged in
     if not hasattr(g, "user") or not g.user:
@@ -2363,7 +2367,39 @@ def get_user_webui_url():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        system_account = user.get("system_account") or user.get("username")
+        from flask import request as flask_request
+
+        raw_system_account = user.get("system_account")
+        system_account = raw_system_account or user.get("username")
+
+        # Issue #3374: explicit isolation requirements are gated BEFORE the
+        # username fallback — a missing identity mapping is a structured
+        # rejection, never a silent convention-derived/shared account.
+        required_isolation = flask_request.args.get("required_isolation")
+        isolation_snapshot = build_workspace_isolation_snapshot(manager)
+        if required_isolation is not None:
+            rejection = evaluate_isolation_requirement(
+                required_isolation,
+                snapshot=isolation_snapshot,
+                system_account=raw_system_account,
+                manager=manager,
+            )
+            if rejection is not None:
+                reasons = [r.public_dict() for r in isolation_snapshot.reasons]
+                if not reasons:
+                    reasons = [rejection.public_dict()]
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": rejection.message,
+                            "error_code": rejection.code,
+                            "reasons": reasons,
+                            "isolation": isolation_snapshot.public_dict(),
+                        }
+                    ),
+                    400,
+                )
 
         # Get or create user's webui instance.
         # Pass host_url so the iframe URL uses the browser-visible host instead
@@ -2371,8 +2407,6 @@ def get_user_webui_url():
         # container-detected IP that the browser cannot reach; webui_manager
         # replaces it with request.host_url. Omitting this argument regresses
         # the workspace into a blank iframe.
-        from flask import request as flask_request
-
         host_url = flask_request.host_url.rstrip("/")
         url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
 
@@ -2402,6 +2436,8 @@ def get_user_webui_url():
                 "system_account": system_account,
                 "multi_user_mode": manager.config.multi_user_mode,
                 "openace_url": openace_url,
+                # Issue #3374: report the policy actually in effect.
+                "isolation": isolation_snapshot.public_dict(),
             }
         )
 
