@@ -184,11 +184,13 @@ def shared_project_path_error(
     browse root. Two additional rules, applied per side:
 
     - *home subtree (any depth)*: a path inside a user home subtree is
-      rejected, EXCEPT when that home is itself one of *creator_roots*
-      (creation side: the creator may share subpaths of their own home,
-      nobody else's). With *creator_roots* omitted (read-side filter) no
-      home subtree is admissible at all — defense in depth that does not
-      depend on the projects row carrying a trustworthy creator.
+      rejected on BOTH sides — with *creator_roots* omitted (read-side
+      filter) no home subtree is admissible at all, defense in depth that
+      does not depend on the projects row carrying a trustworthy creator.
+      Review round 4: creation-side callers stopped including the creator's
+      own home in *creator_roots* — the read side would drop such a row, so
+      creating it produced a silent dead share. The creation-side rejection
+      message points at the first-class namespace instead.
     - *ownership*: when *creator_roots* is given (creation side), the path
       must fall inside one of them — the creator's own per-base home roots
       plus shared roots already open to them. Registering arbitrary
@@ -247,6 +249,15 @@ def shared_project_path_error(
                 f"account named '{SHARED_NAMESPACE_DIRNAME}'; contact an administrator"
             )
         if resolved.startswith(resolved_home + os.sep) and resolved_home not in creator_root_set:
+            if creator_roots is not None:
+                # Round 4: name the fix, not just the rule — a share inside a
+                # home would be created-but-invisible (the read side drops
+                # every home-subtree row), so point at the namespace.
+                return (
+                    "shared projects must live under "
+                    f"<base>/{SHARED_NAMESPACE_DIRNAME}/<name>; paths inside a user's "
+                    "home directory are not visible to other tenant members"
+                )
             return "must not be inside any user's home directory subtree"
     if creator_roots is not None and not any(
         resolved == root or resolved.startswith(root + os.sep) for root in creator_root_set

@@ -260,10 +260,14 @@ def api_create_project():
             if account:
                 home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
 
-        creator_account = (g.user or {}).get("system_account") or (g.user or {}).get("username")
+        # Review round 4: the creator's OWN home roots are deliberately NOT
+        # part of creator_roots for SHARED projects. The read side
+        # (_shared_root_rejection_reason) unconditionally drops every
+        # home-subtree row, so a share inside a home would be created (201,
+        # group-shared directory permissions) yet invisible to every other
+        # tenant member — a silent dead share. Registrable shared paths are
+        # the first-class namespace and clean legacy anchors instead.
         creator_roots: list[str] = []
-        if creator_account:
-            creator_roots.extend(f"{base.rstrip('/')}/{creator_account}" for base in base_dirs)
         # First-class tenant shared namespace: <base>/shared/<name> is
         # always registrable (bootstrap-free). shared_project_path_error
         # still rejects the namespace root itself and any namespace that

@@ -136,16 +136,23 @@ def test_shared_foreign_home_descendant_rejected(projects_app, workspace):
         assert "shared project path" in resp.get_json()["error"].lower()
 
 
-def test_shared_own_home_subpath_accepted(projects_app, workspace):
-    """bob 注册自己 home 内子路径 → 通过拓扑校验(归属规则允许)。"""
+def test_shared_own_home_subpath_rejected_with_namespace_hint(projects_app, workspace):
+    """bob 注册自己 home 内子路径 → 400,文案指向 <base>/shared/<name>。
+
+    Review round 4:创建侧曾允许"自己 home 内"的共享路径,而读取侧无条件
+    丢弃所有 home 子树行——用户会拿到 201 与组共享目录权限,然后共享对
+    其他租户成员永远不可见(静默死共享)。home 根已从共享项目的
+    creator_roots 移除,拒绝信息指向一等共享命名空间。
+    """
     client = projects_app.test_client()
     with patch("app.routes.projects.project_repo") as repo:
         repo.get_project_by_path.return_value = None
-        repo.create_project.return_value = 42
-        repo.get_project_by_id.return_value = None  # 404 分支即视为创建已放行
         resp = _create(client, str(workspace / "bob" / "team-proj"))
-    assert resp.status_code in (200, 201, 404)  # 不是 400 校验拒绝
-    assert repo.create_project.called
+    assert resp.status_code == 400
+    error = resp.get_json()["error"].lower()
+    assert "shared projects must live under" in error
+    assert "shared/<name>" in error
+    assert not repo.create_project.called
 
 
 def test_shared_first_level_non_home_requires_ownership(projects_app, workspace):
@@ -344,3 +351,30 @@ def test_e2e_namespace_bootstrap_visible_to_other_tenant_member(workspace, tmp_p
     assert os.path.realpath(str(target)) in roots
     # B 的根集不因共享行放大到他人 home
     assert os.path.realpath(str(ws / "alice")) not in roots
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "{base}/shared/team-proj",
+        "{base}/shared/a/b",
+        "{base}/shared/team-proj",
+    ],
+)
+def test_create_side_accepts_exactly_what_read_side_accepts(projects_app, workspace, path):
+    """对称不变量(review round 4 点名):创建侧放行的共享路径,读取侧
+    滤波器必须同样放行——两侧口径漂移是 round 2(不相交集合)与 round 4
+    (创建成功但不可见)两个缺陷的共同根源。"""
+    from app.routes.fs import _shared_root_rejection_reason
+    from app.utils.path_guard import shared_namespace_roots
+
+    bases = [str(workspace)]
+    homes = [str(workspace / "alice"), str(workspace / "bob")]
+    resolved = path.format(base=str(workspace))
+    # The exact creator_roots the route assembles for a shared registration.
+    creator_roots = shared_namespace_roots(bases)
+    from app.utils.path_guard import shared_project_path_error
+
+    assert shared_project_path_error(resolved, bases, homes, creator_roots=creator_roots) is None
+    # Read side (creator-less) must agree for every create-side-accepted path.
+    assert _shared_root_rejection_reason(resolved, home_dirs=homes) is None
