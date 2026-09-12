@@ -249,3 +249,89 @@ class VSCodeInfoStore:
 # Module-level singleton — cleanup timer is started lazily on first use
 # to avoid spawning a background thread at import time.
 vscode_info_store = VSCodeInfoStore()
+
+
+class VSCodeOwnerStore:
+    """Issue #3376: remember which user requested a VSCode session.
+
+    /vscode/start knows the requester; the agent later reports 'running'
+    via /api/remote/agent/message, which only has machine context. This
+    in-memory bridge links the two (single web worker: gunicorn
+    --workers 1 with the gevent worker class). Absent entries fall back
+    to machine.created_by at report time.
+
+    Review round 1: the agent re-reports 'running' on every re-attach, so
+    resolution uses the non-consuming ``peek`` — ownership only changes on
+    a new ``/vscode/start`` (``record`` overwrites the entry).
+    """
+
+    def __init__(self, ttl: float = VSCODE_SESSION_TTL):
+        self._lock = threading.Lock()
+        self._ttl = ttl
+        # vscode_id -> (machine_id, user_id, tenant_id, recorded_at)
+        self._owners: dict[str, tuple[str, int, int | None, float]] = {}
+        self._cleanup_timer: threading.Timer | None = None
+        self._timer_started = False
+
+    def _schedule_cleanup(self) -> None:
+        self._cleanup_timer = threading.Timer(CLEANUP_INTERVAL, self._cleanup_loop)
+        self._cleanup_timer.daemon = True
+        self._cleanup_timer.start()
+
+    def _cleanup_loop(self) -> None:
+        self.cleanup_stale()
+        self._schedule_cleanup()
+
+    def record(self, vscode_id: str, machine_id: str, user_id: int, tenant_id: int | None) -> None:
+        with self._lock:
+            # Lazy-start cleanup timer on first record: start requests whose
+            # agent never reports 'running' would otherwise accumulate.
+            if not self._timer_started:
+                self._timer_started = True
+                self._schedule_cleanup()
+            self._owners[vscode_id] = (machine_id, user_id, tenant_id, time.time())
+
+    def pop(self, vscode_id: str) -> tuple[str, int, int | None] | None:
+        """Consume the recorded owner; None when absent/expired.
+
+        A lookup for a different machine consumes the entry defensively
+        (never returns a cross-machine owner).
+        """
+        with self._lock:
+            entry = self._owners.pop(vscode_id, None)
+            if not entry:
+                return None
+            machine_id, user_id, tenant_id, recorded_at = entry
+            if time.time() - recorded_at > self._ttl:
+                return None
+            return machine_id, user_id, tenant_id
+
+    def peek(self, vscode_id: str) -> tuple[str, int, int | None] | None:
+        """Non-consuming read of the recorded owner; None when absent/expired.
+
+        Review round 1 (#3376): agents re-report ``running`` on every
+        re-attach, and consuming the record with ``pop`` handed the second
+        and later reports to the ``machine.created_by`` fallback — silently
+        transferring session ownership. Resolution now peeks; the entry is
+        only overwritten by a new ``/vscode/start`` (``record``) and ages
+        out via the same TTL as ``pop``.
+        """
+        with self._lock:
+            entry = self._owners.get(vscode_id)
+            if not entry:
+                return None
+            machine_id, user_id, tenant_id, recorded_at = entry
+            if time.time() - recorded_at > self._ttl:
+                return None
+            return machine_id, user_id, tenant_id
+
+    def cleanup_stale(self) -> int:
+        now = time.time()
+        with self._lock:
+            stale = [k for k, v in self._owners.items() if now - v[3] > self._ttl]
+            for k in stale:
+                del self._owners[k]
+            return len(stale)
+
+
+vscode_owner_store = VSCodeOwnerStore()

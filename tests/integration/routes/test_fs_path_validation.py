@@ -16,7 +16,10 @@ from unittest.mock import patch
 
 import pytest
 
-project_root = str(Path(__file__).resolve().parent.parent.parent)
+# parents[3]: this file lives at <repo>/tests/integration/routes/, so the
+# repository root is three directories up (a bare parent.parent.parent chain
+# used to resolve to <repo>/tests and broke standalone runs).
+project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -176,10 +179,15 @@ class TestCheckPath:
         assert data["canCreate"] is True
 
     def test_multi_level_new_path_valid(self, client, workspace):
-        """Multi-level new path should be valid and creatable (issue #2317 fix)."""
+        """Multi-level new path should be valid and creatable (issue #2317 fix).
+
+        Review round 2 (#3376): multi-level mkdir -p semantics remain
+        validatable inside the user's own home subtree; directly under the
+        workspace root only single-level names stay validatable.
+        """
         resp = client.post(
             "/api/fs/check-path",
-            json={"path": str(workspace / "subdir" / "new-project")},
+            json={"path": str(workspace / "testuser" / "subdir" / "new-project")},
         )
         assert resp.status_code == 200
         data = resp.get_json()
@@ -191,13 +199,46 @@ class TestCheckPath:
         """Deeply nested new path should also be valid."""
         resp = client.post(
             "/api/fs/check-path",
-            json={"path": str(workspace / "a" / "b" / "c" / "d" / "new-project")},
+            json={"path": str(workspace / "testuser" / "a" / "b" / "c" / "new-project")},
         )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["valid"] is True
         assert data["exists"] is False
         assert data["canCreate"] is True
+
+    def test_multi_level_directly_under_base_rejected(self, client, workspace):
+        """Review round 2 (#3376, 3994613308): <base>/x/y must NOT be probeable.
+
+        Admitting the whole base dir re-opened existence probing under other
+        users' homes; only the base dir itself and first-level non-home
+        children stay validatable.
+        """
+        resp = client.post(
+            "/api/fs/check-path",
+            json={"path": str(workspace / "subdir" / "new-project")},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["valid"] is False
+
+    def test_first_level_foreign_home_rejected(self, client, workspace):
+        """Review round 2: <base>/<other user's account> is not validatable."""
+        from app.routes.fs import user_repo
+
+        with patch.object(
+            user_repo,
+            "get_all_users",
+            return_value=[{"id": 2, "username": "otheruser", "system_account": None}],
+            create=True,  # the _UR stub in this file has no get_all_users
+        ):
+            resp = client.post(
+                "/api/fs/check-path",
+                json={"path": str(workspace / "otheruser")},
+            )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["valid"] is False
 
     def test_existing_directory_valid(self, client, workspace):
         """Already existing directory should be valid."""

@@ -10,7 +10,6 @@ Used by project selector UI to browse directories.
 import logging
 import mimetypes
 import os
-import platform
 import pwd
 import re
 import subprocess
@@ -21,6 +20,7 @@ from typing import IO, Any, cast
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
+from app.utils.path_guard import is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
     OPENACE_RM_WRAPPER,
@@ -45,39 +45,8 @@ MAX_UPLOAD_SIZE_MB = int(os.environ.get("OPENACE_MAX_UPLOAD_SIZE_MB", "100"))
 
 # Filename sanitization: strip control chars and path separators. We use
 # basename() upstream too, but this defends in depth against embedded
-# separators / NULs that could slip past naive handling.
+# separators / NULs that can slip past naive handling.
 _UNSAFE_FILENAME_CHARS = re.compile(r"[\x00-\x1f\\/:]")
-
-# System-sensitive directories blacklist (Linux/Mac)
-# These directories should never be writable by users to prevent system damage
-BLACKLISTED_PATHS = [
-    "/etc",  # System configuration
-    "/bin",  # Binary executables
-    "/sbin",  # System binaries
-    "/usr",  # All user system files (covers /usr/bin, /usr/sbin, /usr/lib, etc.)
-    "/usr/local",  # User-installed software
-    "/usr/share",  # Shared data files
-    "/root",  # Root user home
-    "/boot",  # Boot files
-    "/dev",  # Device files
-    "/proc",  # Process information
-    "/sys",  # System information
-    "/var",  # System variable data (covers /var/log, /var/lib, etc.)
-    "/opt",  # Optional software packages
-    "/tmp",  # Temporary files (security risk for arbitrary creation)
-    "/lib",  # Shared libraries
-    "/lib64",  # 64-bit libraries
-]
-
-# Resolved blacklist used for matching: each literal is canonicalized through
-# realpath so symlinked entries still match. On macOS /etc → /private/etc,
-# /var → /private/var, /tmp → /private/tmp; without this, a path like /etc
-# (realpath /private/etc) would slip past the literal /etc check. Keep both the
-# literal (for readability/docs above) and its realpath here.
-_BLACKLISTED_RESOLVED = {
-    *BLACKLISTED_PATHS,
-    *(os.path.realpath(p) for p in BLACKLISTED_PATHS),
-}
 
 
 @fs_bp.before_request
@@ -234,58 +203,6 @@ def get_home_directory(user=None):
     return str(Path.home())
 
 
-def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
-    """Check if path is valid for browsing.
-
-    Optionally restricts the resolved path to a list of allowed prefix
-    directories (e.g. workspace base dir). If allowed_prefixes is None,
-    no prefix restriction is applied (backward compatible).
-
-    Also checks against system-sensitive directory blacklist to prevent
-    users from writing to /etc, /bin, /root, etc.
-    """
-    if not path:
-        return False
-
-    # Check for path traversal in the original input
-    if ".." in path:
-        return False
-
-    # Platform-specific validation for original path
-    system = platform.system()
-    if system == "Windows":
-        # Windows: must be a valid drive path
-        if not (len(path) >= 2 and path[1] == ":"):
-            return False
-    else:
-        # Mac/Linux: must start with / (absolute path required)
-        if not path.startswith("/"):
-            return False
-
-    # Resolve to absolute path, following symlinks to detect traversal
-    try:
-        abs_path = os.path.realpath(path)
-    except Exception:
-        return False
-
-    # Blacklist check for Linux/Mac - protect system directories
-    if system != "Windows":
-        for blocked in _BLACKLISTED_RESOLVED:
-            if abs_path == blocked or abs_path.startswith(blocked + os.sep):
-                return False
-
-    # Restrict resolved path to allowed prefixes if provided.
-    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
-    if allowed_prefixes:
-        if not any(
-            abs_path == prefix or abs_path.startswith(prefix + os.sep)
-            for prefix in allowed_prefixes
-        ):
-            return False
-
-    return True
-
-
 def _sanitize_filename(name: str) -> str | None:
     """Return a safe basename, or None if the name is unusable.
 
@@ -332,6 +249,177 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None]:
 
     system_account = (user.get("system_account") if user else None) or None
     return resolved, system_account
+
+
+def _is_within_any_root(resolved: str, roots: list[str]) -> bool:
+    """Boundary-safe containment: equal or beneath (path-separator aware)."""
+    return any(root and (resolved == root or resolved.startswith(root + os.sep)) for root in roots)
+
+
+def _home_roots_for_user(user) -> list[str]:
+    """Per-base home roots for the user (review round 1, #3376).
+
+    One root per configured workspace base dir: ``<base>/<account>`` where
+    account = system_account or username. WORKSPACE_BASE_DIR may be a
+    comma-separated list (``/a,/b``); the previous single-base resolution
+    produced the literal path ``/a,/b/<account>`` and locked browse out
+    entirely on multi-root deployments. Users with neither system_account
+    nor username get NO root (empty list) instead of the process home: an
+    identity-less user has no home subtree to browse.
+    """
+    account = (user or {}).get("system_account") or (user or {}).get("username")
+    if not account:
+        return []
+    return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in get_workspace_base_dirs()]
+
+
+def _all_user_home_dirs(base_dirs: list[str]) -> list[str]:
+    """Every user's per-base home path (``<base>/<account>``), review round 2 (#3376).
+
+    Shared by the shared-root read filter and the check-path first-level
+    home determination. Enumeration failures are logged and yield an empty
+    list (fail open — same posture as round 1): with no homes known the
+    equal/ancestor rule still applies, only the subtree rule goes vacuous.
+    """
+    try:
+        rows = user_repo.get_all_users(include_inactive=True) or []
+    except Exception as e:
+        logger.warning("Failed to enumerate users for shared root filter: %s", e)
+        return []
+    home_dirs: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        account = row.get("system_account") or row.get("username")
+        if account:
+            home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
+    return home_dirs
+
+
+def _shared_root_rejection_reason(path, home_dirs: list[str] | None = None) -> str | None:
+    """Filter one shared-project root against the topology rule; None = accept.
+
+    Review round 1 (#3376): defense in depth for historical rows — a shared
+    project whose path is a workspace base dir or an ancestor of any user's
+    home would re-open other users' homes to the whole tenant even though
+    ``api_create_project`` now rejects creating such rows.
+
+    Review round 2 (#3376, 3994613216): the round-1 ``needs_home_check``
+    fast path only enumerated users when the candidate was a base dir or a
+    FIRST-LEVEL child of one, so ``<base>/<account>/.ssh``-style rows (home
+    descendants, any depth) slipped through and stayed tenant-browsable.
+    The home-subtree rule now applies at ANY depth, so users are enumerated
+    for every candidate that sits inside a workspace base dir; callers
+    filtering several candidates pass a pre-computed *home_dirs* so the
+    user enumeration happens once instead of once per candidate.
+
+    Rejections are logged as WARNING so operators can clean the projects
+    table.
+
+    Review round 3 (#3376, PR #3380): rule unchanged — the first-class
+    shared namespace ``<base>/shared/<name>`` (new registrations, see
+    ``shared_project_path_error``) lies OUTSIDE every user home subtree,
+    so it passes this filter without special-casing. Only a namespace
+    that collides with a real user home (an account literally named
+    ``shared``) is dropped here — the creation side already rejects it,
+    this covers rows written by other means.
+    """
+    if not isinstance(path, str) or not path:
+        return "shared project path must be a non-empty string"
+    base_dirs = get_workspace_base_dirs()
+    resolved = os.path.realpath(path)
+    under_any_base = any(
+        resolved == os.path.realpath(base) or resolved.startswith(os.path.realpath(base) + os.sep)
+        for base in base_dirs
+    )
+    if home_dirs is None:
+        # Only candidates inside a base dir can pass the prefix check inside
+        # shared_project_path_error; everything else is rejected before the
+        # home rules run, so skip the user query for it.
+        home_dirs = _all_user_home_dirs(base_dirs) if under_any_base else []
+    reason = shared_project_path_error(path, base_dirs, home_dirs)
+    if reason:
+        logger.warning(
+            "Shared project root rejected by home lock (legacy/dirty row?): %s (%s)",
+            path,
+            reason,
+        )
+    return reason
+
+
+def _allowed_roots_for_user(user) -> list[str]:
+    """Roots a user may browse (Issue #3376; review rounds 1+2).
+
+    Own home roots (one per workspace base dir — see ``_home_roots_for_user``)
+    plus the tenant's explicitly shared project paths, both realpath'd so
+    they compare equal against already-resolved request paths. Shared paths
+    are re-filtered against the shared-project topology rule
+    (``_shared_root_rejection_reason``) so historical rows cannot widen the
+    lock. User homes are enumerated at most once per call, and only when
+    the tenant actually has shared project rows.
+
+    check-path does NOT use this set directly: its exists/canCreate probes
+    are one-at-a-time enumeration and are narrowed further by
+    ``_check_path_rejection_reason`` (review round 2).
+    """
+    roots = _home_roots_for_user(user)
+    try:
+        from app.repositories.project_repo import ProjectRepository
+
+        tenant_id = (user or {}).get("tenant_id")
+        if tenant_id is not None:
+            home_dirs: list[str] | None = None
+            for candidate in ProjectRepository().get_shared_project_paths(tenant_id):
+                if home_dirs is None:
+                    # Lazy: no shared rows → no user enumeration at all.
+                    home_dirs = _all_user_home_dirs(get_workspace_base_dirs())
+                if (
+                    _shared_root_rejection_reason(candidate, home_dirs) is None
+                    and candidate not in roots
+                ):
+                    roots.append(candidate)
+    except Exception as e:
+        logger.warning("Failed to load shared project roots: %s", e)
+    return roots
+
+
+def _check_path_rejection_reason(resolved: str, user) -> str | None:
+    """check-path admissibility predicate; None = admissible (round 2, #3376).
+
+    Review round 2 (#3376, 3994613308): admitting the whole workspace base
+    dirs (round 1's ``include_base_dirs``) let any user probe exists/
+    canCreate under OTHER users' homes one path at a time — existence
+    disclosure is enumeration. The #2317 flow only needs to validate the
+    one path the user is about to create, so the admissible set is:
+
+    1. inside the user's own home roots or shared project roots — any
+       depth (same set as browse);
+    2. a workspace base dir itself — the single point backing "create a
+       project directly under the workspace root";
+    3. a FIRST-LEVEL child of a base dir that is not any user's home
+       (e.g. ``<workspace>/new-project`` admissible, ``<workspace>/alice``
+       not) — first-level user-home detection reuses the shared-root
+       user enumeration.
+
+    Anything deeper under a base dir (``<base>/x/y``, ``<base>/<account>/...``)
+    is rejected.
+    """
+    if _is_within_any_root(resolved, _allowed_roots_for_user(user)):
+        return None
+    base_dirs = get_workspace_base_dirs()
+    for base in base_dirs:
+        resolved_base = os.path.realpath(base)
+        if resolved == resolved_base:
+            return None
+        if os.path.dirname(resolved) == resolved_base:
+            home_roots = {os.path.realpath(h) for h in _all_user_home_dirs(base_dirs)}
+            if resolved not in home_roots:
+                return None
+            return "first-level workspace paths that are a user home directory are not validatable"
+    return (
+        "Path must be inside your home directory or a shared project, the workspace "
+        "root itself, or a first-level directory under the workspace root"
+    )
 
 
 def _chown_to_user(path: str, system_account: str | None) -> bool:
@@ -604,7 +692,17 @@ def api_browse_directory():
 
     # Handle special path values
     if not path or path.lower() == "home":
-        path = get_home_directory(user)
+        # Review round 1 (#3376, item 8): default to the first per-base home
+        # root instead of get_home_directory()'s single-base (or process-home
+        # fallback) value. An identity-less user has no home root at all and
+        # must be rejected rather than dropped into the process home.
+        home_roots = _home_roots_for_user(user)
+        if not home_roots:
+            return (
+                jsonify({"error": "No home directory available for this user"}),
+                400,
+            )
+        path = home_roots[0]
     else:
         # Validate and resolve path — restrict to workspace base dirs
         base_dirs = get_workspace_base_dirs()
@@ -616,6 +714,14 @@ def api_browse_directory():
             )
 
         path = os.path.realpath(path)
+
+        # Issue #3376: home subtree lock; explicitly shared project roots
+        # stay reachable (read-side parity with the #1813 write lock).
+        if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+            return (
+                jsonify({"error": "Path must be inside your home directory or a shared project"}),
+                400,
+            )
 
     # Check if path exists and is readable
     dir_info = get_directory_info(path, system_account)
@@ -905,6 +1011,27 @@ def api_check_path():
         )
 
     path = os.path.realpath(path)
+
+    # Issue #3376: home subtree lock; explicitly shared project roots stay
+    # reachable (read-side parity with the #1813 write lock). Review round 2
+    # (#3376, 3994613308): round 1 admitted the whole workspace base dirs
+    # here, which re-opened existence probing (exists/canCreate) under other
+    # users' homes one path at a time. The admissible set is now narrowed to
+    # own home/shared roots (any depth), the base dir itself, and first-level
+    # non-home children of a base dir (#2317: creating a project directly
+    # under the workspace root stays validatable). browse keeps the stricter
+    # home-roots-only set ("validatable but not enumerable").
+    reason = _check_path_rejection_reason(path, user)
+    if reason is not None:
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": f"{reason}. Provided path: {path}",
+                }
+            ),
+            400,
+        )
 
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None
