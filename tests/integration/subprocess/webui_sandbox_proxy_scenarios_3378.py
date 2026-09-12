@@ -324,6 +324,93 @@ def _build_scenarios(mod):
             runner.stop()
             gateway.mode = "http"
 
+    # ── T-A: bare CR/LF/NUL heads and Content-Length digits ─────────────
+
+    def upstream_header_value_bare_lf_is_502(gateway):
+        gateway.mode = "lf-header"
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            response = mod._get(port, "/api/version")
+            assert response.startswith(b"HTTP/1.1 502")
+            # The injected second header never reached the browser.
+            assert b"session=attacker" not in response
+            assert b"Set-Cookie" not in response
+        finally:
+            runner.stop()
+            gateway.mode = "http"
+
+    def request_header_value_bare_lf_is_400(gateway):
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            raw = (
+                f"GET /api/version HTTP/1.1\r\n"
+                f"Host: localhost:{port}\r\n"
+                "X-Custom: value\nOpenSandbox-Secure-Access: ATTACKER\r\n"
+                "\r\n"
+            ).encode()
+            response = mod._request(port, raw)
+            assert response.startswith(b"HTTP/1.1 400")
+            assert gateway.requests == []
+        finally:
+            runner.stop()
+
+    def request_line_bare_lf_injection_is_400(gateway):
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            # ``GET /x\nOpenSandbox-Secure-Access: ATTACKER HTTP/1.1`` parses
+            # as one request line for this proxy but re-serializes into an
+            # injected header for a lenient upstream — refuse the head.
+            raw = (
+                f"GET /x\nOpenSandbox-Secure-Access: ATTACKER HTTP/1.1\r\n"
+                f"Host: localhost:{port}\r\n"
+                "\r\n"
+            ).encode()
+            response = mod._request(port, raw)
+            assert response.startswith(b"HTTP/1.1 400")
+            assert gateway.requests == []
+        finally:
+            runner.stop()
+
+    def request_header_nul_and_bad_name_are_400(gateway):
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            for bad in (
+                b"X-Custom: val\x00ue\r\n",  # NUL inside a header value
+                b"Bad Name: x\r\n",  # space: not an RFC 7230 token
+                b"Bad@Name: x\r\n",  # '@' is not a token character
+            ):
+                raw = (
+                    (f"GET /api/version HTTP/1.1\r\n" f"Host: localhost:{port}\r\n").encode()
+                    + bad
+                    + b"\r\n"
+                )
+                response = mod._request(port, raw)
+                assert response.startswith(b"HTTP/1.1 400"), bad
+            assert gateway.requests == []
+        finally:
+            runner.stop()
+
+    def content_length_digit_variants_are_400(gateway):
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            for bad in ("-1", "5_0", "+5", "5 5", ""):
+                raw = (
+                    f"POST /api/chat HTTP/1.1\r\n"
+                    f"Host: localhost:{port}\r\n"
+                    f"Content-Length: {bad}\r\n"
+                    "\r\n"
+                ).encode()
+                response = mod._request(port, raw)
+                assert response.startswith(b"HTTP/1.1 400"), bad
+            assert gateway.requests == []
+        finally:
+            runner.stop()
+
     return {
         "http_passthrough_injects_headers_and_overrides_client": (
             http_passthrough_injects_headers_and_overrides_client
@@ -355,6 +442,11 @@ def _build_scenarios(mod):
         "launcher_health_check_false_on_401_from_pod": (
             launcher_health_check_false_on_401_from_pod
         ),
+        "upstream_header_value_bare_lf_is_502": upstream_header_value_bare_lf_is_502,
+        "request_header_value_bare_lf_is_400": request_header_value_bare_lf_is_400,
+        "request_line_bare_lf_injection_is_400": request_line_bare_lf_injection_is_400,
+        "request_header_nul_and_bad_name_are_400": request_header_nul_and_bad_name_are_400,
+        "content_length_digit_variants_are_400": content_length_digit_variants_are_400,
     }
 
 

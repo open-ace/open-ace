@@ -27,6 +27,7 @@ import hashlib
 import io
 import logging
 import os
+import re
 import secrets
 import shlex
 import tarfile
@@ -882,16 +883,33 @@ _INJECTABLE_HEADER_NAMES = frozenset(
 _MAX_HEAD_BYTES = 64 * 1024
 _MAX_DECHUNK_BYTES = 16 * 1024 * 1024
 
+# RFC 7230 §3.2.6 token (header field-name): the only legal shape for a
+# header NAME crossing the proxy. Anything else (a smuggled space, a colon,
+# a bare CR/LF) would re-serialize into a different header set than the one
+# parsed — the request/response-splitting vector T-A closes.
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
 
 def _parse_head(head: bytes) -> tuple[str, list[tuple[str, str]]]:
-    """Split a raw request/response head into its start line + header pairs.
+    r"""Split a raw request/response head into its start line + header pairs.
 
     Raises :class:`_MalformedHead` (not a bare ValueError) so the handler can
     classify: a malformed CLIENT head is a 400, a malformed UPSTREAM head a
     502 (m2).
+
+    Whole-head control-character check (T-A): splitting on ``\\r\\n`` removes
+    every legitimate CRLF, so any CR/LF/NUL left anywhere — the start line, a
+    header name, or a header value — is a bare one smuggled inside a field.
+    Re-serializing such a head lets a lenient upstream read injected headers
+    (``GET /x\\nOpenSandbox-Secure-Access: ...`` parses as one request line
+    here but as two lines for a parser that accepts bare LF), so the entire
+    head is refused, not repaired.
     """
     text = head.decode("iso-8859-1")
     lines = text.split("\r\n")
+    for line in lines:
+        if "\r" in line or "\n" in line or "\0" in line:
+            raise _MalformedHead(f"bare CR/LF or NUL inside head line {line!r}")
     start_line = lines[0]
     headers: list[tuple[str, str]] = []
     for line in lines[1:]:
@@ -900,7 +918,10 @@ def _parse_head(head: bytes) -> tuple[str, list[tuple[str, str]]]:
         if ":" not in line:
             raise _MalformedHead(f"malformed header line {line!r}")
         name, _, value = line.partition(":")
-        headers.append((name.strip(), value.strip()))
+        name = name.strip()
+        if not _HEADER_NAME_RE.fullmatch(name):
+            raise _MalformedHead(f"header name {name!r} is not an RFC 7230 token")
+        headers.append((name, value.strip()))
     return start_line, headers
 
 
@@ -950,7 +971,15 @@ class _BufferedSock:
         return line + b"\n"
 
     def read_exact(self, count: int) -> bytes:
-        """Read exactly *count* bytes (short only on peer close)."""
+        """Read exactly *count* bytes (short only on peer close).
+
+        A non-positive *count* returns ``b""`` immediately — depth-in-depth
+        against a caller that computes a negative length (T-A): the recv loop
+        below would otherwise block forever waiting for bytes nobody will
+        send.
+        """
+        if count <= 0:
+            return b""
         while len(self._pending) < count:
             chunk = self._sock.recv(min(65536, count - len(self._pending)))
             if not chunk:
@@ -1112,10 +1141,16 @@ class SandboxWebuiProxy:
                 request_body = self._dechunk(client)
                 outbound.append(("Content-Length", str(len(request_body))))
             elif "content-length" in lowered:
-                try:
-                    length = int(lowered["content-length"])
-                except ValueError as exc:
-                    raise _BadRequest("invalid Content-Length") from exc
+                # T-A: the value must be a non-empty run of ASCII digits.
+                # int() alone would accept "-1", "5_0" (→50!), "+5" and
+                # " 5" — every one of those frames a different body than
+                # the upstream will read after re-serialization.
+                raw_length = lowered["content-length"]
+                if not raw_length or not raw_length.isdigit():
+                    raise _BadRequest("invalid Content-Length")
+                length = int(raw_length)
+                if length < 0:  # unreachable post-isdigit; depth in depth
+                    raise _BadRequest("invalid Content-Length")
                 request_body = client.read_exact(length) if length else b""
 
             if self._is_websocket_upgrade(headers):

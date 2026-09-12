@@ -126,6 +126,22 @@ class _Gateway:
                 conn.sendall(b"HTTP/1.1 200 OK\r\nno-colon-here\r\n\r\n")
                 conn.close()
                 return
+            elif self.mode == "lf-header":
+                # T-A: a header VALUE carrying a bare LF. The proxy parses the
+                # head strictly (CRLF-only framing); on re-serialization a
+                # lenient parser would read the second line as its own
+                # (attacker-chosen) header — so the whole head must be refused
+                # (502), never relayed.
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Set-Cookie: a=1\nSet-Cookie: session=attacker\r\n"
+                    b"Content-Length: 2\r\n"
+                    b"Connection: close\r\n\r\n"
+                    b"ok"
+                )
+                conn.close()
+                return
             elif self.mode == "unauthorized":
                 # m6a: the webui answers, but the token does not validate.
                 conn.sendall(
@@ -406,6 +422,45 @@ def test_launcher_health_check_true_through_real_proxy():
 
 def test_launcher_health_check_false_on_401_from_pod():
     assert _assert_scenario(_SCENARIOS, "launcher_health_check_false_on_401_from_pod")
+
+
+# ── T-A: bare CR/LF/NUL heads, RFC token names, CL digits ─────────────
+
+
+@pytest.mark.security
+def test_upstream_header_value_bare_lf_is_502():
+    """T-A: an upstream header VALUE with a bare LF (injected Set-Cookie)
+    must be refused with 502, never relayed to the browser."""
+    assert _assert_scenario(_SCENARIOS, "upstream_header_value_bare_lf_is_502")
+
+
+@pytest.mark.security
+def test_request_header_value_bare_lf_is_400():
+    """T-A: a client header VALUE with a bare LF attempting to inject an
+    OpenSandbox-*/X-EXECD-* header is a 400 before any upstream contact."""
+    assert _assert_scenario(_SCENARIOS, "request_header_value_bare_lf_is_400")
+
+
+@pytest.mark.security
+def test_request_line_bare_lf_injection_is_400():
+    """T-A: the request LINE is the same injection surface — a bare LF in
+    the start line re-serializes into an injected header for a lenient
+    upstream, so the whole head is refused (400)."""
+    assert _assert_scenario(_SCENARIOS, "request_line_bare_lf_injection_is_400")
+
+
+@pytest.mark.security
+def test_request_header_nul_and_bad_name_are_400():
+    """T-A: NUL inside a value, and header names that are not RFC 7230
+    tokens, are refused client-side (400)."""
+    assert _assert_scenario(_SCENARIOS, "request_header_nul_and_bad_name_are_400")
+
+
+@pytest.mark.security
+def test_content_length_digit_variants_are_400():
+    """T-A: Content-Length must be a plain digit run — int()-parseable
+    smuggles (-1 / 5_0 / +5 / internal space / empty) are all 400."""
+    assert _assert_scenario(_SCENARIOS, "content_length_digit_variants_are_400")
 
 
 def test_launcher_health_check_false_on_connection_refused():
