@@ -97,6 +97,13 @@ def _reset_contract_memo():
     wic._reset_sandbox_runtime_verification()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_state_root(tmp_path, monkeypatch):
+    """T-E: launch/restore now persists control-plane records under the
+    state root; keep every launcher test off the real config directory."""
+    monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path / "webui-agent-state"))
+
+
 def _launcher(
     fake: FakeOpenSandboxApi,
     *,

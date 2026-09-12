@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
 from unittest.mock import patch
 
@@ -86,6 +87,13 @@ def _webui_metadata(*, generation: str, owner: str = "7") -> dict:
     }
 
 
+def _confirm_restore_cp(root, sandbox_id) -> None:
+    """Write the control-plane restore-confirmation record (T-E export gate)."""
+    record = root / ws.RESTORE_CONFIRMED_DIRNAME / sandbox_id
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"sandbox_id": sandbox_id}), encoding="utf-8")
+
+
 def _tar_bytes(name: str = "chats/session.jsonl", payload: bytes = b"[1]") -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
@@ -130,12 +138,12 @@ def test_reconcile_spares_own_generation_and_untouched_non_webui(tmp_path):
     ]
 
 
-def test_reconcile_exports_orphan_with_marker_and_persists_by_owner(tmp_path):
+def test_reconcile_exports_orphan_with_cp_record_and_persists_by_owner(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    # The pod has a restore marker and a state tree to export.
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    # T-E: the export gate is the CP record; the pod has a state tree.
+    _confirm_restore_cp(tmp_path, sid)
     fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     destroyed = ws.reconcile_webui_orphans(
@@ -160,7 +168,7 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    _confirm_restore_cp(tmp_path, sid)
     fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     # Record the API calls as a single ordered event stream.
@@ -192,8 +200,8 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     )
     assert destroyed == [sid]
     kinds = [kind for kind, _detail in events]
-    # The marker probe (a download of RESTORE_MARKER_PATH) legitimately runs
-    # FIRST — the ordering that matters is: state tar → state download → delete.
+    # T-E: no in-pod marker probe anymore (the gate reads the CP record from
+    # disk) — the ordering that matters is: state tar → state download → delete.
     tar_index = next(
         i
         for i, (kind, detail) in enumerate(events)
@@ -208,12 +216,12 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     assert tar_index < state_download_index < delete_index
 
 
-def test_reconcile_skips_export_for_degraded_orphan_without_marker(tmp_path):
+def test_reconcile_skips_export_for_degraded_orphan_without_cp_record(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    # NO restore marker in the pod: a degraded launch whose touch never
-    # succeeded. Exporting its tree would overwrite the user's good snapshot
+    # NO CP restore record: a degraded launch whose confirmation never
+    # persisted. Exporting its tree would overwrite the user's good snapshot
     # with an empty one (FEAS-R4-1) — so no export, but still destroyed.
     pre_existing = tmp_path / "webui-7.tar"
     pre_existing.write_bytes(_tar_bytes("old/keep.tar", b"old"))
@@ -228,11 +236,50 @@ def test_reconcile_skips_export_for_degraded_orphan_without_marker(tmp_path):
     assert pre_existing.read_bytes() == _tar_bytes("old/keep.tar", b"old")
 
 
+def test_reconcile_ignores_forged_pod_marker_without_cp_record(tmp_path):
+    """T-E: the in-pod /workspace/.openace-restore-done marker is writable by
+    the supervised process — a malicious pod can forge it to push an
+    attacker-shaped tree over the user's stored snapshot. The export gate is
+    the CONTROL-PLANE record, so a forged marker alone exports nothing."""
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    sid = orphan["id"]
+    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"  # forged by the pod
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes("evil/x", b"evil")
+    pre_existing = tmp_path / "webui-7.tar"
+    pre_existing.write_bytes(_tar_bytes("old/keep.tar", b"old"))
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == [sid]  # destroyed regardless
+    assert not any("tar -cf" in b["command"] for b in fake.command_bodies)  # no export
+    assert pre_existing.read_bytes() == _tar_bytes("old/keep.tar", b"old")  # snapshot kept
+
+
+def test_reconcile_delete_clears_cp_record(tmp_path):
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    sid = orphan["id"]
+    _confirm_restore_cp(tmp_path, sid)
+    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == [sid]
+    assert not record.exists()  # the id never returns; the record goes too
+
+
 def test_reconcile_export_failure_does_not_block_destroy(tmp_path):
     fake = FakeOpenSandboxApi(scripted_exit_code=3)
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    _confirm_restore_cp(tmp_path, sid)
 
     destroyed = ws.reconcile_webui_orphans(
         backend_config=_backend(),
@@ -254,7 +301,7 @@ def test_reconcile_export_tar_runs_under_exec_identity(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    _confirm_restore_cp(tmp_path, sid)
     fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     ws.reconcile_webui_orphans(
@@ -275,7 +322,7 @@ def test_reconcile_export_tar_runs_under_exec_identity(tmp_path):
 def test_reconcile_is_idempotent_on_rerun(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
-    fake.uploaded[orphan["id"]][ws.RESTORE_MARKER_PATH] = b"1"
+    _confirm_restore_cp(tmp_path, orphan["id"])
     fake.uploaded[orphan["id"]][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     first = ws.reconcile_webui_orphans(
@@ -364,7 +411,7 @@ def test_reconcile_destroys_once_peer_heartbeats_are_stale(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
     sid = orphan["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    _confirm_restore_cp(tmp_path, sid)
     fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
     stale_ts = time.time() - ws.HEARTBEAT_FRESH_WINDOW_SECONDS - 30
     _write_peer_heartbeat(tmp_path, ts=stale_ts)
@@ -573,7 +620,6 @@ def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, monkeypatch
     fake = FakeOpenSandboxApi()
     launcher = _launcher_with_pod(fake, tmp_path, max_bytes=1024)
     sid = fake.create_sandbox({"metadata": {}})["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
     # A tar larger than the ceiling.
     fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes() + b"\0" * 4096
     old = _tar_bytes("old/keep.tar", b"old")
@@ -613,7 +659,8 @@ def test_empty_state_tar_is_a_valid_archive():
 def test_snapshot_file_permissions_are_tight(tmp_path):
     fake = FakeOpenSandboxApi()
     launcher = _launcher_with_pod(fake, tmp_path)
-    launcher.persist_snapshot(3, b"data")
+    blob = _tar_bytes("chats/permissions.tar", b"tight")
+    launcher.persist_snapshot(3, blob)
     import os
     import stat
 
@@ -621,3 +668,80 @@ def test_snapshot_file_permissions_are_tight(tmp_path):
     assert mode == 0o600
     dir_mode = stat.S_IMODE(os.stat(tmp_path).st_mode)
     assert dir_mode == 0o700
+    # T-E: the persisted blob is a VALID tar (validation happens before the
+    # replace, so the on-disk file is always parseable).
+    with tarfile.open(tmp_path / "webui-3.tar") as tar:
+        assert tar.getnames() == ["chats/permissions.tar"]
+
+
+def test_persist_rejects_non_tar_blob_and_keeps_previous(tmp_path):
+    """T-E: a truncated/corrupt transfer must never replace a good snapshot."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    good = _tar_bytes("old/good.tar", b"good")
+    (tmp_path / "webui-4.tar").write_bytes(good)
+
+    launcher.persist_snapshot(4, b"not-a-tar-at-all")
+    assert (tmp_path / "webui-4.tar").read_bytes() == good
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads through mode 000")
+def test_persist_refuses_to_overwrite_unreadable_snapshot(tmp_path):
+    """T-E: an existing-but-unreadable snapshot is operator-recoverable; a
+    fresh (possibly degraded) export must not destroy it."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    path = tmp_path / "webui-5.tar"
+    path.write_bytes(_tar_bytes("old/unreadable.tar", b"keepme"))
+    path.chmod(0o000)
+
+    launcher.persist_snapshot(5, _tar_bytes("new/tree.tar", b"new"))
+    path.chmod(0o600)
+    with tarfile.open(path) as tar:
+        assert tar.getnames() == ["old/unreadable.tar"]  # original preserved
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads through mode 000")
+def test_load_snapshot_distinguishes_missing_from_unreadable(tmp_path):
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    # Missing → None (a legitimate first launch).
+    assert launcher.load_snapshot(6) is None
+
+    path = tmp_path / "webui-6.tar"
+    path.write_bytes(_tar_bytes())
+    path.chmod(0o000)
+    # Unreadable → SnapshotUnreadableError (NOT a first launch).
+    with pytest.raises(ws.SnapshotUnreadableError):
+        launcher.load_snapshot(6)
+    path.chmod(0o600)
+
+
+def test_launch_writes_cp_restore_record_and_destroy_clears_it(tmp_path):
+    """T-E: restore confirmation persists on the CONTROL PLANE; the record
+    dies with the pod (the sandbox id never returns)."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    launcher._proxy_service_factory = lambda: _NoopProxyService()
+    result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
+
+    assert result.restore_confirmed is True
+    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / result.sandbox_id
+    assert record.is_file()
+    assert launcher.restore_confirmed_on_cp(result.sandbox_id) is True
+
+    launcher.destroy(result.sandbox_id, 8, restore_confirmed=True, final_export=False)
+    assert not record.exists()
+
+
+def test_unwritable_cp_record_leaves_restore_unconfirmed(tmp_path):
+    """T-E crash-window guard: touch succeeded but the CP record could not be
+    persisted → restore_confirmed stays False (exports skipped — safe)."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    launcher._proxy_service_factory = lambda: _NoopProxyService()
+    # Point the record root at a path occupied by a regular file → mkdir fails.
+    (tmp_path / "restore-confirmed").write_text("occupied")
+
+    result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
+    assert result.restore_confirmed is False

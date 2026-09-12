@@ -59,11 +59,15 @@ logger = logging.getLogger(__name__)
 # forwards to this).
 WEBUI_POD_PORT = 3100
 
-# Restore gate ground truth (D5/D6). The entrypoint blocks on this file; the
-# control plane touches it only after a confirmed snapshot restore, and both
-# the export guard and the orphan reconciler read the same file as the single
-# source of truth for "this pod ever completed a restore".
+# Restore gate ground truth (D5/D6, review round 1 T-E). The entrypoint
+# blocks on the in-pod marker; the control plane touches it only after a
+# confirmed snapshot restore. The in-pod marker is NOT trusted as an export
+# gate, though — the supervised process can forge it — so the control plane
+# ALSO persists a confirmation record under the state root, and both the
+# export guard and the orphan reconciler key on THAT (the pod-side marker
+# survives only as the entrypoint's unblock signal).
 RESTORE_MARKER_PATH = "/workspace/.openace-restore-done"
+RESTORE_CONFIRMED_DIRNAME = "restore-confirmed"
 
 # Where the webui keeps its session tree inside the pod (the CLI's cwd encoding
 # of /workspace — same constant the provider pins for qwen transcripts).
@@ -222,6 +226,16 @@ class SandboxWebuiError(RuntimeError):
         """Store the machine-readable reason code (§5 vocabulary)."""
         super().__init__(message)
         self.reason_code = reason_code
+
+
+class SnapshotUnreadableError(RuntimeError):
+    """A stored snapshot exists but cannot be read (permissions/EIO).
+
+    Review round 1 (T-E): this is NOT "no snapshot". The launch degrades to
+    an empty history with exports suspended, and the unreadable file is left
+    on disk for an operator to repair — never treated as a first launch that
+    may freely overwrite the slot.
+    """
 
 
 @dataclass(frozen=True)
@@ -668,11 +682,12 @@ class SandboxedWebuiLauncher:
 
         Order is load-bearing (N3): the entrypoint's webui exec is gated on the
         marker, so the history lands BEFORE the webui can read it. Only a
-        confirmed successful ``touch`` sets restore-confirmed — the D6 export
-        guard keys on that state, and a degraded (timeout/failed-extract) start
-        must leave it False so an empty tree can never overwrite a good
-        snapshot. On degrade the entrypoint's own 60s counter lets the webui
-        start anyway.
+        confirmed successful ``touch`` PLUS a persisted control-plane
+        confirmation record sets restore-confirmed — the D6 export guard keys
+        on that state, and a degraded (timeout/failed-extract/unwritable
+        record) start must leave it False so an empty tree can never overwrite
+        a good snapshot. On degrade the entrypoint's own 60s counter lets the
+        webui start anyway.
         """
         tar_bytes = snapshot if snapshot is not None else empty_state_tar()
         try:
@@ -698,8 +713,55 @@ class SandboxedWebuiLauncher:
                 "webui sandbox %s: restore sequence failed (%s); degrading", sandbox_id, exc
             )
             return False
+        if not self.mark_restore_confirmed(sandbox_id):
+            # Crash-window guard (T-E): the in-pod marker is confirmed but the
+            # control-plane record is not durable. Refusing to mark confirmed
+            # only ever SKIPS exports — the safe direction.
+            logger.warning(
+                "webui sandbox %s: control-plane restore-confirmation record "
+                "could not be written; exports stay disabled for this pod",
+                sandbox_id,
+            )
+            return False
         logger.info("webui sandbox %s: snapshot restore confirmed", sandbox_id)
         return True
+
+    # ── control-plane restore confirmation (T-E) ─────────────────────
+
+    def _restore_confirmed_dir(self) -> Path:
+        return state_root(self._state_root_override) / RESTORE_CONFIRMED_DIRNAME
+
+    def mark_restore_confirmed(self, sandbox_id: str) -> bool:
+        """Persist the CP-side restore confirmation record (fail-soft False)."""
+        try:
+            root = self._restore_confirmed_dir()
+            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            (root / sandbox_id).write_text(
+                json.dumps({"sandbox_id": sandbox_id, "ts": time.time()}),
+                encoding="utf-8",
+            )
+            return True
+        except OSError as exc:
+            logger.warning(
+                "webui sandbox %s: restore-confirmation record write failed: %s",
+                sandbox_id,
+                exc,
+            )
+            return False
+
+    def restore_confirmed_on_cp(self, sandbox_id: str) -> bool:
+        """Whether the CP record says this pod completed a confirmed restore."""
+        try:
+            return (self._restore_confirmed_dir() / sandbox_id).is_file()
+        except OSError:
+            return False
+
+    def clear_restore_confirmation(self, sandbox_id: str) -> None:
+        """Drop the CP record (pod destroyed; the id never returns)."""
+        try:
+            (self._restore_confirmed_dir() / sandbox_id).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _run_background_command(self, api: OpenSandboxApi, sandbox_id: str, command: str) -> bool:
         """Run one ``POST /command background:true`` and confirm exit 0.
@@ -886,22 +948,75 @@ class SandboxedWebuiLauncher:
             return None
 
     def persist_snapshot(self, user_id: int, blob: bytes) -> Path:
-        """Write the snapshot to its independent slot, atomically and 0o600."""
+        """Write the snapshot to its independent slot, atomically and 0o600.
+
+        Review round 1 (T-E) hardening:
+
+        * never overwrite an existing-but-UNREADABLE snapshot — its bytes may
+          be recoverable by an operator; a fresh (possibly degraded) export
+          must not destroy them;
+        * validate the blob is a legal tar BEFORE replacing the last good
+          file — a truncated or corrupt transfer must never win;
+        * write via ``O_EXCL`` at 0600 (no 0644 window), ``fsync`` the file,
+          ``os.replace`` onto the slot, then ``fsync`` the directory so the
+          rename itself is durable.
+        """
         path = snapshot_path_for_user(user_id, state_root(self._state_root_override))
+        if path.exists():
+            try:
+                with open(path, "rb"):
+                    pass
+            except OSError as exc:
+                logger.warning(
+                    "webui snapshot for user %s exists but is unreadable (%s); "
+                    "keeping the previous snapshot; exports stay suspended "
+                    "until the file is repaired",
+                    user_id,
+                    exc,
+                )
+                return path
+        try:
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:"):
+                pass
+        except tarfile.TarError as exc:
+            logger.warning(
+                "webui snapshot for user %s is not a valid tar archive (%s); "
+                "keeping the previous snapshot",
+                user_id,
+                exc,
+            )
+            return path
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
         try:
-            with open(temp, "wb") as handle:
-                handle.write(blob)
-            os.chmod(temp, 0o600)
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                view = memoryview(blob)
+                while view:
+                    view = view[os.write(fd, view) :]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
             os.replace(temp, path)
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         finally:
             if temp.exists():
                 temp.unlink(missing_ok=True)
         return path
 
     def load_snapshot(self, user_id: int) -> bytes | None:
-        """Read the user's stored snapshot, or None when none exists."""
+        """Read the user's stored snapshot; None when none exists.
+
+        Review round 1 (T-E): a snapshot that exists but cannot be read
+        (permissions, EIO) is NOT a first launch — it raises
+        :class:`SnapshotUnreadableError` so the caller can degrade honestly
+        (empty history, exports suspended) instead of silently treating the
+        user's history as absent.
+        """
         path = snapshot_path_for_user(user_id, state_root(self._state_root_override))
         try:
             return path.read_bytes()
@@ -909,7 +1024,9 @@ class SandboxedWebuiLauncher:
             return None
         except OSError as exc:
             logger.warning("webui snapshot read failed for user %s: %s", user_id, exc)
-            return None
+            raise SnapshotUnreadableError(
+                f"snapshot for user {user_id} exists but is unreadable: {exc}"
+            ) from exc
 
     def destroy(
         self,
@@ -933,6 +1050,7 @@ class SandboxedWebuiLauncher:
                 except OSError as exc:
                     logger.warning("webui snapshot persist failed for user %s: %s", user_id, exc)
         self._destroy_raw(api, sandbox_id)
+        self.clear_restore_confirmation(sandbox_id)
         self._webui_endpoints.pop(sandbox_id, None)
 
     def _destroy_raw(self, api: OpenSandboxApi, sandbox_id: str) -> None:
@@ -1602,7 +1720,7 @@ def reconcile_webui_orphans(
             if not sandbox_id:
                 continue
             _export_orphan(api, sandbox_id, metadata, state_root_override, endpoint)
-            _delete_orphan(api, sandbox_id)
+            _delete_orphan(api, sandbox_id, state_root_override)
             destroyed.append(sandbox_id)
     if destroyed:
         logger.info(
@@ -1618,7 +1736,15 @@ def _export_orphan(
     state_root_override: str | None,
     endpoint: EndpointConfig,
 ) -> None:
-    """Best-effort export of one orphan, gated on the pod's restore marker."""
+    """Best-effort export of one orphan, gated on the CP restore record.
+
+    Review round 1 (T-E): the gate is the CONTROL-PLANE confirmation record
+    under the state root, never the in-pod ``/workspace/.openace-restore-done``
+    marker — the supervised process can forge that, and a forged marker would
+    let an empty (or attacker-shaped) tree overwrite the user's stored
+    snapshot. A missing record (degraded launch, unwritable state root in the
+    crash window, or a pre-T-E pod) skips the export: conservative.
+    """
     owner_raw = str(metadata.get(WEBUI_METADATA_OWNER) or "").strip()
     try:
         owner = int(owner_raw)
@@ -1629,32 +1755,6 @@ def _export_orphan(
             owner_raw,
         )
         return
-    marker_present = True
-    try:
-        api.download_file(sandbox_id, RESTORE_MARKER_PATH, max_bytes=1)
-    except OpenSandboxApiError as exc:
-        if exc.status_code == 404 or exc.code == "NOT_FOUND":
-            marker_present = False
-        else:
-            logger.warning(
-                "webui orphan %s: restore marker probe failed (%s); skipping export",
-                sandbox_id,
-                exc,
-            )
-            return
-    except Exception as exc:  # noqa: BLE001 - export is best effort
-        logger.warning("webui orphan %s: restore marker probe failed: %s", sandbox_id, exc)
-        return
-    if not marker_present:
-        # FEAS-R4-1: degraded launch — the control plane's touch never
-        # succeeded, so the pod's tree never replaced the stored snapshot.
-        logger.info(
-            "webui orphan %s: no restore-done marker (degraded launch); "
-            "skipping export, keeping the stored snapshot",
-            sandbox_id,
-        )
-        return
-    command = f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} -C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
     launcher = SandboxedWebuiLauncher(
         backend_config=None,
         # m5: the tier's endpoint must be injected explicitly — the exporter
@@ -1664,6 +1764,15 @@ def _export_orphan(
         endpoint=endpoint,
         state_root_override=state_root_override,
     )
+    if not launcher.restore_confirmed_on_cp(sandbox_id):
+        logger.info(
+            "webui orphan %s: no control-plane restore-confirmation record "
+            "(degraded launch, forged in-pod marker, or pre-upgrade pod); "
+            "skipping export, keeping the stored snapshot",
+            sandbox_id,
+        )
+        return
+    command = f"tar -cf {shlex.quote(WEBUI_STATE_TAR_PATH)} -C {shlex.quote(WEBUI_STATE_POD_DIR)} ."
     # Reuse the launcher's background-command + bounded-download machinery.
     if not launcher._run_background_command(api, sandbox_id, command):  # noqa: SLF001 - same module
         logger.warning("webui orphan %s: snapshot tar did not confirm", sandbox_id)
@@ -1687,8 +1796,17 @@ def _export_orphan(
         logger.warning("webui orphan %s: snapshot persist failed: %s", sandbox_id, exc)
 
 
-def _delete_orphan(api: OpenSandboxApi, sandbox_id: str) -> None:
-    """Idempotent delete; failures are logged, never raised (retry next boot)."""
+def _delete_orphan(
+    api: OpenSandboxApi,
+    sandbox_id: str,
+    state_root_override: str | None = None,
+) -> None:
+    """Idempotent delete; failures are logged, never raised (retry next boot).
+
+    The CP restore-confirmation record goes with the pod (the id never
+    returns); fail-soft — a leftover record only makes a future export-gate
+    check stale-harmless for an id that no longer exists.
+    """
     try:
         api.delete_sandbox(sandbox_id)
     except OpenSandboxApiError as exc:
@@ -1696,6 +1814,11 @@ def _delete_orphan(api: OpenSandboxApi, sandbox_id: str) -> None:
             logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
     except Exception as exc:  # noqa: BLE001 - the sweep must go on
         logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
+    try:
+        record = state_root(state_root_override) / RESTORE_CONFIRMED_DIRNAME / sandbox_id
+        record.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _default_api_factory(endpoint: EndpointConfig) -> OpenSandboxApi:

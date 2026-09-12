@@ -1426,8 +1426,33 @@ class WebUIManager:
                 "pods cannot reach the control-plane LLM proxy"
             )
 
-        snapshot = launcher.load_snapshot(user_id)
+        # T-E (review round 1): an existing-but-UNREADABLE snapshot is not a
+        # first launch. Degrade honestly: start with an empty history (the
+        # entrypoint still needs its unblock marker), keep exports suspended
+        # (restore_confirmed=False) so nothing can overwrite the unreadable
+        # file, and leave it on disk for an operator to repair.
+        snapshot = None
+        history_unreadable = False
+        try:
+            snapshot = launcher.load_snapshot(user_id)
+        except Exception as exc:
+            from app.services.webui_sandbox import SnapshotUnreadableError
+
+            if not isinstance(exc, SnapshotUnreadableError):
+                raise
+            logger.warning(
+                "Sandboxed WebUI for user %s: stored snapshot exists but is "
+                "unreadable (%s); starting with empty history and suspending "
+                "snapshot exports until the file is repaired",
+                user_id,
+                exc,
+            )
+            history_unreadable = True
         result = launcher.launch(user_id=user_id, callback_url=callback_url, snapshot=snapshot)
+        if history_unreadable:
+            import dataclasses
+
+            result = dataclasses.replace(result, restore_confirmed=False)
 
         port = self.allocate_port(user_id, WEBUI_FORM_SANDBOXED)
         # The instance object does not exist until after the proxy starts, so
