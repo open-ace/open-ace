@@ -676,6 +676,16 @@ class SandboxedWebuiLauncher:
         except SandboxError as exc:
             logger.error("webui sandbox %s boot probe failed: %s", sandbox_id, exc)
             self._destroy_raw(api, sandbox_id)
+            # T-L: the memo is not write-only. A failed probe on this tier is
+            # the FRESHEST evidence that the tier's runtime cannot be verified
+            # right now — revoke whatever an earlier successful pod claimed,
+            # so the contract falls back to the honest static view instead of
+            # riding a stale upgrade.
+            from app.services.workspace_isolation_contract import (
+                revoke_sandbox_runtime_verification,
+            )
+
+            revoke_sandbox_runtime_verification(endpoint.tier)
             raise SandboxWebuiError(
                 f"webui sandbox boot probe failed: {exc}",
                 reason_code=getattr(exc, "reason_code", "") or "sandbox_create_failed",

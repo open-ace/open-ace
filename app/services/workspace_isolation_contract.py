@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -121,10 +122,17 @@ SANDBOX_PROBE_REASON_CODES = (
 # on THAT tier registers the upgrade here. Per-tier keying (conformance review
 # Q1): in a multi-tier deployment (gVisor + Kata) a later Kata pod must not
 # overwrite a gVisor tier's earlier positive kernel upgrade (and vice versa) —
-# each snapshot consults only its own tier's memo. Still a process-lifetime
-# memo — a restart reverts every tier to the static (unverified) view, which is
-# the documented honesty contract.
-_SANDBOX_RUNTIME_MEMO: dict[str, dict[str, bool]] = {}
+# each snapshot consults only its own tier's memo. A restart reverts every
+# tier to the static (unverified) view, which is the documented honesty
+# contract.
+#
+# Review round 1 (T-L): the memo is write-only NO MORE — (a) a FAILED pod
+# probe on a tier revokes that tier's entry (a tier whose last launch could
+# not verify itself must not keep riding a stale upgrade), and (b) entries
+# carry a timestamp and expire after SANDBOX_RUNTIME_MEMO_TTL_SECONDS, so a
+# long-lived control plane cannot lean on hours-old probe evidence.
+_SANDBOX_RUNTIME_MEMO: dict[str, dict[str, Any]] = {}
+SANDBOX_RUNTIME_MEMO_TTL_SECONDS = 3600.0
 
 
 def register_sandbox_runtime_verified(*, tier: str, kernel_enforced: bool) -> None:
@@ -141,15 +149,38 @@ def register_sandbox_runtime_verified(*, tier: str, kernel_enforced: bool) -> No
     _SANDBOX_RUNTIME_MEMO[str(tier)] = {
         "verified": True,
         "kernel_enforced": bool(kernel_enforced),
+        "ts": time.time(),
     }
 
 
+def revoke_sandbox_runtime_verification(tier: str) -> None:
+    """Drop *tier*'s memo entry (launcher boot-probe failure hook, T-L).
+
+    The launcher calls this when a pod's boot probes fail and the pod is
+    destroyed: whatever the tier's memo claimed, the most recent evidence is
+    that the tier's runtime cannot be verified right now. Deleting (not
+    downgrading) means the snapshot falls back to the honest static view
+    until a fresh successful probe re-registers.
+    """
+    _SANDBOX_RUNTIME_MEMO.pop(str(tier), None)
+
+
 def sandbox_runtime_verification(tier: str) -> tuple[bool, bool]:
-    """Return ``(verified, kernel_enforced)`` for *tier* — see register hook."""
+    """Return ``(verified, kernel_enforced)`` for *tier* — see register hook.
+
+    An entry older than SANDBOX_RUNTIME_MEMO_TTL_SECONDS reads as absent
+    (T-L): the upgrade evidence is per-pod and per-boot, never permanent.
+    """
     state = _SANDBOX_RUNTIME_MEMO.get(str(tier))
     if state is None:
         return (False, False)
-    return (state["verified"], state["kernel_enforced"])
+    try:
+        age = time.time() - float(state.get("ts") or 0)
+    except (TypeError, ValueError):
+        return (False, False)
+    if age > SANDBOX_RUNTIME_MEMO_TTL_SECONDS:
+        return (False, False)
+    return (bool(state["verified"]), bool(state["kernel_enforced"]))
 
 
 def _reset_sandbox_runtime_verification() -> None:

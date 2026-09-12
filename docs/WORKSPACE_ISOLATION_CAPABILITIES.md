@@ -193,6 +193,9 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
 静态 enforced 五维的依据是**配置事实**(独立 pod、镜像白名单、恒有资源边界),
 不是 per-pod 验证;kernel/network_egress 只有 per-pod boot probe 能证。probe
 结果为进程内 memo——**控制面重启后回退 unverified**,这是有意的诚实契约。
+memo 亦有**负向路径与时效**(T-L):同 tier 的 pod probe 失败即撤销该 tier 的
+memo(最新证据优先,不残留旧升级);memo 条目带时间戳,超过 1h 视为过期
+(回退 unverified,直到新的成功 probe 重注册)。
 
 ### 6.2 部署要求
 
@@ -243,7 +246,8 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
 ### 6.4 诚实声明
 
 - **配置面探测 ≠ per-pod 验证**:静态 enforced 五维依据配置事实;kernel/
-  network_egress 待首个 pod boot probe;**控制面重启后回退 unverified**。
+  network_egress 待首个 pod boot probe;**控制面重启后回退 unverified**;
+  probe 失败即撤销该 tier memo,条目 1h 过期(T-L)。
 - **Kata 的 kernel 验证仅负向**(只能排除 gVisor,不能与未隔离 runc 区分):
   kernel 保持 unsupported + `sandbox_runtime_kata_negative_only`;gVisor 正向
   识别才升级 enforced。

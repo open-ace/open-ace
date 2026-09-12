@@ -105,6 +105,16 @@ def _isolated_state_root(tmp_path, monkeypatch):
     monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path / "webui-agent-state"))
 
 
+class _StubConfig:
+    """Disk-style workspace config for snapshot-building tests."""
+
+    enabled = True
+    multi_user_mode = True
+    sandbox_tier = "kata"
+    webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
+    required_isolation_level = ""
+
+
 def _launcher(
     fake: FakeOpenSandboxApi,
     *,
@@ -377,6 +387,75 @@ def test_probe_failure_destroys_pod_and_raises():
     assert excinfo.value.reason_code == "runtime_class_mismatch"
     assert fake.deleted, "an unverifiable webui pod must not survive"
     assert wic.sandbox_runtime_verification("kata") == (False, False)
+
+
+def test_probe_failure_revokes_a_previously_verified_tier():
+    """T-L: the memo is not write-only — a FAILED pod probe is the freshest
+    evidence about the tier, so it revokes whatever an earlier successful
+    launch registered (the snapshot falls back to unverified, it does not
+    keep riding a stale upgrade)."""
+    fake = FakeOpenSandboxApi()
+    launcher, _svc = _launcher(fake)  # kata tier, plain kernel: probes pass
+    _launch(launcher)
+    assert wic.sandbox_runtime_verification("kata") == (True, False)
+
+    # The tier regresses (gVisor-declared runtime, plain-Linux kernel) →
+    # probe failure → the memo entry for the tier is revoked.
+    failing = FakeOpenSandboxApi(runtime_kernel="Linux version 5.15.0 #1 SMP")
+    failing_launcher, _svc2 = _launcher(failing, backend=_gvisor_backend())
+    with pytest.raises(ws.SandboxWebuiError):
+        failing_launcher.launch(
+            user_id=7,
+            callback_url="http://openace.open-ace.svc.cluster.local:8080",
+            snapshot=None,
+        )
+    assert wic.sandbox_runtime_verification("kata") == (False, False)
+
+
+def test_memo_expires_after_one_hour(monkeypatch):
+    """T-L: probe evidence is per-pod and per-boot — an entry older than the
+    TTL reads as absent and the snapshot falls back to unverified."""
+    import time as _time
+
+    fake = FakeOpenSandboxApi(runtime_kernel="Linux version 4.4.0 (gvisor) #1 SMP")
+    launcher, _svc = _launcher(fake, backend=_gvisor_backend())
+    _launch(launcher)
+    assert wic.sandbox_runtime_verification("kata") == (True, True)
+
+    # Backdate the entry past the TTL.
+    wic._SANDBOX_RUNTIME_MEMO["kata"]["ts"] = (
+        _time.time() - wic.SANDBOX_RUNTIME_MEMO_TTL_SECONDS - 1
+    )
+    assert wic.sandbox_runtime_verification("kata") == (False, False)
+
+    # And the snapshot honestly falls back to the static view (same backend
+    # stub shape as the contract-upgrade test: callback host egress-allowed).
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    class _SnapshotEndpoint:
+        tier = "kata"
+        webui_image = _WEBUI_IMAGE
+        api_key_env = "OSB_KEY"
+        egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
+
+        class attestations:
+            egress_enforced = True
+
+    class _SnapshotBackend:
+        default_tier = "kata"
+        endpoints = {"kata": _SnapshotEndpoint()}
+        image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
+
+    monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _SnapshotBackend())
+
+    class _StubManager:
+        config = _StubConfig()
+        per_user_launch_readiness = staticmethod(lambda: None)
+
+    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    assert wic.DIMENSION_KERNEL in snap.unsupported
+    assert "sandbox_runtime_unverified" in [r.code for r in snap.reasons]
 
 
 def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
