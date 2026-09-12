@@ -10,12 +10,14 @@ prestart reorder, and the per-instance-secret token validation/refresh fork.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import app.services.webui_manager as wmgr
 from app.services import workspace_isolation_contract as wic
 from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
 from app.services.webui_sandbox import mint_instance_token
@@ -406,7 +408,12 @@ def test_maintenance_tick_refreshes_process_heartbeat(tmp_path, monkeypatch):
     manager = _manager(launcher=launcher)
     manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
     monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path))
-    manager._last_sandbox_maintenance = 0.0  # force the gate open
+    # Force the gate open relative to THIS machine's monotonic clock: a
+    # freshly booted CI runner has time.monotonic() < the interval, so an
+    # absolute 0.0 would leave the tick skipped (observed on GitHub runners).
+    manager._last_sandbox_maintenance = (
+        time.monotonic() - wmgr.SANDBOX_MAINTENANCE_INTERVAL_SECONDS - 1.0
+    )
 
     manager._sandbox_maintenance_tick()
 
