@@ -832,7 +832,7 @@ class WebUIManager:
         return self._validate_token_v1(token)
 
     def _find_sandboxed_instance(self, user_id: int, port: int) -> WebUIInstance | None:
-        """Locate the live sandboxed instance a v2 token's (user, port) names.
+        """Locate the sandboxed instance a v2 token's (user, port) names.
 
         Issue #3378 (D2/B1): sandboxed tokens are signed with the instance's
         per-instance secret, so validation needs the instance. Searched
@@ -843,6 +843,15 @@ class WebUIManager:
         carries tokens minted for every requester, so it matches on the port
         alone — the token's user_id is proven by the per-instance-secret
         signature the caller verifies next, never by this lookup.
+
+        Review round 1 (T-H): a hit must also be ALIVE. A TTL-killed pod
+        leaves its registration behind, and its leaked tokens would keep
+        validating (URL_TOKEN_ALLOWED_PATHS admits /api/admin/ routes) for up
+        to the idle-timeout window. is_alive() is the cached 30s-TTL probe,
+        so this adds no per-request latency in the common case; a dead
+        instance fails CLOSED (None → 401) and its teardown/rebuild
+        bookkeeping is scheduled asynchronously — never run synchronously in
+        the validation path.
         """
         single = self._single_user_instance
         if (
@@ -850,7 +859,7 @@ class WebUIManager:
             and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
             and single.port == port
         ):
-            return single
+            return self._live_or_reap(single)
         with self._lock:
             instance = self._instances.get(user_id)
         if (
@@ -858,8 +867,61 @@ class WebUIManager:
             and getattr(instance, "form", "") == WEBUI_FORM_SANDBOXED
             and instance.port == port
         ):
-            return instance
+            return self._live_or_reap(instance)
         return None
+
+    def _live_or_reap(self, instance: WebUIInstance) -> WebUIInstance | None:
+        """Return *instance* when alive; on death fail closed and reap async."""
+        try:
+            alive = instance.is_alive()
+        except Exception:  # noqa: BLE001 - a broken probe reads as dead
+            logger.exception(
+                "Sandboxed WebUI instance (sandbox=%s) aliveness probe raised; "
+                "treating it as dead",
+                instance.sandbox_id,
+            )
+            alive = False
+        if alive:
+            return instance
+        logger.warning(
+            "Sandboxed WebUI instance (sandbox=%s, port=%s, user=%s) is dead; "
+            "rejecting its tokens and scheduling teardown",
+            instance.sandbox_id,
+            instance.port,
+            instance.user_id,
+        )
+        self._reap_dead_sandboxed_async(instance)
+        return None
+
+    def _reap_dead_sandboxed_async(self, instance: WebUIInstance) -> None:
+        """Tear down a dead sandboxed instance off the validation path (T-H).
+
+        Runs on its own greenlet: teardown reaches the sandbox API (final
+        export + delete, potentially tens of seconds) and must never block a
+        token validation. Identity is re-checked under the registry lock so a
+        concurrently REPLACED instance (user-url already restarted it) is not
+        torn down twice. Lock order is the established _single_user_lock →
+        _lock.
+        """
+
+        def _reap() -> None:
+            try:
+                if instance is self._single_user_instance:
+                    with self._single_user_lock:
+                        if self._single_user_instance is instance:
+                            self._stop_single_user_instance_internal()
+                    return
+                with self._lock:
+                    if self._instances.get(instance.user_id) is instance:
+                        self._stop_instance_internal(instance.user_id)
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                logger.exception(
+                    "Failed to reap dead sandboxed webui %s for user %s",
+                    instance.sandbox_id,
+                    instance.user_id,
+                )
+
+        gevent.spawn(_reap)
 
     @staticmethod
     def _verify_v2_signature(token: str, token_secret: str) -> tuple[bool, int, int]:

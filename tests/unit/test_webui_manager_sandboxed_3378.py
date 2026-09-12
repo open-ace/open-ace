@@ -202,6 +202,59 @@ def test_sandboxed_token_validates_against_instance_secret_and_dies_with_it():
     assert valid is False
 
 
+def test_dead_sandboxed_instance_token_rejected_and_reaped(monkeypatch):
+    """T-H: a sandboxed instance whose pod died (TTL kill upstream, missed
+    reaper) must not keep validating tokens — URL_TOKEN_ALLOWED_PATHS admits
+    /api/admin/ routes. The token fails closed and the teardown/rebuild
+    bookkeeping runs asynchronously, never in the validation path."""
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    _url, token = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    assert manager.validate_token(token)[0] is True
+
+    # Kill the pod behind the instance: the probe goes unhealthy and the
+    # instance crosses its consecutive-failure death budget.
+    launcher.healthy = False
+    instance = manager.get_user_instance(7)
+    instance._consecutive_health_failures = instance._max_consecutive_failures
+    instance._health_check_ttl = 0.0
+    assert instance.is_alive() is False
+
+    reaped = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: reaped.append(fn))
+    assert manager.validate_token(token)[0] is False  # fail closed
+    assert manager.refresh_token(token)[0] is False  # refresh path equally gated
+    assert len(reaped) == 2  # each validation path schedules ONE reap...
+    assert manager.get_user_instance(7) is instance  # ...never run inline
+
+    reaped[0]()  # run the first reaper greenlet: identity re-check + teardown
+    assert manager.get_user_instance(7) is None
+    assert len(launcher.destroy_calls) == 1
+    reaped[1]()  # the second finds the registry entry already replaced — no-op
+    assert len(launcher.destroy_calls) == 1
+
+
+def test_dead_single_user_sandboxed_token_rejected_and_reaped(monkeypatch):
+    """T-H, single-user registry: same fail-closed + async reap through the
+    _single_user_lock branch (lock order _single_user_lock → _lock)."""
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
+    _url, token = manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
+    assert manager.validate_token(token)[0] is True
+
+    launcher.healthy = False
+    instance = manager._single_user_instance
+    instance._consecutive_health_failures = instance._max_consecutive_failures
+    instance._health_check_ttl = 0.0
+
+    reaped = []
+    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: reaped.append(fn))
+    assert manager.validate_token(token)[0] is False
+    reaped[0]()
+    assert manager._single_user_instance is None
+    assert len(launcher.destroy_calls) == 1
+
+
 def test_is_alive_fork_declares_dead_after_consecutive_failures():
     launcher = _FakeLauncher(healthy=False)
     manager = _manager(launcher=launcher)
