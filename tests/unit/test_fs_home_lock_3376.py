@@ -273,3 +273,89 @@ def test_shared_first_level_non_home_path_still_allowed(fs_app, workspace):
     client = fs_app.test_client()
     with _with_shared_paths(fs_app, workspace, [str(team)]):
         assert _browse(client, str(team)).status_code == 200
+
+
+# --- review round 2 [3994613216]: home descendants filtered at ANY depth ---
+
+
+@pytest.mark.regression
+def test_attack_chain_shared_foreign_home_descendants_rejected(fs_app, workspace):
+    """repo 脏行返回他人 home 后代路径(/ws/alice/.ssh 等)→ 被滤除,browse 不可达。
+
+    Review round 2:round 1 的读取侧只挡"home 本身/祖先",后代子树漏过;
+    现在 home 子树(任意深度)一律不进入允许根。以 bob(攻击者)视角验证:
+    alice 本人仍可经自己的 home 根访问,但共享机制不得把它放大给 bob。
+    """
+    ws, home, shared, other = workspace
+    (home / ".ssh").mkdir()
+    (home / "secrets").mkdir()
+    _switch_user({"id": 10, "user_id": 10, "username": "bob", "role": "user", "tenant_id": 1})
+    client = fs_app.test_client()
+    with _with_shared_paths(
+        fs_app, workspace, [str(home / ".ssh"), str(home / "secrets"), str(shared)]
+    ):
+        assert _browse(client, str(home / ".ssh")).status_code == 400
+        assert _browse(client, str(home / "secrets")).status_code == 400
+        # 合法共享根(不在任何 home 子树内)不受影响
+        assert _browse(client, str(shared)).status_code == 200
+        # bob 自己的 home 根不受影响
+        assert _browse(client, str(other)).status_code == 200
+
+
+def test_shared_row_inside_any_home_subtree_filtered_read_side(fs_app, workspace):
+    """读取侧纵深防御不依赖 creator 关联:任何用户 home 子树内的共享行都不放大。
+
+    bob 自己 home 内的共享行对 alice 同样不可达(bob 本人仍可经自己的
+    home 根访问该子树,不依赖共享根机制)。
+    """
+    ws, home, shared, other = workspace
+    (other / "team").mkdir()
+    client = fs_app.test_client()
+    with _with_shared_paths(fs_app, workspace, [str(other / "team"), str(shared)]):
+        assert _browse(client, str(other / "team")).status_code == 400
+        assert _browse(client, str(shared)).status_code == 200
+
+
+# --- review round 2 [3994613308]: check-path existence probing narrowed ----
+
+
+def test_check_path_foreign_home_subtree_rejected(fs_app, workspace):
+    """check-path 不得探测他人 home 子树(exists/canCreate 逐条探测=枚举)。"""
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    # <base>/<别人的 account>/anything → 400
+    resp = client.post("/api/fs/check-path", json={"path": str(other / "id_rsa")})
+    assert resp.status_code == 400
+    assert resp.get_json()["valid"] is False
+    # <base>/<别人的 account> 本身(一级但是 home)→ 400
+    resp = client.post("/api/fs/check-path", json={"path": str(other)})
+    assert resp.status_code == 400
+    assert resp.get_json()["valid"] is False
+
+
+def test_check_path_second_level_under_base_rejected(fs_app, workspace):
+    """<base>/x/y(二级)→ 400:一级非 home 之外不再放行。"""
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    resp = client.post("/api/fs/check-path", json={"path": str(ws / "x" / "y")})
+    assert resp.status_code == 400
+    assert resp.get_json()["valid"] is False
+
+
+@pytest.mark.regression
+def test_check_path_own_home_deep_and_workspace_point_still_valid(fs_app, workspace):
+    """收窄后的正向保持:自己 home 子树任意深度 + base 自身 + 一级非 home。"""
+    ws, home, shared, other = workspace
+    client = fs_app.test_client()
+    # 自己 home 根的完整子树(任意深度)
+    resp = client.post("/api/fs/check-path", json={"path": str(home / "a" / "b" / "c")})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True
+    # base dir 自身这一个点
+    resp = client.post("/api/fs/check-path", json={"path": str(ws)})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True
+    # 一级非 home 子路径(#2317)
+    resp = client.post("/api/fs/check-path", json={"path": str(ws / "new-project")})
+    assert resp.status_code == 200
+    assert resp.get_json()["valid"] is True

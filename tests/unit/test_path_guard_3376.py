@@ -135,10 +135,10 @@ def test_is_valid_remote_path_independent_of_backend_platform():
 # --- shared_project_path_error (review round 1, item 1) --------------------
 
 
-def _shared_err(path, bases, homes):
+def _shared_err(path, bases, homes, creator_roots=None):
     from app.utils.path_guard import shared_project_path_error
 
-    return shared_project_path_error(path, bases, homes)
+    return shared_project_path_error(path, bases, homes, creator_roots=creator_roots)
 
 
 def test_shared_path_rejects_base_dir_and_foreign_and_own_home(ws_base):
@@ -152,14 +152,53 @@ def test_shared_path_rejects_base_dir_and_foreign_and_own_home(ws_base):
     assert _shared_err(str(Path(base).parent), [base], homes) is not None
 
 
+def test_shared_path_rejects_home_descendants_any_depth(ws_base):
+    """Review round 2 [3994613216]: home 后代不再豁免。
+
+    读取侧(creator_roots=None)一律拒绝任意深度的 home 子树;
+    创建侧(传 creator_roots)只有创建者自己的 home 子树豁免。
+    """
+    base = ws_base
+    homes = [f"{base}/alice", f"{base}/bob"]
+
+    # 读取侧:他人 home 后代 → 拒绝(之前漏掉的洞)
+    assert _shared_err(f"{base}/alice/.ssh", [base], homes) is not None
+    assert _shared_err(f"{base}/alice/secrets", [base], homes) is not None
+    assert _shared_err(f"{base}/alice/deep/nested/team", [base], homes) is not None
+    # 读取侧:创建者自己 home 后代同样拒绝(纵深防御,不依赖 creator 关联)
+    assert _shared_err(f"{base}/bob/team", [base], homes) is not None
+
+    # 创建侧(alice):自己 home 后代豁免,他人 home 后代仍拒
+    assert _shared_err(f"{base}/alice/subproj", [base], homes, [f"{base}/alice"]) is None
+    assert _shared_err(f"{base}/alice/.ssh", [base], homes, [f"{base}/alice"]) is None
+    assert _shared_err(f"{base}/bob/subproj", [base], homes, [f"{base}/alice"]) is not None
+
+
+def test_shared_path_creator_roots_ownership(ws_base):
+    """Review round 2 [3994613216]: 共享路径必须落在创建者根内。"""
+    base = ws_base
+    homes = [f"{base}/alice", f"{base}/bob"]
+
+    # <base>/team-proj 不在创建者任何根内 → 拒(归属规则)
+    err = _shared_err(f"{base}/team-proj", [base], homes, [f"{base}/alice"])
+    assert err is not None
+    assert "own workspace roots" in err
+    # 已开放共享根内的子路径 → 允许
+    assert (
+        _shared_err(f"{base}/team-area/sub", [base], homes, [f"{base}/alice", f"{base}/team-area"])
+        is None
+    )
+    # 空 creator_roots(无身份创建者)→ 一律拒绝(fail closed)
+    assert _shared_err(f"{base}/alice/subproj", [base], homes, []) is not None
+    assert _shared_err(f"{base}/team-proj", [base], homes, []) is not None
+
+
 def test_shared_path_accepts_deep_and_first_level_non_home(ws_base):
     base = ws_base
     homes = [f"{base}/alice", f"{base}/bob"]
 
     assert _shared_err(f"{base}/team-proj", [base], homes) is None
     assert _shared_err(f"{base}/team/deep/proj", [base], homes) is None
-    # home 的后代目录不是 home 的祖先,允许(口径:仅禁"祖先/相等")
-    assert _shared_err(f"{base}/alice/subproj", [base], homes) is None
 
 
 def test_shared_path_rejects_traversal_and_outside(ws_base):

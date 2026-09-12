@@ -144,3 +144,58 @@ def _is_within_any_root(resolved: str, roots) -> bool:  # == 或 startswith(root
 | 终端 status 响应剥离 original_* | 含 | 不含 | §2.4 唯一消费者走保留的 proxy 早退路径 |
 | VSCode owner 由 created_by → 请求者 | — | — | 内存映射丢失时回退 created_by(日志注明),窗口 = TTL 3600s 内服务重启 |
 | 共享项目根查询引入每请求 DB 开销 | — | — | 单条索引查询;browse 频度低 |
+
+## 9. 复审第二轮修订(2026-09-11,PR #3380)
+
+### 9.1 共享项目自扩张:后代子树 + 创建侧归属(意见 3994613216)
+
+Round 1 的 `shared_project_path_error` 只拒绝"是某个 home 或其祖先"的路径——
+**他人 home 的后代**(`/workspace/alice/.ssh`)不在此列,且创建侧不校验路径归属,
+攻击只是从"拿下整个 base dir"变成"拿下一棵子树"。Round 2 补两条规则:
+
+- **home 子树(任意深度)**:落在任何用户 home 子树内的共享路径一律拒绝;
+  唯一豁免是创建侧传 `creator_roots` 时"该 home 本身是创建者根之一"——即
+  用户可以共享**自己** home 内的子路径,不能共享别人的。
+- **归属(`creator_roots`)**:创建侧要求共享路径落在创建者的根内——
+  `_home_roots_for_user(creator)`(每个 base 的 `<base>/<account>`)加上
+  **已对其开放**的共享根(同租户 `get_shared_project_paths`,且该行自身通过
+  拓扑规则——脏行不得引导进一步的共享)。空 `creator_roots`(无身份)拒绝
+  一切(fail closed)。
+
+两侧分工:**创建侧用 creator_roots 归属(准确,能区分"自己的 home 子树")**;
+**读取侧(`_shared_root_rejection_reason`)用"不在任何用户 home 子树内"**
+(纵深防御,不依赖 projects 行携带可信 creator——`created_by` 可能为 NULL、
+指向已删除用户,或经其它路径写入)。读取侧因此也更严:自己 home 内的共享行
+不再对其他租户成员放大(创建者本人仍经 home 根可达)。
+
+`needs_home_check` 快捷路径复核:round 1 只在"候选 = base 或一级子目录"时才
+枚举用户,这正是后代子树漏过的原因。现在候选只要位于任一 base 之下(任意
+深度)就按需枚举;`_allowed_roots_for_user` 把枚举提升到调用级(租户没有
+共享行时零查询,有 N 行时也只查一次,不再是每候选一次)。
+
+### 9.2 check-path 存在性探测收窄(意见 3994613308)
+
+Round 1 的 `include_base_dirs=True` 让 check-path 的 `exists`/`canCreate` 探测
+覆盖整个 base dirs——逐条探测即枚举,任何用户可确认他人 home 下文件是否存在
+(`.ssh/id_rsa`、`.aws/credentials`……)。#2317 流程只需要校验"自己即将创建的
+那个名字",允许范围收窄为:
+
+1. 自己 home 根的完整子树(任意深度,与 browse 同集);
+2. base dir **自身**这一个点;
+3. base dir 的**一级子路径**中不是任何用户 home 的那些
+   (`<workspace>/new-project` 合法、`<workspace>/alice` 非法;home 判定复用
+   共享根过滤的用户枚举)。
+
+更深路径(`<base>/<account>/...`、`<base>/x/y`)→ 400。实现上移除了
+`_allowed_roots_for_user` 的 `include_base_dirs` 参数(browse/check-path 重新
+共用同一根集),check-path 改用专门谓词 `_check_path_rejection_reason`。
+
+### 9.3 兼容性影响增量(相对 §8)
+
+| 变更 | 从 | 到 | 依据/缓解 |
+|---|---|---|---|
+| 共享项目注册:`<base>/team-proj` 一级团队目录 | 任意租户成员可注册 | 400(须在创建者 home 根或已开放共享根内) | 意见 3994613216 归属规则;管理员仍可经 DB/既有行提供租户级共享根 |
+| 共享项目注册:他人 home 后代(`/base/<account>/.ssh`) | 放行 | 400 | 同上;读取侧纵深过滤同步收口 |
+| 读取侧:创建者自己 home 内的共享行 | 对租户放大 | 不放大(滤除) | 读取侧规则不依赖 creator 关联;创建者本人经 home 根可达 |
+| check-path:`<base>/x/y` 及更深非 home 路径 | 可探测 | 400 | 意见 3994613308;#2317 的 mkdir -p 多级语义在自己 home 子树内保持可用 |
+| check-path:`<base>/<account>`(他人 home,一级) | 可探测 | 400 | 一级 user-home 判定复用用户枚举,失败时 fail-open 并记 WARNING(与 round 1 同姿态) |

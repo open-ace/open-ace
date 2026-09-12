@@ -227,6 +227,14 @@ def api_create_project():
     # the whole tenant able to browse other users' files. The same filter
     # runs read-side in fs.py as defense in depth (covers paths that enter
     # the projects table by other routes, e.g. a later is_shared flip).
+    #
+    # Review round 2 (#3376, 3994613216): round 1 only rejected homes and
+    # their ANCESTORS — a descendant of another user's home
+    # (<base>/alice/.ssh) still passed, and nothing verified the path
+    # belonged to the creator. Now the shared path must land inside the
+    # creator's own roots: per-base home roots plus shared roots already
+    # open to this tenant (first-level <base>/team-proj registrations are
+    # no longer admissible for regular users).
     if is_shared:
         base_dirs = get_workspace_base_dirs()
         home_dirs: list[str] = []
@@ -241,7 +249,24 @@ def api_create_project():
             account = row.get("system_account") or row.get("username")
             if account:
                 home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
-        reason = shared_project_path_error(path, base_dirs, home_dirs)
+
+        creator_account = (g.user or {}).get("system_account") or (g.user or {}).get("username")
+        creator_roots: list[str] = []
+        if creator_account:
+            creator_roots.extend(f"{base.rstrip('/')}/{creator_account}" for base in base_dirs)
+        try:
+            open_shared_roots = project_repo.get_shared_project_paths(tenant_id) or []
+        except Exception as e:
+            logger.warning("Failed to load open shared roots for creator: %s", e)
+            open_shared_roots = []
+        # Only topology-clean rows may anchor new registrations: a dirty
+        # home-overlapping shared row must not bootstrap further sharing.
+        creator_roots.extend(
+            root
+            for root in open_shared_roots
+            if shared_project_path_error(root, base_dirs, home_dirs) is None
+        )
+        reason = shared_project_path_error(path, base_dirs, home_dirs, creator_roots=creator_roots)
         if reason is not None:
             return (
                 jsonify({"error": f"Invalid shared project path: {reason}"}),

@@ -130,7 +130,12 @@ def is_valid_remote_path(value) -> bool:
     )
 
 
-def shared_project_path_error(path: str, base_dirs: list[str], home_dirs: list[str]) -> str | None:
+def shared_project_path_error(
+    path: str,
+    base_dirs: list[str],
+    home_dirs: list[str],
+    creator_roots: list[str] | None = None,
+) -> str | None:
     """Validate a shared-project path against the workspace topology.
 
     Review round 1 (#3376): a shared project path extends every tenant
@@ -146,6 +151,24 @@ def shared_project_path_error(path: str, base_dirs: list[str], home_dirs: list[s
     - an ancestor of (or equal to) any user home directory, including the
       creator's own.
 
+    Review round 2 (#3376, 3994613216): round 1 only rejected paths that
+    WERE a home or an ancestor of one — a DESCendant of another user's
+    home (e.g. ``<base>/alice/.ssh``) passed and became a tenant-wide
+    browse root. Two additional rules, applied per side:
+
+    - *home subtree (any depth)*: a path inside a user home subtree is
+      rejected, EXCEPT when that home is itself one of *creator_roots*
+      (creation side: the creator may share subpaths of their own home,
+      nobody else's). With *creator_roots* omitted (read-side filter) no
+      home subtree is admissible at all — defense in depth that does not
+      depend on the projects row carrying a trustworthy creator.
+    - *ownership*: when *creator_roots* is given (creation side), the path
+      must fall inside one of them — the creator's own per-base home roots
+      plus shared roots already open to them. Registering arbitrary
+      workspace paths (e.g. a first-level ``<base>/team-proj``) is no
+      longer admissible; an empty *creator_roots* rejects everything
+      (fail closed).
+
     Returns an error message when rejected, else ``None``.
     """
     bases = [b for b in (base_dirs or []) if b]
@@ -155,10 +178,19 @@ def shared_project_path_error(path: str, base_dirs: list[str], home_dirs: list[s
     for base in bases:
         if resolved == os.path.realpath(base):
             return "must not be a workspace base directory itself"
+    creator_root_set = (
+        {os.path.realpath(r) for r in creator_roots if r} if creator_roots is not None else set()
+    )
     for home in home_dirs or []:
         if not home:
             continue
         resolved_home = os.path.realpath(home)
         if resolved_home == resolved or resolved_home.startswith(resolved + os.sep):
             return "must not be a user home directory or one of its ancestors"
+        if resolved.startswith(resolved_home + os.sep) and resolved_home not in creator_root_set:
+            return "must not be inside any user's home directory subtree"
+    if creator_roots is not None and not any(
+        resolved == root or resolved.startswith(root + os.sep) for root in creator_root_set
+    ):
+        return "shared project path must be inside your own workspace roots"
     return None
