@@ -376,8 +376,9 @@ def test_idle_teardown_runs_outside_the_registry_lock(monkeypatch):
     def _run_cleanup():
         try:
             manager.cleanup_idle_instances()
-        except BaseException as exc:  # noqa: BLE001 - surfaced via assert below
+        except BaseException as exc:  # noqa: BLE001 - recorded then re-raised
             errors.append(exc)
+            raise
         finally:
             done.set()
 
