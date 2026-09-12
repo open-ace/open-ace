@@ -69,6 +69,19 @@ def no_sandbox_backend(monkeypatch):
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: None)
 
 
+@pytest.fixture(autouse=True)
+def _single_web_process(monkeypatch):
+    """Deterministic single-process assumption for every probe test.
+
+    _sandboxed_readiness consults the live heartbeat root for peer web
+    processes; tests must not depend on whatever the host happens to have
+    there (review follow-up on the multi-process reason code).
+    """
+    import app.services.webui_sandbox as wsandbox
+
+    monkeypatch.setattr(wsandbox, "fresh_peer_heartbeats", lambda _override=None: [])
+
+
 @pytest.fixture
 def ready_backend(monkeypatch):
     """A fully-configured, healthy sandbox backend (probe passes)."""
@@ -452,3 +465,38 @@ def test_gate_os_user_chain_unchanged_without_sandbox_capability():
     assert verdict is not None
     assert verdict.code == "identity_mapping_missing"
     assert verdict.code == "identity_mapping_missing"
+
+
+def test_probe_refuses_sandboxed_when_peer_web_process_is_live(monkeypatch):
+    """Review follow-up: per-instance secrets are process-memory state — with
+    another live web process (shipped k8s manifest runs 3 replicas) roughly
+    two thirds of token validations would 401. The contract must fall back
+    instead of declaring an unreliable level."""
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
+    monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
+    monkeypatch.setattr(wic, "_peer_web_processes_live", lambda: True)
+    cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
+    ok, tier, reason = wic._sandboxed_readiness(cfg)
+    assert ok is False
+    assert reason.code == "sandbox_multi_process_unsupported"
+
+
+def test_probe_error_counting_peers_refuses_sandboxed(monkeypatch):
+    """Cannot prove this process is alone -> refuse (conservative direction)."""
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
+    monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
+
+    import app.services.webui_sandbox as wsandbox
+
+    def _boom(_override=None):
+        raise RuntimeError("heartbeat root exploded")
+
+    monkeypatch.setattr(wsandbox, "fresh_peer_heartbeats", _boom)
+    cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
+    ok, tier, reason = wic._sandboxed_readiness(cfg)
+    assert ok is False
+    assert reason.code == "sandbox_multi_process_unsupported"
