@@ -234,3 +234,41 @@ def test_unreadable_secret_file_logs_read_error_not_not_configured(tmp_path, mon
         assert not any("not configured; generated an in-memory" in m for m in messages)
     finally:
         secret_file.chmod(0o600)
+
+
+def test_absent_file_on_unwritable_fs_is_not_reported_unreadable(tmp_path, monkeypatch, caplog):
+    # Issue #3377 review round 2: FileNotFoundError must not be classified as
+    # unreadable — on an unwritable-but-readable filesystem the secret file is
+    # simply absent, and the final message must be the accurate "not
+    # configured", never "exists but cannot be read".
+    import logging
+
+    cd = _config_dir(tmp_path, monkeypatch)
+    _write_config_json(cd)
+
+    real_open = open
+
+    def _absent_open(path, *a, **kw):
+        if str(path).endswith(SECRET_FILENAME):
+            raise FileNotFoundError(str(path))
+        return real_open(path, *a, **kw)
+
+    real_os_open = os.open
+
+    def _ero_fs_open(path, flags, *a, **kw):
+        if str(path).endswith(SECRET_FILENAME):
+            raise OSError(30, "Read-only file system")
+        return real_os_open(path, flags, *a, **kw)
+
+    monkeypatch.setattr("builtins.open", _absent_open)
+    monkeypatch.setattr(os, "open", _ero_fs_open)
+    with caplog.at_level(logging.WARNING, logger="app.services.webui_manager"):
+        mgr = WebUIManager()
+    assert len(mgr.config.token_secret) >= 64
+    messages = [r.message for r in caplog.records]
+    # Absent is the normal first-boot state: no read-side alarm at all.
+    assert not any("Cannot read WebUI token secret file" in m for m in messages)
+    # The final message names the real cause (nothing persisted), not the
+    # opposite-of-truth "exists but cannot be read".
+    assert not any("exists but cannot be read" in m for m in messages)
+    assert any("not configured; generated an in-memory" in m for m in messages)
