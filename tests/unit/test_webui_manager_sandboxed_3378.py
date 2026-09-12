@@ -462,8 +462,17 @@ def test_single_user_local_request_restarts_live_sandboxed_instance(monkeypatch)
     manager._launch_webui_process = MagicMock(side_effect=fake_launch)
     manager._wait_for_service_ready = MagicMock(return_value=True)
 
-    # Floor derives local for this request (sandbox probe no longer passes).
-    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: None)
+    # The snapshot verifies only os_user (sandbox probe no longer passes), so
+    # the strongest verified form satisfying the request is the LOCAL form.
+    os_user_snapshot = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend=wic.BACKEND_PER_USER,
+        isolation_level=wic.ISOLATION_LEVEL_OS_USER,
+        enforced=wic._OS_USER_ENFORCED,
+        unsupported=wic._OS_USER_UNSUPPORTED,
+        reasons=(),
+    )
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: os_user_snapshot)
     monkeypatch.setattr(wic, "resolve_required_floor", lambda config, snap: "os_user")
 
     url, token = manager.get_user_webui_url(3, "u3", "http://192.168.1.5:19888")
@@ -487,6 +496,83 @@ def test_single_user_local_request_restarts_live_sandboxed_instance(monkeypatch)
 
 
 # ── prestart reorder (§7.7) ───────────────────────────────────────────
+
+
+def _snapshot_at_level(level: str) -> wic.IsolationCapabilitySnapshot:
+    """A capability snapshot reporting *level* (T-B invariant fixtures)."""
+    if level == wic.ISOLATION_LEVEL_SANDBOXED:
+        return wic.IsolationCapabilitySnapshot(
+            supported=True,
+            backend="opensandbox:kata",
+            isolation_level=level,
+            enforced=wic._SANDBOXED_ENFORCED,
+            unsupported=wic._SANDBOXED_UNSUPPORTED,
+            reasons=(),
+        )
+    return wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend=wic.BACKEND_PER_USER,
+        isolation_level=level,
+        enforced=wic._OS_USER_ENFORCED,
+        unsupported=wic._OS_USER_UNSUPPORTED,
+        reasons=(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("pin", "snapshot_level", "request_param", "expected_form"),
+    [
+        # The invariant: the default launch form is the strongest VERIFIED
+        # form satisfying max(pin floor, request) — same source as the
+        # contract snapshot. The second row is the T-B regression: the
+        # entrypoint pins `os_user` on multi-user deployments, and the old
+        # code silently launched local processes on a sandboxed-capable one.
+        ("", wic.ISOLATION_LEVEL_SANDBOXED, "", "sandboxed"),
+        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "", "sandboxed"),
+        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "os_user", "sandboxed"),
+        ("os_user", wic.ISOLATION_LEVEL_OS_USER, "", "local"),
+        ("", wic.ISOLATION_LEVEL_OS_USER, "", "local"),
+        ("", wic.ISOLATION_LEVEL_NONE, "", "local"),
+        # An explicit sandboxed request keeps its fail-closed shape.
+        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "sandboxed", "sandboxed"),
+    ],
+)
+def test_resolve_form_invariant_strongest_verified_form(
+    monkeypatch, pin, snapshot_level, request_param, expected_form
+):
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher, required_isolation_level=pin)
+    snap = _snapshot_at_level(snapshot_level)
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: snap)
+
+    # What the /user-url gate hands the manager: max(pin floor, request).
+    effective = pin or snapshot_level
+    if request_param and wic.isolation_level_at_least(request_param, effective):
+        effective = request_param
+    assert manager._resolve_form(effective) == expected_form
+
+    # And a real DEFAULT request (no parameter) through get_user_webui_url
+    # lands on the form the snapshot's isolation level dictates: sandboxed
+    # capability → the pod form, regardless of the pin. (Local rows stub the
+    # OS-process start — launching a real webui is not this test's business.)
+    form = "sandboxed" if snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED else "local"
+    if form == "local":
+        stub = WebUIInstance(user_id=7, system_account="u7", port=3110, form="local")
+        manager._start_instance_internal = lambda *a, **kw: stub
+    url, token = manager.get_user_webui_url(
+        7,
+        "u7",
+        "http://192.168.1.5:19888",
+        required_isolation=effective if request_param else "",
+    )
+    instance = manager._instances.get(7)
+    chosen = getattr(instance, "form", "local") if instance else "local"
+    assert chosen == form
+    if form == "sandboxed":
+        assert token.startswith("v2:7:")
+        # The URL carries the LOCAL proxy port of the pod instance (never a
+        # global-secret 3100 token path).
+        assert url == f"http://192.168.1.5:{instance.port}"
 
 
 def test_prestart_proceeds_without_mapping_when_floor_is_sandboxed(monkeypatch):

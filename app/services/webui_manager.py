@@ -1109,27 +1109,40 @@ class WebUIManager:
             return instance.url, instance.token
 
     def _resolve_form(self, required_isolation: str) -> str:
-        """Pick the launch form for this request (Issue #3378).
+        """Pick the launch form for this request (Issue #3378, review round 1).
 
-        An explicit level wins ("sandboxed" → sandboxed form). An empty value
-        derives from the server-side floor — which the capability snapshot
-        already computed from the sandbox probe, so a passing probe flips the
-        deployment's default form (documented D7 behavior).
+        The caller passes the EFFECTIVE requirement — max(server pin floor,
+        request parameter), resolved by the /user-url gate. The pin is a
+        FLOOR, not a target (#3375 semantics): the launch form is the
+        strongest VERIFIED form that satisfies the requirement, derived from
+        the same capability snapshot the contract reports (one source of
+        truth — the previous code mapped every non-sandboxed explicit value
+        to the local form, so a deployment pinned `os_user` by the entrypoint
+        but configured with a webui_image advertised `sandboxed` in its
+        contract while launching local OS processes).
+
+        Consequences: with no sandboxed request parameter, a sandboxed-
+        capable deployment always launches the pod form (even when the pin
+        is merely `os_user`); a deployment without webui_image keeps the
+        local form for every os_user-level requirement; an explicit
+        `sandboxed` requirement keeps its fail-closed shape (the gate
+        already refused unmet requests, and the launcher re-checks the
+        backend so a bypassed gate cannot silently downgrade to local).
         """
         explicit = (required_isolation or "").strip()
         if explicit == WEBUI_FORM_SANDBOXED:
             return WEBUI_FORM_SANDBOXED
-        if explicit and explicit != "none":
-            return WEBUI_FORM_LOCAL
         from app.services.workspace_isolation_contract import (
             ISOLATION_LEVEL_SANDBOXED,
             build_workspace_isolation_snapshot,
-            resolve_required_floor,
         )
 
         snapshot = build_workspace_isolation_snapshot(self)
-        floor = resolve_required_floor(self.config, snapshot)
-        return WEBUI_FORM_SANDBOXED if floor == ISOLATION_LEVEL_SANDBOXED else WEBUI_FORM_LOCAL
+        return (
+            WEBUI_FORM_SANDBOXED
+            if snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+            else WEBUI_FORM_LOCAL
+        )
 
     def _start_single_user_instance(self, user_id: int, system_account: str, base_url: str) -> None:
         """
@@ -2286,11 +2299,15 @@ class WebUIManager:
                 logger.info("Skipping webui prestart for user %s: %s", user_id, rejection.code)
                 return
 
-        # Issue #3378: the explicit-mapping requirement belongs to the os_user
-        # chain — a sandboxed prestart has no OS account by design, so this
-        # early exit moved AFTER the gate evaluation and only fires when the
-        # effective level still needs one.
-        if not system_account and required != ISOLATION_LEVEL_SANDBOXED:
+        # Review round 1 (T-B): the explicit-mapping requirement belongs to
+        # the os_user chain — key the early exit on the launch FORM the
+        # default request would take (the strongest verified form satisfying
+        # the floor), not on the floor itself. A pinned `os_user` floor on a
+        # sandboxed-capable deployment launches pods, which have no OS
+        # account by design; skipping those prestarts would silently diverge
+        # from what /user-url actually launches.
+        launch_form_is_sandboxed = snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+        if not system_account and not launch_form_is_sandboxed:
             logger.info("Skipping webui prestart for user %s: no explicit mapping", user_id)
             return
 

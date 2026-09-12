@@ -211,8 +211,13 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
    ——sandboxed 形态的浏览器端口是本地代理端口,取自同一 port_range
    (默认 3100-3200);单用户 + sandboxed 以代理端口分配替代硬编码 3100。
 5. `workspace.sandbox_tier` 可选:指定交互 pod 落在哪个 endpoint tier,缺省用
-   后端 `default_tier`。`webui_image` 配置即翻转默认 floor——探测通过后,不带
-   参数的 `/user-url` 也走沙箱形态。
+   后端 `default_tier`。**pin 是下限,不是目标**(与 #3375 的 floor 定义一致):
+   生效要求 = max(pin 下限, 请求参数),启动形态 = 满足该要求的**最强已验证
+   形态**——因此 `webui_image` 配置(探测通过、能力为 sandboxed)后,不带参数的
+   `/user-url` 也走沙箱形态,即使 pin(如 docker-entrypoint 默认写入的
+   `os_user`)更低;此时 os_user 链(身份映射、sudo 启动)不适用,门闸按
+   sandboxed 分支放行。未配置 `webui_image` 的部署行为完全不变(os_user 链,
+   显式 `os_user` 请求照旧要求 system_account 映射)。
 6. webui 入口与 pod 3100 端点可达性**未经真实集群端到端验证**(#3379;运行期
    失败以 `sandbox_endpoint_unresolved` 结构化浮出,不会静默挂死)。
 

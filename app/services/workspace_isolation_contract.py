@@ -629,23 +629,32 @@ def evaluate_isolation_requirement(
         )
     if required_level == ISOLATION_LEVEL_NONE:
         return None
+    if isolation_level_at_least(snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED):
+        # Review round 1 (T-B, pin=floor): a sandboxed-capable deployment
+        # satisfies every requirement at or below sandboxed with the pod
+        # form — the strongest VERIFIED form, which is what launches. The
+        # snapshot level IS sandboxed, so the probe already passed, and the
+        # OS-account chain below (identity mapping, sudo launch) does not
+        # apply: a pod's identity is its per-instance token. Without this
+        # branch, an entrypoint-pinned `os_user` floor made every default
+        # request from a mapping-less user a silent 400 even though the
+        # launch itself would have been a sandboxed pod.
+        return None
     if required_level == ISOLATION_LEVEL_SANDBOXED:
         # Issue #3378: identity for sandboxed pods is the per-instance webui
         # token, not an OS account — the identity_mapping / per-user-launch
         # chain below is os_user-specific and does not apply. The gate is the
         # capability snapshot itself: when the level is unmet, surface the
         # sandbox probe's exact reason instead of the generic level message.
-        if not isolation_level_at_least(snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED):
-            for reason in snapshot.reasons:
-                if reason.code in SANDBOX_PROBE_REASON_CODES:
-                    return reason
-            return IsolationReason(
-                "isolation_level_unsupported",
-                f"Requested isolation level 'sandboxed' exceeds what this "
-                f"deployment enforces ('{snapshot.isolation_level}'); refusing to "
-                "silently launch with weaker isolation.",
-            )
-        return None
+        for reason in snapshot.reasons:
+            if reason.code in SANDBOX_PROBE_REASON_CODES:
+                return reason
+        return IsolationReason(
+            "isolation_level_unsupported",
+            f"Requested isolation level 'sandboxed' exceeds what this "
+            f"deployment enforces ('{snapshot.isolation_level}'); refusing to "
+            "silently launch with weaker isolation.",
+        )
     if not isolation_level_at_least(snapshot.isolation_level, required_level):
         return IsolationReason(
             "isolation_level_unsupported",

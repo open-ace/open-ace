@@ -319,12 +319,35 @@ def test_gate_generic_rejection_without_probe_reason():
     assert verdict.code == "isolation_level_unsupported"
 
 
-def test_gate_os_user_chain_unchanged():
+def test_gate_os_user_requirement_satisfied_by_sandboxed_capability():
+    """T-B (pin=floor): an os_user requirement on a sandboxed-capable
+    deployment is satisfied by the pod form — the strongest VERIFIED form
+    that meets the floor. The os_user identity chain (system_account,
+    supports_per_user_launch) describes the LOCAL launch path, which is not
+    the path taken; without this, an entrypoint-pinned `os_user` floor made
+    every mapping-less user's default request a 400 on a deployment whose
+    launches were pods anyway."""
     snap = _sandboxed_snapshot()
-    # An os_user request on a sandboxed deployment still walks the identity
+    verdict = wic.evaluate_isolation_requirement(
+        "os_user", snapshot=snap, system_account=None, manager=None
+    )
+    assert verdict is None
+
+
+def test_gate_os_user_chain_unchanged_without_sandbox_capability():
+    snap = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend=wic.BACKEND_PER_USER,
+        isolation_level=wic.ISOLATION_LEVEL_OS_USER,
+        enforced=wic._OS_USER_ENFORCED,
+        unsupported=wic._OS_USER_UNSUPPORTED,
+        reasons=(),
+    )
+    # An os_user request on an os_user deployment still walks the identity
     # chain (level is satisfied; system_account still required).
     verdict = wic.evaluate_isolation_requirement(
         "os_user", snapshot=snap, system_account=None, manager=None
     )
     assert verdict is not None
+    assert verdict.code == "identity_mapping_missing"
     assert verdict.code == "identity_mapping_missing"
