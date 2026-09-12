@@ -955,14 +955,22 @@ class SandboxedWebuiLauncher:
 
     # ── snapshot export / import / destroy (D6) ──────────────────────
 
-    def export_snapshot(self, sandbox_id: str, *, restore_confirmed: bool) -> bytes | None:
+    def export_snapshot(
+        self,
+        sandbox_id: str,
+        *,
+        restore_confirmed: bool,
+        user_id: int | None = None,
+    ) -> bytes | None:
         """Read the pod's session tree as a bounded tar, or None.
 
         The export guard (FEAS-M2/FEAS-R4-1): an instance whose restore was
         never confirmed — degraded start, the CP touch never succeeded — never
         exports. Its empty tree must not overwrite the last good snapshot.
-        Over-ceiling exports are skipped with a WARNING (the user's history
-        freezes at the old snapshot; documented semantics, FEAS-Q2).
+        Over-ceiling exports are skipped with a dedicated WARNING naming the
+        user, the ceiling env var, and the sizes (T-I: the freeze must be
+        audible and diagnosable — the user's history freezes at the old
+        snapshot until an operator trims it; documented semantics, FEAS-Q2).
         """
         if not restore_confirmed:
             logger.warning(
@@ -983,6 +991,16 @@ class SandboxedWebuiLauncher:
                 sandbox_id, WEBUI_STATE_TAR_PATH, max_bytes=self._max_state_bytes
             )
         except OpenSandboxApiError as exc:
+            if getattr(exc, "code", "") == "FILE_TOO_LARGE":
+                subject = f"user {user_id}" if user_id is not None else f"sandbox {sandbox_id}"
+                logger.warning(
+                    "snapshot for %s exceeds %s (%s); keeping previous "
+                    "snapshot; history is frozen until trimmed",
+                    subject,
+                    STATE_MAX_BYTES_ENV,
+                    exc,
+                )
+                return None
             logger.warning(
                 "webui sandbox %s: snapshot download failed (%s); keeping the previous snapshot",
                 sandbox_id,
@@ -1082,16 +1100,30 @@ class SandboxedWebuiLauncher:
         """Best-effort final export, then an idempotent sandbox delete.
 
         404 from delete is success (the desired end state). Export failures
-        never block the destroy — an idle webui pod is cheaper than a leak.
+        NEVER block the destroy — an idle webui pod is cheaper than a leak
+        (T-I: the final-export block catches Exception wholesale, the same
+        posture as restore_sequence's degrade path; only the delete frees the
+        pod, so it must always run).
         """
         api = self._current_api()
         if final_export:
-            blob = self.export_snapshot(sandbox_id, restore_confirmed=restore_confirmed)
-            if blob is not None:
-                try:
-                    self.persist_snapshot(user_id, blob)
-                except OSError as exc:
-                    logger.warning("webui snapshot persist failed for user %s: %s", user_id, exc)
+            try:
+                blob = self.export_snapshot(
+                    sandbox_id, restore_confirmed=restore_confirmed, user_id=user_id
+                )
+                if blob is not None:
+                    try:
+                        self.persist_snapshot(user_id, blob)
+                    except OSError as exc:
+                        logger.warning(
+                            "webui snapshot persist failed for user %s: %s", user_id, exc
+                        )
+            except Exception as exc:  # noqa: BLE001 - destroy must always run
+                logger.warning(
+                    "webui sandbox %s: final export failed (%s); destroying anyway",
+                    sandbox_id,
+                    exc,
+                )
         self._destroy_raw(api, sandbox_id)
         self.clear_restore_confirmation(sandbox_id)
         self._webui_endpoints.pop(sandbox_id, None)
