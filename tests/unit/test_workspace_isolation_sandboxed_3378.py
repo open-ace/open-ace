@@ -303,7 +303,56 @@ def test_snapshot_appends_sandbox_reason_when_configured_but_failing(monkeypatch
 
 
 def test_policy_revision_bumped():
-    assert wic.POLICY_REVISION == "2026-09-12.1"
+    assert wic.POLICY_REVISION == "2026-09-12.2"
+
+
+def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
+    """T-K: the entry-point matrix is per-level — a sandboxed snapshot
+    reports terminal/vscode/filesystem_api as sandboxed_entry_not_wired
+    (their executors still live on the control plane, unwired to the pod),
+    while webui stays enforced and session_history/autonomous unchanged."""
+    snap = wic.build_workspace_isolation_snapshot(
+        type(
+            "_M",
+            (),
+            {
+                "config": _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080"),
+                "per_user_launch_readiness": lambda: None,
+            },
+        )()
+    )
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
+    entry_points = snap.public_dict()["entry_points"]
+    assert entry_points["webui"] == "enforced"
+    assert entry_points["session_history"] == "enforced"
+    assert entry_points["autonomous"] == "separate_contract"
+    for name in ("terminal", "vscode", "filesystem_api"):
+        assert entry_points[name] == "sandboxed_entry_not_wired"
+    # The os_user/default matrix is untouched.
+    assert wic.ENTRY_POINT_STATUSES["terminal"] == "partial"
+    assert wic.ENTRY_POINT_STATUSES["filesystem_api"] == "partial"
+    assert wic.ENTRY_POINT_STATUSES["vscode"] == "partial"
+
+
+def test_cold_worker_sandbox_snapshot_is_provisional(monkeypatch):
+    """T-K: without a manager singleton the sandboxed launch path has not
+    been exercised on this worker — the snapshot carries
+    sandbox_launch_unverified (the launch_path_unverified precedent)."""
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+    import app.services.webui_manager as wm
+
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
+    monkeypatch.setattr(wm, "peek_webui_manager", lambda: None)
+    monkeypatch.setattr(
+        wm,
+        "read_workspace_config",
+        lambda: _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080"),
+    )
+    snap = wic.build_workspace_isolation_snapshot()  # no manager anywhere
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
+    codes = [r.code for r in snap.reasons]
+    assert "sandbox_launch_unverified" in codes
+    assert "sandbox_runtime_unverified" in codes
 
 
 def test_kernel_dimension_in_vocabulary():

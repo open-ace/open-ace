@@ -24,6 +24,13 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+# Revision 4 (2026-09-12.2, review round 1 T-K): the entry-point matrix is
+# per-level — sandboxed snapshots report terminal/vscode/filesystem_api as
+# ``sandboxed_entry_not_wired`` (those executors still live on the control
+# plane and are not wired to the user's pod); sandboxed snapshots on a cold
+# worker (no manager yet) append ``sandbox_launch_unverified`` (the
+# launch_path_unverified precedent, #3375).
+#
 # Revision 3 (2026-09-12.1, Issue #3378): new sandboxed level with a zero-pod
 # fail-closed probe; new ``kernel`` dimension (os_user reports it unsupported
 # — shared host kernel); sandboxed snapshots report
@@ -31,7 +38,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-12.1"
+POLICY_REVISION = "2026-09-12.2"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -161,6 +168,21 @@ ENTRY_POINT_STATUSES = {
     "autonomous": "separate_contract",
 }
 
+# T-K (review round 1): the matrix is PER-LEVEL. On a sandboxed snapshot
+# only the webui entry rides the pod — terminal/vscode/filesystem_api
+# executors still run on the control-plane host and are NOT wired to the
+# user's sandbox instance, so reporting the os_user "partial" status would
+# claim coverage that does not exist. session_history is enforced via the
+# per-pod snapshot store; autonomous stays a separate contract.
+ENTRY_POINTS_SANDBOXED = {
+    "webui": "enforced",
+    "filesystem_api": "sandboxed_entry_not_wired",
+    "session_history": "enforced",
+    "terminal": "sandboxed_entry_not_wired",
+    "vscode": "sandboxed_entry_not_wired",
+    "autonomous": "separate_contract",
+}
+
 
 def _current_platform() -> str:
     if sys.platform.startswith("win"):
@@ -211,9 +233,15 @@ class IsolationCapabilitySnapshot:
         }
         # Issue #3374 review #11: the entry-point matrix describes multi-user
         # enforcement; emitting it on an unsupported snapshot would claim
-        # "webui: enforced" next to "no isolation at all".
+        # "webui: enforced" next to "no isolation at all". T-K: the matrix is
+        # level-aware — a sandboxed snapshot reports its own wiring truth.
         if self.supported:
-            data["entry_points"] = dict(ENTRY_POINT_STATUSES)
+            matrix = (
+                ENTRY_POINTS_SANDBOXED
+                if self.isolation_level == ISOLATION_LEVEL_SANDBOXED
+                else ENTRY_POINT_STATUSES
+            )
+            data["entry_points"] = dict(matrix)
         return data
 
 
@@ -418,6 +446,21 @@ def build_workspace_isolation_snapshot(
 
     sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
     if sandbox_ok:
+        # T-K (review round 1): a cold worker (no manager singleton yet) has
+        # not exercised the sandbox launch path — mark the level provisional
+        # exactly like the os_user chain's launch_path_unverified (#3375
+        # precedent): the manager appearing (first workspace activity)
+        # removes the marker.
+        cold_reasons: tuple[IsolationReason, ...] = ()
+        if readiness_probe is None:
+            cold_reasons = (
+                IsolationReason(
+                    "sandbox_launch_unverified",
+                    "The sandboxed launch path has not been exercised on this "
+                    "worker yet; treat this level as provisional until the "
+                    "WebUI manager is initialized.",
+                ),
+            )
         # D3 two-state mapping: the static view reports kernel/egress
         # unverified; once the launcher's first pod boot probe succeeded the
         # in-process memo upgrades them (egress always — its enforcement plane
@@ -427,11 +470,11 @@ def build_workspace_isolation_snapshot(
         verified, kernel_enforced = sandbox_runtime_verification(sandbox_tier)
         if verified:
             enforced: tuple[str, ...] = _SANDBOXED_ENFORCED + (DIMENSION_NETWORK_EGRESS,)
-            reasons: tuple[IsolationReason, ...] = ()
+            reasons: tuple[IsolationReason, ...] = cold_reasons
             if kernel_enforced:
                 enforced = enforced + (DIMENSION_KERNEL,)
             else:
-                reasons = (
+                reasons = cold_reasons + (
                     IsolationReason(
                         "sandbox_runtime_kata_negative_only",
                         "The runtime boot probe passed in the negative "
@@ -455,7 +498,8 @@ def build_workspace_isolation_snapshot(
             isolation_level=ISOLATION_LEVEL_SANDBOXED,
             enforced=_SANDBOXED_ENFORCED,
             unsupported=_SANDBOXED_UNSUPPORTED,
-            reasons=(
+            reasons=cold_reasons
+            + (
                 IsolationReason(
                     "sandbox_runtime_unverified",
                     "The sandboxed level is verified on the configuration "

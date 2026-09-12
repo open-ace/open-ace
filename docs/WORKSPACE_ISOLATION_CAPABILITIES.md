@@ -25,7 +25,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
     "vscode": "partial",
     "autonomous": "separate_contract"
   },
-  "policy_revision": "2026-09-12.1"
+  "policy_revision": "2026-09-12.2"
 }
 ```
 
@@ -110,7 +110,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
 `sandboxed` 等级的探测是**零 pod、配置面 fail-closed** 的(不创建 pod 即可
-判定);以下前 7 个为探测级 reason(命中即拒绝),后 2 个为快照级(出现在契约
+判定);以下前 7 个为探测级 reason(命中即拒绝),后 3 个为快照级(出现在契约
 `reasons[]` 中、不阻止申报),最后 2 个为运行期错误码(启动器抛出,非探测码)。
 
 | code | 级别 | 含义 | 修复动作 |
@@ -123,6 +123,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `sandbox_api_key_missing` | 探测 | 该 tier 的 `api_key_env` 指定的环境变量在本进程为空——创建 pod 的第一个 API 调用就会失败;契约与启动路径不得对同一台主机给出矛盾结论(#3375 原则) | 在运行 web 进程的环境中设置该 API key(sandbox-backends.json 的 `api_key_env` 字段) |
 | `sandbox_proxy_unreachable` | 探测 | `workspace.webui_callback_url` 未设置;或该 URL 在该 tier 出口策略下不可达(loopback;sidecar tier 不在 `egress_allow_hosts`;CNI tier 为私网/集群内地址) | 设置 `webui_callback_url`;sidecar tier 将控制面主机名加入 `egress_allow_hosts`;CNI tier 保证公网可达 |
 | `sandbox_runtime_unverified` | 快照 | 静态视图:仅配置面验证通过;kernel/network_egress 待首个 pod boot probe 确认(控制面重启后回退到该状态) | 无需修复;首次成功启动 pod 后自动升级 |
+| `sandbox_launch_unverified` | 快照 | 冷 worker(manager 尚未初始化、沙箱启动链路未在本进程演练过):等级为 **provisional**,manager 初始化后自动消除(对齐 os_user 的 `launch_path_unverified` 先例) | 无需修复;首次工作区活动后消失 |
 | `sandbox_runtime_kata_negative_only` | 快照 | 首 pod probe 通过,但 kernel 仅负向验证(Kata 只能排除 gVisor,无法与未隔离 runc 区分):network_egress 升级 enforced,kernel 保持 unsupported | 无需修复;换 gVisor tier 可获得 kernel 正向验证 |
 | `sandbox_create_failed` | 运行期 | create 请求被拒、create 失败或 boot probe 失败(probe 失败会立即销毁 pod) | 查看 message 内嵌原因(含 provider probe 码透传) |
 | `sandbox_endpoint_unresolved` | 运行期 | pod 的 3100 端点经 `GET /sandboxes/{id}/endpoints/3100` 解析失败——网关无法为未声明端口应答(外部假设,集群端验证归 #3379) | 检查网关对未声明端口的应答行为;该通路未经真实集群验证 |
@@ -138,12 +139,13 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | vscode | partial | owner 记录为 machine.created_by;project_path 校验弱(已知缺口) |
 | autonomous | separate_contract | 沿用 #2022 sandbox 契约,不在本契约范围 |
 
-**sandboxed 部署下的矩阵解读(#3378)**:矩阵取值不变,但只有 `webui` 入口随
-`sandboxed` 等级进入 pod(`enforced`);`terminal`/`vscode`/`filesystem_api`
-的执行体仍在控制面宿主上,**未接线**到用户的沙箱实例(方案标注
-`sandboxed_entry_not_wired`),对 sandboxed 用户的 `/fs` host 树亦不可用——其
-文件在 pod 内,由 webui 自带的 in-pod 文件浏览承载。这些入口的既有缺口(§8)
-不受隔离等级影响。
+**sandboxed 部署下的矩阵取值(#3378,revision 2026-09-12.2 起)**:矩阵按等级
+输出——`webui` 随 `sandboxed` 等级进入 pod(`enforced`);`terminal`/`vscode`/
+`filesystem_api` 输出 **`sandboxed_entry_not_wired`**(执行体仍在控制面宿主上,
+未接线到用户的沙箱实例),对 sandboxed 用户的 `/fs` host 树亦不可用——其文件在
+pod 内,由 webui 自带的 in-pod 文件浏览承载;`session_history` 仍 `enforced`
+(per-pod 快照存储);`autonomous` 仍 `separate_contract`。os_user/none 快照的
+矩阵取值不变。这些入口的既有缺口(§8)不受隔离等级影响。
 
 ## 5. 多用户模式部署要求(policy revision 2026-09-11.2)
 
