@@ -90,6 +90,13 @@ BACKEND_OPENSANDBOX = "opensandbox"
 
 # Reason codes produced by the sandboxed readiness probe; the user-url gate
 # surfaces one of these when a sandboxed request outruns the snapshot level.
+# Review round 1 (T-F): sandbox_proxy_token_ttl_too_short is GONE — a short
+# effective webui proxy-token TTL is not a deployment defect of the sandboxed
+# level: the launcher clamps the pod TTL to min(webui token TTL, proxy token
+# TTL) at create time and re-clamps at every renew, so the pod never outlives
+# its baked-in credential regardless of the TTL configuration. Forcing the
+# old gate's ≥1440min requirement meant every sandboxed declaration also
+# lengthened the LOCAL webui credentials' floor — a security regression.
 SANDBOX_PROBE_REASON_CODES = (
     "sandbox_backend_unconfigured",
     "sandbox_tier_missing",
@@ -97,7 +104,6 @@ SANDBOX_PROBE_REASON_CODES = (
     "webui_image_not_pinned",
     "webui_image_not_allowed",
     "sandbox_proxy_unreachable",
-    "sandbox_proxy_token_ttl_too_short",
 )
 
 # Issue #3378 (D3): the boot-probe upgrade memo, keyed per tier. Kernel and
@@ -224,12 +230,20 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
     """Zero-pod fail-closed probe for the sandboxed level (Issue #3378).
 
     Verifies the configuration plane only — backend config parses, a tier
-    exists, a digest-pinned allowlisted webui image is set, the control
-    plane's LLM-proxy URL would be reachable under the tier's egress policy,
-    and the effective webui proxy-token TTL covers the pod TTL. Never creates
-    a pod; kernel/egress enforcement stays ``sandbox_runtime_unverified``
-    until the first successful pod boot probe upgrades it (launcher-side,
-    in-process memo).
+    exists, a digest-pinned allowlisted webui image is set, and the control
+    plane's LLM-proxy URL would be reachable under the tier's egress policy.
+    Never creates a pod; kernel/egress enforcement stays
+    ``sandbox_runtime_unverified`` until the first successful pod boot probe
+    upgrades it (launcher-side, in-process memo).
+
+    Review round 1 (T-F): the proxy-token TTL check is deliberately ABSENT.
+    The launch path clamps the pod TTL to min(webui token TTL, effective
+    proxy token TTL) at create and re-clamps at every renew, so a short TTL
+    never strands a pod past its LLM credential; gating here would only have
+    forced deployments to raise OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES — which
+    lengthens the LOCAL webui credentials too (the TTL is process-global), a
+    security regression — and made this read-only capability probe construct
+    the database-backed APIKeyProxyService on every cold GET.
 
     Returns ``(ok, tier, reason)``; on failure ``reason`` carries one of
     :data:`SANDBOX_PROBE_REASON_CODES`.
@@ -335,28 +349,6 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
             IsolationReason(
                 "sandbox_proxy_unreachable",
                 f"The sandbox egress policy would block the control-plane LLM proxy ({exc}).",
-            ),
-        )
-
-    # Proxy-token TTL must cover the pod TTL: the token is baked into the pod
-    # env at create time and cannot be refreshed without a restart, so a
-    # shorter effective TTL would strand sessions with dead LLM auth while
-    # health checks still pass.
-    from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
-    from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
-
-    effective_ttl_minutes = get_api_key_proxy_service().effective_proxy_token_ttl_minutes("webui")
-    if effective_ttl_minutes * 60 < WEBUI_TOKEN_TTL_SECONDS:
-        return (
-            False,
-            tier,
-            IsolationReason(
-                "sandbox_proxy_token_ttl_too_short",
-                f"The effective webui proxy-token TTL ({effective_ttl_minutes}m) "
-                f"is shorter than the WebUI token TTL "
-                f"({WEBUI_TOKEN_TTL_SECONDS}s) a sandboxed pod is created with; "
-                "raise OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES to at least the "
-                "pod TTL or the pod outlives its LLM credentials.",
             ),
         )
     return True, tier, None

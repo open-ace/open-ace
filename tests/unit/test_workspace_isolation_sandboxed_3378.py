@@ -159,16 +159,32 @@ def test_probe_reports_proxy_unreachable_when_egress_blocks_host(monkeypatch):
     assert reason.code == "sandbox_proxy_unreachable"
 
 
-def test_probe_reports_proxy_token_ttl_too_short(monkeypatch):
+def test_probe_ignores_proxy_token_ttl_and_never_builds_the_proxy_service(monkeypatch):
+    """T-F: a short effective proxy-token TTL no longer fails the probe — the
+    launcher clamps the pod TTL to the credential (create + renew), so the
+    gate only forced deployments to lengthen the process-global TTL (which
+    the LOCAL webui credentials share — a security regression). The probe
+    must also never construct the database-backed APIKeyProxyService (the old
+    check did, on every cold capability GET)."""
     import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
 
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
-    # 240m < 24h pod TTL: the pod would outlive its baked-in LLM credentials.
+    # 240m < 24h webui TTL — irrelevant now; the clamp owns this invariant.
     monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "240")
+
+    def _no_service():
+        raise AssertionError("the readiness probe must not build APIKeyProxyService")
+
+    import app.modules.workspace.api_key_proxy as akp
+
+    monkeypatch.setattr(akp, "get_api_key_proxy_service", _no_service)
+
     cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
     ok, tier, reason = wic._sandboxed_readiness(cfg)
-    assert ok is False
-    assert reason.code == "sandbox_proxy_token_ttl_too_short"
+    assert ok is True
+    assert tier == "kata"
+    assert reason is None
+    assert "sandbox_proxy_token_ttl_too_short" not in wic.SANDBOX_PROBE_REASON_CODES
 
 
 def test_probe_passes_with_full_config(monkeypatch):

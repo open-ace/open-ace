@@ -110,7 +110,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
 `sandboxed` 等级的探测是**零 pod、配置面 fail-closed** 的(不创建 pod 即可
-判定);以下前 7 个为探测级 reason(命中即拒绝),后 2 个为快照级(出现在契约
+判定);以下前 6 个为探测级 reason(命中即拒绝),后 2 个为快照级(出现在契约
 `reasons[]` 中、不阻止申报),最后 2 个为运行期错误码(启动器抛出,非探测码)。
 
 | code | 级别 | 含义 | 修复动作 |
@@ -121,7 +121,6 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `webui_image_not_pinned` | 探测 | `webui_image` 非 digest-pinned(`name@sha256:<64 hex>`) | 改用 digest 引用——tag 可被重指向,会架空白名单 |
 | `webui_image_not_allowed` | 探测 | `webui_image` 不在 `image_allowlist` | 将镜像加入 `image_allowlist`,或换用已在列的镜像 |
 | `sandbox_proxy_unreachable` | 探测 | `workspace.webui_callback_url` 未设置;或该 URL 在该 tier 出口策略下不可达(loopback;sidecar tier 不在 `egress_allow_hosts`;CNI tier 为私网/集群内地址) | 设置 `webui_callback_url`;sidecar tier 将控制面主机名加入 `egress_allow_hosts`;CNI tier 保证公网可达 |
-| `sandbox_proxy_token_ttl_too_short` | 探测 | 生效 webui proxy token TTL(默认 240min)短于 WebUI token TTL(默认 24h)——pod 会活得比其 LLM 凭证久 | 抬高 `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES`(默认 token TTL 下须 ≥ 1440) |
 | `sandbox_runtime_unverified` | 快照 | 静态视图:仅配置面验证通过;kernel/network_egress 待首个 pod boot probe 确认(控制面重启后回退到该状态) | 无需修复;首次成功启动 pod 后自动升级 |
 | `sandbox_runtime_kata_negative_only` | 快照 | 首 pod probe 通过,但 kernel 仅负向验证(Kata 只能排除 gVisor,无法与未隔离 runc 区分):network_egress 升级 enforced,kernel 保持 unsupported | 无需修复;换 gVisor tier 可获得 kernel 正向验证 |
 | `sandbox_create_failed` | 运行期 | create 请求被拒、create 失败或 boot probe 失败(probe 失败会立即销毁 pod) | 查看 message 内嵌原因(含 provider probe 码透传) |
@@ -203,10 +202,13 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
    (每请求 host 只在启动时可知,静态探测需要稳定 URL)。sidecar tier 须将
    控制面主机名加入该 tier 的 `egress_allow_hosts`;CNI tier 须公网可达
    (loopback/私网/集群内地址会被拒)。
-3. proxy token TTL:生效 webui proxy token TTL 必须 ≥ WebUI token TTL——
-   `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES` ≥ 1440(默认 WebUI token TTL 24h
-   下);默认 proxy token TTL 仅 240min,须显式抬高,否则
-   `sandbox_proxy_token_ttl_too_short`。
+3. proxy token TTL **无部署前置**(T-F):pod 寿命由启动器钳制——create 时
+   `min(WebUI token TTL, 生效 proxy token TTL)`,每次 renew 再钳到
+   `min(now + WebUI token TTL, token 过期时刻)`(UTC;token 不可解码/为空时
+   钳到 now,即随失效凭证一起终止)。短 TTL 只缩短 pod 寿命,不会让 pod 活过
+   其 LLM 凭证;不需要为申报 sandboxed 抬高
+   `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES`(抬高会连带拉长本地 webui 凭据
+   寿命)。
 4. HTTPS:沿用外部反代的端口段映射(`/webui/<port>`,见 `docs/cn/NGINX.md`)
    ——sandboxed 形态的浏览器端口是本地代理端口,取自同一 port_range
    (默认 3100-3200);单用户 + sandboxed 以代理端口分配替代硬编码 3100。
@@ -227,10 +229,10 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
 |---|---|---|
 | WebUI token TTL | 24h(默认) | `OPENACE_WEBUI_TOKEN_TTL_SECONDS`(86400) |
 | pod create timeout | min(WebUI token TTL, 生效 proxy token TTL) | 启动器 launch 时计算 |
-| pod renew 目标 | min(now + WebUI token TTL, proxy token 过期时刻)——pod 至多活到其 LLM 凭证失效;钳制点之后由空闲回收正常拆除,下次 `/user-url` 重建 + 快照恢复 | 启动器 renew 钳制 |
+| pod renew 目标 | min(now(UTC) + WebUI token TTL, proxy token 过期时刻)——pod 至多活到其 LLM 凭证失效;token 不可解码/为空 → 钳到 now(fail-closed,不再每轮前移一个 fallback TTL);钳制点之后由空闲回收正常拆除,下次 `/user-url` 重建 + 快照恢复 | 启动器 renew 钳制 |
 | 空闲回收 | 30min(默认) | `workspace.idle_timeout_minutes` |
-| 周期快照导出 + renew | 默认 5min,实际随 cleanup 间隔:维护检查搭载在 cleanup 循环里,`workspace.cleanup_interval_minutes`(默认 5)> 5min 时实际导出间隔 = cleanup 间隔 | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300(下限)+ cleanup 循环 sleep |
-| 默认 proxy token TTL | 240min(申报 sandboxed 须抬到 ≥ 1440) | `DEFAULT_PROXY_TOKEN_TTL_MINUTES`,env `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES` |
+| 周期快照导出 + renew + 心跳刷新 | 默认 5min,实际随 cleanup 间隔:维护检查搭载在 cleanup 循环里,`workspace.cleanup_interval_minutes`(默认 5)> 5min 时实际导出间隔 = cleanup 间隔 | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300(下限)+ cleanup 循环 sleep |
+| 默认 proxy token TTL | 240min(无需为 sandboxed 抬高;pod TTL 被钳到它之下) | `DEFAULT_PROXY_TOKEN_TTL_MINUTES`,env `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES` |
 
 token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用现行 token
 经本地代理探测(通过即证明 代理→网关→pod→webui→token 校验 全链)。
