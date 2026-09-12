@@ -41,7 +41,7 @@ class TestLoadConfig:
     """Tests for _load_config() parsing."""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_load_config_basic(self, mock_load):
+    def test_load_config_basic(self, mock_load, tmp_path):
         """Test loading basic workspace config."""
         config = WorkspaceConfig(
             enabled=True,
@@ -49,7 +49,10 @@ class TestLoadConfig:
         )
         mock_load.return_value = config
 
-        manager = WebUIManager()
+        # Issue #3377: config without token_secret makes the manager persist
+        # a generated secret under CONFIG_DIR — keep that off the host.
+        with patch("app.repositories.database.CONFIG_DIR", str(tmp_path)):
+            manager = WebUIManager()
         assert manager.config.enabled is True
         assert manager.config.multi_user_mode is True
 
