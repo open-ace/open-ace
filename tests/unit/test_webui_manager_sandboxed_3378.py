@@ -98,7 +98,7 @@ class _FakeLauncher:
         self.renew_calls.append(sandbox_id)
         return "2099-01-01T00:00:00"
 
-    def export_snapshot(self, sandbox_id, *, restore_confirmed):
+    def export_snapshot(self, sandbox_id, *, restore_confirmed, user_id=None):
         self.exports.append(restore_confirmed)
         return b"TAR"
 
@@ -324,6 +324,68 @@ def test_idle_reclaim_exports_destroys_and_unproxies():
     assert instance.port not in manager._port_allocations
 
 
+def test_idle_teardown_runs_outside_the_registry_lock(monkeypatch):
+    """T-I: a sandboxed teardown reaches the sandbox API (export + delete,
+    up to ~90s per pod) and must not pin the registry lock — it used to block
+    every concurrent /user-url hit for the whole idle batch."""
+    monkeypatch.setattr(
+        "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+        lambda: type(
+            "_NoRevoke",
+            (),
+            {"revoke_proxy_tokens_for_session": lambda *a, **kw: 0},
+        )(),
+    )
+
+    class _ParkingLauncher(_FakeLauncher):
+        release = False
+        entered = False
+
+        def destroy(self, sandbox_id, user_id, *, restore_confirmed, final_export=True):
+            self.entered = True  # teardown started; park cooperatively
+            import gevent
+
+            for _ in range(200):  # park up to ~10s, yielding to the hub
+                if self.release:
+                    break
+                gevent.sleep(0.05)
+            self.destroy_calls.append(
+                {
+                    "sandbox_id": sandbox_id,
+                    "user_id": user_id,
+                    "restore_confirmed": restore_confirmed,
+                    "final_export": final_export,
+                }
+            )
+
+    launcher = _ParkingLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    manager.get_user_instance(7).last_activity = datetime.now() - timedelta(hours=2)
+
+    import gevent
+
+    greenlet = gevent.spawn(manager.cleanup_idle_instances)
+    # Let the teardown start (it parks inside destroy)...
+    for _ in range(500):
+        if launcher.entered:
+            break
+        gevent.sleep(0.01)
+    assert launcher.entered, "idle teardown did not start"
+
+    # ...the registry slot is already free and _lock stays acquirable while
+    # the teardown is parked (a regression re-holding _lock times out here).
+    assert manager.get_user_instance(7) is None
+    assert manager._lock.acquire(timeout=1.0) is True
+    manager._lock.release()
+
+    launcher.release = True
+    greenlet.join(timeout=10)
+    assert greenlet.successful()
+    assert len(launcher.destroy_calls) == 1
+    assert manager.get_user_instance(7) is None
+
+
 def test_periodic_maintenance_exports_and_renews_each_live_sandbox():
     launcher = _FakeLauncher()
     manager = _manager(launcher=launcher)
@@ -359,7 +421,7 @@ def test_maintenance_tick_refreshes_process_heartbeat(tmp_path, monkeypatch):
 
 def test_maintenance_is_fail_soft_per_instance():
     class _ExplodingLauncher(_FakeLauncher):
-        def export_snapshot(self, sandbox_id, *, restore_confirmed):
+        def export_snapshot(self, sandbox_id, *, restore_confirmed, user_id=None):
             raise RuntimeError("execd gone")
 
     launcher = _ExplodingLauncher()

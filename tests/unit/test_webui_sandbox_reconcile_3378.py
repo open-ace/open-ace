@@ -616,18 +616,47 @@ def test_snapshot_round_trip_via_independent_root(tmp_path):
     assert str(ws.state_root()) == str(CONFIG_DIR) + "/webui-agent-state"
 
 
-def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, monkeypatch):
+def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, caplog):
     fake = FakeOpenSandboxApi()
     launcher = _launcher_with_pod(fake, tmp_path, max_bytes=1024)
     sid = fake.create_sandbox({"metadata": {}})["id"]
     # A tar larger than the ceiling.
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes() + b"\0" * 4096
+    blob = _tar_bytes() + b"\0" * 4096
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = blob
     old = _tar_bytes("old/keep.tar", b"old")
     (tmp_path / "webui-5.tar").write_bytes(old)
 
-    blob = launcher.export_snapshot(sid, restore_confirmed=True)
-    assert blob is None  # WARNING + skip, never a truncation
+    with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+        result = launcher.export_snapshot(sid, restore_confirmed=True, user_id=5)
+    assert result is None  # skip, never a truncation
     assert (tmp_path / "webui-5.tar").read_bytes() == old  # last good kept
+    # T-I: the freeze is audible as its own sentence naming the subject, the
+    # ceiling env var, and the sizes (N > M).
+    freeze_logs = [r for r in caplog.records if "frozen until trimmed" in r.message]
+    assert freeze_logs, "the over-ceiling skip must log its dedicated warning"
+    message = freeze_logs[0].getMessage()
+    assert "user 5" in message
+    assert ws.STATE_MAX_BYTES_ENV in message  # OPENACE_WEBUI_STATE_MAX_BYTES
+    assert str(len(blob)) in message  # N (actual size)
+    assert "1024" in message  # M (ceiling)
+    assert "keeping previous snapshot" in message
+
+
+def test_destroy_deletes_pod_even_when_final_export_raises(tmp_path):
+    """T-I: an exception escaping the final export must never skip the
+    delete — an idle webui pod leaking forever is worse than a lost export."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    sid = fake.create_sandbox({"metadata": {}})["id"]
+
+    def _boom(sandbox_id, *, restore_confirmed, user_id=None):
+        raise OpenSandboxApiError("execd exploded mid-export", status_code=500)
+
+    launcher.export_snapshot = _boom  # type: ignore[method-assign]
+    launcher.destroy(sid, 5, restore_confirmed=True, final_export=True)
+    assert sid in fake.deleted  # delete_sandbox ran regardless
 
 
 def test_state_max_bytes_env_override(monkeypatch):

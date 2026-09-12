@@ -536,7 +536,9 @@ class WebUIManager:
         for instance in self._live_sandboxed_instances():
             try:
                 blob = instance.launcher.export_snapshot(
-                    instance.sandbox_id, restore_confirmed=instance.restore_confirmed
+                    instance.sandbox_id,
+                    restore_confirmed=instance.restore_confirmed,
+                    user_id=instance.user_id,
                 )
                 if blob is not None:
                     instance.launcher.persist_snapshot(instance.user_id, blob)
@@ -552,42 +554,70 @@ class WebUIManager:
                 )
 
     def cleanup_idle_instances(self):
-        """Clean up instances that have been idle for too long."""
+        """Clean up instances that have been idle for too long.
+
+        T-I (review round 1): the registry scan runs under the lock, but the
+        TEARDOWN runs outside it — a sandboxed teardown reaches the sandbox
+        API (final export + delete, up to ~90s per pod) and used to pin _lock
+        for the whole batch, blocking every concurrent /user-url hit.
+        stop_user_webui takes _lock itself; the single-user branch re-checks
+        idleness under _single_user_lock (a hit in between refreshes the
+        activity timestamp and spares the instance). Lock order stays the
+        established _single_user_lock → _lock (we now hold neither across the
+        teardowns).
+        """
         now = datetime.now()
         timeout = timedelta(minutes=self.config.idle_timeout_minutes)
 
         with self._lock:
-            to_cleanup = []
-            for user_id, instance in self._instances.items():
-                idle_time = now - instance.last_activity
-                if idle_time > timeout:
-                    to_cleanup.append(user_id)
+            to_cleanup = [
+                user_id
+                for user_id, instance in self._instances.items()
+                if now - instance.last_activity > timeout
+            ]
+            # Pop the registry slots NOW (fast, consistent with the scan) so
+            # the slow teardown below runs on already-deregistered instances.
+            stale_instances = {user_id: self._instances.pop(user_id) for user_id in to_cleanup}
+            single = self._single_user_instance
+            stale_single = (
+                single is not None
+                and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+                and now - single.last_activity > timeout
+            )
 
-            for user_id in to_cleanup:
-                logger.info(f"Cleaning up idle instance for user {user_id}")
-                self._stop_instance_internal(user_id)
+        for user_id, instance in stale_instances.items():
+            logger.info(f"Cleaning up idle instance for user {user_id}")
+            self._finish_stop_instance(instance)
 
         # Issue #3378 review (m1): the single-user SANDBOXED instance holds a
         # remote pod plus a proxy port, so it must not be exempt from idle
         # reaping — its last_activity is fed by the proxy's on_activity
         # heartbeat and by /user-url hits. The LOCAL single-user instance
         # keeps its historic never-reaped semantics (shared, fixed port 3100,
-        # no remote resource; restart-on-dead already covers it). Taken AFTER
-        # the _lock block: teardown reaches release_port (which takes _lock),
-        # and the codebase's established order is _single_user_lock → _lock.
-        with self._single_user_lock:
-            single = self._single_user_instance
-            if (
-                single is not None
-                and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
-                and now - single.last_activity > timeout
-            ):
+        # no remote resource; restart-on-dead already covers it). The slot is
+        # cleared under _single_user_lock (idleness re-checked — a hit in
+        # between refreshes the activity and spares the instance); the
+        # teardown runs after the lock is released. Lock order stays the
+        # established _single_user_lock → _lock; neither is held across a
+        # teardown.
+        if stale_single:
+            popped_single: WebUIInstance | None = None
+            with self._single_user_lock:
+                single = self._single_user_instance
+                if (
+                    single is not None
+                    and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+                    and now - single.last_activity > timeout
+                ):
+                    popped_single = single
+                    self._single_user_instance = None
+            if popped_single is not None:
                 logger.info(
                     "Cleaning up idle single-user sandboxed webui instance (sandbox=%s, port=%s)",
-                    single.sandbox_id,
-                    single.port,
+                    popped_single.sandbox_id,
+                    popped_single.port,
                 )
-                self._stop_single_user_instance_internal()
+                self._finish_stop_single_user(popped_single)
 
     def allocate_port(self, user_id: int, form: str = WEBUI_FORM_LOCAL) -> int:
         """
@@ -1305,12 +1335,20 @@ class WebUIManager:
         Stop the single-user WebUI instance (internal, must be called with lock).
 
         This method is called when the instance is dead and needs to be restarted,
-        or during shutdown.
+        or during shutdown. The registry slot is cleared here (fast); the actual
+        teardown runs in :meth:`_finish_stop_single_user`, which is safe to call
+        WITHOUT _single_user_lock (T-I: idle cleanup tears down outside the lock
+        so a slow sandbox destroy cannot pin it).
         """
         if self._single_user_instance is None:
             return
 
         instance = self._single_user_instance
+        self._single_user_instance = None
+        self._finish_stop_single_user(instance)
+
+    def _finish_stop_single_user(self, instance: WebUIInstance) -> None:
+        """Teardown half of the single-user stop (no _single_user_lock held)."""
         # Issue #3378 review (Q1): revoke the instance's proxy tokens before
         # teardown — same precedent as _stop_instance_internal for the
         # multi-user form. Without this, a stopped instance leaves a
@@ -1333,7 +1371,6 @@ class WebUIManager:
                 instance.port,
             )
             self._teardown_sandboxed_instance(instance)
-            self._single_user_instance = None
             return
 
         logger.info(
@@ -1354,7 +1391,6 @@ class WebUIManager:
             except Exception as e:
                 logger.warning(f"Error stopping single-user WebUI process: {e}")
 
-        self._single_user_instance = None
         logger.info("Single-user WebUI instance stopped")
 
     def _start_instance_internal(
@@ -2107,6 +2143,11 @@ class WebUIManager:
         """
         Stop a webui instance (internal, must be called with lock).
 
+        The registry pop happens here (fast, under the lock); the teardown runs
+        in :meth:`_finish_stop_instance`, which is safe to call WITHOUT the
+        lock (T-I: idle cleanup deregisters first and tears down outside the
+        lock — a sandbox destroy can take ~90s per pod and must not pin it).
+
         Args:
             user_id: User ID to stop instance for.
         """
@@ -2114,6 +2155,11 @@ class WebUIManager:
             return
 
         instance = self._instances.pop(user_id)
+        self._finish_stop_instance(instance)
+
+    def _finish_stop_instance(self, instance: WebUIInstance) -> None:
+        """Teardown half of _stop_instance_internal (no _lock needed)."""
+        user_id = instance.user_id
 
         try:
             from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
