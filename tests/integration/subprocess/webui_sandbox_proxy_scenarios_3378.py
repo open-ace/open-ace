@@ -301,6 +301,26 @@ def _build_scenarios(mod):
         finally:
             runner.stop()
 
+    def non_ascii_digit_content_length_is_400_not_502(gateway):
+        # T-A follow-up: isdigit() accepts Unicode superscripts after
+        # iso-8859-1 decoding (0xB2 = '²'); without the isascii() guard
+        # int() raises an uncaught ValueError and the client sees a 502
+        # proxy error with a server-side exception stack instead of the
+        # correct 400.
+        runner = mod._ProxyThread(gateway)
+        port = runner.start()
+        try:
+            raw = (
+                "POST /api/chat HTTP/1.1\r\n".encode("ascii")
+                + f"Host: localhost:{port}\r\n".encode("ascii")
+                + b"Content-Length: \xb2\r\n\r\n"
+            )
+            response = mod._request(port, raw)
+            assert response.startswith(b"HTTP/1.1 400"), response[:64]
+            assert gateway.requests == []
+        finally:
+            runner.stop()
+
     def launcher_health_check_true_through_real_proxy(gateway):
         launcher = mod._real_launcher()
         runner = mod._ProxyThread(gateway)
@@ -436,6 +456,9 @@ def _build_scenarios(mod):
             chunked_request_body_is_dechunked_and_forwarded
         ),
         "negative_chunk_size_is_400": negative_chunk_size_is_400,
+        "non_ascii_digit_content_length_is_400_not_502": (
+            non_ascii_digit_content_length_is_400_not_502
+        ),
         "launcher_health_check_true_through_real_proxy": (
             launcher_health_check_true_through_real_proxy
         ),

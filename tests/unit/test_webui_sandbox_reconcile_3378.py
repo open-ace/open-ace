@@ -774,3 +774,29 @@ def test_unwritable_cp_record_leaves_restore_unconfirmed(tmp_path):
 
     result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
     assert result.restore_confirmed is False
+
+
+def test_reconcile_skips_when_heartbeat_root_unwritable(tmp_path, monkeypatch):
+    """T-D follow-up: an unwritable heartbeat root must not let the sweep run.
+
+    The same broken root also hides every peer's heartbeat, so "0 peers"
+    means "cannot prove we are alone", not "we are alone" — running the
+    sweep would re-open the fleet-wide pod destruction the mutex exists to
+    prevent (shared-PVC EACCES/EIO is the same fault source as the T-E
+    data-loss paths).
+    """
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+
+    def _unwritable(_override=None):
+        return None  # write_webui_heartbeat's fail-soft failure result
+
+    monkeypatch.setattr(ws, "write_webui_heartbeat", _unwritable)
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == []
+    assert orphan["id"] not in fake.deleted
+    assert fake.command_bodies == []  # no export/destroy traffic at all

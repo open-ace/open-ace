@@ -413,6 +413,10 @@ def test_negative_chunk_size_is_400():
     assert _assert_scenario(_SCENARIOS, "negative_chunk_size_is_400")
 
 
+def test_non_ascii_digit_content_length_is_400_not_502():
+    assert _assert_scenario(_SCENARIOS, "non_ascii_digit_content_length_is_400_not_502")
+
+
 # ── m6a: the REAL launcher.health_check through the real proxy ────────
 
 
