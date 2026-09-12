@@ -709,6 +709,62 @@ def test_prestart_still_requires_mapping_for_os_user(monkeypatch):
 MOCK_USER = {"id": 7, "username": "alice", "role": "user", "tenant_id": 1}
 
 
+def test_webui_token_auth_paths_validate_against_the_singleton(app, client, monkeypatch):
+    """T-G: both one-shot WebUI-manager construction sites (the workspace
+    blueprint's before_request and session_access._set_user_from_webui_token)
+    must validate against the manager SINGLETON — a fresh WebUIManager() has
+    neither the running instances nor their per-instance secrets, so every
+    sandboxed-instance token validated to a constant 401."""
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    _url, token = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    # Sanity: the token needs the instance (per-instance secret) to validate.
+    assert manager.validate_token(token)[0] is True
+
+    monkeypatch.setattr(
+        "app.services.webui_manager.get_webui_manager", lambda: manager, raising=True
+    )
+    # Keep the /user-url flow after auth on the (fake-launcher) sandbox path —
+    # no real webui process may be spawned from a unit test.
+    sandbox_snapshot = wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend="opensandbox:kata",
+        isolation_level=wic.ISOLATION_LEVEL_SANDBOXED,
+        enforced=wic._SANDBOXED_ENFORCED,
+        unsupported=wic._SANDBOXED_UNSUPPORTED,
+        reasons=(),
+    )
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: sandbox_snapshot)
+
+    # Path 1: the workspace blueprint's before_request (load_user). A fresh
+    # WebUIManager() would 401 here; the singleton resolves user 7 and the
+    # request proceeds into the route handler.
+    with (
+        patch("app.repositories.user_repo.UserRepository") as repo_cls,
+        patch("app.routes.workspace._load_user_from_token", return_value=None),
+    ):
+        repo_cls.return_value.get_user_by_id.return_value = {
+            **MOCK_USER,
+            "system_account": "",
+        }
+        resp = client.get(f"/api/workspace/user-url?token={token}")
+    assert resp.status_code == 200
+
+    # Path 2: session_access._set_user_from_webui_token (load_remote_user).
+    from flask import g
+
+    from app.modules.workspace.session_access import load_remote_user
+
+    with (
+        patch("app.repositories.user_repo.UserRepository") as repo_cls,
+        patch("app.modules.workspace.session_access._load_user_from_token", return_value=None),
+        app.test_request_context(f"/?token={token}"),
+    ):
+        repo_cls.return_value.get_user_by_id.return_value = {**MOCK_USER}
+        assert load_remote_user() is None  # authenticated, no rejection tuple
+        assert g.user_id == 7
+
+
 def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
     class _StubManager:
         def __init__(self):
