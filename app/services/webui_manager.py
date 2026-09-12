@@ -822,12 +822,16 @@ class WebUIManager:
         per-instance secret, so validation needs the instance. Searched
         lock-free on purpose: the registries hold dataclass instances and the
         lookup is advisory (a concurrent stop just makes the answer None).
+
+        Review round 1 (T-C): the SHARED single-user sandboxed instance
+        carries tokens minted for every requester, so it matches on the port
+        alone — the token's user_id is proven by the per-instance-secret
+        signature the caller verifies next, never by this lookup.
         """
         single = self._single_user_instance
         if (
             single is not None
             and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
-            and single.user_id == user_id
             and single.port == port
         ):
             return single
@@ -1366,11 +1370,24 @@ class WebUIManager:
             )
         return self._sandbox_launcher
 
-    def _mint_sandboxed_token(self, instance: WebUIInstance) -> str:
-        """Mint a v2 token signed with the instance's per-instance secret."""
+    def _mint_sandboxed_token(
+        self, instance: WebUIInstance, *, requester_id: int | None = None
+    ) -> str:
+        """Mint a v2 token signed with the instance's per-instance secret.
+
+        ``requester_id`` (review round 1, T-C): on the shared single-user
+        sandboxed instance the token must be minted for the REQUESTING user.
+        The reuse branch used the pod creator's user_id, so every subsequent
+        user's token validated as the creator — including against the admin
+        paths URL_TOKEN_ALLOWED_PATHS admits — a privilege escalation.
+        Default (None) keeps the multi-user behavior of minting for the
+        instance owner, aligned with the local branch's
+        generate_token(user_id, ...) precedent.
+        """
         from app.services.webui_sandbox import mint_instance_token
 
-        token = mint_instance_token(instance.user_id, instance.port, instance.token_secret)
+        subject = instance.user_id if requester_id is None else int(requester_id)
+        token = mint_instance_token(subject, instance.port, instance.token_secret)
         instance.token = token
         return token
 
@@ -1479,7 +1496,10 @@ class WebUIManager:
             if instance is not None and getattr(instance, "form", "") == WEBUI_FORM_SANDBOXED:
                 if instance.is_alive():
                     instance.update_activity()
-                    token = self._mint_sandboxed_token(instance)
+                    # T-C: mint for the REQUESTER, never the pod creator —
+                    # the shared instance serves every user, and each token
+                    # must validate as the user who asked for it.
+                    token = self._mint_sandboxed_token(instance, requester_id=user_id)
                     return f"{self._remove_port_from_url(base_url)}:{instance.port}", token
                 logger.warning(
                     "Single-user sandboxed webui (sandbox=%s) is dead; restarting",

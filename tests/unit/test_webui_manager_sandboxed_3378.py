@@ -329,6 +329,33 @@ def test_single_user_sandboxed_url_uses_proxy_port_not_3100():
     assert instance.proxy.stopped
 
 
+def test_single_user_sandboxed_token_mints_for_the_requester():
+    """T-C: the shared single-user sandboxed instance must mint each token
+    for the REQUESTING user. The reuse branch minted with the pod creator's
+    user_id, so a second user's token validated as the creator — including
+    against the admin paths URL_TOKEN_ALLOWED_PATHS admits."""
+    launcher = _FakeLauncher()
+    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
+    _url, token_creator = manager.get_user_webui_url(
+        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+    instance = manager._single_user_instance
+    assert len(launcher.launch_calls) == 1  # pod reused below, never recreated
+
+    _url2, token_other = manager.get_user_webui_url(
+        9, "u9", "http://192.168.1.5:19888", required_isolation="sandboxed"
+    )
+    assert len(launcher.launch_calls) == 1  # same shared pod
+    assert token_other.startswith("v2:9:")
+
+    # Each token validates (against the instance secret) to ITS OWN user.
+    assert manager.validate_token(token_creator)[:2] == (True, 3)
+    assert manager.validate_token(token_other)[:2] == (True, 9)
+    # And the pod-creator subject never leaks into the second user's token.
+    assert not token_other.startswith("v2:3:")
+    assert instance.user_id == 3  # the pod still belongs to its creator
+
+
 def test_single_user_sandboxed_instance_resolves_for_proxy_token_lifecycle(monkeypatch, tmp_path):
     """M1: the pod's baked-in LLM proxy token only validates while its
     instance resolves as alive — api_key_proxy._webui_instance_alive goes
