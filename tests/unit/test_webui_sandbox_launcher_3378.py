@@ -386,6 +386,7 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
     class _Endpoint:
         tier = "kata"
         webui_image = _WEBUI_IMAGE
+        api_key_env = "OSB_KEY"
         egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
 
         class attestations:
@@ -397,7 +398,7 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
         image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
 
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
-    monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
+    monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
 
     class _Cfg:
         enabled = True
@@ -521,6 +522,7 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
     class _Endpoint:
         tier = "unused"
         webui_image = _WEBUI_IMAGE
+        api_key_env = "OSB_KEY"
         egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
 
         class attestations:
@@ -532,7 +534,7 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
         image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
 
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _TwoTierCfg())
-    monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
+    monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
 
     class _Cfg:
         enabled = True
