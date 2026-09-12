@@ -300,9 +300,13 @@ def load_user():
 
         # Session token failed — try WebUI token validation
         try:
-            from app.services.webui_manager import WebUIManager
+            # Review round 1 (T-G): validate against the manager SINGLETON.
+            # A fresh WebUIManager() carries a random token_secret and empty
+            # instance registries, so every sandboxed-instance token (signed
+            # with the pod's per-instance secret) validated to a constant 401.
+            from app.services.webui_manager import get_webui_manager
 
-            webui_manager = WebUIManager()
+            webui_manager = get_webui_manager()
             is_valid, user_id, error = webui_manager.validate_token(token)
             if is_valid and user_id:
                 from app.repositories.user_repo import UserRepository

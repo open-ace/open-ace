@@ -126,9 +126,12 @@ def _set_user_from_webui_token() -> bool:
 
     url_token = normalize_webui_token(url_token)
     try:
-        from app.services.webui_manager import WebUIManager
+        # Review round 1 (T-G): validate against the manager SINGLETON — a
+        # fresh WebUIManager() cannot see sandboxed-instance tokens (per-
+        # instance secrets live on the singleton's registered instances).
+        from app.services.webui_manager import get_webui_manager
 
-        ok, user_id, _ = WebUIManager().validate_token(url_token)
+        ok, user_id, _ = get_webui_manager().validate_token(url_token)
         if ok and user_id:
             from app.repositories.user_repo import UserRepository
 
