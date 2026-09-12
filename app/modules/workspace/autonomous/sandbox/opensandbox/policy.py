@@ -61,6 +61,17 @@ PROVIDER_NAME = "opensandbox"
 # drift apart.
 INSTALLATION_METADATA_KEY = "openace.installation"
 
+# Issue #3378: metadata namespace for interactive WebUI pods. Deliberately
+# independent of ``openace.generation`` (the workflow-generation key, F33) —
+# ``process_generation`` carries the web PROCESS's uuid so the web worker's
+# reconcile can distinguish its own pods from a dead predecessor's. Lives here
+# (not in app/services) so the provider's orphan sweep can honour the kind
+# exclusion contract without importing a service module.
+WEBUI_METADATA_KIND = "openace.webui.kind"
+WEBUI_METADATA_GENERATION = "openace.webui.process_generation"
+WEBUI_METADATA_OWNER = "openace.webui.owner"
+WEBUI_METADATA_KIND_VALUE = "webui"
+
 # Upstream CreateSandboxRequest.timeout is seconds with minimum 60.
 _MIN_TTL_SECONDS = 60
 
@@ -80,7 +91,7 @@ _AGENT_HOME = "/home/agent"
 #
 # This is why the create body sets `entrypoint` explicitly rather than relying on
 # the image's own — a script baked into the image would be overridden here.
-def _build_entrypoint(uid: int, gid: int) -> list[str]:
+def _build_entrypoint(uid: int, gid: int, *, command_suffix: str = "") -> list[str]:
     """Create the agent's directories AND give them to the exec identity.
 
     The chown is not cosmetic. Files uploaded through execd land root-owned, and
@@ -116,18 +127,28 @@ def _build_entrypoint(uid: int, gid: int) -> list[str]:
     work even if this line did not, but ``-c`` on our own invocations does
     nothing for the agent's: locally, ``git status`` still failed until the
     global config was set.
+
+    Issue #3378: ``command_suffix`` lets the interactive WebUI launcher append a
+    restore gate and an ``exec qwen-code-webui`` after the bootstrap. The
+    bootstrap half is kept VERBATIM — same directories, same chown, same
+    safe.directory — so a webui pod gets the identical HOME/TMP/XDG tree and git
+    ownership fix the agent pods rely on. The suffix REPLACES the
+    ``exec tail -f /dev/null`` placeholder (an exec'd webui never returns to it,
+    and text after an exec is unreachable anyway).
     """
     dirs = (
         f"{_AGENT_HOME}/tmp {_AGENT_HOME}/.cache {_AGENT_HOME}/.config "
         f"{_AGENT_HOME}/.local/share {_AGENT_HOME} {_WORKSPACE_ROOT}"
     )
-    return [
-        "/bin/sh",
-        "-c",
+    bootstrap = (
         f"mkdir -p {dirs} && chown -R {uid}:{gid} {_AGENT_HOME} {_WORKSPACE_ROOT} || true; "
         f"git config --global --add safe.directory {_WORKSPACE_ROOT} || true; "
-        "exec tail -f /dev/null",
-    ]
+    )
+    if command_suffix.strip():
+        script = f"{bootstrap}{command_suffix}"
+    else:
+        script = f"{bootstrap}exec tail -f /dev/null"
+    return ["/bin/sh", "-c", script]
 
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -696,40 +717,68 @@ def build_create_request(
     generation: int,
     tenant: str | None = None,
     probes_passed: bool = True,
+    entrypoint_suffix: str = "",
+    timeout_seconds: int | None = None,
+    extra_metadata: Mapping[str, str] | None = None,
 ) -> dict:
-    """Build the ``POST /v1/sandboxes`` body, refusing anything unenforceable."""
+    """Build the ``POST /v1/sandboxes`` body, refusing anything unenforceable.
+
+    Issue #3378 adds three optional overrides for the interactive WebUI pod
+    launcher — the request SHAPE is unchanged, no second builder exists:
+
+    * ``entrypoint_suffix`` — appended verbatim after the bootstrap half of
+      :func:`_build_entrypoint` (which see for why the bootstrap must stay
+      byte-identical and why the suffix replaces the ``exec tail -f /dev/null``
+      placeholder);
+    * ``timeout_seconds`` — replaces the wall-clock/TTL-derived pod timeout,
+      clamped to upstream's documented minimum. The WebUI launcher passes
+      ``min(webui token TTL, effective proxy-token TTL)`` so a pod never
+      outlives its baked-in LLM credentials;
+    * ``extra_metadata`` — merged over the standard ``openace.*`` keys (values
+      coerced to str). The WebUI launcher uses the ``openace.webui.*`` namespace
+      (F33: ``openace.generation`` is the workflow-generation key and must not
+      be reused for the process generation).
+    """
     spec = synthesise_spec_fields(spec, cfg, endpoint)
     validate_spec_for_endpoint(spec, cfg, endpoint, probes_passed=probes_passed)
 
     policy = spec.policy
     wall_clock = getattr(policy, "wall_clock_limit", 0) if policy else 0
-    ttl = (
-        max(wall_clock, cfg.sandbox_ttl_seconds, _MIN_TTL_SECONDS)
-        if wall_clock > 0
-        else max(cfg.sandbox_ttl_seconds, _MIN_TTL_SECONDS)
-    )
+    if timeout_seconds is not None:
+        ttl = max(int(timeout_seconds), _MIN_TTL_SECONDS)
+    else:
+        ttl = (
+            max(wall_clock, cfg.sandbox_ttl_seconds, _MIN_TTL_SECONDS)
+            if wall_clock > 0
+            else max(cfg.sandbox_ttl_seconds, _MIN_TTL_SECONDS)
+        )
+
+    metadata: dict[str, str] = {
+        "openace.provider": PROVIDER_NAME,
+        # WHICH Open ACE. Reconciliation destroys every sandbox carrying our
+        # provider tag that no local workflow row claims; on a lifecycle
+        # server shared by two installations that filter alone is mutual
+        # destruction. Required by parse_backend_config, so it is never "".
+        INSTALLATION_METADATA_KEY: cfg.installation_id,
+        "openace.task_id": str(spec.task_id),
+        "openace.tenant": str(tenant or ""),
+        "openace.generation": str(generation),
+    }
+    metadata.update({str(k): str(v) for k, v in (extra_metadata or {}).items()})
 
     body: dict = {
         # image is an ImageSpec object, not a bare string.
         "image": {"uri": spec.runtime.image if spec.runtime else endpoint.default_image},
-        "entrypoint": _build_entrypoint(endpoint.exec_uid, endpoint.exec_gid),
+        "entrypoint": _build_entrypoint(
+            endpoint.exec_uid, endpoint.exec_gid, command_suffix=entrypoint_suffix
+        ),
         "resourceLimits": build_resource_limits(policy, cfg, endpoint),
         "timeout": ttl,
         # Without this, sandbox endpoints are reachable with no access token.
         "secureAccess": True,
         "env": build_env(spec, cfg, endpoint),
         # metadata values must all be strings upstream.
-        "metadata": {
-            "openace.provider": PROVIDER_NAME,
-            # WHICH Open ACE. Reconciliation destroys every sandbox carrying our
-            # provider tag that no local workflow row claims; on a lifecycle
-            # server shared by two installations that filter alone is mutual
-            # destruction. Required by parse_backend_config, so it is never "".
-            INSTALLATION_METADATA_KEY: cfg.installation_id,
-            "openace.task_id": str(spec.task_id),
-            "openace.tenant": str(tenant or ""),
-            "openace.generation": str(generation),
-        },
+        "metadata": metadata,
     }
     # The key is OMITTED, not sent empty, under CNI enforcement. Upstream's
     # ensure_egress_runtime_compatible starts `if not network_policy: return`

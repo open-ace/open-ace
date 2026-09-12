@@ -300,9 +300,13 @@ def load_user():
 
         # Session token failed — try WebUI token validation
         try:
-            from app.services.webui_manager import WebUIManager
+            # Review round 1 (T-G): validate against the manager SINGLETON.
+            # A fresh WebUIManager() carries a random token_secret and empty
+            # instance registries, so every sandboxed-instance token (signed
+            # with the pod's per-instance secret) validated to a constant 401.
+            from app.services.webui_manager import get_webui_manager
 
-            webui_manager = WebUIManager()
+            webui_manager = get_webui_manager()
             is_valid, user_id, error = webui_manager.validate_token(token)
             if is_valid and user_id:
                 from app.repositories.user_repo import UserRepository
@@ -2346,6 +2350,7 @@ def get_user_webui_url():
     """
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.services.webui_sandbox import SandboxWebuiError
     from app.services.workspace_isolation_contract import (
         SUPPORTED_ISOLATION_LEVELS,
         IsolationReason,
@@ -2427,7 +2432,12 @@ def get_user_webui_url():
         # replaces it with request.host_url. Omitting this argument regresses
         # the workspace into a blank iframe.
         host_url = flask_request.host_url.rstrip("/")
-        url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
+        # Issue #3378: the effective level the gate resolved drives the
+        # manager's form fork (sandboxed → launcher branch; otherwise the
+        # os_user path is unchanged). The gate itself is contract-owned (T1).
+        url, token = manager.get_user_webui_url(
+            int(user_id), str(system_account), host_url, required_isolation=effective
+        )
 
         # Update activity timestamp
         manager.update_user_activity(user_id)
@@ -2471,6 +2481,42 @@ def get_user_webui_url():
             ),
             503,
         )  # Service Unavailable (e.g., max instances reached)
+
+    except SandboxWebuiError as e:
+        # Issue #3378 review (MINOR-5): the launcher's fail-closed refusals
+        # carry a machine-readable reason code (§5 vocabulary) that the generic
+        # handler below collapsed into an opaque 500. Surface them with the
+        # SAME body shape as the gate rejections above (success/error/
+        # error_code/reasons/isolation) so clients keying on error_code keep
+        # working — the snapshot is always computed before the launch can
+        # fail. 502 (not 400): the request already passed the isolation gate;
+        # this is the upstream sandbox runtime refusing (create failed,
+        # endpoint unresolved), which a client cannot fix by reshaping the
+        # request — 502 distinguishes it from both the policy 400s and the
+        # capacity 503, matching this endpoint's pattern of precise 5xx codes.
+        # The message is a fixed per-code wording, never str(e): the upstream
+        # exception chains embed internal lifecycle URLs and execd allowlist
+        # contents, and every other handler on this endpoint sanitizes its
+        # message. Full details stay in the logger.error below.
+        reason_code = getattr(e, "reason_code", "") or "sandbox_create_failed"
+        reason = IsolationReason(
+            reason_code,
+            "The sandboxed WebUI runtime refused this launch "
+            f"({reason_code}); see the server log for details.",
+        )
+        logger.error(f"Sandboxed webui launch failed at /user-url: {e}")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": reason.message,
+                    "error_code": reason_code,
+                    "reasons": [reason.public_dict()],
+                    "isolation": isolation_snapshot.public_dict(),
+                }
+            ),
+            502,
+        )
 
     except Exception as e:
         logger.error(f"Error getting user webui URL: {e}")
