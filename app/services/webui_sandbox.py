@@ -1468,9 +1468,12 @@ class SandboxWebuiProxy:
                 # T-A: the value must be a non-empty run of ASCII digits.
                 # int() alone would accept "-1", "5_0" (→50!), "+5" and
                 # " 5" — every one of those frames a different body than
-                # the upstream will read after re-serialization.
+                # the upstream will read after re-serialization. isascii()
+                # keeps Unicode digit-lookalikes (e.g. ² after iso-8859-1
+                # decoding) from passing isdigit() and then blowing up
+                # int() with an uncaught ValueError (review follow-up).
                 raw_length = lowered["content-length"]
-                if not raw_length or not raw_length.isdigit():
+                if not raw_length or not raw_length.isascii() or not raw_length.isdigit():
                     raise _BadRequest("invalid Content-Length")
                 length = int(raw_length)
                 if length < 0:  # unreachable post-isdigit; depth in depth
@@ -1779,10 +1782,18 @@ def reconcile_webui_orphans(
         return []
     if cfg is None:
         return []
-    # T-D: register this process, then honour the peer mutex. Both steps are
-    # fail-soft; a heartbeat root that cannot be written simply means peers
-    # also cannot see us, and the sweep degrades to the previous behavior.
-    write_webui_heartbeat(state_root_override)
+    # T-D: register this process, then honour the peer mutex. The heartbeat
+    # write is fail-soft, but an unwritable root must NOT let the sweep run:
+    # the same broken root also hides every peer's heartbeat, so "0 peers"
+    # would mean "cannot prove we are alone", not "we are alone" — running
+    # the sweep then re-opens the fleet-wide pod destruction this mutex
+    # exists to prevent (review follow-up on T-D).
+    if write_webui_heartbeat(state_root_override) is None:
+        logger.warning(
+            "webui orphan reconcile skipped: heartbeat state root is unwritable, "
+            "so peer liveness cannot be established"
+        )
+        return []
     peers = fresh_peer_heartbeats(state_root_override)
     if peers:
         logger.info(
