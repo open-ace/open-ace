@@ -110,7 +110,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
 `sandboxed` 等级的探测是**零 pod、配置面 fail-closed** 的(不创建 pod 即可
-判定);以下前 6 个为探测级 reason(命中即拒绝),后 2 个为快照级(出现在契约
+判定);以下前 7 个为探测级 reason(命中即拒绝),后 2 个为快照级(出现在契约
 `reasons[]` 中、不阻止申报),最后 2 个为运行期错误码(启动器抛出,非探测码)。
 
 | code | 级别 | 含义 | 修复动作 |
@@ -120,6 +120,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `webui_image_missing` | 探测 | 该 tier 未配置 `webui_image` | 配置含 qwen-code-webui 的镜像(参考构建:`scripts/docker/webui-sandbox.Dockerfile`) |
 | `webui_image_not_pinned` | 探测 | `webui_image` 非 digest-pinned(`name@sha256:<64 hex>`) | 改用 digest 引用——tag 可被重指向,会架空白名单 |
 | `webui_image_not_allowed` | 探测 | `webui_image` 不在 `image_allowlist` | 将镜像加入 `image_allowlist`,或换用已在列的镜像 |
+| `sandbox_api_key_missing` | 探测 | 该 tier 的 `api_key_env` 指定的环境变量在本进程为空——创建 pod 的第一个 API 调用就会失败;契约与启动路径不得对同一台主机给出矛盾结论(#3375 原则) | 在运行 web 进程的环境中设置该 API key(sandbox-backends.json 的 `api_key_env` 字段) |
 | `sandbox_proxy_unreachable` | 探测 | `workspace.webui_callback_url` 未设置;或该 URL 在该 tier 出口策略下不可达(loopback;sidecar tier 不在 `egress_allow_hosts`;CNI tier 为私网/集群内地址) | 设置 `webui_callback_url`;sidecar tier 将控制面主机名加入 `egress_allow_hosts`;CNI tier 保证公网可达 |
 | `sandbox_runtime_unverified` | 快照 | 静态视图:仅配置面验证通过;kernel/network_egress 待首个 pod boot probe 确认(控制面重启后回退到该状态) | 无需修复;首次成功启动 pod 后自动升级 |
 | `sandbox_runtime_kata_negative_only` | 快照 | 首 pod probe 通过,但 kernel 仅负向验证(Kata 只能排除 gVisor,无法与未隔离 runc 区分):network_egress 升级 enforced,kernel 保持 unsupported | 无需修复;换 gVisor tier 可获得 kernel 正向验证 |

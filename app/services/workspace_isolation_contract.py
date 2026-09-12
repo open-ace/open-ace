@@ -19,6 +19,7 @@ successful pod probe memoizes the upgrade (in-process; resets on restart).
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -103,6 +104,7 @@ SANDBOX_PROBE_REASON_CODES = (
     "webui_image_missing",
     "webui_image_not_pinned",
     "webui_image_not_allowed",
+    "sandbox_api_key_missing",
     "sandbox_proxy_unreachable",
 )
 
@@ -319,6 +321,25 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
                 "webui_image_not_allowed",
                 f"webui_image for tier {tier!r} is not in image_allowlist; "
                 "refusing to launch interactive pods from an unlisted image.",
+            ),
+        )
+
+    # T-J (review round 1): a tier whose API key env var is empty in THIS
+    # process cannot create pods — the launcher's first API call fails
+    # upstream. The contract and the gate must not declare sandboxed on the
+    # same host where the launch path cannot succeed (#3375's "no
+    # contradictory verdicts for one host" principle).
+    api_key_env = getattr(endpoint, "api_key_env", "") or ""
+    if not os.environ.get(api_key_env, "").strip():
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_api_key_missing",
+                f"The tier's API key environment variable {api_key_env!r} is "
+                "not set in this process; sandboxed WebUI pods cannot be "
+                "created (the autonomous backend config names it via "
+                "api_key_env).",
             ),
         )
 

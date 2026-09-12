@@ -37,12 +37,21 @@ class _Endpoint:
     def __init__(self, webui_image=_VALID_IMAGE, egress_allow_hosts=None):
         self.tier = "kata"
         self.webui_image = webui_image
+        self.api_key_env = "OSB_KEY"
         self.egress_allow_hosts = (
             ("openace.open-ace.svc.cluster.local",)
             if egress_allow_hosts is None
             else tuple(egress_allow_hosts)
         )
         self.attestations = _Attestations()
+
+
+@pytest.fixture(autouse=True)
+def _tier_api_key(monkeypatch):
+    """T-J: the readiness probe requires the tier's API key env to be set;
+    default it on for every test, individual tests opt out to exercise the
+    missing-key reason."""
+    monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
 
 
 class _BackendCfg:
@@ -139,6 +148,33 @@ def test_probe_reports_webui_image_not_allowed(monkeypatch):
     ok, tier, reason = wic._sandboxed_readiness(_Cfg())
     assert ok is False
     assert reason.code == "webui_image_not_allowed"
+
+
+def test_probe_reports_api_key_missing(monkeypatch):
+    """T-J: a tier whose api_key_env is empty in this process cannot create
+    pods — the contract must not declare sandboxed where the launch path
+    cannot succeed (no contradictory verdicts for one host, #3375)."""
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
+    monkeypatch.delenv("OSB_KEY", raising=False)
+    cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
+    ok, tier, reason = wic._sandboxed_readiness(cfg)
+    assert ok is False
+    assert reason.code == "sandbox_api_key_missing"
+    assert "OSB_KEY" in reason.message
+
+    # And the snapshot carries it so the /user-url gate can surface it.
+    monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
+    snap = wic.build_workspace_isolation_snapshot(_OsUserManager())
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
+    assert "sandbox_api_key_missing" in [r.code for r in snap.reasons]
+    # The gate prefers the probe reason for a sandboxed request.
+    verdict = wic.evaluate_isolation_requirement(
+        "sandboxed", snapshot=snap, system_account=None, manager=None
+    )
+    assert verdict is not None
+    assert verdict.code == "sandbox_api_key_missing"
 
 
 def test_probe_reports_proxy_unreachable_without_callback_url(ready_backend):
