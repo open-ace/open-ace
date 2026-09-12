@@ -11,9 +11,10 @@ Kata negative-only).
 
 from __future__ import annotations
 
+import json
 import tarfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -567,11 +568,15 @@ def test_renew_clamps_to_min_of_24h_and_proxy_token_expiry(monkeypatch):
     launcher, _svc = _launcher(fake, ttl_minutes=1440)  # token lives 24h
     result = _launch(launcher)
 
-    before = datetime.now()
+    before = datetime.now(timezone.utc)
     expires_at = launcher.renew_expiration(result.sandbox_id, proxy_token=result.proxy_token)
-    after = datetime.now()
+    after = datetime.now(timezone.utc)
     assert fake.renewed == [(result.sandbox_id, expires_at)]
     target = datetime.fromisoformat(expires_at)
+    # T-F: the renew target is UTC-aware (+00:00 in the ISO string) — a naive
+    # local 'now' would compare apples to oranges on non-UTC hosts.
+    assert target.tzinfo is not None
+    assert expires_at.endswith("+00:00")
     # Clamp = min(now+24h, token expiry). Token was minted moments ago with a
     # 24h TTL, so now+24h is the smaller side (mint skew included).
     assert before + timedelta(seconds=86400) - timedelta(seconds=5) <= target
@@ -587,8 +592,50 @@ def test_renew_clamps_to_shorter_proxy_token(monkeypatch):
     result = _launch(launcher)
     expires_at = launcher.renew_expiration(result.sandbox_id, proxy_token=result.proxy_token)
     target = datetime.fromisoformat(expires_at)
-    assert target <= datetime.now() + timedelta(minutes=61)
+    assert target <= datetime.now(timezone.utc) + timedelta(minutes=61)
     assert target <= result.proxy_token_expires_at + timedelta(seconds=5)
+
+
+# ── T-F: proxy-token expiry decode is fail-closed, not re-arming ──────
+
+
+def test_proxy_token_expiry_fail_closed_on_empty_and_garbage():
+    before = datetime.now(timezone.utc)
+    empty = ws.proxy_token_expiry("")
+    garbage = ws.proxy_token_expiry("not-a-token")
+    after = datetime.now(timezone.utc)
+    for parsed in (empty, garbage):
+        assert parsed.tzinfo is not None
+        assert before <= parsed <= after  # 'now', never now + fallback TTL
+
+
+def test_renew_clamps_undecodable_token_to_now(monkeypatch):
+    """T-F: an undecodable credential must not re-arm the pod's lifetime.
+    The old fallback returned now+TTL on every 5-minute maintenance pass —
+    a pod with a broken token lived forever."""
+    fake = FakeOpenSandboxApi()
+    monkeypatch.setattr("app.auth.decorators.WEBUI_TOKEN_TTL_SECONDS", 86400)
+    launcher, _svc = _launcher(fake, ttl_minutes=1440)
+    before = datetime.now(timezone.utc)
+    expires_at = launcher.renew_expiration("sb-1", proxy_token="%%%%garbage")
+    target = datetime.fromisoformat(expires_at)
+    assert target.tzinfo is not None
+    assert before <= target <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    assert fake.renewed == [("sb-1", expires_at)]
+
+
+def test_proxy_token_expiry_normalizes_naive_payload_to_aware():
+    """The mint writes naive local time; the expiry reader must return an
+    aware datetime (naive-vs-aware min() in renew would raise TypeError)."""
+    import base64
+
+    naive_local = datetime.now() + timedelta(minutes=30)  # no tzinfo, local
+    payload = base64.b64encode(json.dumps({"exp": naive_local.isoformat()}).encode())
+    token = payload.decode() + ".sig"
+    parsed = ws.proxy_token_expiry(token)
+    assert parsed.tzinfo is not None
+    # Same wall-clock instant, expressed aware.
+    assert abs((parsed - naive_local.astimezone()).total_seconds()) < 1
 
 
 # ── destroy (D5) ──────────────────────────────────────────────────────

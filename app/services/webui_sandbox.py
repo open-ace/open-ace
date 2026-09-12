@@ -36,7 +36,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -345,23 +345,45 @@ def mint_instance_token(user_id: int, port: int, token_secret: str) -> str:
     return f"{payload}:{signature}"
 
 
-def proxy_token_expiry(token: str, *, fallback_ttl_minutes: int) -> datetime:
+def proxy_token_expiry(token: str) -> datetime:
     """Read the minted proxy token's expiry out of its signed payload.
 
-    ``generate_proxy_token`` returns only the token string; the expiry lives in
-    the base64 JSON payload under ``exp`` (ISO datetime). Renew clamps to this
-    moment. Decode failures fall back to the effective TTL the mint used — the
-    same duration, recomputed rather than trusted from an unreadable token.
+    ``generate_proxy_token`` returns only the token string; the expiry lives
+    in the base64 JSON payload under ``exp`` (ISO datetime). Renew clamps to
+    this moment. Returns an aware UTC datetime (a naive payload — the mint
+    writes local time — is normalized via astimezone).
+
+    Review round 1 (T-F): decode failures and EMPTY tokens (the
+    ``WebUIInstance.proxy_token`` default) fail CLOSED — 'now' (UTC) — so a
+    renew clamps the pod to immediate expiry instead of re-arming a full
+    fallback TTL every maintenance cycle (previously each 5-minute pass moved
+    the pod's deadline 4 hours further out: an unbounded lifetime for a
+    credential whose real expiry cannot be known). An unreadable token is a
+    credential problem, never 'valid for another TTL'.
     """
     import base64
     import json as _json
 
-    try:
-        payload_b64 = token.split(".", 1)[0]
-        payload = _json.loads(base64.b64decode(payload_b64))
-        return datetime.fromisoformat(str(payload["exp"]))
-    except Exception:  # noqa: BLE001 - conservative fallback, same duration
-        return datetime.now() + timedelta(minutes=fallback_ttl_minutes)
+    if token:
+        try:
+            payload_b64 = token.split(".", 1)[0]
+            payload = _json.loads(base64.b64decode(payload_b64))
+            parsed = datetime.fromisoformat(str(payload["exp"]))
+            if parsed.tzinfo is None:
+                # The mint wrote naive local time (datetime.now().isoformat()).
+                parsed = parsed.astimezone()
+            return parsed
+        except Exception:  # noqa: BLE001 - fail closed below
+            logger.warning(
+                "webui proxy token expiry could not be decoded; treating the "
+                "credential as expired (renew will clamp the pod to now)"
+            )
+    else:
+        logger.warning(
+            "webui proxy token is empty; treating the credential as expired "
+            "(renew will clamp the pod to now)"
+        )
+    return datetime.now(timezone.utc)
 
 
 def empty_state_tar() -> bytes:
@@ -551,7 +573,12 @@ class SandboxedWebuiLauncher:
         )
 
     def _mint_proxy_token(self, user_id: int) -> tuple[str, datetime, int]:
-        """Mint the instance's LLM proxy token; return (token, expiry, ttl min)."""
+        """Mint the instance's LLM proxy token; return (token, expiry, ttl min).
+
+        A freshly minted token that does not decode is a BUG in the mint
+        (T-F's fail-closed 'now' would create a zero-lifetime pod) — surface
+        it instead of silently clamping.
+        """
         service = self._proxy_service()
         ttl_minutes = service.effective_proxy_token_ttl_minutes("webui")
         token = service.generate_proxy_token(
@@ -562,7 +589,14 @@ class SandboxedWebuiLauncher:
             session_type="webui",
             extra_payload={"scope": "local", "tool_name": "qwen-code"},
         )
-        expiry = proxy_token_expiry(token, fallback_ttl_minutes=ttl_minutes)
+        expiry = proxy_token_expiry(token)
+        if token and (expiry - datetime.now(timezone.utc)).total_seconds() <= 0:
+            raise SandboxWebuiError(
+                "minted webui proxy token carries an already-expired or "
+                "undecodable payload; refusing to create a pod whose LLM "
+                "credential is dead at birth",
+                reason_code="sandbox_create_failed",
+            )
         return token, expiry, ttl_minutes
 
     def _build_pod_env(self, user_id: int, callback_url: str, proxy_token: str) -> dict[str, str]:
@@ -850,16 +884,25 @@ class SandboxedWebuiLauncher:
         die with its credentials rather than outlive them — after the clamp
         point the normal idle reaper tears it down and the next /user-url
         recreates it with a fresh token and a snapshot restore.
+
+        Review round 1 (T-F): both clock reads are aware UTC datetimes and
+        the returned ISO string carries +00:00 — a naive local 'now' next to
+        the token's (normalized) expiry compared apples to oranges on any
+        host not running UTC. An unreadable/empty token clamps to 'now'
+        (see proxy_token_expiry): the pod expires with its unusable
+        credential instead of being re-armed forever.
         """
         from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
 
-        ttl_minutes = self._effective_proxy_ttl_minutes()
-        token_expiry = proxy_token_expiry(proxy_token, fallback_ttl_minutes=ttl_minutes)
+        token_expiry = proxy_token_expiry(proxy_token)
         target = min(
-            datetime.now() + timedelta(seconds=int(WEBUI_TOKEN_TTL_SECONDS)),
+            datetime.now(timezone.utc) + timedelta(seconds=int(WEBUI_TOKEN_TTL_SECONDS)),
             token_expiry,
         )
-        expires_at = target.isoformat()
+        # Normalize to UTC before serialization: the token side of the min()
+        # may be aware in the mint host's local offset (+08:00 etc.) — the
+        # upstream API gets one unambiguous representation.
+        expires_at = target.astimezone(timezone.utc).isoformat()
         api = self._current_api()
         api.renew_expiration(sandbox_id, expires_at)
         return expires_at
