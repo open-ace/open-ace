@@ -487,17 +487,33 @@ class WebUIManager:
             # live sandboxed instances get a snapshot export (bounds the crash
             # loss window at ~5 minutes) and a renew clamped to their baked-in
             # proxy-token expiry. Best-effort per instance: one failing
-            # sandbox must not starve the others.
+            # sandbox must not starve the others. The same tick refreshes the
+            # process heartbeat (T-D).
             try:
-                now = time.monotonic()
-                if now - self._last_sandbox_maintenance >= SANDBOX_MAINTENANCE_INTERVAL_SECONDS:
-                    self._last_sandbox_maintenance = now
-                    self._maintain_sandboxed_instances()
+                self._sandbox_maintenance_tick()
             except Exception as e:
                 logger.error(f"Error in sandbox maintenance: {e}")
 
             # Sleep for cleanup interval
             time.sleep(self.config.cleanup_interval_minutes * 60)
+
+    def _sandbox_maintenance_tick(self) -> None:
+        """One maintenance gate pass: heartbeat refresh + instance upkeep.
+
+        T-D: the heartbeat refresh rides the same cadence as the snapshot
+        export/renew so a peer reconcile can always see a live web process
+        within HEARTBEAT_FRESH_WINDOW_SECONDS. Fail-soft by design: an
+        unwritable state root skips it (peers then treat us as stale, the
+        conservative direction for THEIR sweep).
+        """
+        now = time.monotonic()
+        if now - self._last_sandbox_maintenance < SANDBOX_MAINTENANCE_INTERVAL_SECONDS:
+            return
+        self._last_sandbox_maintenance = now
+        from app.services.webui_sandbox import write_webui_heartbeat
+
+        write_webui_heartbeat()
+        self._maintain_sandboxed_instances()
 
     def _live_sandboxed_instances(self) -> list[WebUIInstance]:
         """Every live sandboxed instance, multi-user and single-user alike."""
