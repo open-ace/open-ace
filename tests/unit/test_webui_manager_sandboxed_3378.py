@@ -10,6 +10,7 @@ prestart reorder, and the per-instance-secret token validation/refresh fork.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -40,15 +41,22 @@ class _FakeProxy:
         self.stopped = True
 
 
+@dataclass(frozen=True)
 class _FakeLaunchResult:
-    def __init__(self, sandbox_id="sb-1", restore_confirmed=True):
-        self.sandbox_id = sandbox_id
-        self.tier = "kata"
-        self.token_secret = "a" * 64
-        self.restore_confirmed = restore_confirmed
-        self.proxy_token = "proxytok"
-        self.proxy_token_expires_at = datetime.now() + timedelta(hours=24)
-        self.webui_port = 3100
+    """Frozen-dataclass stand-in for SandboxedWebuiLaunchResult.
+
+    Must be a real (frozen) dataclass: _launch_sandboxed rewrites
+    restore_confirmed via dataclasses.replace on the unreadable-snapshot
+    degrade path (T-E).
+    """
+
+    sandbox_id: str
+    tier: str = "kata"
+    token_secret: str = "a" * 64
+    restore_confirmed: bool = True
+    proxy_token: str = "proxytok"
+    proxy_token_expires_at: datetime = datetime.now() + timedelta(hours=24)
+    webui_port: int = 3100
 
 
 class _FakeLauncher:
@@ -307,6 +315,33 @@ def test_maintenance_is_fail_soft_per_instance():
     manager._maintain_sandboxed_instances()  # must not raise
     # The renew after the failed export never ran for this instance…
     assert launcher.renew_calls == []
+
+
+def test_unreadable_snapshot_degrades_start_and_suspends_exports():
+    """T-E: an existing-but-unreadable snapshot is not a first launch — the
+    pod starts with an EMPTY history, exports stay suspended (the unreadable
+    file is left for an operator), and the launch is recorded honestly."""
+
+    class _UnreadableSnapshotLauncher(_FakeLauncher):
+        def load_snapshot(self, user_id):
+            from app.services.webui_sandbox import SnapshotUnreadableError
+
+            raise SnapshotUnreadableError(f"snapshot for user {user_id}: EACCES")
+
+    launcher = _UnreadableSnapshotLauncher()
+    manager = _manager(launcher=launcher)
+    _url, _token = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+
+    instance = manager.get_user_instance(7)
+    assert instance.restore_confirmed is False  # exports suspended
+    # The launch itself ran with the degraded (empty) history.
+    assert len(launcher.launch_calls) == 1
+    assert launcher.launch_calls[0]["snapshot"] is None
+    # Maintenance and teardown both honor the suspended export guard.
+    manager._maintain_sandboxed_instances()
+    assert launcher.exports == [False]
+    manager.stop_all_instances()
+    assert launcher.destroy_calls[0]["restore_confirmed"] is False
 
 
 def test_shutdown_exports_and_destroys_sandboxed_instances():
