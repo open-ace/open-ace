@@ -344,13 +344,13 @@ def test_idle_teardown_runs_outside_the_registry_lock(monkeypatch):
         entered = False
 
         def destroy(self, sandbox_id, user_id, *, restore_confirmed, final_export=True):
-            self.entered = True  # teardown started; park cooperatively
-            import gevent
+            self.entered = True  # teardown started; park on a plain thread
+            import time
 
-            for _ in range(200):  # park up to ~10s, yielding to the hub
+            for _ in range(200):  # park up to ~10s
                 if self.release:
                     break
-                gevent.sleep(0.05)
+                time.sleep(0.05)
             self.destroy_calls.append(
                 {
                     "sandbox_id": sandbox_id,
@@ -365,14 +365,29 @@ def test_idle_teardown_runs_outside_the_registry_lock(monkeypatch):
     manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
     manager.get_user_instance(7).last_activity = datetime.now() - timedelta(hours=2)
 
-    import gevent
+    # Plain threading, deliberately no gevent: a real hub inside an xdist
+    # worker is the #2457 worker-crash class (observed on CI for this test).
+    import threading
+    import time
 
-    greenlet = gevent.spawn(manager.cleanup_idle_instances)
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def _run_cleanup():
+        try:
+            manager.cleanup_idle_instances()
+        except BaseException as exc:  # noqa: BLE001 - surfaced via assert below
+            errors.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=_run_cleanup, daemon=True)
+    worker.start()
     # Let the teardown start (it parks inside destroy)...
     for _ in range(500):
         if launcher.entered:
             break
-        gevent.sleep(0.01)
+        time.sleep(0.01)
     assert launcher.entered, "idle teardown did not start"
 
     # ...the registry slot is already free and _lock stays acquirable while
@@ -382,8 +397,9 @@ def test_idle_teardown_runs_outside_the_registry_lock(monkeypatch):
     manager._lock.release()
 
     launcher.release = True
-    greenlet.join(timeout=10)
-    assert greenlet.successful()
+    assert done.wait(timeout=15), "cleanup thread did not finish"
+    worker.join(timeout=5)
+    assert errors == []
     assert len(launcher.destroy_calls) == 1
     assert manager.get_user_instance(7) is None
 
