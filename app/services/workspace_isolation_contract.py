@@ -114,6 +114,7 @@ SANDBOX_PROBE_REASON_CODES = (
     "webui_image_not_allowed",
     "sandbox_api_key_missing",
     "sandbox_proxy_unreachable",
+    "sandbox_multi_process_unsupported",
 )
 
 # Issue #3378 (D3): the boot-probe upgrade memo, keyed per tier. Kernel and
@@ -299,6 +300,24 @@ def _unsupported(reason_code: str, message: str) -> IsolationCapabilitySnapshot:
     )
 
 
+def _peer_web_processes_live() -> bool:
+    """Whether another live web process holds a fresh heartbeat.
+
+    Conservative in both directions that matter: an unreadable/errored
+    heartbeat root counts as "peers present" (we cannot prove this process
+    is alone, and per-instance secrets cannot span replicas anyway), while
+    a readable root with no fresh peer heartbeats counts as single-process.
+    Late-imported to keep the contract importable without the sandbox
+    module (and to avoid its gevent dependencies on cold paths).
+    """
+    try:
+        from app.services.webui_sandbox import fresh_peer_heartbeats
+
+        return bool(fresh_peer_heartbeats())
+    except Exception:  # noqa: BLE001 - cannot prove aloneness -> refuse
+        return True
+
+
 def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None]:
     """Zero-pod fail-closed probe for the sandboxed level (Issue #3378).
 
@@ -411,6 +430,26 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
                 "not set in this process; sandboxed WebUI pods cannot be "
                 "created (the autonomous backend config names it via "
                 "api_key_env).",
+            ),
+        )
+
+    # Review follow-up: per-instance token secrets are process-memory state.
+    # With another live web process (the shipped k8s manifest runs 3
+    # replicas), a pod's secret is invisible to the other replicas and
+    # roughly two thirds of token validations would 401. The contract must
+    # not declare a level whose auth is unreliable — same fail-closed class
+    # as api_key_env. fresh_peer_heartbeats() is the liveness answer this PR
+    # already built for the reconcile mutex.
+    if _peer_web_processes_live():
+        return (
+            False,
+            tier,
+            IsolationReason(
+                "sandbox_multi_process_unsupported",
+                "Another live web process is present (per its heartbeat); "
+                "sandboxed token validation and instance management are "
+                "per-process in-memory state and cannot span replicas — the "
+                "sandboxed level is only declarable on a single web process.",
             ),
         )
 
