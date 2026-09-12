@@ -256,9 +256,14 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
 - **外部假设**:网关凭据注入头由 pod 内自捕获的代理端到端持有——"代理为哑
   管道、token 在 pod 内 webui 校验"包含对 webui 行为的假设;3100 端点可达性
   与 entrypoint 上游约束为外部假设,真实集群验证归 #3379。
-- **单 web 进程部署假设**:孤儿回收按进程 generation 判别,前提是每个
-  installation 恰有一个存活 web 进程(compose 单 app 容器成立);**多副本/
-  滚动发布新旧重叠会互毁对方 pod,不支持**。
+- **多副本与孤儿回收(T-D)**:孤儿回收按进程 generation 判别,且销毁前检查
+  控制面心跳文件(`<CONFIG_DIR>/webui-agent-state/webui-heartbeat-<boot_id>-<pid>.json`,
+  每 web 进程一个;reconcile 启动时写入、维护周期(默认 5min)刷新)——存在其它
+  新鲜心跳(ts 距今 ≤ 2×维护间隔+60s)时跳过清扫。**reconcile 互杀已消除**
+  (3 副本/滚动重叠下新副本不再清扫其它副本的在线 pod,代价是死亡副本的 pod
+  最多延迟到心跳过期后才被清扫、或由 pod TTL 自然回收)。**但 pod 归属仍是
+  单进程内存态**——多副本下的 token 校验与实例管理(回收、快照导出)仍不支持,
+  需要单副本或多副本感知的重构(§8)。心跳读写全部 fail-soft。
 - pause/resume/warm pool 不适用于 webui pod;gunicorn 形态 SIGTERM 无 exit
   hook——正常停机会尽力导出,异常退出由下次启动的孤儿 reconcile 兜底。
 
@@ -333,5 +338,6 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
 4. WebUI `token_secret` 未持久化时重启导致已发 token 失效的加固。
 5. 交互工作区 `sandboxed` 等级:#3378 已交付(§6);遗留 follow-up:真实集群
    端到端验收(#3379,含 3100 端点可达性验证)、`terminal`/`vscode`/`fs` 入口
-   沙箱接线、webui 历史 quota/GC、多 web 副本/滚动发布支持。
+   沙箱接线、webui 历史 quota/GC、多 web 副本下的 token 校验/实例管理
+   (reconcile 已心跳互斥,但 pod 归属仍是单进程内存态)。
 6. 多用户模式真实 Linux 端到端隔离验收(并发用户 + 越权尝试矩阵)。

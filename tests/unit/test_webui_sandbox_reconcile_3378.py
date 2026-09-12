@@ -98,7 +98,7 @@ def _tar_bytes(name: str = "chats/session.jsonl", payload: bytes = b"[1]") -> by
 # ── reconcile: generation discrimination + export gating ───────────────
 
 
-def test_reconcile_spares_own_generation_and_untouched_non_webui():
+def test_reconcile_spares_own_generation_and_untouched_non_webui(tmp_path):
     fake = FakeOpenSandboxApi()
     mine = fake.create_sandbox(
         {"metadata": _webui_metadata(generation=ws.current_process_generation())}
@@ -115,7 +115,7 @@ def test_reconcile_spares_own_generation_and_untouched_non_webui():
     destroyed = ws.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
-        state_root_override=None,
+        state_root_override=str(tmp_path),
     )
     assert destroyed == [stale["id"]]
     assert mine["id"] not in fake.deleted
@@ -302,7 +302,7 @@ def test_reconcile_fail_soft_on_corrupt_config(monkeypatch):
     assert ws.reconcile_webui_orphans() == []
 
 
-def test_reconcile_ignores_foreign_installation_client_side():
+def test_reconcile_ignores_foreign_installation_client_side(tmp_path):
     fake = FakeOpenSandboxApi()
     # A server that ignored the query filter hands us another installation's
     # pod — the client-side re-check must spare it.
@@ -317,10 +317,92 @@ def test_reconcile_ignores_foreign_installation_client_side():
         }
     )
     destroyed = ws.reconcile_webui_orphans(
-        backend_config=_backend(), api_factory=lambda endpoint: fake
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
     )
     assert destroyed == []
     assert foreign["id"] not in fake.deleted
+
+
+# ── T-D: multi-replica heartbeat mutex ────────────────────────────────
+
+
+def _write_peer_heartbeat(root, *, ts, pid=12345, boot_id="peer-boot-1"):
+    import time as _time
+
+    path = root / f"{ws.HEARTBEAT_FILENAME_PREFIX}{boot_id}-{pid}.json"
+    path.write_text(json.dumps({"pid": pid, "boot_id": boot_id, "ts": ts}))
+    return path
+
+
+def test_reconcile_skips_destroy_while_peer_heartbeat_is_fresh(tmp_path):
+    """T-D: the k8s manifest ships 3 replicas — generation discrimination
+    alone made every newly started replica destroy its siblings' live pods.
+    A fresh peer heartbeat means the 'orphan' pods have a live owner."""
+    import time
+
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+    peer = _write_peer_heartbeat(tmp_path, ts=time.time())
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == []
+    assert orphan["id"] not in fake.deleted
+    # The sweep aborted BEFORE any export/destroy API traffic.
+    assert fake.command_bodies == []
+    assert peer.exists()  # fresh peer files are never pruned
+
+
+def test_reconcile_destroys_once_peer_heartbeats_are_stale(tmp_path):
+    import time
+
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+    sid = orphan["id"]
+    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    stale_ts = time.time() - ws.HEARTBEAT_FRESH_WINDOW_SECONDS - 30
+    _write_peer_heartbeat(tmp_path, ts=stale_ts)
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == [sid]  # every peer expired → the sweep proceeds
+
+
+def test_reconcile_own_heartbeat_never_blocks_the_sweep(tmp_path):
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+    # This process's OWN (fresh) heartbeat must not read as a peer.
+    own = ws.write_webui_heartbeat(str(tmp_path))
+    assert own is not None and own.exists()
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == [orphan["id"]]
+
+
+def test_heartbeat_write_prunes_ancient_files(tmp_path):
+    import time
+
+    ancient = _write_peer_heartbeat(
+        tmp_path, ts=time.time() - ws.HEARTBEAT_MAX_AGE_SECONDS - 60, pid=999
+    )
+    fresh = _write_peer_heartbeat(tmp_path, ts=time.time(), pid=888)
+    assert ws.write_webui_heartbeat(str(tmp_path)) is not None
+    assert not ancient.exists()  # > 24h: pruned
+    assert fresh.exists()
+    assert ws.fresh_peer_heartbeats(str(tmp_path))  # peer 888 still counts
 
 
 # ── positive trigger + TESTING guard + separate greenlet ───────────────

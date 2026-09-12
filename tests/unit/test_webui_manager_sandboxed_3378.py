@@ -274,6 +274,28 @@ def test_periodic_maintenance_exports_and_renews_each_live_sandbox():
     assert launcher.renew_calls == [manager.get_user_instance(7).sandbox_id]
 
 
+def test_maintenance_tick_refreshes_process_heartbeat(tmp_path, monkeypatch):
+    """T-D: the maintenance cadence refreshes this process's heartbeat file
+    (the multi-replica reconcile mutex) before exporting/renewing."""
+    from app.services import webui_sandbox as ws
+
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+    manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+    monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path))
+    manager._last_sandbox_maintenance = 0.0  # force the gate open
+
+    manager._sandbox_maintenance_tick()
+
+    heartbeats = list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json"))
+    assert len(heartbeats) == 1
+    assert launcher.exports == [True]  # the tick still maintained the pod
+    # A second tick inside the window refreshes the heartbeat but is a no-op
+    # gate-wise (the maintenance interval has not elapsed).
+    manager._sandbox_maintenance_tick()
+    assert list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json")) == heartbeats
+
+
 def test_maintenance_is_fail_soft_per_instance():
     class _ExplodingLauncher(_FakeLauncher):
         def export_snapshot(self, sandbox_id, *, restore_confirmed):
