@@ -9,6 +9,13 @@ Review round 2 (3994613216): round 1 only rejected homes and their
 ancestors — descendants of a foreign home (<base>/alice/.ssh) passed.
 Creation now also enforces creator ownership: the path must land inside
 the creator's own home roots or a shared root already open to the tenant.
+
+Review round 3 (PR #3380): round 2's creation-side ownership rule and the
+read-side home-subtree filter accepted disjoint sets (home-internal paths
+were created but never surfaced; fresh deployments could not bootstrap a
+first shared root). New shared registrations now go through the
+first-class <base>/shared/ namespace; the E2E test below drives the real
+ProjectRepository against a real sqlite projects table.
 """
 
 import os
@@ -177,3 +184,163 @@ def test_non_shared_project_not_subject_to_topology_rule(projects_app, workspace
         resp = _create(client, str(workspace), is_shared=False)
     assert resp.status_code in (200, 201, 404)
     assert repo.create_project.called
+
+
+# --- review round 3 (PR #3380): first-class shared namespace ---------------
+#
+# Round 2's creation-side ownership rule and the read-side home-subtree
+# filter accepted DISJOINT sets: paths inside the creator's own home were
+# created but filtered for every other tenant member, and a fresh
+# deployment could never bootstrap its first clean shared root (anchoring
+# requires one to already exist). New registrations now go through the
+# <base>/shared/ namespace, which lies outside every user home.
+
+
+def test_shared_namespace_child_accepted_without_any_anchor(projects_app, workspace):
+    """自举用例:<base>/shared/team-proj 无任何既有共享根也可注册。
+
+    Round 2 时该路径会被归属规则拒绝(不在创建者根内);round 3 命名空间
+    一等公民化后,默认 fixture(无 open shared roots)直接放行。
+    """
+    client = projects_app.test_client()
+    with patch("app.routes.projects.project_repo") as repo:
+        repo.get_project_by_path.return_value = None
+        repo.create_project.return_value = 46
+        repo.get_project_by_id.return_value = None
+        resp = _create(client, str(workspace / "shared" / "team-proj"))
+    assert resp.status_code in (200, 201, 404)
+    assert repo.create_project.called
+
+
+def test_shared_namespace_root_itself_rejected(projects_app, workspace):
+    """<base>/shared 是容器不是项目:命名空间根本身不可注册。"""
+    client = projects_app.test_client()
+    resp = _create(client, str(workspace / "shared"))
+    assert resp.status_code == 400
+    assert "namespace root" in resp.get_json()["error"]
+
+
+def test_shared_namespace_collision_with_shared_account_rejected(projects_app, workspace):
+    """账户名 "shared" 的 home 与命名空间碰撞 → 拒绝并给出明确 message。
+
+    不拒绝会重现 round 2 的死局:创建侧放行、读取侧滤除。fail-closed。
+    """
+    client = projects_app.test_client()
+    collided_rows = list(_USER_ROWS) + [{"id": 11, "username": "shared", "system_account": None}]
+    with patch("app.routes.projects.user_repo.get_all_users", return_value=collided_rows):
+        resp = _create(client, str(workspace / "shared" / "team-proj"))
+    assert resp.status_code == 400
+    assert "collides" in resp.get_json()["error"]
+
+
+# --- review round 3: end-to-end bootstrap over a REAL projects table -------
+#
+# Reviewer-requested E2E: empty projects table → user A creates a shared
+# project through the <base>/shared/ namespace → the path shows up in
+# ANOTHER tenant member B's fs._allowed_roots_for_user. The anchoring
+# mechanism itself (ProjectRepository SQL against a real sqlite projects
+# table + the read-side filter) runs for real — only the database
+# location is redirected to a throwaway file.
+
+_PROJECTS_DDL = """
+CREATE TABLE projects (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ path TEXT NOT NULL,
+ name TEXT,
+ description text,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ is_active INTEGER DEFAULT 1 NOT NULL,
+ is_shared INTEGER DEFAULT 0 NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL,
+ permission_status TEXT,
+ permission_task_id TEXT
+)
+"""
+
+_USER_PROJECTS_DDL = """
+CREATE TABLE user_projects (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id integer NOT NULL,
+ project_id integer NOT NULL,
+ first_access_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ last_access_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ total_sessions integer DEFAULT 0 NOT NULL,
+ total_tokens integer DEFAULT 0 NOT NULL,
+ total_requests integer DEFAULT 0 NOT NULL,
+ total_duration_seconds integer DEFAULT 0 NOT NULL
+)
+"""
+
+
+def test_e2e_namespace_bootstrap_visible_to_other_tenant_member(workspace, tmp_path):
+    """空 projects 表 → alice 创建 <base>/shared/team-proj → bob 的允许根可见。
+
+    真实 ProjectRepository + 真实 sqlite 表;断言同时覆盖创建侧放行、
+    读取侧通过(_shared_root_rejection_reason 为 None)与
+    _allowed_roots_for_user 锚定结果。
+    """
+    from flask import Flask
+
+    import app.repositories.project_repo as pr_mod
+    from app.repositories.database import Database
+    from app.routes import fs as fs_mod
+    from app.routes.projects import projects_bp
+
+    ws = workspace
+    real_cls = pr_mod.ProjectRepository
+    db = Database(db_url=f"sqlite:///{tmp_path / 'proj-e2e-3376.db'}")
+    with db.connection() as conn:
+        conn.execute(_PROJECTS_DDL)
+        conn.execute(_USER_PROJECTS_DDL)
+        conn.commit()
+    repo = real_cls(db=db)
+    # 前置:真实共享根为空(空表)
+    assert repo.get_shared_project_paths(1) == []
+
+    alice = {"id": 7, "user_id": 7, "username": "alice", "role": "user", "tenant_id": 1}
+    bob = {"id": 9, "user_id": 9, "username": "bob", "role": "user", "tenant_id": 1}
+    target = ws / "shared" / "team-proj"
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(projects_bp, url_prefix="/api")
+    app.before_request_funcs["projects"] = []
+
+    @app.before_request
+    def _set_alice():
+        g.user = dict(alice)
+        g.user_id = alice["id"]
+        g.user_role = alice["role"]
+        g.tenant_id = alice["tenant_id"]
+        return None
+
+    # 用户 A(alice)经创建侧:命名空间路径通过拓扑校验并真实落库
+    with (
+        patch("app.routes.projects.get_current_tenant_id", return_value=1),
+        patch("app.routes.projects.get_workspace_base_dirs", return_value=[str(ws)]),
+        patch("app.routes.projects.user_repo.get_all_users", return_value=list(_USER_ROWS)),
+        patch("app.routes.projects.project_repo", repo),
+    ):
+        resp = app.test_client().post(
+            "/api/projects",
+            json={"path": str(target), "name": "team", "is_shared": True, "create_dir": False},
+        )
+    assert resp.status_code == 201, resp.get_json()
+    # 行确实写进了真实 projects 表
+    assert repo.get_shared_project_paths(1) == [os.path.realpath(str(target))]
+
+    # 用户 B(bob)经读取侧:真实 repo 查询 + 真实过滤器,不桩锚定机制
+    with (
+        patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws)]),
+        patch("app.routes.fs.user_repo.get_all_users", return_value=list(_USER_ROWS)),
+        patch.object(pr_mod, "ProjectRepository", lambda: real_cls(db=db)),
+    ):
+        # 对偶断言之读取侧:命名空间行不在任何 home 子树内 → 通过
+        assert fs_mod._shared_root_rejection_reason(os.path.realpath(str(target))) is None
+        # 锚定结果:B 的允许根包含 A 创建的共享路径
+        roots = fs_mod._allowed_roots_for_user(dict(bob))
+    assert os.path.realpath(str(target)) in roots
+    # B 的根集不因共享行放大到他人 home
+    assert os.path.realpath(str(ws / "alice")) not in roots

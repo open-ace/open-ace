@@ -130,6 +130,33 @@ def is_valid_remote_path(value) -> bool:
     )
 
 
+# Directory name of the first-class shared namespace under each workspace
+# base dir (review round 3, #3376): ``<base>/shared/<name>`` is the only
+# place where a NEW shared project can be registered without an existing
+# shared root to anchor on (fresh-deployment bootstrap), because it lies
+# outside every user's home subtree and therefore survives the read-side
+# home lock in fs.py.
+SHARED_NAMESPACE_DIRNAME = "shared"
+
+
+def shared_namespace_roots(base_dirs: list[str] | None) -> list[str]:
+    """Realpath'd shared-namespace roots, one per workspace base dir.
+
+    Review round 3 (#3376, PR #3380): creation-side callers add these to
+    the creator's admissible roots (``creator_roots``) so a shared project
+    can be registered as ``<base>/shared/<name>`` on a fresh deployment —
+    round 2 required an already-open shared root to anchor on, which no
+    new deployment could ever produce. The namespace deliberately lives
+    OUTSIDE every user home, so the read-side filter (which drops any
+    shared row inside a user home subtree) never drops it.
+    """
+    return [
+        os.path.realpath(f"{base.rstrip('/')}/{SHARED_NAMESPACE_DIRNAME}")
+        for base in (base_dirs or [])
+        if base
+    ]
+
+
 def shared_project_path_error(
     path: str,
     base_dirs: list[str],
@@ -169,6 +196,27 @@ def shared_project_path_error(
       longer admissible; an empty *creator_roots* rejects everything
       (fail closed).
 
+    Review round 3 (#3376, PR #3380): round 2 made the two sides accept
+    DISJOINT sets — creation required the path inside the creator's roots
+    (own home + open shared roots) while the read side filtered anything
+    inside ANY user's home subtree. A shared path created inside the
+    creator's own home was therefore unreadable for the rest of the
+    tenant, and a fresh deployment could never bootstrap its first clean
+    shared root (creation-side anchoring needs one to already exist).
+    Round 3 adds a first-class shared namespace ``<base>/shared/<name>``
+    (see ``shared_namespace_roots``): creation-side callers include the
+    namespace in *creator_roots*; the namespace lies outside every home,
+    so the read-side home-subtree filter passes it. Two namespace guards
+    apply on BOTH sides:
+
+    - the namespace ROOT itself is not registrable — it is a container,
+      not a project (``<base>/shared`` would expose every future sibling
+      as a browse root);
+    - a namespace that collides with a real user home (an account
+      literally named ``shared``) is rejected outright (fail closed):
+      the read side would filter everything under it, so creation must
+      not accept it.
+
     Returns an error message when rejected, else ``None``.
     """
     bases = [b for b in (base_dirs or []) if b]
@@ -178,6 +226,12 @@ def shared_project_path_error(
     for base in bases:
         if resolved == os.path.realpath(base):
             return "must not be a workspace base directory itself"
+    namespace_roots = set(shared_namespace_roots(bases))
+    if resolved in namespace_roots:
+        return (
+            "must be a named subdirectory of the shared namespace "
+            f"(<base>/{SHARED_NAMESPACE_DIRNAME}/<name>), not the namespace root itself"
+        )
     creator_root_set = (
         {os.path.realpath(r) for r in creator_roots if r} if creator_roots is not None else set()
     )
@@ -187,6 +241,11 @@ def shared_project_path_error(
         resolved_home = os.path.realpath(home)
         if resolved_home == resolved or resolved_home.startswith(resolved + os.sep):
             return "must not be a user home directory or one of its ancestors"
+        if resolved_home in namespace_roots and resolved.startswith(resolved_home + os.sep):
+            return (
+                "the shared namespace collides with the home directory of a user "
+                f"account named '{SHARED_NAMESPACE_DIRNAME}'; contact an administrator"
+            )
         if resolved.startswith(resolved_home + os.sep) and resolved_home not in creator_root_set:
             return "must not be inside any user's home directory subtree"
     if creator_roots is not None and not any(

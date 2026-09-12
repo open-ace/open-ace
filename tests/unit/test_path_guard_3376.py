@@ -205,3 +205,82 @@ def test_shared_path_rejects_traversal_and_outside(ws_base):
     base = ws_base
     assert _shared_err(f"{base}/../escape", [base], []) is not None
     assert _shared_err("/etc/team", [base], []) is not None
+
+
+# --- shared namespace (review round 3, PR #3380) ---------------------------
+
+
+def test_shared_namespace_roots_helper(ws_base):
+    """每个 base 一个 <base>/shared 根,realpath 化;空/None 输入 → 空列表。"""
+    import os
+
+    from app.utils.path_guard import shared_namespace_roots
+
+    base2 = f"{ws_base}-b"
+    assert shared_namespace_roots([ws_base, base2]) == [
+        os.path.realpath(f"{ws_base}/shared"),
+        os.path.realpath(f"{base2}/shared"),
+    ]
+    assert shared_namespace_roots([]) == []
+    assert shared_namespace_roots(None) == []
+    assert shared_namespace_roots(["", None]) == []
+
+
+def test_shared_namespace_root_itself_not_registrable(ws_base):
+    """<base>/shared 是容器不是项目:命名空间根本身两侧都拒。"""
+    base = ws_base
+    homes = [f"{base}/alice", f"{base}/bob"]
+
+    err = _shared_err(f"{base}/shared", [base], homes)
+    assert err is not None
+    assert "namespace root" in err
+    # 创建侧(带 creator_roots)同样拒绝
+    assert _shared_err(f"{base}/shared", [base], homes, [f"{base}/shared"]) is not None
+
+
+def test_shared_namespace_child_passes_both_sides(ws_base):
+    """对偶断言:<base>/shared/<name> 创建侧放行 + 读取侧通过。
+
+    Round 2 的两个集合不相交(创建 OK/读取滤除);round 3 命名空间
+    让两侧一致 —— 创建侧由调用方把命名空间并入 creator_roots,
+    读取侧因命名空间不在任何 home 子树内自然通过。
+    """
+    from app.utils.path_guard import shared_namespace_roots
+
+    base = ws_base
+    homes = [f"{base}/alice", f"{base}/bob"]
+
+    # 创建侧:命名空间在 creator_roots 内 → 放行
+    assert (
+        _shared_err(f"{base}/shared/team-proj", [base], homes, shared_namespace_roots([base]))
+        is None
+    )
+    # 读取侧(creator_roots=None):不在任何 home 子树内 → 通过
+    assert _shared_err(f"{base}/shared/team-proj", [base], homes) is None
+    assert _shared_err(f"{base}/shared/deep/nested", [base], homes) is None
+
+    # 纯函数保持 fail-closed:空 creator_roots 时命名空间子路径同样拒绝
+    # (豁免来自调用方组装,函数本身不隐式放行任何集合)
+    assert _shared_err(f"{base}/shared/team-proj", [base], homes, []) is not None
+
+
+def test_shared_namespace_collision_with_user_home_rejected(ws_base):
+    """账户名 "shared" 的 home 恰为 <base>/shared → 命名空间整体不可用,fail-closed。
+
+    Round 3:若不拒绝,创建侧(命名空间在 creator_roots 内)会放行,
+    而读取侧因该路径在 home 子树内会滤除 —— 重新制造 round 2 的死局;
+    碰撞守卫在两侧都给出明确 message。
+    """
+    from app.utils.path_guard import shared_namespace_roots
+
+    base = ws_base
+    homes = [f"{base}/alice", f"{base}/bob", f"{base}/shared"]  # 账户名 "shared"
+
+    # 创建侧:即使命名空间已并入 creator_roots,碰撞 → 拒绝
+    err = _shared_err(f"{base}/shared/team-proj", [base], homes, shared_namespace_roots([base]))
+    assert err is not None
+    assert "collides" in err
+    # 读取侧同样拒绝(home 子树规则/碰撞规则一致 fail-closed)
+    assert _shared_err(f"{base}/shared/team-proj", [base], homes) is not None
+    # 无碰撞的其他共享路径不受影响
+    assert _shared_err(f"{base}/shared-x/team", [base], homes) is None

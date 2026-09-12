@@ -316,6 +316,48 @@ def test_shared_row_inside_any_home_subtree_filtered_read_side(fs_app, workspace
         assert _browse(client, str(shared)).status_code == 200
 
 
+# --- review round 3 (PR #3380): first-class <base>/shared/ namespace -------
+
+
+def test_shared_namespace_row_reachable_via_browse(fs_app, workspace):
+    """round 3 对偶断言之读取侧:<base>/shared/<name> 共享行经 browse 可达。
+
+    命名空间不在任何用户 home 子树内,读取侧规则不变、天然通过;
+    round 2 时自己 home 内创建的共享行会被滤除,命名空间行不会。
+    """
+    from app.routes.fs import _shared_root_rejection_reason
+
+    ws, home, shared, other = workspace
+    ns_proj = ws / "shared" / "team-proj"
+    ns_proj.mkdir(parents=True)
+    client = fs_app.test_client()
+    with _with_shared_paths(fs_app, workspace, [str(ns_proj), str(shared)]):
+        # 读取侧过滤谓词直接放行
+        assert _shared_root_rejection_reason(str(ns_proj)) is None
+        # browse 端到端可达(同一用户与其他租户成员同集)
+        assert _browse(client, str(ns_proj)).status_code == 200
+
+
+def test_shared_namespace_root_and_collision_filtered_read_side(fs_app, workspace):
+    """命名空间根本身与碰撞行在读取侧同样不可达(fail-closed 一致性)。"""
+    from app.routes.fs import _shared_root_rejection_reason
+
+    ws, home, shared, other = workspace
+    collided = ws / "shared" / "team-proj"
+    collided.mkdir(parents=True)
+    client = fs_app.test_client()
+    # 命名空间根本身是容器不是项目 → 拒
+    assert _shared_root_rejection_reason(str(ws / "shared")) is not None
+    # 账户名 "shared" 碰撞:该行在 home 子树内 → 拒
+    collided_rows = list(_USER_ROWS) + [{"id": 11, "username": "shared", "system_account": None}]
+    with (
+        _with_shared_paths(fs_app, workspace, [str(collided)]),
+        patch("app.routes.fs.user_repo.get_all_users", return_value=collided_rows),
+    ):
+        assert _shared_root_rejection_reason(str(collided)) is not None
+        assert _browse(client, str(collided)).status_code == 400
+
+
 # --- review round 2 [3994613308]: check-path existence probing narrowed ----
 
 

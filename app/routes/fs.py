@@ -315,6 +315,14 @@ def _shared_root_rejection_reason(path, home_dirs: list[str] | None = None) -> s
 
     Rejections are logged as WARNING so operators can clean the projects
     table.
+
+    Review round 3 (#3376, PR #3380): rule unchanged — the first-class
+    shared namespace ``<base>/shared/<name>`` (new registrations, see
+    ``shared_project_path_error``) lies OUTSIDE every user home subtree,
+    so it passes this filter without special-casing. Only a namespace
+    that collides with a real user home (an account literally named
+    ``shared``) is dropped here — the creation side already rejects it,
+    this covers rows written by other means.
     """
     if not isinstance(path, str) or not path:
         return "shared project path must be a non-empty string"

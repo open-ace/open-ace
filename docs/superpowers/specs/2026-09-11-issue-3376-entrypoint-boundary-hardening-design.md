@@ -1,6 +1,6 @@
 # Issue #3376 本地工作区入口边界加固 设计文档
 
-日期:2026-09-11(修订 2:采纳独立评审两轮共 22 条意见)
+日期:2026-09-11(修订 3:复审第三轮——共享目录一等公民,见 §9.4)
 Issue: open-ace/open-ace#3376(拆分自 #3374;第一增量见 PR #3375)
 状态:待独立评审(修订版)
 
@@ -190,12 +190,51 @@ Round 1 的 `include_base_dirs=True` 让 check-path 的 `exists`/`canCreate` 探
 `_allowed_roots_for_user` 的 `include_base_dirs` 参数(browse/check-path 重新
 共用同一根集),check-path 改用专门谓词 `_check_path_rejection_reason`。
 
-### 9.3 兼容性影响增量(相对 §8)
+### 9.3 兼容性影响增量(相对 §8;round 3 修订版)
 
 | 变更 | 从 | 到 | 依据/缓解 |
 |---|---|---|---|
-| 共享项目注册:`<base>/team-proj` 一级团队目录 | 任意租户成员可注册 | 400(须在创建者 home 根或已开放共享根内) | 意见 3994613216 归属规则;管理员仍可经 DB/既有行提供租户级共享根 |
+| 共享项目注册:`<base>/team-proj` 一级团队目录 | 任意租户成员可注册 | 400(命名空间外仍须在创建者 home 根或已开放共享根内;**新共享注册走 `<base>/shared/` 命名空间**,见 §9.4) | 意见 3994613216 归属规则 + round 3 命名空间;管理员仍可经 DB/既有行提供租户级共享根 |
 | 共享项目注册:他人 home 后代(`/base/<account>/.ssh`) | 放行 | 400 | 同上;读取侧纵深过滤同步收口 |
-| 读取侧:创建者自己 home 内的共享行 | 对租户放大 | 不放大(滤除) | 读取侧规则不依赖 creator 关联;创建者本人经 home 根可达 |
+| 读取侧:创建者自己 home 内的共享行 | 对租户放大 | 不放大(滤除) | 读取侧规则不依赖 creator 关联;创建者本人经 home 根可达;新共享注册改走 `<base>/shared/` 后不再依赖该形态 |
+| 共享项目注册:`<base>/shared` 命名空间根本身 | —(目录此前无特殊语义) | 400 | round 3:命名空间根是容器不是项目,两侧一致拒绝 |
+| 共享项目注册/读取:`<base>/shared/` 与账户名 `shared` 的 home 碰撞 | — | 400(创建侧明确 message 拒绝;读取侧滤除) | round 3 碰撞守卫,fail-closed:不拒绝会重现"创建 OK/读取滤除"死局 |
 | check-path:`<base>/x/y` 及更深非 home 路径 | 可探测 | 400 | 意见 3994613308;#2317 的 mkdir -p 多级语义在自己 home 子树内保持可用 |
 | check-path:`<base>/<account>`(他人 home,一级) | 可探测 | 400 | 一级 user-home 判定复用用户枚举,失败时 fail-open 并记 WARNING(与 round 1 同姿态) |
+
+### 9.4 复审第三轮修订(2026-09-11,PR #3380):共享目录一等公民
+
+Round 2 的两侧规则接受了**不相交**的集合:创建侧要求共享路径落在创建者根内
+(自己 home + 既有干净共享根),读取侧滤除任何用户 home 子树内的共享行。后果:
+自己 home 内的共享路径"创建 OK、读取被滤";`<base>/team-proj` 一级路径"读取 OK、
+创建被拒";全新部署上"既有共享根锚定新注册"自举死锁(第一个干净共享根永远
+产生不了)。共享项目对 fs browse 的可达性彻底失效,且行为依赖升级前的存量库存。
+
+Round 3 在每个 base 下划定非 home 的共享命名空间 **`<base>/shared/`**:
+
+1. **创建侧**(`shared_project_path_error` + `api_create_project`):
+   `creator_roots` 并入每个 base 的 `<base>/shared` 子树
+   (`shared_namespace_roots`),共享项目路径形如 `<base>/shared/<name>`;
+   其余规则不变(仍拒绝任何用户 home 子树/base 本身/穿越/黑名单)。
+2. **读取侧**(`_shared_root_rejection_reason`):规则不变——命名空间天然
+   不在任何 home 子树内,自然通过;home 子树内的行仍被滤除。
+3. **自举消失**:全新部署 alice 创建 `<base>/shared/team-proj` → 创建侧 OK
+   (命名空间内,无锚)→ 读取侧通过 → 其他租户成员
+   (`_allowed_roots_for_user`)可达。
+4. **存量锚定保留**:升级前库存的一级干净共享行(如 `/workspace/team-proj`)
+   读取侧继续接受,创建侧继续允许在其内嵌套注册(round 2 的
+   `test_shared_inside_open_shared_root_accepted` 语义不变)。
+5. **命名空间根**:本身不可注册——它是容器不是项目(注册它会把所有未来
+   兄弟目录变成全体租户的 browse 根);创建侧与读取侧一致拒绝。
+6. **碰撞守卫**:若某用户 home 恰好解析为 `<base>/shared`(账户名
+   `shared`),该命名空间整体不可用——创建侧用现有用户枚举检测到碰撞即
+   拒绝并给出明确 message(fail-closed);读取侧因 home 子树规则同样滤除。
+
+**测试**(reviewer 点名):`test_projects_shared_path_3376.py::
+test_e2e_namespace_bootstrap_visible_to_other_tenant_member`——空 projects
+表 → alice 经 `POST /api/projects` 创建 `<base>/shared/team-proj`(真实
+ProjectRepository + 真实 sqlite projects 表,不桩锚定机制)→ 断言该路径出现在
+另一租户成员 bob 的 `_allowed_roots_for_user`,且 `_shared_root_rejection_reason`
+为 None(对偶断言);命名空间碰撞拒绝、命名空间根本身拒绝、`<base>/shared/x`
+创建侧放行 + 读取侧通过的对偶断言分别在 `test_projects_shared_path_3376.py`、
+`test_fs_home_lock_3376.py`、`test_path_guard_3376.py` 覆盖。

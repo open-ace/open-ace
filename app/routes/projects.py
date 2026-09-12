@@ -35,7 +35,7 @@ from app.services.permission_task_service import (
     PERMISSION_SYNC_THRESHOLD,
     get_permission_task_service,
 )
-from app.utils.path_guard import shared_project_path_error
+from app.utils.path_guard import shared_namespace_roots, shared_project_path_error
 from app.utils.request_context import get_current_tenant_id
 from app.utils.validators import validate_project_name
 from app.utils.workspace import (
@@ -235,6 +235,16 @@ def api_create_project():
     # creator's own roots: per-base home roots plus shared roots already
     # open to this tenant (first-level <base>/team-proj registrations are
     # no longer admissible for regular users).
+    #
+    # Review round 3 (#3376, PR #3380): round 2's creator-roots rule and
+    # the read-side home-subtree filter accepted DISJOINT sets — paths
+    # inside the creator's own home were created but never surfaced to
+    # other tenant members, and a fresh deployment could not bootstrap
+    # its first shared root (anchoring needs one to already exist). New
+    # registrations now have a first-class namespace: <base>/shared/<name>
+    # lies outside every user home, so the read side never filters it and
+    # no anchor is needed. Legacy clean shared rows keep anchoring nested
+    # registrations (see open_shared_roots below).
     if is_shared:
         base_dirs = get_workspace_base_dirs()
         home_dirs: list[str] = []
@@ -254,6 +264,11 @@ def api_create_project():
         creator_roots: list[str] = []
         if creator_account:
             creator_roots.extend(f"{base.rstrip('/')}/{creator_account}" for base in base_dirs)
+        # First-class tenant shared namespace: <base>/shared/<name> is
+        # always registrable (bootstrap-free). shared_project_path_error
+        # still rejects the namespace root itself and any namespace that
+        # collides with a user home (an account literally named "shared").
+        creator_roots.extend(shared_namespace_roots(base_dirs))
         try:
             open_shared_roots = project_repo.get_shared_project_paths(tenant_id) or []
         except Exception as e:
