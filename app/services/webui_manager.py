@@ -203,6 +203,12 @@ def _read_secret_file(secret_path: str) -> tuple[str | None, bool, bool]:
         # non-empty invalid so the caller unlinks and regenerates.
         logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
         return None, True, False
+    except FileNotFoundError:
+        # Absent is the normal first-boot state, not an access problem —
+        # lumping it into OSError below would log a false alarm on every
+        # healthy first boot and mislabel read-only-filesystem failures as
+        # "exists but cannot be read" (Issue #3377 review round 2).
+        return None, False, False
     except OSError as e:
         logger.warning(
             "Cannot read WebUI token secret file %s (%s); check its owner "
