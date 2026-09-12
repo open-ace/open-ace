@@ -105,6 +105,36 @@ def _isolated_state_root(tmp_path, monkeypatch):
     monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path / "webui-agent-state"))
 
 
+def _snapshot_backend_stub():
+    """Backend stub whose tier admits the stub config's callback URL."""
+
+    class _Endpoint:
+        tier = "kata"
+        webui_image = _WEBUI_IMAGE
+        api_key_env = "OSB_KEY"
+        egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
+
+        class attestations:
+            egress_enforced = True
+
+    class _Backend:
+        default_tier = "kata"
+        endpoints = {"kata": _Endpoint()}
+        image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
+
+    return _Backend()
+
+
+def _snapshot_manager_stub():
+    """Manager stub for build_workspace_isolation_snapshot calls."""
+
+    class _StubManager:
+        config = _StubConfig()
+        per_user_launch_readiness = staticmethod(lambda: None)
+
+    return _StubManager()
+
+
 class _StubConfig:
     """Disk-style workspace config for snapshot-building tests."""
 
@@ -332,9 +362,12 @@ def test_kata_probes_do_not_upgrade_kernel_dimension():
     fake = FakeOpenSandboxApi()  # default kernel string is not gVisor
     launcher, _svc = _launcher(fake)  # kata-qemu tier
     _launch(launcher)
-    verified, kernel_enforced = wic.sandbox_runtime_verification("kata")
+    # T-M: kata tier here IS the sidecar-egress form (_FULL_ATTESTATIONS) —
+    # the /policy read is positive evidence, so egress upgrades with it.
+    verified, kernel_enforced, egress_enforced = wic.sandbox_runtime_verification("kata")
     assert verified is True
     assert kernel_enforced is False
+    assert egress_enforced is True
 
 
 def _gvisor_backend():
@@ -369,13 +402,31 @@ def _gvisor_backend():
     )
 
 
-def test_gvisor_probes_upgrade_kernel_and_egress():
+def test_gvisor_probes_upgrade_kernel_but_not_egress(monkeypatch):
+    """T-M: a gVisor/CNI tier's egress probe is a NEGATIVE control (deny path
+    only — config.py forbids gVisor declaring the sidecar), so kernel
+    upgrades on the positive identification but network_egress must stay
+    unverified with sandbox_runtime_egress_negative_only."""
     fake = FakeOpenSandboxApi(runtime_kernel="Linux version 4.4.0 (gvisor) #1 SMP")
     launcher, _svc = _launcher(fake, backend=_gvisor_backend())
     _launch(launcher)
-    verified, kernel_enforced = wic.sandbox_runtime_verification("kata")
+    verified, kernel_enforced, egress_enforced = wic.sandbox_runtime_verification("kata")
     assert verified is True
     assert kernel_enforced is True
+    assert egress_enforced is False
+
+    # Snapshot truth for the same tier: kernel enforced, egress unsupported
+    # with the new negative-only reason.
+    import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
+
+    monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
+    monkeypatch.setattr(
+        sbcfg, "load_backend_config", lambda explicit=None: _snapshot_backend_stub()
+    )
+    snap = wic.build_workspace_isolation_snapshot(_snapshot_manager_stub())
+    assert wic.DIMENSION_KERNEL in snap.enforced
+    assert wic.DIMENSION_NETWORK_EGRESS in snap.unsupported
+    assert [r.code for r in snap.reasons] == ["sandbox_runtime_egress_negative_only"]
 
 
 def test_probe_failure_destroys_pod_and_raises():
@@ -386,7 +437,7 @@ def test_probe_failure_destroys_pod_and_raises():
         _launch(launcher)
     assert excinfo.value.reason_code == "runtime_class_mismatch"
     assert fake.deleted, "an unverifiable webui pod must not survive"
-    assert wic.sandbox_runtime_verification("kata") == (False, False)
+    assert wic.sandbox_runtime_verification("kata") == (False, False, False)
 
 
 def test_probe_failure_revokes_a_previously_verified_tier():
@@ -397,7 +448,7 @@ def test_probe_failure_revokes_a_previously_verified_tier():
     fake = FakeOpenSandboxApi()
     launcher, _svc = _launcher(fake)  # kata tier, plain kernel: probes pass
     _launch(launcher)
-    assert wic.sandbox_runtime_verification("kata") == (True, False)
+    assert wic.sandbox_runtime_verification("kata") == (True, False, True)
 
     # The tier regresses (gVisor-declared runtime, plain-Linux kernel) →
     # probe failure → the memo entry for the tier is revoked.
@@ -409,7 +460,7 @@ def test_probe_failure_revokes_a_previously_verified_tier():
             callback_url="http://openace.open-ace.svc.cluster.local:8080",
             snapshot=None,
         )
-    assert wic.sandbox_runtime_verification("kata") == (False, False)
+    assert wic.sandbox_runtime_verification("kata") == (False, False, False)
 
 
 def test_memo_expires_after_one_hour(monkeypatch):
@@ -420,40 +471,22 @@ def test_memo_expires_after_one_hour(monkeypatch):
     fake = FakeOpenSandboxApi(runtime_kernel="Linux version 4.4.0 (gvisor) #1 SMP")
     launcher, _svc = _launcher(fake, backend=_gvisor_backend())
     _launch(launcher)
-    assert wic.sandbox_runtime_verification("kata") == (True, True)
+    assert wic.sandbox_runtime_verification("kata") == (True, True, False)
 
     # Backdate the entry past the TTL.
     wic._SANDBOX_RUNTIME_MEMO["kata"]["ts"] = (
         _time.time() - wic.SANDBOX_RUNTIME_MEMO_TTL_SECONDS - 1
     )
-    assert wic.sandbox_runtime_verification("kata") == (False, False)
+    assert wic.sandbox_runtime_verification("kata") == (False, False, False)
 
-    # And the snapshot honestly falls back to the static view (same backend
-    # stub shape as the contract-upgrade test: callback host egress-allowed).
+    # And the snapshot honestly falls back to the static view.
     import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
 
-    class _SnapshotEndpoint:
-        tier = "kata"
-        webui_image = _WEBUI_IMAGE
-        api_key_env = "OSB_KEY"
-        egress_allow_hosts = ("openace.open-ace.svc.cluster.local",)
-
-        class attestations:
-            egress_enforced = True
-
-    class _SnapshotBackend:
-        default_tier = "kata"
-        endpoints = {"kata": _SnapshotEndpoint()}
-        image_allowlist = frozenset({_WEBUI_IMAGE, _AGENT_IMAGE})
-
     monkeypatch.setenv("OSB_KEY", "unit-test-tier-key")
-    monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _SnapshotBackend())
-
-    class _StubManager:
-        config = _StubConfig()
-        per_user_launch_readiness = staticmethod(lambda: None)
-
-    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    monkeypatch.setattr(
+        sbcfg, "load_backend_config", lambda explicit=None: _snapshot_backend_stub()
+    )
+    snap = wic.build_workspace_isolation_snapshot(_snapshot_manager_stub())
     assert wic.DIMENSION_KERNEL in snap.unsupported
     assert "sandbox_runtime_unverified" in [r.code for r in snap.reasons]
 
@@ -496,18 +529,29 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
     assert [r.code for r in snap.reasons] == ["sandbox_runtime_unverified"]
 
-    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=True)
+    # Sidecar tier: both probes positive → kernel + egress enforced.
+    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=True, egress_enforced=True)
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert wic.DIMENSION_KERNEL in snap.enforced
     assert wic.DIMENSION_NETWORK_EGRESS in snap.enforced
     assert snap.reasons == ()
 
     wic._reset_sandbox_runtime_verification()
-    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=False)
+    # Kata sidecar, kernel negative-only → egress still enforced.
+    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=False, egress_enforced=True)
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert wic.DIMENSION_KERNEL in snap.unsupported
     assert wic.DIMENSION_NETWORK_EGRESS in snap.enforced
     assert [r.code for r in snap.reasons] == ["sandbox_runtime_kata_negative_only"]
+
+    # T-M: a gVisor/CNI tier (kernel positive, egress negative-only) — egress
+    # must NOT upgrade and carries the new reason.
+    wic._reset_sandbox_runtime_verification()
+    wic.register_sandbox_runtime_verified(tier="kata", kernel_enforced=True, egress_enforced=False)
+    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    assert wic.DIMENSION_KERNEL in snap.enforced
+    assert wic.DIMENSION_NETWORK_EGRESS in snap.unsupported
+    assert [r.code for r in snap.reasons] == ["sandbox_runtime_egress_negative_only"]
 
 
 def _two_tier_backend():
@@ -579,19 +623,21 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
         callback_url="http://openace.open-ace.svc.cluster.local:8080",
         snapshot=None,
     )
-    assert wic.sandbox_runtime_verification("gvisor") == (True, True)
-    assert wic.sandbox_runtime_verification("kata") == (False, False)
+    # T-M: gVisor = CNI egress → kernel positive, egress negative-only.
+    assert wic.sandbox_runtime_verification("gvisor") == (True, True, False)
+    assert wic.sandbox_runtime_verification("kata") == (False, False, False)
 
-    # The Kata pod starts afterwards — its negative-only probes must register
-    # on the kata key ONLY, never touch the gVisor tier's memo entry.
+    # The Kata pod starts afterwards — its probes must register on the kata
+    # key ONLY, never touch the gVisor tier's memo entry (kata here IS the
+    # sidecar form: egress upgrades with it).
     kata_launcher = _launcher_for("kata")
     kata_launcher.launch(
         user_id=7,
         callback_url="http://openace.open-ace.svc.cluster.local:8080",
         snapshot=None,
     )
-    assert wic.sandbox_runtime_verification("gvisor") == (True, True)
-    assert wic.sandbox_runtime_verification("kata") == (True, False)
+    assert wic.sandbox_runtime_verification("gvisor") == (True, True, False)
+    assert wic.sandbox_runtime_verification("kata") == (True, False, True)
 
     # And the contract snapshot consults its OWN tier's entry (review Q1): a
     # gvisor-configured deployment still reports kernel enforced, while the
@@ -632,11 +678,13 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
 
     snap_gvisor = wic.build_workspace_isolation_snapshot(_StubManager("gvisor"))
     assert wic.DIMENSION_KERNEL in snap_gvisor.enforced
-    assert wic.DIMENSION_NETWORK_EGRESS in snap_gvisor.enforced
-    assert snap_gvisor.reasons == ()
+    # T-M: the gVisor tier's CNI egress is negative-only — NOT enforced.
+    assert wic.DIMENSION_NETWORK_EGRESS in snap_gvisor.unsupported
+    assert [r.code for r in snap_gvisor.reasons] == ["sandbox_runtime_egress_negative_only"]
 
     snap_kata = wic.build_workspace_isolation_snapshot(_StubManager("kata"))
     assert wic.DIMENSION_KERNEL in snap_kata.unsupported
+    assert wic.DIMENSION_NETWORK_EGRESS in snap_kata.enforced  # sidecar /policy
     assert [r.code for r in snap_kata.reasons] == ["sandbox_runtime_kata_negative_only"]
 
 

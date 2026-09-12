@@ -135,7 +135,9 @@ _SANDBOX_RUNTIME_MEMO: dict[str, dict[str, Any]] = {}
 SANDBOX_RUNTIME_MEMO_TTL_SECONDS = 3600.0
 
 
-def register_sandbox_runtime_verified(*, tier: str, kernel_enforced: bool) -> None:
+def register_sandbox_runtime_verified(
+    *, tier: str, kernel_enforced: bool, egress_enforced: bool = False
+) -> None:
     """Record that a sandbox pod's boot probes passed on ``tier`` (launcher hook).
 
     Called by ``SandboxedWebuiLauncher`` after the runtime-class and egress
@@ -145,10 +147,16 @@ def register_sandbox_runtime_verified(*, tier: str, kernel_enforced: bool) -> No
     while a Kata result is negative-only — it rules out gVisor but cannot
     distinguish Kata from an unisolated runc container, so the kernel dimension
     must NOT upgrade on it (reason ``sandbox_runtime_kata_negative_only``).
+    ``egress_enforced`` (T-M) upgrades network_egress ONLY for a sidecar-
+    attestation tier whose /policy the probe actually read: on gVisor/CNI
+    tiers the cluster-egress check is a negative control (deny-path only),
+    which never proves an allow flows — those stay unverified with
+    ``sandbox_runtime_egress_negative_only``.
     """
     _SANDBOX_RUNTIME_MEMO[str(tier)] = {
         "verified": True,
         "kernel_enforced": bool(kernel_enforced),
+        "egress_enforced": bool(egress_enforced),
         "ts": time.time(),
     }
 
@@ -165,22 +173,26 @@ def revoke_sandbox_runtime_verification(tier: str) -> None:
     _SANDBOX_RUNTIME_MEMO.pop(str(tier), None)
 
 
-def sandbox_runtime_verification(tier: str) -> tuple[bool, bool]:
-    """Return ``(verified, kernel_enforced)`` for *tier* — see register hook.
+def sandbox_runtime_verification(tier: str) -> tuple[bool, bool, bool]:
+    """Return ``(verified, kernel_enforced, egress_enforced)`` for *tier*.
 
     An entry older than SANDBOX_RUNTIME_MEMO_TTL_SECONDS reads as absent
     (T-L): the upgrade evidence is per-pod and per-boot, never permanent.
     """
     state = _SANDBOX_RUNTIME_MEMO.get(str(tier))
     if state is None:
-        return (False, False)
+        return (False, False, False)
     try:
         age = time.time() - float(state.get("ts") or 0)
     except (TypeError, ValueError):
-        return (False, False)
+        return (False, False, False)
     if age > SANDBOX_RUNTIME_MEMO_TTL_SECONDS:
-        return (False, False)
-    return (bool(state["verified"]), bool(state["kernel_enforced"]))
+        return (False, False, False)
+    return (
+        bool(state["verified"]),
+        bool(state["kernel_enforced"]),
+        bool(state.get("egress_enforced", False)),
+    )
 
 
 def _reset_sandbox_runtime_verification() -> None:
@@ -494,26 +506,43 @@ def build_workspace_isolation_snapshot(
             )
         # D3 two-state mapping: the static view reports kernel/egress
         # unverified; once the launcher's first pod boot probe succeeded the
-        # in-process memo upgrades them (egress always — its enforcement plane
-        # was read live; kernel only for a positive gVisor identification).
-        # The memo is keyed per tier (review Q1): a pod verified on another tier
-        # never upgrades THIS tier's snapshot.
-        verified, kernel_enforced = sandbox_runtime_verification(sandbox_tier)
+        # in-process memo upgrades them. Kernel only upgrades on a positive
+        # gVisor identification (T-M: Kata is negative-only); network_egress
+        # only on a sidecar-attestation tier whose /policy was read live
+        # (T-M: a gVisor/CNI tier's cluster-egress probe is a negative
+        # control — deny-path evidence, never proof an allow flows — same
+        # treatment as the kata kernel direction). The memo is keyed per tier
+        # (review Q1): a pod verified on another tier never upgrades THIS
+        # tier's snapshot.
+        verified, kernel_enforced, egress_enforced = sandbox_runtime_verification(sandbox_tier)
         if verified:
-            enforced: tuple[str, ...] = _SANDBOXED_ENFORCED + (DIMENSION_NETWORK_EGRESS,)
-            reasons: tuple[IsolationReason, ...] = cold_reasons
+            enforced: tuple[str, ...] = _SANDBOXED_ENFORCED
+            reasons = list(cold_reasons)
+            if egress_enforced:
+                enforced = enforced + (DIMENSION_NETWORK_EGRESS,)
+            else:
+                reasons.append(
+                    IsolationReason(
+                        "sandbox_runtime_egress_negative_only",
+                        "The tier's egress enforcement was verified in the "
+                        "negative direction only (the cluster deny-default "
+                        "control proves a deny path exists, not that an allow "
+                        "actually flows); only an egress sidecar whose /policy "
+                        "was read live upgrades network_egress, so the "
+                        "dimension stays unverified on gVisor/CNI tiers.",
+                    )
+                )
             if kernel_enforced:
                 enforced = enforced + (DIMENSION_KERNEL,)
             else:
-                reasons = cold_reasons + (
+                reasons.append(
                     IsolationReason(
                         "sandbox_runtime_kata_negative_only",
                         "The runtime boot probe passed in the negative "
                         "direction only (Kata rules out gVisor but no "
                         "hypervisor signal is observable), so the kernel "
-                        "dimension stays unverified; network egress is "
-                        "verified against the tier's enforcement plane.",
-                    ),
+                        "dimension stays unverified.",
+                    )
                 )
             return IsolationCapabilitySnapshot(
                 supported=True,
@@ -521,7 +550,7 @@ def build_workspace_isolation_snapshot(
                 isolation_level=ISOLATION_LEVEL_SANDBOXED,
                 enforced=enforced,
                 unsupported=tuple(d for d in ALL_DIMENSIONS if d not in enforced),
-                reasons=reasons,
+                reasons=tuple(reasons),
             )
         return IsolationCapabilitySnapshot(
             supported=True,

@@ -692,17 +692,34 @@ class SandboxedWebuiLauncher:
             ) from exc
         family = sandbox_config_mod.runtime_family(endpoint.runtime_class)
         kernel_enforced = family == "gvisor"
+        # T-M (review round 1): egress upgrades ONLY on a sidecar-attestation
+        # tier. config.py refuses a gVisor tier declaring the sidecar (it
+        # cannot run one) — gVisor/CNI tiers enforce egress at the CNI, and
+        # the boot probe's cluster-egress check for them is a NEGATIVE
+        # control: it verifies a deny path exists, never that an allow
+        # actually flows. Only the sidecar /policy read — which _run_probes
+        # performed on its way here (attestations.egress_enforced is the
+        # sidecar tier marker) — is positive evidence, so only those tiers
+        # register egress_enforced.
+        attestations = getattr(endpoint, "attestations", None)
+        egress_enforced = bool(getattr(attestations, "egress_enforced", False))
         from app.services.workspace_isolation_contract import register_sandbox_runtime_verified
 
         # Per-tier memo (review Q1): this pod's verification upgrades only the
         # tier it was launched against — a Kata pod starting later must not
         # downgrade an already-verified gVisor tier's snapshot (or vice versa).
-        register_sandbox_runtime_verified(tier=endpoint.tier, kernel_enforced=kernel_enforced)
+        register_sandbox_runtime_verified(
+            tier=endpoint.tier,
+            kernel_enforced=kernel_enforced,
+            egress_enforced=egress_enforced,
+        )
         logger.info(
-            "webui sandbox %s boot probes passed (runtime family %r; kernel_enforced=%s)",
+            "webui sandbox %s boot probes passed (runtime family %r; "
+            "kernel_enforced=%s; egress_enforced=%s)",
             sandbox_id,
             family,
             kernel_enforced,
+            egress_enforced,
         )
         return kernel_enforced
 
