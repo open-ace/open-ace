@@ -110,7 +110,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
 `sandboxed` 等级的探测是**零 pod、配置面 fail-closed** 的(不创建 pod 即可
-判定);以下前 7 个为探测级 reason(命中即拒绝),后 4 个为快照级(出现在契约
+判定);以下前 8 个为探测级 reason(命中即拒绝),后 4 个为快照级(出现在契约
 `reasons[]` 中、不阻止申报),最后 2 个为运行期错误码(启动器抛出,非探测码)。
 
 | code | 级别 | 含义 | 修复动作 |
@@ -123,7 +123,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `sandbox_api_key_missing` | 探测 | 该 tier 的 `api_key_env` 指定的环境变量在本进程为空——创建 pod 的第一个 API 调用就会失败;契约与启动路径不得对同一台主机给出矛盾结论(#3375 原则) | 在运行 web 进程的环境中设置该 API key(sandbox-backends.json 的 `api_key_env` 字段) |
 | `sandbox_multi_process_unsupported` | 探测 | 存在**另一个**持有新鲜心跳的 web 进程(心跳根不可读/不可判定时同样视为存在——无法证明本进程是独苗):per-instance token secret 与实例管理是进程内存态,跨副本时约 2/3 的 token 校验会随机 401;**出货的 k8s manifest(3 副本)默认即此形态,sandboxed 在多副本下自动回落到 os_user 链** | 单 web 进程部署(如 docker-compose 单副本)才可申报 sandboxed;多副本形态使用 os_user,或等待多副本实例管理支持(follow-up) |
 | `sandbox_proxy_unreachable` | 探测 | `workspace.webui_callback_url` 未设置;或该 URL 在该 tier 出口策略下不可达(loopback;sidecar tier 不在 `egress_allow_hosts`;CNI tier 为私网/集群内地址) | 设置 `webui_callback_url`;sidecar tier 将控制面主机名加入 `egress_allow_hosts`;CNI tier 保证公网可达 |
-| `sandbox_runtime_unverified` | 快照 | 静态视图:仅配置面验证通过;kernel/network_egress 待首个 pod boot probe 确认(控制面重启后回退到该状态) | 无需修复;首次成功启动 pod 后自动升级 |
+| `sandbox_runtime_unverified` | 快照 | 静态视图:仅配置面验证通过;kernel/network_egress 待首个 pod boot probe 确认(memo 在控制面重启、同 tier probe 失败或条目超过 1h 后回退到该状态) | 无需修复;首次成功启动 pod 后自动升级 |
 | `sandbox_launch_unverified` | 快照 | 冷 worker(manager 尚未初始化、沙箱启动链路未在本进程演练过):等级为 **provisional**,manager 初始化后自动消除(对齐 os_user 的 `launch_path_unverified` 先例) | 无需修复;首次工作区活动后消失 |
 | `sandbox_runtime_kata_negative_only` | 快照 | 首 pod probe 通过,但 kernel 仅负向验证(Kata 只能排除 gVisor,无法与未隔离 runc 区分):kernel 保持 unsupported | 无需修复;换 gVisor tier 可获得 kernel 正向验证 |
 | `sandbox_runtime_egress_negative_only` | 快照 | 首 pod probe 通过,但出口仅负向验证(gVisor/CNI tier 的集群级 deny-default 对照——证明拒绝路径存在,不能证明放行生效):network_egress 保持 unsupported;仅 sidecar tier 的 `/policy` 实读才升级(T-M) | 无需修复;需要申报 network_egress 时使用 sidecar attestation tier |
@@ -168,7 +168,7 @@ wrapper 齐备)同样可以验证并强制 os_user。
 unsupported——**不会**静默降级到共享账户后宣称支持;该形态下默认启动路径保持
 既有行为,显式 `required_isolation=os_user` 得到结构化拒绝。
 
-## 6. sandboxed 等级部署要求与诚实声明(policy revision 2026-09-12.1)
+## 6. sandboxed 等级部署要求与诚实声明(policy revision 2026-09-12.2)
 
 `sandboxed` = WebUI 进程运行于 OpenSandbox pod:每用户每实例一个独立 pod、
 digest-pinned 且在 image_allowlist 的专属 webui 镜像、deny-default 出口;浏览器
@@ -179,6 +179,30 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
 `POLICY_REVISION` 2026-09-12.1 的变更:`sandboxed` 等级与零 pod 探测入词表;
 新增 `kernel` 维度(`os_user` 如实申报 unsupported——共享宿主内核);user-url
 门闸增加 sandboxed 分支(按探测 reason 拒绝,不再走 OS 账户链)。
+
+`POLICY_REVISION` 2026-09-12.2 的变更(全部变化):
+
+- **T-B 闸门语义**:`required_isolation` 下限是 floor 不是目标——生效要求 =
+  max(pin 下限, 请求参数),启动形态 = 满足该要求的**最强已验证形态**
+  (`_resolve_form` 从同一能力快照推导)。因此配置了 `webui_image` 的部署,
+  不带参数的 `/user-url` 默认也走沙箱形态,即使 pin 仅为 `os_user`;未配置
+  `webui_image` 的部署行为完全不变(os_user 链,显式 `os_user` 请求照旧要求
+  system_account 映射);显式 `sandboxed` 请求保持 fail-closed 形状(探测
+  拒绝 + 启动器二次校验,不会静默降级本地)。
+- **探测 reason 词表变化**:新增 `sandbox_multi_process_unsupported`(存在
+  另一个持有新鲜心跳的 web 进程,或心跳根不可读无法证明独苗时,拒绝申报
+  sandboxed——per-instance secret 与实例管理是进程内存态);移除
+  `sandbox_proxy_token_ttl_too_short`(短 TTL 不是部署缺陷:pod 寿命在
+  create 与每次 renew 时被钳制到 LLM 凭证失效之前,抬高 TTL 反而连带拉长
+  本地 webui 凭据寿命)。
+- **T-M 仅 sidecar 升级 egress**:network_egress 只在 sidecar attestation
+  tier 的 `/policy` 实读时升级 enforced;gVisor/CNI tier 的集群级
+  deny-default 对照是负向验证(证明拒绝路径存在,不能证明放行生效),保持
+  unsupported + `sandbox_runtime_egress_negative_only`。
+- **T-L memo 失败撤销 + 1h TTL**:boot-probe memo 不再只写不读——同 tier
+  的 pod probe 失败即撤销该 tier 的升级(最新证据优先);memo 条目带
+  时间戳,超过 1h 视为过期回退 unverified。回退条件因此是"控制面重启、
+  同 tier probe 失败、或条目超过 1h"三者之一,不再仅重启。
 
 ### 6.1 维度表
 
@@ -194,10 +218,9 @@ multi_user_mode**——pod 在远端集群,单用户 + sandboxed 是合法的加
 
 静态 enforced 五维的依据是**配置事实**(独立 pod、镜像白名单、恒有资源边界),
 不是 per-pod 验证;kernel/network_egress 只有 per-pod boot probe 能证。probe
-结果为进程内 memo——**控制面重启后回退 unverified**,这是有意的诚实契约。
-memo 亦有**负向路径与时效**(T-L):同 tier 的 pod probe 失败即撤销该 tier 的
-memo(最新证据优先,不残留旧升级);memo 条目带时间戳,超过 1h 视为过期
-(回退 unverified,直到新的成功 probe 重注册)。
+结果为进程内 memo——**控制面重启、同 tier probe 失败、或条目超过 1h 后回退
+unverified**,这是有意的诚实契约(T-L:失败即撤销、条目带 1h 时效——最新
+证据优先,长驻进程不依赖数小时前的探测结论)。
 
 ### 6.2 部署要求
 
@@ -239,7 +262,8 @@ memo(最新证据优先,不残留旧升级);memo 条目带时间戳,超过 1h �
 | pod create timeout | min(WebUI token TTL, 生效 proxy token TTL) | 启动器 launch 时计算 |
 | pod renew 目标 | min(now(UTC) + WebUI token TTL, proxy token 过期时刻)——pod 至多活到其 LLM 凭证失效;token 不可解码/为空 → 钳到 now(fail-closed,不再每轮前移一个 fallback TTL);钳制点之后由空闲回收正常拆除,下次 `/user-url` 重建 + 快照恢复 | 启动器 renew 钳制 |
 | 空闲回收 | 30min(默认) | `workspace.idle_timeout_minutes` |
-| 周期快照导出 + renew + 心跳刷新 | 默认 5min,实际随 cleanup 间隔:维护检查搭载在 cleanup 循环里,`workspace.cleanup_interval_minutes`(默认 5)> 5min 时实际导出间隔 = cleanup 间隔 | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300(下限)+ cleanup 循环 sleep |
+| 周期快照导出 + renew | 默认 5min,实际随 cleanup 间隔:维护检查搭载在 cleanup 循环里,`workspace.cleanup_interval_minutes`(默认 5)> 5min 时实际导出间隔 = cleanup 间隔 | `SANDBOX_MAINTENANCE_INTERVAL_SECONDS` = 300(下限)+ cleanup 循环 sleep |
+| 进程心跳刷新 | 恒定 300s——独立定时器 greenlet(worker 启动钩子随 reconcile 同一 env 门控拉起),**不随 cleanup 间隔伸缩**;新鲜窗口 = 2×300+60 = 660s | `webui_sandbox.HEARTBEAT_REFRESH_SECONDS`;窗口 `HEARTBEAT_FRESH_WINDOW_SECONDS` |
 | 默认 proxy token TTL | 240min(无需为 sandboxed 抬高;pod TTL 被钳到它之下) | `DEFAULT_PROXY_TOKEN_TTL_MINUTES`,env `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES` |
 
 token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用现行 token
@@ -259,8 +283,11 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
   仅 sidecar attestation tier 的 `/policy` 实读升级 enforced(T-M)。
 - **会话历史**:整目录 tar 快照(存于独立根,键 `webui-<user_id>.tar`);
   控制面 crash 丢失 ≤ 一轮导出间隔的增量(默认 5min;导出搭载 cleanup 循环,
-  `cleanup_interval_minutes` 拉长时丢失窗口随之拉长);**降级启动(restore 门 60s 超时、恢复未确认)
-  的实例不导出**——宁可保住旧快照,也不让空树覆盖完好快照;快照上界默认
+  `cleanup_interval_minutes` 拉长时丢失窗口随之拉长);**降级启动(restore 门
+  60s 超时、恢复未确认、或快照不可读)的实例不导出**——宁可保住旧快照,也
+  不让空树覆盖完好快照;不可读快照的降级启动进一步**不写控制面确认记录**
+  (reconcile 与导出守卫因此都不会认它的空树);记录仅在删除**确认成功**后
+  清除,删除失败保留至下轮重试;快照上界默认
   16MiB(`OPENACE_WEBUI_STATE_MAX_BYTES` 可调),越限跳过导出——该用户历史
   **冻结在最后一份完好快照**,直到手工清理;**无自动 GC**。
 - **token 401 语义(N8)**:沙箱实例停止后,其已发 token 在 CP URL-token 路径
@@ -271,16 +298,26 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
 - **外部假设**:网关凭据注入头由 pod 内自捕获的代理端到端持有——"代理为哑
   管道、token 在 pod 内 webui 校验"包含对 webui 行为的假设;3100 端点可达性
   与 entrypoint 上游约束为外部假设,真实集群验证归 #3379。
-- **多副本与孤儿回收(T-D)**:孤儿回收按进程 generation 判别,且销毁前检查
-  控制面心跳文件(`<CONFIG_DIR>/webui-agent-state/webui-heartbeat-<boot_id>-<pid>.json`,
-  每 web 进程一个;reconcile 启动时写入、维护周期(默认 5min)刷新)——存在其它
-  新鲜心跳(ts 距今 ≤ 2×维护间隔+60s)时跳过清扫。**reconcile 互杀已消除**
-  (3 副本/滚动重叠下新副本不再清扫其它副本的在线 pod,代价是死亡副本的 pod
-  最多延迟到心跳过期后才被清扫、或由 pod TTL 自然回收)。**但 pod 归属仍是
-  单进程内存态**——多副本下的 token 校验与实例管理(回收、快照导出)仍不支持,
-  需要单副本或多副本感知的重构(§8)。心跳读写全部 fail-soft。
-- pause/resume/warm pool 不适用于 webui pod;gunicorn 形态 SIGTERM 无 exit
-  hook——正常停机会尽力导出,异常退出由下次启动的孤儿 reconcile 兜底。
+- **多副本与孤儿回收(T-D,round 2 修订)**:孤儿回收按进程 generation 判别,
+  且销毁前检查控制面心跳文件
+  (`<CONFIG_DIR>/webui-agent-state/webui-heartbeat-<process-generation>.json`,
+  每 web 进程一个;文件名与自我排除均按**每进程 uuid4 generation**——同节点
+  容器共享宿主 boot_id 且 pid 常碰撞,`(boot_id, pid)` 身份会让单节点
+  k3s/kind 副本互认为"自己");刷新由**独立 300s 定时器**承担(恒定周期,
+  与 cleanup 间隔解耦,无 manager 实例的副本也会刷新);进程退出时删除自己的
+  心跳文件(gunicorn `worker_exit` 钩子 + atexit,幂等 fail-soft)——**单进程
+  部署的重启窗口因此趋零**,但 SIGKILL/崩溃路径无法清理,残留心跳至多一个
+  新鲜窗口(≤ 660s)后自然过期,期间 sandboxed 申报被拒并回落 os_user 链。
+  存在其它新鲜心跳时跳过清扫。**reconcile 互杀已消除**(3 副本/滚动重叠下
+  新副本不再清扫其它副本的在线 pod)。**心跳读取 fail-closed**:心跳根或
+  心跳文件不可读 = "无法证明独苗",按"存在 peer"处理(探测拒绝 sandboxed、
+  清扫跳过),写入侧仍 fail-soft。**但 pod 归属仍是单进程内存态**——多副本下
+  的 token 校验与实例管理(回收、快照导出)仍不支持,需要单副本或多副本感知
+  的重构(§8)。
+- pause/resume/warm pool 不适用于 webui pod;gunicorn 形态正常停机经
+  `worker_exit` 钩子清理心跳文件(dev/非 gunicorn 形态由 atexit 兜底;
+  SIGKILL 无法覆盖——残留心跳至多一个新鲜窗口后过期),实例侧正常停机仍尽力
+  导出,异常退出由下次启动的孤儿 reconcile 兜底。
 
 ## 7. 接入方用法
 

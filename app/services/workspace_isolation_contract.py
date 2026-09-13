@@ -14,7 +14,8 @@ Issue #3378 adds the ``sandboxed`` level (WebUI pods on an OpenSandbox
 backend). Its kernel/egress enforcement is only verifiable per-pod via boot
 probes, so the sandboxed snapshot reports those dimensions as unsupported
 with an explicit ``sandbox_runtime_unverified`` reason until the first
-successful pod probe memoizes the upgrade (in-process; resets on restart).
+successful pod probe memoizes the upgrade (in-process; resets on
+control-plane restart, when a probe on the tier fails, and after a 1h TTL).
 """
 
 from __future__ import annotations
@@ -603,8 +604,9 @@ def build_workspace_isolation_snapshot(
                     "sandbox_runtime_unverified",
                     "The sandboxed level is verified on the configuration "
                     "plane only; kernel and egress enforcement are confirmed "
-                    "per-pod by boot probes after the first launch (resets "
-                    "on control-plane restart).",
+                    "per-pod by boot probes after the first launch (the memo "
+                    "resets on control-plane restart, when a probe on the "
+                    "tier fails, or after its 1h TTL).",
                 ),
             ),
         )
