@@ -599,9 +599,11 @@ class TestWebuiTokenV2:
 
     def test_v2_token_generation(self):
         """Test that generate_token produces v2 format."""
-        from app.services.webui_manager import WebUIManager
+        from app.services.webui_manager import WebUIManager, WorkspaceConfig
 
-        manager = WebUIManager()
+        # Issue #3377: injected config keeps the manager off the host config
+        # dir (the secret is overwritten right below either way).
+        manager = WebUIManager(WorkspaceConfig())
         manager.config.token_secret = "test-secret"
 
         token = manager.generate_token(user_id=1, port=3100)
@@ -613,9 +615,11 @@ class TestWebuiTokenV2:
 
     def test_v2_token_validation(self):
         """Test v2 token validation with TTL."""
-        from app.services.webui_manager import WebUIManager
+        from app.services.webui_manager import WebUIManager, WorkspaceConfig
 
-        manager = WebUIManager()
+        # Issue #3377: injected config keeps the manager off the host config
+        # dir (the secret is overwritten right below either way).
+        manager = WebUIManager(WorkspaceConfig())
         manager.config.token_secret = "test-secret"
 
         # Generate token
@@ -631,9 +635,11 @@ class TestWebuiTokenV2:
         """Test that v1 format tokens are still accepted (legacy support)."""
         import hashlib
 
-        from app.services.webui_manager import WebUIManager
+        from app.services.webui_manager import WebUIManager, WorkspaceConfig
 
-        manager = WebUIManager()
+        # Issue #3377: injected config keeps the manager off the host config
+        # dir (the secret is overwritten right below either way).
+        manager = WebUIManager(WorkspaceConfig())
         manager.config.token_secret = "test-secret"
 
         # Generate v1 format token manually
