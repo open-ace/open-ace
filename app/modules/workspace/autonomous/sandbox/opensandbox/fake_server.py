@@ -228,6 +228,31 @@ class FakeOpenSandboxApi:
         self._require_execd(sandbox_id)
         self.command_bodies.append(body)
         command = str(body.get("command") or "")
+        command_id = f"cmd-{next(self._command_ids)}"
+        if body.get("background"):
+            # UPSTREAM background:true semantics (modelled, not invented):
+            # execution_complete fires IMMEDIATELY after launch and no
+            # stdout/stderr SSE events are emitted at all — the evidence
+            # contract cannot work with this shape, which is exactly why
+            # policy.build_command_request (policy.py:652-657) documents
+            # "Foreground, always". The command itself keeps running detached;
+            # its terminal status is observable via /command/status, which the
+            # WebUI launcher's restore/snapshot sequences poll (Issue #3378).
+            exit_code = self._scripted_exit_code
+            self._commands[command_id] = {
+                "id": command_id,
+                "running": self._scripted_timeout,
+                "exit_code": None if self._scripted_timeout else exit_code,
+                "error": "",
+                "started_at": "2026-08-28T00:00:00Z",
+                "finished_at": None if self._scripted_timeout else "2026-08-28T00:00:01Z",
+            }
+            return iter(
+                [
+                    {"type": "init", "text": command_id},
+                    {"type": "execution_complete", "execution_time": 0},
+                ]
+            )
         if "OPENACE_METADATA=" in command:
             return iter(self._cluster_egress_events())
         if "openace-manifest.py" in command:

@@ -356,6 +356,16 @@ class APIKeyProxyService:
             )
         return self.DEFAULT_PROXY_TOKEN_TTL_MINUTES
 
+    def effective_proxy_token_ttl_minutes(self, session_type: str) -> int:
+        """Public accessor for the effective default TTL of a session type.
+
+        Issue #3378: the sandboxed isolation probe must compare the SAME
+        effective value launch-time tokens are minted with (env overrides,
+        clamping, fallback included) instead of re-reading raw environment
+        variables — one definition, no drift.
+        """
+        return self._get_default_proxy_token_ttl_minutes(session_type)
+
     def _get_clock_skew_seconds(self, session_type: str) -> int:
         """Get clock skew tolerance for the given session type.
 

@@ -66,12 +66,62 @@ from app.remote_ws_handler import RemoteWSHandler
 
 
 class TerminalGeventWorker(GeventPyWSGIWorker):
-    """Gevent pywsgi worker with remote terminal and VSCode WebSocket handler.
+    """Gunicorn pywsgi worker with remote terminal and VSCode WebSocket handler.
 
     This worker class:
     1. Inherits from GeventPyWSGIWorker (gevent-based worker)
     2. Uses RemoteWSHandler for WebSocket upgrade handling
-    3. Applies psycogreen patch for psycopg2 gevent compatibility (Issue #2187)
+    3. Applies psycogreen patch for gevent compatibility (Issue #2187)
+    4. Spawns the webui-pod orphan reconcile and the webui heartbeat timer
+       at worker start (Issue #3378)
+
+    Both spawns are env-gated (OPENACE_WEBUI_ORPHAN_RECONCILE=1, set only by
+    the web service entrypoint) and run on their OWN greenlets — the sweep
+    and the heartbeat refresh must never run inline in a request-serving
+    greenlet (design #3378 FEAS-R4-3).
     """
 
     wsgi_handler = RemoteWSHandler
+
+    def run(self) -> None:
+        """Spawn the (gated) orphan reconcile + heartbeat timer, THEN serve.
+
+        Issue #3378 review (B1): gunicorn's ``Worker.init_process`` ends with
+        ``self.run()`` and blocks there for the worker's entire life, so a hook
+        placed AFTER ``super().init_process()`` would only execute at shutdown,
+        when no greenlet hub drives it anymore. Overriding ``run()`` instead
+        puts the spawn right before the service loop starts (the reconcile
+        itself only spawns a greenlet — serving is never delayed by the sweep).
+        """
+        try:
+            from app.services.webui_sandbox import (
+                maybe_spawn_webui_heartbeat_timer,
+                maybe_spawn_webui_orphan_reconcile,
+            )
+
+            maybe_spawn_webui_orphan_reconcile()
+            # F-2③ (review round 2): the heartbeat refresh timer — same env
+            # gate + TESTING guard as the reconcile; a replica without a
+            # manager instance must still keep its heartbeat fresh.
+            maybe_spawn_webui_heartbeat_timer()
+        except Exception:  # noqa: BLE001 - fail-soft: boot must not fail
+            logger.exception("webui sandbox background spawns failed (fail-soft)")
+        super().run()
+
+
+def worker_exit(server, worker) -> None:  # noqa: ARG001 - gunicorn hook signature
+    """Gunicorn ``worker_exit`` hook (F-2②, Issue #3378 review round 2).
+
+    Called in the worker process just after it exits. Removes THIS worker's
+    webui heartbeat file (idempotent, fail-soft) so a restarted deployment is
+    not blocked by its own dead predecessor for a full heartbeat freshness
+    window. Activated by passing ``--config python:app.gunicorn_worker`` (the
+    shipped entrypoint does); atexit covers the non-gunicorn dev path as a
+    belt-and-braces — both route through the same idempotent removal.
+    """
+    from app.services.webui_sandbox import remove_own_heartbeat
+
+    try:
+        remove_own_heartbeat()
+    except Exception:  # noqa: BLE001 - shutdown must never raise
+        logger.exception("webui heartbeat cleanup at worker exit failed (fail-soft)")

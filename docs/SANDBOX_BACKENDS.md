@@ -80,6 +80,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
       "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_KATA",
       "runtime_class": "kata-qemu",
       "default_image": "ghcr.io/open-ace/agent@sha256:<64 hex>",
+      "webui_image": "ghcr.io/open-ace/webui@sha256:<64 hex>",
       "execd_endpoint_host_allowlist": ["opensandbox-gateway.open-ace.example"],
       "egress_allow_hosts": [
         "openace.open-ace.svc.cluster.local",
@@ -163,6 +164,16 @@ Points worth knowing before you edit it:
   name, and the client refuses any execd URL whose host is not on this list. It
   therefore has to match `ingress.gateway.address` in the server ConfigMap; a
   `*.svc.cluster.local` entry left over from direct ingress refuses every call.
+- **`webui_image` is optional, and validated by the capability probe — not by the
+  parser.** Interactive sandboxed WebUI pods (#3378, see §8) launch from
+  `endpoints.<tier>.webui_image` when that key is set. It parses as a plain
+  optional string on purpose: the digest-pinned + `image_allowlist` checks happen
+  in the isolation-capability probe, so a bad value degrades only the `sandboxed`
+  level (with `webui_image_not_pinned` / `webui_image_not_allowed` reasons) and
+  never breaks the shared backend config that autonomous tasks depend on. The
+  same discipline as `default_image` applies operationally — digest-pinned and
+  allowlisted — it is just enforced at a different layer. A reference build lives
+  at `scripts/docker/webui-sandbox.Dockerfile`.
 - **`installation_id` is required and must be unique per deployment.** It is
   stamped on every sandbox's metadata, and orphan reconciliation destroys every
   sandbox carrying our provider tag that no local workflow row claims. Two
@@ -304,6 +315,12 @@ ChangeSet rejections use their own set: `absolute_path`, `path_escape`,
 `repo_integrity`, `symlink_escape`, `file_too_large`, `too_many_files`,
 `total_too_large`, `unsafe_mode`, `secret_path`.
 
+The sandboxed interactive WebUI launcher (#3378, §8) adds two runtime codes of
+its own — `sandbox_create_failed` and `sandbox_endpoint_unresolved` — plus a
+zero-pod probe vocabulary (`webui_image_*`, `sandbox_proxy_*`,
+`sandbox_runtime_*`) documented in
+`docs/workspace-isolation-capabilities.md` §3.4.
+
 ---
 
 ## 7. Known limitations
@@ -430,7 +447,9 @@ teardown happens through `destroy_attribution` on rows the database already
 knows about. Attribution is now persisted the moment `create()` returns an id,
 so the crash window that could strand an unnameable sandbox is closed — but a
 sandbox whose workflow row is lost entirely is still reclaimed by its TTL rather
-than by Open ACE.
+than by Open ACE. Should this sweep ever gain a production caller, it MUST keep
+the interactive-WebUI exclusion described in §8 — without it the first sweep
+destroys every live user WebUI pod.
 
 **Multi-turn `--resume` carries the CLI transcript, and nothing else.** Each
 turn gets a fresh sandbox with an empty `HOME`, so the transcript `--resume`
@@ -505,7 +524,74 @@ split `scripts/openace-run-as.sh` makes between its fail-closed capture
 
 ---
 
-## 8. Backend comparison
+## 8. Interactive workspaces (the `sandboxed` isolation level)
+
+Since #3378 this backend also hosts the **interactive workspace**: a deployment
+can run each user's qwen-code-webui in its own OpenSandbox pod instead of as a
+local process under an OS account. The browser reaches the pod through a local
+per-instance port proxy in the web process; identity is a per-instance token
+secret, not a host uid. The capability contract — probe reason codes, the
+dimension table, the TTL chain, and the honest-declaration list (configuration-
+plane vs per-pod verification, crash-loss windows, snapshot ceiling) — lives in
+`docs/workspace-isolation-capabilities.md` §6. This section covers what touches
+*this* backend file and the web process that drives it.
+
+**Configuration.** One key in this file, plus two in config.json:
+
+- `endpoints.<tier>.webui_image` — the pod image; see the §3 bullet. Setting it
+  is what makes the `sandboxed` level probe-able at all, and a passing probe
+  flips the deployment's default launch form to sandboxed.
+- config.json `workspace.webui_callback_url` — **required**: the static probe
+  uses it as the URL the pod reaches the control-plane LLM proxy through. On a
+  sidecar tier the control plane's hostname must be in that tier's
+  `egress_allow_hosts`; on a CNI tier it must be publicly reachable (loopback,
+  private, and cluster-internal addresses are refused at probe time).
+- config.json `workspace.sandbox_tier` — optional; which endpoint tier
+  interactive pods launch on, defaulting to the backend's `default_tier`.
+
+**Web-process environment:**
+
+- `OPENACE_WEBUI_ORPHAN_RECONCILE=1` — positive trigger for the WebUI-pod orphan
+  reconcile. Set **only** by the web service entrypoint (docker-entrypoint.sh's
+  gunicorn path — explicitly *not* the scheduler container — and server.py's dev
+  `__main__`). Management scripts import `create_app` without setting it, so
+  they can never sweep; a test process is guarded off (`PYTEST_VERSION` /
+  `TESTING`) and the sweep itself is fail-soft (a corrupt sandbox-backends.json
+  logs and is skipped rather than breaking web boot).
+- `OPENACE_WEBUI_STATE_ROOT` — snapshot root for WebUI session history, default
+  `<CONFIG_DIR>/webui-agent-state` (i.e. `~/.open-ace/webui-agent-state`), one
+  `webui-<user_id>.tar` per user. Implementation note: the design plan placed
+  this *alongside* the config directory; the shipped default is *inside* it,
+  because CONFIG_DIR is the directory Docker deployments mount for persistence —
+  a sibling would be container-local and lose every snapshot on container
+  recreation. The reaper never scans this root.
+- `OPENACE_WEBUI_STATE_MAX_BYTES` — per-snapshot ceiling, default 16 MiB. Over
+  the ceiling the export is skipped with a WARNING and the user's history stays
+  frozen at the last good snapshot (see the capabilities doc §6.4).
+
+> **Load-bearing exclusion contract (N7): `reconcile_orphans` must never claim
+> WebUI pods.**
+>
+> Interactive WebUI pods carry `openace.webui.kind=webui` metadata and are NOT
+> workflow-bound — no workflow row will ever appear to claim them, so a
+> `reconcile_orphans()` sweep without the kind exclusion classifies every live
+> user WebUI pod as an orphan and **destroys all of them on its first run**.
+> The exclusion is implemented in `provider.reconcile_orphans` (metadata filter
+> + client-side re-check) and bound by tests. Anyone wiring that sweep to a new
+> production caller MUST keep the exclusion; WebUI pods are reclaimed by the web
+> process's own generation-keyed reconcile (`app/services/webui_sandbox.py`),
+> not by the workflow live-set.
+
+**Single web process assumption.** The webui-pod reconcile destroys WebUI pods
+whose `openace.webui.process_generation` metadata is not the current web
+process's — which is only a sound discriminator when exactly one web process
+owns the installation. The shipped compose deployment (one `open-ace` app
+container) satisfies it; **multiple web replicas or a rolling deploy with
+old/new overlap are not supported** and would destroy each other's pods.
+
+---
+
+## 9. Backend comparison
 
 Sources are labelled. Nothing here is an unattributed number.
 
@@ -601,7 +687,7 @@ on your cluster and provider.*
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 **Every execd call returns 401.** `execd_token_env` is unset or names an empty
 variable. Note that execd's auth middleware short-circuits on an empty token, so

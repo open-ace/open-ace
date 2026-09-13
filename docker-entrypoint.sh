@@ -1610,10 +1610,19 @@ echo "=========================================="
 echo "  Open ACE - Starting Gunicorn"
 echo "=========================================="
 
+# Issue #3378 (D5): only the WEB service reconciles orphaned webui sandbox
+# pods at boot (positive-trigger env). The scheduler container shares this
+# entrypoint but must NOT set it — the web process owns the webui-pod
+# lifecycle (process generation reconcile), and two hosts would race.
+if [ "${SCHEDULER_MODE:-web}" != "scheduler" ]; then
+    export OPENACE_WEBUI_ORPHAN_RECONCILE=1
+fi
+
 # Use gunicorn_entry.py wrapper that monkey-patches gevent BEFORE gunicorn
 # (or any transitive dep) imports urllib3. This prevents urllib3.util.ssl_
 # RecursionError under the gevent event loop during LLM proxy outbound requests.
 exec python3 /app/gunicorn_entry.py \
+    --config python:app.gunicorn_worker \
     --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \
