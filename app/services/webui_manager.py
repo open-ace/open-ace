@@ -443,6 +443,18 @@ def _resolve_token_secret(config: WorkspaceConfig) -> str:
     return generated
 
 
+def _webui_token_user(user_id: int) -> dict | None:
+    """Look up the user a webui token names (Issue #3379 PR-A seam).
+
+    Raises are handled by the caller's fail-closed denial; this seam exists
+    so tests (and any future cache) can substitute the lookup without
+    constructing repository state.
+    """
+    from app.repositories.user_repo import UserRepository
+
+    return UserRepository().get_user_by_id(user_id)
+
+
 class WebUIManager:
     """
     Manages per-user qwen-code-webui processes.
@@ -1166,6 +1178,10 @@ class WebUIManager:
         if age_seconds < 0:
             return False, None, "Token timestamp is in the future"
 
+        denial = self._user_token_denial(user_id)
+        if denial:
+            return False, None, denial
+
         return True, user_id, None
 
     def _find_sandboxed_instance_by_token(self, token: str) -> WebUIInstance | None:
@@ -1203,10 +1219,38 @@ class WebUIManager:
             # creates a new WebUIManager instance with empty allocations.
             # Signature validation is sufficient for security.
 
+            denial = self._user_token_denial(user_id)
+            if denial:
+                return False, None, denial
+
             return True, user_id, None
 
         except (ValueError, TypeError) as e:
             return False, None, f"Token parse error: {e}"
+
+    def _user_token_denial(self, user_id: int) -> str | None:
+        """Why a signature-valid webui token must still be refused, or None.
+
+        Issue #3379 (PR-A): webui tokens are stateless (signature + TTL), so
+        without this check a deactivated or soft-deleted user's already-issued
+        URL tokens keep authenticating (URL_TOKEN_ALLOWED_PATHS admits admin
+        routes) until their TTL lapses — the exact "停用用户后无法恢复继续
+        执行" acceptance item #3374 demands. The deactivation path also stops
+        the workspace; this is the token-side closure. Fail-closed on lookup
+        errors: a token that cannot be tied to a live user does not pass.
+        """
+        try:
+            user = _webui_token_user(user_id)
+        except Exception as e:  # noqa: BLE001 - fail closed on lookup failure
+            logger.warning(f"Webui token user lookup failed for user {user_id}: {e}")
+            return "User status unavailable"
+        if not user:
+            return "User not found"
+        if not user.get("is_active", True):
+            return "User is deactivated"
+        if user.get("deleted_at"):
+            return "User is deleted"
+        return None
 
     def get_user_webui_url(
         self,

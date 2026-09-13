@@ -17,6 +17,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _active_webui_token_user(monkeypatch):
+    """Issue #3379 PR-A: token validation checks the named user is active;
+    unit tests without a seeded DB default the lookup to an active user."""
+    import app.services.webui_manager as wm
+
+    monkeypatch.setattr(wm, "_webui_token_user", lambda uid: {"id": uid, "is_active": True})
+
+
 # Ensure project root is on path
 project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:

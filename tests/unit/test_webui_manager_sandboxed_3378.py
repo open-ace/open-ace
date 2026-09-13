@@ -17,6 +17,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _active_webui_token_user(monkeypatch):
+    """Issue #3379 PR-A: token validation now checks the named user is
+    active; unit tests without a seeded DB default the lookup to an
+    active user via the module seam."""
+    import app.services.webui_manager as wm
+
+    monkeypatch.setattr(wm, "_webui_token_user", lambda uid: {"id": uid, "is_active": True})
+
+
 import app.services.webui_manager as wmgr
 from app.services import workspace_isolation_contract as wic
 from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig

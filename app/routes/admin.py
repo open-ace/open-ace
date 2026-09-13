@@ -394,6 +394,31 @@ def api_update_user(user_id):
             new_active = data.get("is_active")
             if new_active is not None and old_active != new_active:
                 details["status_change"] = {"from": old_active, "to": new_active}
+                # Issue #3379 (PR-A): deactivating a user must stop their
+                # running workspace — same invariant as DELETE above. Also
+                # revoke the sessions: a disabled account must not keep
+                # logged-in sessions (login already refuses is_active=false,
+                # this closes the already-issued ones).
+                if new_active is False:
+                    try:
+                        user_repo.delete_all_sessions_for_user(user_id)
+                    except Exception as e:  # noqa: BLE001 - audit the miss
+                        logger.warning(
+                            f"Failed to revoke sessions for deactivated user {user_id}: {e}"
+                        )
+                    workspace_stopped = False
+                    try:
+                        from app.services.webui_manager import get_webui_manager
+
+                        manager = get_webui_manager()
+                        if manager is not None:
+                            manager.stop_user_webui(user_id)
+                            workspace_stopped = True
+                    except Exception as e:  # noqa: BLE001 - deactivation proceeds
+                        logger.warning(
+                            f"Failed to stop WebUI instance for deactivated user {user_id}: {e}"
+                        )
+                    details["workspace_stopped"] = workspace_stopped
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.USER_UPDATE,
@@ -439,6 +464,21 @@ def api_delete_user(user_id):
         f"web_user_auth_sessions={session_counts['web_user_auth_sessions']}"
     )
 
+    # Issue #3379 (PR-A): a deactivated user must not keep a running workspace.
+    # Stopping the instance also revokes the webui:<uid> LLM proxy token and
+    # (for sandboxed instances) destroys the pod. Fail-soft: the token-side
+    # active-user check below still closes the door if the stop hiccups.
+    workspace_stopped = False
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        if manager is not None:
+            manager.stop_user_webui(user_id)
+            workspace_stopped = True
+    except Exception as e:  # noqa: BLE001 - deactivation must proceed
+        logger.warning(f"Failed to stop WebUI instance for deleted user {user_id}: {e}")
+
     # Perform soft delete
     success = user_repo.delete_user(user_id)
 
@@ -472,6 +512,7 @@ def api_delete_user(user_id):
                 "action": "delete",
                 "tenant_id": tenant_id,
                 "sessions_revoked": session_counts,
+                "workspace_stopped": workspace_stopped,
                 "counter_decremented": counter_decremented,
             },
             **client_info,
