@@ -1214,6 +1214,7 @@ class WebUIManager:
         system_account: str,
         host_url: str | None = None,
         required_isolation: str = "",
+        snapshot: Any = None,
     ) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
@@ -1231,6 +1232,14 @@ class WebUIManager:
                       resolved (Issue #3378). "sandboxed" launches the sandboxed
                       form; empty derives it from the capability snapshot's
                       floor (a passing sandbox probe flips the default).
+            snapshot: Optional capability snapshot the CALLER already built for
+                      its own gate (F-6.1, review round 2). When given,
+                      _resolve_form reuses it instead of building a second one
+                      — the route's gate snapshot and the launch-form fork then
+                      key on ONE view even if a heartbeat flips the (cached)
+                      level between the two builds, so the form can never
+                      disagree with the gate that admitted the request.
+                      Default None keeps the build-it-yourself behavior.
 
         Returns:
             Tuple of (url, token).
@@ -1246,7 +1255,7 @@ class WebUIManager:
         else:
             base_url = self.config.url
 
-        form = self._resolve_form(required_isolation)
+        form = self._resolve_form(required_isolation, snapshot=snapshot)
 
         if not self.config.multi_user_mode:
             if form == WEBUI_FORM_SANDBOXED:
@@ -1370,7 +1379,7 @@ class WebUIManager:
                 instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
 
-    def _resolve_form(self, required_isolation: str) -> str:
+    def _resolve_form(self, required_isolation: str, *, snapshot: Any = None) -> str:
         """Pick the launch form for this request (Issue #3378, review round 1).
 
         The caller passes the EFFECTIVE requirement — max(server pin floor,
@@ -1382,6 +1391,14 @@ class WebUIManager:
         to the local form, so a deployment pinned `os_user` by the entrypoint
         but configured with a webui_image advertised `sandboxed` in its
         contract while launching local OS processes).
+
+        F-6.1 (review round 2): a caller that already built a snapshot for its
+        own gate (the /user-url route, the login prestart) passes it in —
+        building a SECOND one here let a heartbeat flip the cached level
+        between the two builds, making the form disagree with the gate that
+        admitted the request (e.g. the gate skipping
+        identity_mapping_missing for a now-`local` launch). None builds it,
+        the historical behavior.
 
         Consequences: with no sandboxed request parameter, a sandboxed-
         capable deployment always launches the pod form (even when the pin
@@ -1399,7 +1416,8 @@ class WebUIManager:
             build_workspace_isolation_snapshot,
         )
 
-        snapshot = build_workspace_isolation_snapshot(self)
+        if snapshot is None:
+            snapshot = build_workspace_isolation_snapshot(self)
         return (
             WEBUI_FORM_SANDBOXED
             if snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
@@ -2661,7 +2679,12 @@ class WebUIManager:
         def start_in_background():
             try:
                 logger.info(f"Pre-starting webui instance for user {user_id} ({system_account})")
-                url, token = self.get_user_webui_url(user_id, system_account, host_url)
+                # F-6.1: the gate snapshot built ABOVE is the one this prestart
+                # was admitted on — pass it through so the launch-form fork
+                # cannot disagree with the evaluation that spawned it.
+                url, token = self.get_user_webui_url(
+                    user_id, system_account, host_url, snapshot=snapshot
+                )
                 logger.info(f"Pre-started webui for user {user_id}: {url}")
             except Exception as e:
                 logger.error(f"Failed to pre-start webui for user {user_id}: {e}")

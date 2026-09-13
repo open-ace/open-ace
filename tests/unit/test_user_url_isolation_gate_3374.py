@@ -23,7 +23,9 @@ class _StubManager:
         self.config.multi_user_mode = multi_user_mode
         self.launched_with = None
 
-    def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
+    def get_user_webui_url(
+        self, user_id, system_account, host_url, required_isolation="", snapshot=None
+    ):
         self.launched_with = system_account
         return "http://127.0.0.1:3100", "tok"
 
@@ -264,7 +266,7 @@ def test_https_multi_user_returns_relative_webui_path(app, client, monkeypatch):
     # (_extract_token() 依次读 cookie → Bearer header,header 与 host 无关)。
     _deployment_supported(monkeypatch)
     stub = _StubManager()
-    stub.get_user_webui_url = lambda user_id, sa, host, required_isolation="": (
+    stub.get_user_webui_url = lambda user_id, sa, host, required_isolation="", snapshot=None: (
         "http://10.0.0.1:3100",
         "tok",
     )

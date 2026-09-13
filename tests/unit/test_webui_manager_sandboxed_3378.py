@@ -1050,6 +1050,7 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
 
             self.config = wm.WorkspaceConfig(enabled=True, multi_user_mode=True)
             self.received_isolation = None
+            self.received_snapshot = None
 
         def per_user_launch_readiness(self):
             return None
@@ -1057,8 +1058,11 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
         def supports_per_user_launch(self, system_account):
             return True, None
 
-        def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
+        def get_user_webui_url(
+            self, user_id, system_account, host_url, required_isolation="", snapshot=None
+        ):
             self.received_isolation = required_isolation
+            self.received_snapshot = snapshot
             return "http://127.0.0.1:3123", "tok"
 
         def update_user_activity(self, user_id):
@@ -1089,6 +1093,41 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
             resp = client.get("/api/workspace/user-url?required_isolation=sandboxed")
     assert resp.status_code == 200
     assert stub.received_isolation == "sandboxed"
+    # F-6.1: the manager gets the SAME snapshot object the route's gate used —
+    # its form fork cannot diverge if a second build would have flipped.
+    assert stub.received_snapshot is sandbox_snapshot
+
+
+def test_resolve_form_reuses_the_callers_snapshot():
+    """F-6.1: with a snapshot handed in, _resolve_form must not build a second
+    one — two builds could disagree (a peer heartbeat flipping the cached
+    level between them), making the launch form contradict the gate."""
+    launcher = _FakeLauncher()
+    manager = _manager(launcher=launcher)
+
+    def _boom(mgr):
+        raise AssertionError("a second snapshot build must never happen")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", _boom)
+    try:
+        # The caller's sandboxed snapshot decides — no rebuild.
+        assert manager._resolve_form("", snapshot=_snapshot_at_level("sandboxed")) == "sandboxed"
+        assert manager._resolve_form("", snapshot=_snapshot_at_level("os_user")) == "local"
+        # An explicit sandboxed request never needs the snapshot at all.
+        assert manager._resolve_form("sandboxed", snapshot=None) == "sandboxed"
+    finally:
+        monkeypatch.undo()
+
+    # Default (None) keeps the historical build-it-yourself behavior.
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        wic, "build_workspace_isolation_snapshot", lambda mgr: _snapshot_at_level("os_user")
+    )
+    try:
+        assert manager._resolve_form("") == "local"
+    finally:
+        monkeypatch.undo()
 
 
 def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
@@ -1109,7 +1148,9 @@ def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
         def supports_per_user_launch(self, system_account):
             return True, None
 
-        def get_user_webui_url(self, user_id, system_account, host_url, required_isolation=""):
+        def get_user_webui_url(
+            self, user_id, system_account, host_url, required_isolation="", snapshot=None
+        ):
             raise SandboxWebuiError(
                 "sandbox gateway at https://lifecycle.internal:9443/v1 could not "
                 "resolve the pod's webui endpoint (allowlist=['lifecycle.internal']) "

@@ -2435,8 +2435,15 @@ def get_user_webui_url():
         # Issue #3378: the effective level the gate resolved drives the
         # manager's form fork (sandboxed → launcher branch; otherwise the
         # os_user path is unchanged). The gate itself is contract-owned (T1).
+        # F-6.1 (review round 2): the SAME snapshot the gate used is handed
+        # through, so the manager's form fork cannot diverge from the gate's
+        # verdict if the (cached) level flips between the two builds.
         url, token = manager.get_user_webui_url(
-            int(user_id), str(system_account), host_url, required_isolation=effective
+            int(user_id),
+            str(system_account),
+            host_url,
+            required_isolation=effective,
+            snapshot=isolation_snapshot,
         )
 
         # Update activity timestamp
