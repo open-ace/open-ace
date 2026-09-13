@@ -1341,7 +1341,10 @@ class SandboxedWebuiLauncher:
         NEVER block the destroy — an idle webui pod is cheaper than a leak
         (T-I: the final-export block catches Exception wholesale, the same
         posture as restore_sequence's degrade path; only the delete frees the
-        pod, so it must always run).
+        pod, so it must always run). F-5b: the CP restore-confirmation record
+        is cleared ONLY after a CONFIRMED delete — a failed delete used to
+        clear it anyway, so the next reconcile saw "no record", skipped the
+        export and blindly deleted a pod whose history was never saved.
         """
         api = self._current_api()
         if final_export:
@@ -1362,20 +1365,27 @@ class SandboxedWebuiLauncher:
                     sandbox_id,
                     exc,
                 )
-        self._destroy_raw(api, sandbox_id)
-        self.clear_restore_confirmation(sandbox_id)
+        if self._destroy_raw(api, sandbox_id):
+            self.clear_restore_confirmation(sandbox_id)
         self._webui_endpoints.pop(sandbox_id, None)
 
-    def _destroy_raw(self, api: OpenSandboxApi, sandbox_id: str) -> None:
-        """delete_sandbox, treating 404/unavailable as already-gone."""
+    def _destroy_raw(self, api: OpenSandboxApi, sandbox_id: str) -> bool:
+        """delete_sandbox; True only when the deletion is CONFIRMED.
+
+        404 counts as confirmed (the desired end state already holds). Any
+        other failure returns False so the caller keeps the CP record for the
+        next round (F-5b).
+        """
         try:
             api.delete_sandbox(sandbox_id)
+            return True
         except OpenSandboxApiError as exc:
             if exc.status_code == 404:
-                return
+                return True
             logger.warning("webui sandbox %s delete failed: %s", sandbox_id, exc)
         except Exception as exc:  # noqa: BLE001 - destroy stays idempotent
             logger.warning("webui sandbox %s delete failed: %s", sandbox_id, exc)
+        return False
 
 
 # ── D1: the per-instance browser proxy ──────────────────────────────────────
@@ -2074,7 +2084,7 @@ def reconcile_webui_orphans(
                     exc,
                 )
             try:
-                _delete_orphan(api, sandbox_id, state_root_override)
+                deleted = _delete_orphan(api, sandbox_id, state_root_override)
             except Exception as exc:  # noqa: BLE001 - the sweep must survive any orphan
                 logger.warning(
                     "webui orphan reconcile: destroy failed for %s (%s); "
@@ -2082,6 +2092,11 @@ def reconcile_webui_orphans(
                     sandbox_id,
                     exc,
                 )
+                continue
+            # An unconfirmed delete keeps the CP record AND stays out of the
+            # destroyed list (F-5b): the pod is retried — with its export —
+            # on the next sweep.
+            if not deleted:
                 continue
             destroyed.append(sandbox_id)
     if destroyed:
@@ -2162,29 +2177,38 @@ def _delete_orphan(
     api: OpenSandboxApi,
     sandbox_id: str,
     state_root_override: str | None = None,
-) -> None:
-    """Idempotent delete; failures are logged, never raised (retry next boot).
+) -> bool:
+    """Idempotent delete; the CP record is cleared ONLY on confirmed success.
 
-    The CP restore-confirmation record goes with the pod (the id never
-    returns); fail-soft — a leftover record only makes a future export-gate
-    check stale-harmless for an id that no longer exists. F-4: the record
-    path goes through the same sandbox-id guard (a malformed id has no legal
-    record path to unlink).
+    Returns True when the deletion is confirmed (the API accepted it, or 404 =
+    the desired end state already holds). On failure the record is KEPT
+    (F-5b): the next sweep must still see an export-worthy pod — the old
+    behavior cleared the record even when the delete failed, so the retry
+    round found "no record", skipped the export, and deleted the user's last
+    session history unread. Failures are logged, never raised (retry next
+    boot). F-4: the record path goes through the same sandbox-id guard (a
+    malformed id has no legal record path to unlink).
     """
+    confirmed = False
     try:
         api.delete_sandbox(sandbox_id)
+        confirmed = True
     except OpenSandboxApiError as exc:
-        if exc.status_code != 404:
+        if exc.status_code == 404:
+            confirmed = True
+        else:
             logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
     except Exception as exc:  # noqa: BLE001 - the sweep must go on
         logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
+    if not confirmed:
+        return False
     record = SandboxedWebuiLauncher._safe_restore_record_path(sandbox_id, state_root_override)
-    if record is None:
-        return
-    try:
-        record.unlink(missing_ok=True)
-    except OSError:
-        pass
+    if record is not None:
+        try:
+            record.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return True
 
 
 def _default_api_factory(endpoint: EndpointConfig) -> OpenSandboxApi:

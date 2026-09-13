@@ -1129,6 +1129,82 @@ def test_reconcile_skips_export_but_deletes_pod_for_malformed_orphan_id(tmp_path
     assert not (tmp_path / "webui-7.tar").exists()  # nothing persisted, nothing escaped
 
 
+# ── F-5b (review round 2): the CP record dies only with a CONFIRMED delete ──
+
+
+class _FlakyDeleteFake(FakeOpenSandboxApi):
+    """delete_sandbox answers 503 for the first N calls, then behaves."""
+
+    def __init__(self, fail_times: int = 1):
+        super().__init__()
+        self.delete_calls = 0
+        self.fail_times = fail_times
+
+    def delete_sandbox(self, sandbox_id: str) -> None:
+        from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+        self.delete_calls += 1
+        if self.delete_calls <= self.fail_times:
+            raise OpenSandboxApiError("upstream unavailable", status_code=503, code="UNAVAILABLE")
+        super().delete_sandbox(sandbox_id)
+
+
+def test_failed_delete_keeps_cp_record_and_next_round_exports(tmp_path):
+    """F-5b: a 503 delete leaves the pod AND its record in place — the next
+    sweep must still treat it as export-worthy (the old code cleared the
+    record on the failed delete, so the retry found "no record", skipped the
+    export and deleted the user's last history unread)."""
+    fake = _FlakyDeleteFake(fail_times=1)
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    sid = orphan["id"]
+    _confirm_restore_cp(tmp_path, sid)
+    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+
+    first = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert first == []  # NOT destroyed: the delete never confirmed
+    assert sid not in fake.deleted
+    assert record.exists()  # the record survived the failed delete
+
+    # The retry round: the record is still there, so the export runs again
+    # BEFORE the (now working) delete — the history is not lost.
+    second = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert second == [sid]
+    assert sid in fake.deleted
+    assert not record.exists()
+    assert (tmp_path / "webui-7.tar").exists()
+    tar_runs = [b for b in fake.command_bodies if "tar -cf" in b["command"]]
+    assert len(tar_runs) == 2  # exported on BOTH rounds
+
+
+def test_destroy_keeps_cp_record_when_delete_fails(tmp_path):
+    """F-5b (instance teardown path): destroy() with a 503 delete leaves the
+    record for the next reconcile; a confirmed destroy clears it."""
+    fake = _FlakyDeleteFake(fail_times=1)
+    launcher = _launcher_with_pod(fake, tmp_path)
+    launcher._proxy_service_factory = lambda: _NoopProxyService()
+    result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
+    sid = result.sandbox_id
+    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+    assert record.is_file()
+
+    launcher.destroy(sid, 8, restore_confirmed=True, final_export=False)
+    assert sid not in fake.deleted  # 503: nothing confirmed
+    assert record.exists()  # kept for the next reconcile round
+
+    launcher.destroy(sid, 8, restore_confirmed=True, final_export=False)
+    assert sid in fake.deleted
+    assert not record.exists()
+
+
 def test_reconcile_skips_when_heartbeat_root_unwritable(tmp_path, monkeypatch):
     """T-D follow-up: an unwritable heartbeat root must not let the sweep run.
 
