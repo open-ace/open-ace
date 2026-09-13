@@ -228,7 +228,7 @@ Last updated: 2026-08-05
 if __name__ == "__main__":
     import sys
 
-    output_path = Path("docs/api_permission_matrix.md")
+    output_path = Path("docs/api/API_PERMISSION_MATRIX.md")
 
     if len(sys.argv) > 1:
         output_path = Path(sys.argv[1])

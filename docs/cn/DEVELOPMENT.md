@@ -44,9 +44,9 @@ open-ace/
 │
 ├── app/                # Flask 应用
 │   ├── __init__.py     # create_app() 工厂函数
-│   ├── routes/         # 24 个 Blueprint 路由模块
-│   ├── services/       # 13 个业务逻辑服务
-│   ├── repositories/   # 11 个数据访问仓储
+│   ├── routes/         # 39 个 Blueprint 路由模块
+│   ├── services/       # 41 个业务逻辑服务
+│   ├── repositories/   # 26 个数据访问仓储
 │   ├── modules/        # 领域逻辑包
 │   │   ├── analytics/  # 使用分析、ROI、成本优化
 │   │   ├── compliance/ # 审计分析、报告、数据保留
@@ -82,11 +82,10 @@ open-ace/
 ├── k8s/                # Kubernetes 清单
 ├── schema/             # 数据库模式文件
 ├── static/             # 构建后的前端资源
-├── templates/          # HTML 模板
 ├── tests/              # 测试文件
 │   ├── unit/           # 单元测试
-│   ├── e2e/            # 端到端测试
-│   └── issues/         # Issue 相关测试
+│   ├── integration/    # 集成测试
+│   └── e2e/            # 端到端测试
 └── docs/               # 文档（en/ + cn/）
 ```
 
@@ -133,7 +132,7 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 python scripts/run_extended_tests.py --category e2e --split-total 4 --split-group 1 --isolated-home
 ```
 
-完整前端参考请参阅 [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)。
+完整前端参考请参阅 [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md)。
 
 ## 代码风格
 

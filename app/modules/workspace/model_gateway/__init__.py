@@ -16,8 +16,8 @@ Removal checklist (mirrors run_timeline): ``git rm`` this package; delete the
 ``if not _gateway.is_noop`` seam + import in ``llm_proxy_handler.py``; remove
 ``is_model_gateway_enabled`` from ``app/utils/config.py``; unregister the admin
 blueprint in ``app/__init__.py:register_blueprints``; delete the admin page +
-routes + i18n keys; delete ``docs/model-gateway.md``; drop the
-``model_gateway_config`` table migration. See docs/model-gateway.md for setup.
+routes + i18n keys; delete ``docs/MODEL_GATEWAY.md``; drop the
+``model_gateway_config`` table migration. See docs/MODEL_GATEWAY.md for setup.
 """
 
 from app.modules.workspace.model_gateway.config import GatewayConfig, get_gateway_config, is_enabled

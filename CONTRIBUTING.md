@@ -190,7 +190,7 @@ See `docs/TEST_LAYERS.md` for CI execution guarantees and legacy migration.
 - [ ] Commit messages are clear
 - [ ] API security scanner passes (`python scripts/lint/api_security_scanner.py`)
 - [ ] If modifying API routes with ID parameters, ensure ownership checks are in place
-- [ ] If adding baseline suppressions, ensure complete metadata (see `docs/security/api-exceptions.md`)
+- [ ] If adding baseline suppressions, ensure complete metadata (see `docs/security/API_EXCEPTIONS.md`)
 
 ## 📚 Documentation
 

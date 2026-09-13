@@ -140,9 +140,9 @@ Open ACE 支持多种部署路径：
 按你的评估路径继续读：
 
 - [部署指南](./DEPLOYMENT.md) - 本地与生产部署
-- [Remote Agent 指南](./REMOTE-AGENT.md) - 远程执行模型、适配器、机器注册
-- [Remote Workspace](./REMOTE-WORKSPACE.md) - 浏览器工作台与服务端远程会话设计
-- [权限模型](./PERMISSION-MODEL.md) - 角色、管理边界与访问控制
+- [Remote Agent 指南](./REMOTE_AGENT.md) - 远程执行模型、适配器、机器注册
+- [Remote Workspace](./REMOTE_WORKSPACE.md) - 浏览器工作台与服务端远程会话设计
+- [权限模型](./PERMISSION_MODEL.md) - 角色、管理边界与访问控制
 - [系统架构](./ARCHITECTURE.md) - 后端、前端与运行时结构
 
 ## 一句话总结

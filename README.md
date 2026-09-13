@@ -425,12 +425,12 @@ open-ace/
 | 文档 | 说明 |
 |------|------|
 | [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
-| [AI 自主开发](docs/cn/AUTONOMOUS-DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
+| [AI 自主开发](docs/cn/AUTONOMOUS_DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
 | [部署指南](docs/cn/DEPLOYMENT.md) | 本地与生产环境部署 |
 | [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
-| [远程工作区](docs/cn/REMOTE-WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
-| [远程 Agent](docs/cn/REMOTE-AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
-| [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
+| [远程工作区](docs/cn/REMOTE_WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
+| [远程 Agent](docs/cn/REMOTE_AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
+| [权限模型](docs/cn/PERMISSION_MODEL.md) | 租户、角色与访问控制 |
 | [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考（多副本 + 粘性会话边界） |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
 | [钉钉配置](docs/cn/DINGTALK_CONFIG.md) | 钉钉集成配置 |
@@ -751,12 +751,12 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/en/ARCHITECTURE.md) | System architecture and concepts |
-| [AI Autonomous Development](docs/en/AUTONOMOUS-DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
+| [AI Autonomous Development](docs/en/AUTONOMOUS_DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
 | [Deployment](docs/en/DEPLOYMENT.md) | Local and production deployment |
 | [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
-| [Remote Workspace](docs/en/REMOTE-WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
-| [Remote Agent](docs/en/REMOTE-AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
-| [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
+| [Remote Workspace](docs/en/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
+| [Remote Agent](docs/en/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
+| [Permission Model](docs/en/PERMISSION_MODEL.md) | Tenants, roles, and access control |
 | [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
 | [DingTalk Config](docs/en/DINGTALK_CONFIG.md) | DingTalk integration |

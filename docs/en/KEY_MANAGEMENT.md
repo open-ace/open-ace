@@ -242,6 +242,6 @@ Future algorithm upgrades will:
 
 ## Related Documentation
 
-- [Remote Workspace](./REMOTE-WORKSPACE.md) - Feature overview
+- [Remote Workspace](./REMOTE_WORKSPACE.md) - Feature overview
 - [Deployment](./DEPLOYMENT.md) - Production deployment guide
 - [Security Policy](https://github.com/open-ace/open-ace/security/policy) - Security reporting and policy details

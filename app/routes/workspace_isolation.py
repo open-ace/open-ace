@@ -29,7 +29,7 @@ def get_isolation_capabilities():
     Returns:
         JSON contract: local_workspace_multi_user, backend, isolation_level,
         enforced/unsupported dimension lists, reasons, entry_points, and
-        policy_revision. See docs/workspace-isolation-capabilities.md.
+        policy_revision. See docs/WORKSPACE_ISOLATION_CAPABILITIES.md.
 
     Read-only by construction: never creates the WebUI manager (which would
     mint a token secret and spawn a cleanup greenlet) — when no manager

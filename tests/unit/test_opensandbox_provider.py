@@ -1069,7 +1069,7 @@ def test_the_runtime_probe_is_one_directional_for_kata():
     Kata boots a real kernel in a VM whose /proc/version looks like plain runc's,
     so a Kata claim is only confirmed not-gVisor. That asymmetry sets the actual
     strength of NAMESPACE_ISOLATION on a Kata tier, and is documented in
-    docs/sandbox-backends.md §5 rather than overstated.
+    docs/SANDBOX_BACKENDS.md §5 rather than overstated.
     """
     from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
 

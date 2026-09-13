@@ -59,20 +59,37 @@ Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
 system users (`useradd`), fixes ownership (`chown`), and switches identity
 (`sudo -u <user>`) across `/home`.
 
-**Recommended: Use docker-compose.multi-user.yml**
+---
+
+### Multi-User Workspace Deployment
+
+#### Option 1: One-click startup script (recommended)
 
 ```bash
-# One-command multi-user mode
+# Start multi-user mode with the one-click script
+./scripts/start-multi-user.sh
+```
+
+The script automatically:
+- Detects the Docker Compose version (v1/v2)
+- Verifies that the configuration files exist
+- Starts the multi-user mode containers
+- Prints the access URL and status
+
+#### Option 2: Docker Compose overlay
+
+```bash
+# Enable multi-user mode in one command
 ./scripts/bootstrap-compose-env.sh
 docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
 ```
 
-The docker-compose.multi-user.yml automatically configures:
+docker-compose.multi-user.yml automatically configures:
 - Container runs as root (`user: "0"`)
 - Explicit authorization (`OPENACE_ALLOW_ROOT_MULTI_USER=1`)
 - Configuration persistence (`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`)
 
-**Manual Setup**
+#### Option 3: Manual configuration
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
@@ -86,7 +103,58 @@ Otherwise, the entrypoint exits with a clear error rather than silently
 swallowing the `useradd`/`chown` permission failures that a naive non-root
 multi-user deployment would hit.
 
-**Migrating from config.json**
+---
+
+### Multi-User Mode FAQ
+
+#### Common errors and solutions
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `multi-user workspace mode requires root` | multi-user mode enabled while running as non-root | use `./scripts/start-multi-user.sh` or the overlay file |
+| `OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set` | running as root without explicit authorization | use `./scripts/start-multi-user.sh` or set the env var |
+| `Workspace failed to load` | iframe load failure or timeout | check container logs, verify config, restart the container |
+| `docker-compose.multi-user.yml not found` | overlay file missing | make sure the repo was cloned correctly, or download the file from GitHub |
+
+#### Migrating from single-user to multi-user
+
+If you already run a single-user deployment, migrate as follows:
+
+1. **Stop the existing containers**
+   ```bash
+   docker compose down
+   ```
+   > Note: no data is lost — Docker volumes are preserved
+
+2. **Check the data volumes**
+   ```bash
+   docker volume ls | grep open-ace
+   # expect: config-data, postgres-data, workspace-data
+   ```
+
+3. **Start in multi-user mode**
+   ```bash
+   ./scripts/start-multi-user.sh
+   ```
+   or
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+   ```
+
+4. **Verify data integrity**
+   - Log in and check that users and session data are intact
+   - Check that configuration loads correctly
+   - Test workspace functionality
+
+#### Migration verification checklist
+
+- [ ] Database data preserved (users, sessions, configuration)
+- [ ] Docker volume data preserved (config-data, workspace-data)
+- [ ] Users can log in normally
+- [ ] Workspaces can be created and used normally
+- [ ] Existing AI sessions can be restored
+
+#### Migrating from config.json
 
 If you previously set `"multi_user_mode": true` in config.json:
 
@@ -98,44 +166,43 @@ only. For production, ensure strong passwords and security keys are set.
 
 ### Initial Deployment
 
+Deployment is Docker Compose based:
+
 ```bash
-# 1. Export Docker images (on development machine)
-./scripts/export-image.sh --compress
+# 1. Clone the repository on the server
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
 
-# 2. Copy to server
-scp dist/open-ace-images.tar.gz user@server:~
-scp scripts/deploy.sh user@server:~
+# 2. Generate .env (SECRET_KEY, OPENACE_ENCRYPTION_KEY, UPLOAD_AUTH_KEY, ...)
+./scripts/bootstrap-compose-env.sh
 
-# 3. Run deployment script
-chmod +x deploy.sh
-sudo ./deploy.sh
+# 3. Start (pulls the pre-built openace/open-ace:latest image by default)
+docker compose up -d --wait
 
-# 4. Follow interactive prompts
+# 4. Verify
+docker compose ps
+docker compose logs -f open-ace
 ```
+
+For offline servers, pull the image on a connected machine with
+`docker pull openace/open-ace:latest`, transfer it via
+`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz`, load it
+with `gunzip -c open-ace-images.tar.gz | docker load`, then start the stack.
 
 ### Deployment Configuration
 
-The deployment script will prompt for:
+Most settings are controlled through `.env` and `docker-compose.yml` in the
+repository root:
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Run User | User to run the application | `open-ace` |
-| Deploy Directory | Installation directory | `/home/open-ace/open-ace` |
-| Web Port | Web server port | `19888` |
-| Host Name | Server hostname | Auto-detected |
-| Database User | PostgreSQL username | `open-ace` |
-| Database Name | PostgreSQL database name | `ace` |
-| OpenClaw | Enable OpenClaw tool | `yes` |
-| Claude | Enable Claude tool | `yes` |
-| Qwen | Enable Qwen tool | `yes` |
-| Workspace | Enable Workspace | `no` |
+| Setting | Environment variable | Default |
+|---------|----------------------|---------|
+| Web port | `PORT` | `19888` |
+| Image | `IMAGE_NAME` | `openace/open-ace:latest` |
+| Database user | `DB_USER` | `ace` |
+| Database name | `DB_NAME` | `ace` |
+| Database password | `DB_PASSWORD` | `dev-password-change-in-production` (must change in production) |
 
 **Note**: Workspace runs in a separate container. When enabled, Open ACE will connect to the Workspace service at the specified URL. Make sure the Workspace container is running and the port is accessible.
-
-**URL Configuration**: If you enter `localhost` in the Workspace or OpenClaw URL, the deployment script automatically converts it to the server's IP address. This is because:
-- The URL is used by the frontend (browser), not the container
-- Browsers cannot resolve `localhost` to the server's address
-- Example: `http://localhost:3000` → `http://192.168.1.100:3000`
 
 ### Default Credentials
 
@@ -157,11 +224,11 @@ Before starting the production stack, define these secrets in `.env` or your sec
 ### Directory Structure
 
 ```
-/home/open-ace/open-ace/
-├── config/                  # Configuration files
-│   └── config.json          # Main configuration
+open-ace/                    # cloned repository
 ├── docker-compose.yml       # Docker Compose configuration
-└── .env                     # Environment variables (sensitive!)
+├── .env                     # Environment variables (sensitive!)
+└── config/                  # Configuration files (mounted into the container)
+    └── config.json          # Main configuration
 ```
 
 **Note**: Data is stored in the PostgreSQL container's volume (`postgres-data`), not in the host filesystem.
@@ -169,7 +236,7 @@ Before starting the production stack, define these secrets in `.env` or your sec
 ### Management Commands
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
 # View status
 docker compose ps
@@ -200,10 +267,10 @@ When a new version of Open ACE is released, you only need to update the Docker i
 #### Method 1: Simple Restart (Recommended)
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
-# 1. Load new image
-gunzip -c open-ace-images.tar.gz | docker load
+# 1. Pull the new image
+docker compose pull
 
 # 2. Restart open-ace container
 docker compose up -d open-ace
@@ -215,10 +282,10 @@ docker compose logs -f open-ace
 #### Method 2: Complete Rebuild
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
-# 1. Load new image
-gunzip -c open-ace-images.tar.gz | docker load
+# 1. Pull the new image
+docker compose pull
 
 # 2. Stop and remove old container
 docker compose stop open-ace
@@ -234,13 +301,11 @@ docker compose logs -f open-ace
 #### Method 3: Using Version Tags
 
 ```bash
-# 1. Load specific version
-docker load -i open-ace-v1.2.0.tar
+# 1. Pin a specific version (in .env)
+echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
 
-# 2. Update docker-compose.yml
-sed -i 's|image: open-ace:latest|image: open-ace:v1.2.0|' docker-compose.yml
-
-# 3. Recreate container
+# 2. Pull and recreate the container
+docker compose pull
 docker compose up -d open-ace
 ```
 
@@ -254,7 +319,7 @@ docker compose up -d open-ace
 If the new version includes database schema changes:
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
 # Run migrations
 docker compose run --rm open-ace alembic upgrade head
@@ -264,10 +329,6 @@ docker compose restart open-ace
 ```
 
 ### Uninstallation
-
-#### Docker Uninstallation
-
-For pure Docker deployments (without deploy.sh script):
 
 ```bash
 # Stop and remove containers
@@ -281,20 +342,6 @@ docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-
 
 # Remove local configuration (optional)
 rm -rf ~/.open-ace ./logs
-```
-
-#### Script Uninstallation
-
-For deployments using deploy.sh script:
-
-```bash
-cd /home/open-ace/open-ace
-
-# Interactive uninstall (keeps data)
-./uninstall.sh
-
-# Complete uninstall (removes everything)
-./uninstall.sh --purge
 ```
 
 ## Configuration

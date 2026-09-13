@@ -25,6 +25,8 @@ k8s/
 ├── storage.yaml        # PVC + ServiceAccount + RBAC
 ├── database.yaml       # PostgreSQL + Redis StatefulSets
 ├── deployment.yaml     # 应用 Deployment + HPA
+├── scheduler-deployment.yaml  # 自主开发调度器 Deployment
+├── scheduler-service.yaml     # 调度器 Service
 ├── service.yaml        # Service + Ingress
 ├── policies.yaml       # PDB + NetworkPolicy
 └── kustomization.yaml  # Kustomize 配置
@@ -123,7 +125,7 @@ k8s/
 
 3. **恢复演练：** 建议定期进行恢复测试（至少每月一次）
 
-详细备份/恢复步骤请参见 [DATABASE-BACKUP.md](./DATABASE-BACKUP.md)。
+详细备份/恢复步骤请参见 [DATABASE_BACKUP.md](./DATABASE_BACKUP.md)。
 
 #### 可选备份 CronJob
 
@@ -181,7 +183,7 @@ kubectl get cronjob -n open-ace
 ### RBAC
 
 - ServiceAccount：`open-ace`
-- Role：对 configmaps、secrets、pods 的 get/list/watch 权限
+- Role：对 configmaps 的 get/list/watch；对 pods 的 get/list
 - RoleBinding：将角色绑定到 `open-ace` 命名空间中的服务账户
 
 ### NetworkPolicy

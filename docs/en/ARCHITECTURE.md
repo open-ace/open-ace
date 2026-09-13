@@ -2,7 +2,7 @@
 
 ## System Overview
 
-For a detailed explanation of how Claude / Codex / ZCode / Qwen local token usage is collected, computed, stored, and consumed across the stack, see [token-accounting.md](token-accounting.md).
+For a detailed explanation of how Claude / Codex / ZCode / Qwen local token usage is collected, computed, stored, and consumed across the stack, see [TOKEN_ACCOUNTING.md](TOKEN_ACCOUNTING.md).
 
 Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with three layers:
 
@@ -19,15 +19,15 @@ Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with thr
                        │ HTTP / WebSocket
 ┌──────────────────────┴──────────────────────────────────┐
 │                  Flask API Server                         │
-│  23 Blueprints │ 14 Services │ 11 Repositories │ 31 Mods │
+│  39 Blueprints │ 41 Services │ 26 Repositories │ 6 Modules│
 │  Background Schedulers │ Middleware │ Auth                 │
 └──────────┬───────────────────┬───────────────────────────┘
            │                   │
 ┌──────────┴──────┐  ┌────────┴────────────────────────────┐
 │ SQLite/PostgreSQL│  │       Remote Agent (daemon)          │
-│  35+ tables      │  │  HTTP polling │ CLI subprocesses     │
+│  103 tables     │  │  HTTP polling │ CLI subprocesses     │
 │  Alembic         │  │  WS terminal   │ Session sync        │
-└─────────────────┘  │  Claude/Qwen/Codex/OpenClaw          │
+└─────────────────┘  │  Claude/Qwen/Codex/ZCode/OpenClaw     │
                       └─────────────────────────────────────┘
 ```
 
@@ -42,7 +42,7 @@ Routes (Flask Blueprints)
       → Database abstraction (SQLite or PostgreSQL)
 
 Modules (domain logic):
-  analytics/  compliance/  governance/  sso/  workspace/
+  analytics/  compliance/  governance/  policy/  sso/  workspace/
 ```
 
 ### Application Entry Point
@@ -52,7 +52,7 @@ Modules (domain logic):
 2. Applies `ProxyFix` middleware for nginx
 3. Configures `SECRET_KEY`
 4. Registers error handlers (JSON for API, standard for pages)
-5. Registers 23 Flask Blueprints
+5. Registers 39 Flask Blueprints
 6. Runs `ensure_all_tables()` for DDL schema initialization
 7. Starts background schedulers
 
@@ -61,28 +61,44 @@ Modules (domain logic):
 | Blueprint | Prefix | Description |
 |-----------|--------|-------------|
 | `admin_bp` | `/api` | User CRUD, system account creation |
+| `ai_agent_settings_bp` | `/api` | AI agent settings management |
 | `alerts_bp` | `/api` | Alert management, WebSocket push |
 | `analysis_bp` | `/api` | Usage analysis, trends, anomalies |
 | `analytics_bp` | `/api` | Enterprise analytics, CSV export |
+| `api_keys_bp` | `/api` | API key management and scoping |
+| `autonomous_bp` | `/api/autonomous` | Autonomous development workflows, CI repair, acceptance |
 | `auth_bp` | `/api` | Login, register, logout, sessions, avatars |
+| `encryption_keys_bp` | `/api` | Encryption key management |
+| `feature_flags_bp` | `/api` | Feature flag management |
+| `feishu_config_bp` | `/api` | Feishu integration configuration |
+| `frontend_errors_bp` | `/api` | Frontend error reporting |
 | `compliance_bp` | `/api/compliance` | Compliance reports, data retention |
 | `fetch_bp` | `/api` | Data collection scripts, fetch status |
 | `fs_bp` | `/api` | File system browsing |
 | `governance_bp` | `/api` | Audit logs, quotas, content filtering |
 | `insights_bp` | `/api` | AI conversation insights |
+| `mapping_rules_bp` | `/api` | Tenant isolation mapping rules |
+| `model_gateway_bp` | `/api` | Model gateway configuration (LiteLLM-compatible) |
 | `messages_bp` | `/api` | Message data, pagination, export |
+| `notification_integrations_bp` | `/api` | Notification and collaboration settings |
 | `pages_bp` | `/` | React SPA catch-all |
+| `policy_bp` | `/api` | Policy rules engine |
+| `project_categories_bp` | `/api` | Project category management |
 | `projects_bp` | `/api` | Project CRUD, stats, file scanning |
 | `quota_bp` | `/api` | Quota checking, enforcement |
+| `run_timeline_bp` | `/api` | Autonomous session run timeline events |
 | `remote_bp` | `/api/remote` | Remote machines, sessions, LLM proxy |
 | `report_bp` | `/api` | Usage reports |
 | `roi_bp` | `/api` | ROI analysis, cost optimization |
 | `sso_bp` | `/api/sso` | SSO provider management, OAuth2/OIDC/SAML |
+| `smtp_config_bp` | `/api` | SMTP configuration management |
+| `system_bp` | `/api` | Scheduler status and system info |
 | `tenant_bp` | `/api/tenants` | Multi-tenant management |
 | `tool_accounts_bp` | `/api` | User-tool-account mapping |
 | `upload_bp` | `/api` | External data ingestion |
 | `usage_bp` | `/api` | Usage data, CSV export |
 | `workspace_bp` | `/api/workspace` | Sessions, prompts, tool connections |
+| `workspace_isolation_bp` | `/api/workspace` | Workspace isolation capability contract |
 
 ### Services
 
@@ -152,7 +168,7 @@ The `Database` abstraction layer in `app/repositories/database.py` transparently
 - **`Database` class** — DI-friendly wrapper with `execute()`, `fetch_one()`, `fetch_all()`, `table_exists()`
 - Default SQLite path: `~/.open-ace/ace.db`
 
-See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for the full table reference.
+See [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) for the full table reference.
 
 ## Middleware
 
@@ -195,7 +211,7 @@ Both are singleton daemon threads started in `create_app()`, wrapped in try/exce
 - Sidebar navigation layout with 20+ admin pages
 - Routes: dashboard, analysis, messages, audit, quota, compliance, security, users, tenants, projects, remote machines, SSO settings
 
-See [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md) for the complete frontend reference.
+See [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) for the complete frontend reference.
 
 ## Remote Agent Architecture
 
@@ -224,7 +240,7 @@ The remote agent runs as a Python daemon on remote machines, providing:
 - **WebSocket terminal** — browser connects to PTY via terminal server
 - **Session sync** — scans `~/.claude/`, `~/.qwen/`, `~/.codex/` for session history, syncs to server every 30s
 
-See [REMOTE-AGENT.md](REMOTE-AGENT.md) for the client-side guide and [REMOTE-WORKSPACE.md](REMOTE-WORKSPACE.md) for the server-side guide.
+See [REMOTE_AGENT.md](REMOTE_AGENT.md) for the client-side guide and [REMOTE_WORKSPACE.md](REMOTE_WORKSPACE.md) for the server-side guide.
 
 ## Authentication
 
@@ -238,4 +254,4 @@ Three auth decorators in `app/auth/decorators.py`:
 
 Token extraction order: `session_token` cookie → `Authorization: Bearer` header → `token` query param.
 
-See [PERMISSION-MODEL.md](PERMISSION-MODEL.md) for the full permission model.
+See [PERMISSION_MODEL.md](PERMISSION_MODEL.md) for the full permission model.

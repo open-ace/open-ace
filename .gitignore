@@ -90,6 +90,12 @@ backups/
 # Git worktrees (temporary development artifacts)
 .worktrees/
 
+# Superpowers skill working artifacts (plans/specs) stay local only.
+# Curated process write-ups belong in docs/dev-notes/; these scratch files
+# accumulated to 57 committed/untracked copies with nothing referencing them
+# and were removed in the 2026-09 docs reorganization.
+docs/superpowers/
+
 # Process documents in the repository ROOT only (leading slash = root-anchored).
 # Fix write-ups, CI post-mortems, implementation summaries, progress snapshots and
 # per-issue plans belong in docs/dev-notes/ -- see docs/dev-notes/README.md.
