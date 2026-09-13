@@ -1068,6 +1068,67 @@ def test_unwritable_cp_record_leaves_restore_unconfirmed(tmp_path):
     assert result.restore_confirmed is False
 
 
+# ── F-4 (review round 2): sandbox ids never join paths raw ────────────
+
+
+_MALICIOUS_IDS = [
+    "../webui-7.tar",  # traversal out of the record dir (defeats the export guard)
+    "/tmp/pwned-by-id",  # absolute path (arbitrary-file overwrite)
+    "evil\x00id",  # NUL byte (ValueError inside the pod delete)
+]
+
+
+def test_malformed_sandbox_ids_never_touch_the_filesystem(tmp_path, caplog):
+    """F-4: mark refuses to write, check answers False, clear is a no-op —
+    for traversal, absolute-path, and NUL ids alike."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+
+    for bad in _MALICIOUS_IDS:
+        with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+            assert launcher.mark_restore_confirmed(bad) is False
+        assert launcher.restore_confirmed_on_cp(bad) is False
+        launcher.clear_restore_confirmation(bad)  # must neither raise nor unlink
+
+    # Nothing escaped the state root: the record dir is empty and the
+    # traversal target (restore-confirmed/../webui-7.tar == webui-7.tar) was
+    # never created.
+    record_dir = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME
+    assert not record_dir.exists() or list(record_dir.iterdir()) == []
+    assert not (tmp_path / "webui-7.tar").exists()
+    assert any("malformed sandbox id" in r.message for r in caplog.records)
+
+    # A well-formed id still round-trips through the same guard.
+    assert launcher.mark_restore_confirmed("sb-ok-1") is True
+    assert launcher.restore_confirmed_on_cp("sb-ok-1") is True
+    launcher.clear_restore_confirmation("sb-ok-1")
+    assert launcher.restore_confirmed_on_cp("sb-ok-1") is False
+
+
+def test_reconcile_skips_export_but_deletes_pod_for_malformed_orphan_id(tmp_path):
+    """F-4 reconcile side: an orphan whose server-returned id cannot form a
+    legal record path gets NO export (there is no CP record to read — and no
+    path may be joined from that id), but the pod is still destroyed."""
+    malicious_row = {"id": "../evil", "metadata": _webui_metadata(generation="deadbeef", owner="7")}
+
+    class _InjectedRowFake(FakeOpenSandboxApi):
+        def list_sandboxes(self, metadata=None):
+            super().list_sandboxes(metadata)
+            return [malicious_row]
+
+    fake = _InjectedRowFake()
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == ["../evil"]  # the pod itself is deletable garbage
+    assert "../evil" in fake.deleted
+    assert fake.command_bodies == []  # no in-pod tar ran for it
+    assert not (tmp_path / "webui-7.tar").exists()  # nothing persisted, nothing escaped
+
+
 def test_reconcile_skips_when_heartbeat_root_unwritable(tmp_path, monkeypatch):
     """T-D follow-up: an unwritable heartbeat root must not let the sweep run.
 

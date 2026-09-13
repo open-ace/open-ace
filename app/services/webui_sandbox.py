@@ -910,15 +910,47 @@ class SandboxedWebuiLauncher:
 
     # ── control-plane restore confirmation (T-E) ─────────────────────
 
+    # F-4 (review round 2): the restore-confirmed record path is joined from
+    # the SERVER-RETURNED sandbox id. A malformed/hostile id ("../webui-7.tar"
+    # escaping the export guard, an absolute path overwriting an arbitrary
+    # file, a NUL byte raising ValueError inside the pod delete) must never be
+    # concatenated raw. One guard, every entry point.
+    _SANDBOX_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
     def _restore_confirmed_dir(self) -> Path:
         return state_root(self._state_root_override) / RESTORE_CONFIRMED_DIRNAME
 
+    @classmethod
+    def _safe_restore_record_path(
+        cls, sandbox_id: str, state_root_override: str | None = None
+    ) -> Path | None:
+        """Return the CP record path for *sandbox_id*, or None when unsafe.
+
+        The id must be 1-128 chars of [A-Za-z0-9._-] and not "." or ".." —
+        anything containing a separator, a NUL, or any other character is
+        refused. ``None`` means "no legal record path exists": mark refuses
+        to write, check answers False, clear is a no-op, and the reconcile
+        skips the export while still deleting the pod.
+        """
+        sid = sandbox_id if isinstance(sandbox_id, str) else str(sandbox_id or "")
+        if sid in (".", "..") or not cls._SANDBOX_ID_RE.fullmatch(sid):
+            return None
+        return state_root(state_root_override) / RESTORE_CONFIRMED_DIRNAME / sid
+
     def mark_restore_confirmed(self, sandbox_id: str) -> bool:
         """Persist the CP-side restore confirmation record (fail-soft False)."""
+        record = self._safe_restore_record_path(sandbox_id, self._state_root_override)
+        if record is None:
+            logger.warning(
+                "webui sandbox %r: malformed sandbox id refused a "
+                "restore-confirmation record (path traversal guard); exports "
+                "stay disabled for this pod",
+                sandbox_id,
+            )
+            return False
         try:
-            root = self._restore_confirmed_dir()
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            (root / sandbox_id).write_text(
+            record.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            record.write_text(
                 json.dumps({"sandbox_id": sandbox_id, "ts": time.time()}),
                 encoding="utf-8",
             )
@@ -933,15 +965,24 @@ class SandboxedWebuiLauncher:
 
     def restore_confirmed_on_cp(self, sandbox_id: str) -> bool:
         """Whether the CP record says this pod completed a confirmed restore."""
+        record = self._safe_restore_record_path(sandbox_id, self._state_root_override)
+        if record is None:
+            return False
         try:
-            return (self._restore_confirmed_dir() / sandbox_id).is_file()
+            return record.is_file()
         except OSError:
             return False
 
     def clear_restore_confirmation(self, sandbox_id: str) -> None:
         """Drop the CP record (pod destroyed; the id never returns)."""
+        record = self._safe_restore_record_path(sandbox_id, self._state_root_override)
+        if record is None:
+            # A malformed id can never have a record (mark refuses it too) —
+            # nothing to clear, and unlinking a joined path is out of the
+            # question (F-4).
+            return
         try:
-            (self._restore_confirmed_dir() / sandbox_id).unlink(missing_ok=True)
+            record.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -2077,7 +2118,9 @@ def _delete_orphan(
 
     The CP restore-confirmation record goes with the pod (the id never
     returns); fail-soft — a leftover record only makes a future export-gate
-    check stale-harmless for an id that no longer exists.
+    check stale-harmless for an id that no longer exists. F-4: the record
+    path goes through the same sandbox-id guard (a malformed id has no legal
+    record path to unlink).
     """
     try:
         api.delete_sandbox(sandbox_id)
@@ -2086,8 +2129,10 @@ def _delete_orphan(
             logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
     except Exception as exc:  # noqa: BLE001 - the sweep must go on
         logger.warning("webui orphan %s: delete failed: %s", sandbox_id, exc)
+    record = SandboxedWebuiLauncher._safe_restore_record_path(sandbox_id, state_root_override)
+    if record is None:
+        return
     try:
-        record = state_root(state_root_override) / RESTORE_CONFIRMED_DIRNAME / sandbox_id
         record.unlink(missing_ok=True)
     except OSError:
         pass
