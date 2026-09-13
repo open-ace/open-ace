@@ -923,7 +923,7 @@ class OpenSandboxProvider:
           positive check would need a hypervisor signal (DMI product name), and
           that differs per Kata hypervisor (qemu / fc / clh) — shipping one
           untested risks refusing legitimate deployments, so the asymmetry is
-          documented rather than papered over. ``docs/sandbox-backends.md`` §5
+          documented rather than papered over. ``docs/SANDBOX_BACKENDS.md`` §5
           states the same limitation.
         """
         if self._probes_passed:

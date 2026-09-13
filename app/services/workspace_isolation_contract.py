@@ -6,7 +6,7 @@ runtime state only (webui manager config, environment, euid, platform).
 It deliberately never upgrades the reported isolation level: ``os_user``
 means per-user OS accounts on a shared host kernel, not strong runtime
 isolation (no namespaces, no egress policy). Reason messages stay free of
-deployment specifics; see docs/workspace-isolation-capabilities.md for
+deployment specifics; see docs/WORKSPACE_ISOLATION_CAPABILITIES.md for
 deployment requirements. Bump POLICY_REVISION whenever derivation semantics
 or the entry-point matrix change.
 """

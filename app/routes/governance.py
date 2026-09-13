@@ -447,7 +447,7 @@ def api_add_pattern():
                 "error": "Deprecated",
                 "message": "This endpoint is deprecated and will be removed in a future version.",
                 "migration_guide": "Use POST /api/filter-rules instead.",
-                "documentation": "/docs/api/migrations/filter-patterns-v2.md",
+                "documentation": "/docs/api/migrations/FILTER_PATTERNS_V2.md",
             }
         ),
         200,

@@ -242,6 +242,6 @@ openssl rand -hex 32
 
 ## 相关文档
 
-- [远程工作区](./REMOTE-WORKSPACE.md) - 功能概述
+- [远程工作区](./REMOTE_WORKSPACE.md) - 功能概述
 - [部署](./DEPLOYMENT.md) - 生产部署指南
 - [Security Policy](https://github.com/open-ace/open-ace/security/policy) - 安全报告与策略说明

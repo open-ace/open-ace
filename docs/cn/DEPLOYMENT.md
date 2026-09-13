@@ -166,44 +166,41 @@ docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
 
 ### 初始部署
 
+部署以 Docker Compose 为准：
+
 ```bash
-# 1. 导出 Docker 镜像（在开发机上）
-./scripts/export-image.sh --compress
+# 1. 在服务器上克隆仓库
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
 
-# 2. 复制到服务器
-scp dist/open-ace-images.tar.gz user@server:~
-scp scripts/deploy.sh user@server:~
+# 2. 生成 .env（SECRET_KEY、OPENACE_ENCRYPTION_KEY、UPLOAD_AUTH_KEY 等）
+./scripts/bootstrap-compose-env.sh
 
-# 3. 运行部署脚本
-chmod +x deploy.sh
-sudo ./deploy.sh
+# 3. 启动（默认拉取 openace/open-ace:latest 预构建镜像）
+docker compose up -d --wait
 
-# 4. 按照交互提示操作
+# 4. 验证
+docker compose ps
+docker compose logs -f open-ace
 ```
+
+离线环境可在有网络的机器上先 `docker pull openace/open-ace:latest`，再
+`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz` 传到服务器，
+用 `gunzip -c open-ace-images.tar.gz | docker load` 导入后启动。
 
 ### 部署配置
 
-部署脚本将提示以下配置：
+主要配置通过仓库根目录的 `.env` 和 `docker-compose.yml` 控制：
 
-| 设置 | 说明 | 默认值 |
-|------|------|--------|
-| 运行用户 | 运行应用的用户 | `open-ace` |
-| 部署目录 | 安装目录 | `/home/open-ace/open-ace` |
-| Web 端口 | Web 服务器端口 | `19888` |
-| 主机名 | 服务器主机名 | 自动检测 |
-| 数据库用户 | PostgreSQL 用户名 | `open-ace` |
-| 数据库名称 | PostgreSQL 数据库名 | `ace` |
-| OpenClaw | 启用 OpenClaw 工具 | `yes` |
-| Claude | 启用 Claude 工具 | `yes` |
-| Qwen | 启用 Qwen 工具 | `yes` |
-| 工作区 | 启用工作区 | `no` |
+| 设置 | 环境变量 | 默认值 |
+|------|----------|--------|
+| Web 端口 | `PORT` | `19888` |
+| 镜像 | `IMAGE_NAME` | `openace/open-ace:latest` |
+| 数据库用户 | `DB_USER` | `ace` |
+| 数据库名称 | `DB_NAME` | `ace` |
+| 数据库密码 | `DB_PASSWORD` | `dev-password-change-in-production`（生产必须修改） |
 
 **注意**：工作区在单独的容器中运行。启用后，Open ACE 将连接到指定 URL 的工作区服务。请确保工作区容器正在运行且端口可访问。
-
-**URL 配置**：如果在工作区或 OpenClaw URL 中输入 `localhost`，部署脚本会自动将其转换为服务器 IP 地址。这是因为：
-- URL 由前端（浏览器）使用，而非容器
-- 浏览器无法将 `localhost` 解析为服务器地址
-- 示例：`http://localhost:3000` → `http://192.168.1.100:3000`
 
 ### 默认凭证
 
@@ -225,11 +222,11 @@ sudo ./deploy.sh
 ### 目录结构
 
 ```
-/home/open-ace/open-ace/
-├── config/                  # 配置文件
-│   └── config.json          # 主配置文件
+open-ace/                    # 克隆的仓库目录
 ├── docker-compose.yml       # Docker Compose 配置
-└── .env                     # 环境变量（敏感信息！）
+├── .env                     # 环境变量（敏感信息！）
+└── config/                  # 配置文件（挂载进容器）
+    └── config.json          # 主配置文件
 ```
 
 **注意**：数据存储在 PostgreSQL 容器的卷（`postgres-data`）中，而非主机文件系统。
@@ -237,7 +234,7 @@ sudo ./deploy.sh
 ### 管理命令
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
 # 查看状态
 docker compose ps
@@ -265,13 +262,13 @@ docker compose up -d
 
 发布新版本时，只需更新 Docker 镜像：
 
-#### 方法一：简单重启（推荐）
+#### 方法一：拉取新镜像（推荐）
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
-# 1. 加载新镜像
-gunzip -c open-ace-images.tar.gz | docker load
+# 1. 拉取新镜像
+docker compose pull
 
 # 2. 重启 open-ace 容器
 docker compose up -d open-ace
@@ -283,10 +280,10 @@ docker compose logs -f open-ace
 #### 方法二：完整重建
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
-# 1. 加载新镜像
-gunzip -c open-ace-images.tar.gz | docker load
+# 1. 拉取新镜像
+docker compose pull
 
 # 2. 停止并删除旧容器
 docker compose stop open-ace
@@ -302,13 +299,11 @@ docker compose logs -f open-ace
 #### 方法三：使用版本标签
 
 ```bash
-# 1. 加载特定版本
-docker load -i open-ace-v1.2.0.tar
+# 1. 指定版本（在 .env 中设置）
+echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
 
-# 2. 更新 docker-compose.yml
-sed -i 's|image: open-ace:latest|image: open-ace:v1.2.0|' docker-compose.yml
-
-# 3. 重建容器
+# 2. 拉取并重建容器
+docker compose pull
 docker compose up -d open-ace
 ```
 
@@ -322,7 +317,7 @@ docker compose up -d open-ace
 如果新版本包含数据库模式变更：
 
 ```bash
-cd /home/open-ace/open-ace
+cd /path/to/open-ace
 
 # 运行迁移
 docker compose run --rm open-ace alembic upgrade head
@@ -332,10 +327,6 @@ docker compose restart open-ace
 ```
 
 ### 卸载
-
-#### Docker 方式卸载
-
-如果使用纯 Docker 部署（无 deploy.sh 脚本），可手动卸载：
 
 ```bash
 # 停止并删除容器
@@ -349,20 +340,6 @@ docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-
 
 # 删除本地配置（可选）
 rm -rf ~/.open-ace ./logs
-```
-
-#### 脚本方式卸载
-
-如果使用 deploy.sh 脚本部署：
-
-```bash
-cd /home/open-ace/open-ace
-
-# 交互式卸载（保留数据）
-./uninstall.sh
-
-# 完全卸载（删除所有内容）
-./uninstall.sh --purge
 ```
 
 ## 配置

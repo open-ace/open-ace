@@ -8,7 +8,7 @@ This document defines the core concepts used in Open ACE: **Request**, **Message
 
 ### 1. Request (API Call)
 
-**Definition**: Each API call to the cloud LLM counts as 1 Request. In logs, this is typically identified by the `auth_type` field.
+**Definition**: Each independent assistant response counts as 1 Request (deduplicated by message ID when available; see `TOKEN_ACCOUNTING.md` for the counting pipeline).
 
 **Example**:
 - User sends a message → 1 API call → 1 Request
@@ -125,4 +125,3 @@ Conversation 2:
 | `agent_session_id` | Tool session identifier (process level) |
 | `conversation_id` | Conversation identifier |
 | `feishu_conversation_id` | Feishu conversation identifier |
-| `auth_type` | API call indicator (for Request counting) |

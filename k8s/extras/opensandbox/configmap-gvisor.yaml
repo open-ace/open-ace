@@ -70,7 +70,7 @@ data:
     # It does not get NETWORK_EGRESS_POLICY, and a spec that requires a
     # per-sandbox egress policy is refused here rather than silently degraded.
     # Use the Kata tier when the allowlist itself is the control you need.
-    # See docs/sandbox-backends.md §7.
+    # See docs/SANDBOX_BACKENDS.md §7.
 
     [store]
     # REQUIRED. Without it upstream defaults to ~/.opensandbox/opensandbox.db,

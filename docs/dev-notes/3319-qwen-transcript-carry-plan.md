@@ -141,7 +141,7 @@ carried, so the traversal guard is intact.
 3. `orchestrator.py` — add `qwen-code-cli` to `_RESUME_ID_MAPPED_TOOLS` so
    `_resolve_session_line` maps qwen's tracking id to its captured
    `cli_session_id` (the shared frozenset #3321 introduced).
-4. `docs/sandbox-backends.md` — drop the "claude-code only" note; describe the
+4. `docs/SANDBOX_BACKENDS.md` — drop the "claude-code only" note; describe the
    capture-persist-resolve-import flow.
 
 Deliberately **not** changed: `_uses_sidebar_session_source` (its 12 call sites
@@ -186,5 +186,5 @@ gate widens); and no sidecar file is added.
 ## Out of scope
 
 Deployment topology is unchanged: the shared state-root contract from #3237
-(`docs/sandbox-backends.md`) applies as-is — this changes what is carried and
+(`docs/SANDBOX_BACKENDS.md`) applies as-is — this changes what is carried and
 how the id is threaded, not where state rests.

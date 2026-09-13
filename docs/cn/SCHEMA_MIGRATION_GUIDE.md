@@ -355,8 +355,8 @@ PR 包含 migration 时，检查：
 ## 相关文档
 
 - [部署指南](DEPLOYMENT.md)
-- [数据库 Schema 说明](DATABASE-SCHEMA.md)
-- [数据库约定](DATABASE-CONVENTIONS.md)
+- [数据库 Schema 说明](DATABASE_SCHEMA.md)
+- [数据库约定](DATABASE_CONVENTIONS.md)
 
 ## 联系支持
 

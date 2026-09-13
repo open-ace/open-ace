@@ -63,8 +63,8 @@ def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
 
 def test_terminal_docs_describe_windows_piped_subprocess() -> None:
     readme = read_doc("README.md")
-    remote_agent_en = read_doc("docs/en/REMOTE-AGENT.md")
-    remote_agent_cn = read_doc("docs/cn/REMOTE-AGENT.md")
+    remote_agent_en = read_doc("docs/en/REMOTE_AGENT.md")
+    remote_agent_cn = read_doc("docs/cn/REMOTE_AGENT.md")
     marketing = read_doc("docs/marketing/REMOTE_AGENT_API_KEY_PROXY_ARTICLE.md")
 
     assert "WebSocket PTY" not in readme

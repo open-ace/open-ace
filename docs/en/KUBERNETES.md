@@ -25,6 +25,8 @@ k8s/
 ├── storage.yaml        # PVC + ServiceAccount + RBAC
 ├── database.yaml       # PostgreSQL + Redis StatefulSets
 ├── deployment.yaml     # App Deployment + HPA
+├── scheduler-deployment.yaml  # Autonomous scheduler Deployment
+├── scheduler-service.yaml     # Scheduler Service
 ├── service.yaml        # Service + Ingress
 ├── policies.yaml       # PDB + NetworkPolicy
 └── kustomization.yaml  # Kustomize configuration
@@ -125,7 +127,7 @@ Credentials from Secret `open-ace-secrets` (keys: `DB_USER`, `DB_PASSWORD`).
 
 3. **Restore Testing**: Regular recovery drills are recommended (at least monthly)
 
-For detailed backup/restore procedures, see [DATABASE-BACKUP.md](./DATABASE-BACKUP.md).
+For detailed backup/restore procedures, see [DATABASE_BACKUP.md](./DATABASE_BACKUP.md).
 
 #### Optional Backup CronJob
 
@@ -183,7 +185,7 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 ### RBAC
 
 - ServiceAccount: `open-ace`
-- Role: get/list/watch on configmaps, secrets, pods
+- Role: get/list/watch on configmaps; get/list on pods
 - RoleBinding: Binds role to service account in `open-ace` namespace
 
 ### NetworkPolicy
@@ -239,8 +241,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 The `/health` endpoint returns service status and git commit hash.
 
-**Prometheus Monitoring** (Issue #1821 F1):
-The `prometheus.io/scrape` annotation currently points to `/health` which returns HTTP 200 for health checks only. No application metrics are exposed. This annotation is retained for infrastructure monitoring readiness. To enable real metrics collection, implement a `/metrics` endpoint (e.g., using prometheus_client library).
+**Prometheus Monitoring**: the `prometheus.io/scrape` annotation scrapes the application `/metrics` endpoint (exported via `prometheus_flask_exporter`).
 
 **Image Registry Dependency** (Issue #1821 F3):
 With `imagePullPolicy: Always`, the container registry becomes a critical dependency. If the registry is unavailable:

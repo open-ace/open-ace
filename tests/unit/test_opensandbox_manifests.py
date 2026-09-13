@@ -324,7 +324,7 @@ def test_the_docs_example_points_at_the_service_for_its_own_tier():
     import json
     import re
 
-    md = (_DIR.parents[2] / "docs" / "sandbox-backends.md").read_text(encoding="utf-8")
+    md = (_DIR.parents[2] / "docs" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
     raw = json.loads(
         re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
     )
@@ -365,7 +365,7 @@ def test_the_known_probe_overclaims_are_not_reinstated():
     import re
 
     root = _DIR.parents[2]
-    sources = [root / "docs" / "sandbox-backends.md", _DIR / "README.md"]
+    sources = [root / "docs" / "SANDBOX_BACKENDS.md", _DIR / "README.md"]
     # Phrasings that assert the probe enforces the declared class unconditionally.
     overclaims = [
         r"refuses to continue if the kernel does not match",
@@ -409,7 +409,7 @@ def test_probe_claims_carry_the_one_directional_caveat():
     )
     kernel_topic = re.compile(r"kernel|/proc/version", re.I)
     offenders = []
-    for path in (root / "docs" / "sandbox-backends.md", _DIR / "README.md"):
+    for path in (root / "docs" / "SANDBOX_BACKENDS.md", _DIR / "README.md"):
         text = path.read_text(encoding="utf-8")
         for para in re.split(r"\n\s*\n", text):
             if "runtime_class" not in para or not kernel_topic.search(para):
@@ -458,7 +458,7 @@ def test_the_template_uid_and_the_exec_identity_attestation_agree():
     )
     pinned_uid = sandbox.get("securityContext", {}).get("runAsUser")
 
-    md = (_DIR.parents[2] / "docs" / "sandbox-backends.md").read_text(encoding="utf-8")
+    md = (_DIR.parents[2] / "docs" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
     raw = json.loads(
         re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
     )

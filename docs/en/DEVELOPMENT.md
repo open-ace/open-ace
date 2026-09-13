@@ -44,9 +44,9 @@ open-ace/
 │
 ├── app/                # Flask application
 │   ├── __init__.py     # create_app() factory
-│   ├── routes/         # 24 Blueprint route modules
-│   ├── services/       # 13 business logic services
-│   ├── repositories/   # 11 data access repositories
+│   ├── routes/         # 39 Blueprint route modules
+│   ├── services/       # 41 business logic services
+│   ├── repositories/   # 26 data access repositories
 │   ├── modules/        # Domain logic packages
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
 │   │   ├── compliance/ # Audit analysis, reports, retention
@@ -82,11 +82,10 @@ open-ace/
 ├── k8s/                # Kubernetes manifests
 ├── schema/             # Database schema files
 ├── static/             # Built frontend assets
-├── templates/          # HTML templates
 ├── tests/              # Test files
 │   ├── unit/           # Unit tests
-│   ├── e2e/            # End-to-end tests
-│   └── issues/         # Issue-specific tests
+│   ├── integration/    # Integration tests
+│   └── e2e/            # End-to-end tests
 └── docs/               # Documentation (en/ + cn/)
 ```
 
@@ -133,7 +132,7 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
-See [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md) for the complete frontend reference.
+See [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) for the complete frontend reference.
 
 ## Code Style
 

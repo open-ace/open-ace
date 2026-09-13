@@ -2,7 +2,7 @@
 
 ## 系统总览
 
-关于 Claude / Codex / ZCode / Qwen 本地 token 如何抓取、计算、落库以及被各层消费，请参阅 [token-accounting.md](token-accounting.md)。
+关于 Claude / Codex / ZCode / Qwen 本地 token 如何抓取、计算、落库以及被各层消费，请参阅 [TOKEN_ACCOUNTING.md](TOKEN_ACCOUNTING.md)。
 
 Open ACE (AI Computing Explorer) 是一个企业级 AI 工作区平台，包含三层架构：
 
@@ -19,15 +19,15 @@ Open ACE (AI Computing Explorer) 是一个企业级 AI 工作区平台，包含�
                        │ HTTP / WebSocket
 ┌──────────────────────┴──────────────────────────────────┐
 │                  Flask API Server                         │
-│  23 Blueprints │ 14 Services │ 11 Repositories │ 31 Mods │
+│  39 Blueprints │ 41 Services │ 26 Repositories │ 6 Modules│
 │  Background Schedulers │ Middleware │ Auth                 │
 └──────────┬───────────────────┬───────────────────────────┘
            │                   │
 ┌──────────┴──────┐  ┌────────┴────────────────────────────┐
 │ SQLite/PostgreSQL│  │       Remote Agent (daemon)          │
-│  35+ tables      │  │  HTTP polling │ CLI subprocesses     │
+│  103 tables     │  │  HTTP polling │ CLI subprocesses     │
 │  Alembic         │  │  WS terminal   │ Session sync        │
-└─────────────────┘  │  Claude/Qwen/Codex/OpenClaw          │
+└─────────────────┘  │  Claude/Qwen/Codex/ZCode/OpenClaw     │
                       └─────────────────────────────────────┘
 ```
 
@@ -42,7 +42,7 @@ Routes (Flask Blueprints)
       → Database abstraction (SQLite or PostgreSQL)
 
 Modules (domain logic):
-  analytics/  compliance/  governance/  sso/  workspace/
+  analytics/  compliance/  governance/  policy/  sso/  workspace/
 ```
 
 ### 应用入口
@@ -52,7 +52,7 @@ Modules (domain logic):
 2. 应用 `ProxyFix` 中间件以支持 nginx
 3. 配置 `SECRET_KEY`
 4. 注册错误处理器（API 返回 JSON，页面返回标准格式）
-5. 注册 23 个 Flask Blueprint
+5. 注册 39 个 Flask Blueprint
 6. 运行 `ensure_all_tables()` 初始化 DDL 模式
 7. 启动后台调度器
 
@@ -61,28 +61,44 @@ Modules (domain logic):
 | Blueprint | 前缀 | 说明 |
 |-----------|------|------|
 | `admin_bp` | `/api` | 用户 CRUD、系统账户创建 |
+| `ai_agent_settings_bp` | `/api` | AI Agent 设置管理 |
 | `alerts_bp` | `/api` | 告警管理、WebSocket 推送 |
 | `analysis_bp` | `/api` | 使用分析、趋势、异常检测 |
 | `analytics_bp` | `/api` | 企业分析、CSV 导出 |
+| `api_keys_bp` | `/api` | API Key 管理与作用域 |
+| `autonomous_bp` | `/api/autonomous` | 自主开发工作流、CI 修复、验收 |
 | `auth_bp` | `/api` | 登录、注册、登出、会话、头像 |
+| `encryption_keys_bp` | `/api` | 加密密钥管理 |
+| `feature_flags_bp` | `/api` | 功能开关管理 |
+| `feishu_config_bp` | `/api` | 飞书集成配置 |
+| `frontend_errors_bp` | `/api` | 前端错误上报 |
 | `compliance_bp` | `/api/compliance` | 合规报告、数据保留 |
 | `fetch_bp` | `/api` | 数据采集脚本、采集状态 |
 | `fs_bp` | `/api` | 文件系统浏览 |
 | `governance_bp` | `/api` | 审计日志、配额、内容过滤 |
 | `insights_bp` | `/api` | AI 对话洞察 |
+| `mapping_rules_bp` | `/api` | 租户隔离映射规则 |
+| `model_gateway_bp` | `/api` | 模型网关配置（LiteLLM 兼容） |
 | `messages_bp` | `/api` | 消息数据、分页、导出 |
+| `notification_integrations_bp` | `/api` | 通知与协作集成设置 |
 | `pages_bp` | `/` | React SPA 全局捕获 |
+| `policy_bp` | `/api` | 策略规则引擎 |
+| `project_categories_bp` | `/api` | 项目分类管理 |
 | `projects_bp` | `/api` | 项目 CRUD、统计、文件扫描 |
 | `quota_bp` | `/api` | 配额检查、执行 |
+| `run_timeline_bp` | `/api` | 自主会话运行时间线事件 |
 | `remote_bp` | `/api/remote` | 远程机器、会话、LLM 代理 |
 | `report_bp` | `/api` | 使用报告 |
 | `roi_bp` | `/api` | ROI 分析、成本优化 |
 | `sso_bp` | `/api/sso` | SSO 提供商管理、OAuth2/OIDC/SAML |
+| `smtp_config_bp` | `/api` | SMTP 配置管理 |
+| `system_bp` | `/api` | 调度器状态与系统信息 |
 | `tenant_bp` | `/api/tenants` | 多租户管理 |
 | `tool_accounts_bp` | `/api` | 用户-工具-账户映射 |
 | `upload_bp` | `/api` | 外部数据导入 |
 | `usage_bp` | `/api` | 使用数据、CSV 导出 |
 | `workspace_bp` | `/api/workspace` | 会话、提示词、工具连接 |
+| `workspace_isolation_bp` | `/api/workspace` | 工作区隔离能力契约 |
 
 ### 服务层
 
@@ -152,7 +168,7 @@ Modules (domain logic):
 - **`Database` 类** — 支持 DI 的封装，提供 `execute()`、`fetch_one()`、`fetch_all()`、`table_exists()`
 - 默认 SQLite 路径：`~/.open-ace/ace.db`
 
-完整表结构参考请参阅 [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)。
+完整表结构参考请参阅 [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)。
 
 ## 中间件
 
@@ -195,7 +211,7 @@ Modules (domain logic):
 - 侧边栏导航布局，20+ 管理页面
 - 路由：dashboard、analysis、messages、audit、quota、compliance、security、users、tenants、projects、remote machines、SSO settings
 
-完整前端参考请参阅 [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)。
+完整前端参考请参阅 [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md)。
 
 ## 远程代理架构
 
@@ -224,7 +240,7 @@ Modules (domain logic):
 - **WebSocket 终端** — 浏览器通过终端服务器连接 PTY
 - **会话同步** — 扫描 `~/.claude/`、`~/.qwen/`、`~/.codex/` 的会话历史，每 30 秒同步到服务器
 
-客户端指南请参阅 [REMOTE-AGENT.md](REMOTE-AGENT.md)，服务端指南请参阅 [REMOTE-WORKSPACE.md](REMOTE-WORKSPACE.md)。
+客户端指南请参阅 [REMOTE_AGENT.md](REMOTE_AGENT.md)，服务端指南请参阅 [REMOTE_WORKSPACE.md](REMOTE_WORKSPACE.md)。
 
 ## 认证
 
@@ -238,4 +254,4 @@ Modules (domain logic):
 
 Token 提取顺序：`session_token` cookie → `Authorization: Bearer` 头 → `token` 查询参数。
 
-完整权限模型请参阅 [PERMISSION-MODEL.md](PERMISSION-MODEL.md)。
+完整权限模型请参阅 [PERMISSION_MODEL.md](PERMISSION_MODEL.md)。
