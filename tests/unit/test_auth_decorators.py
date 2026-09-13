@@ -347,7 +347,12 @@ class TestAdminRequiredWebuiToken:
         ):
             # Mock WebUI manager
             mock_manager = MagicMock()
-            mock_manager.validate_token.return_value = (True, 1, None)  # admin user_id=1
+            mock_manager.validate_token_with_user.return_value = (
+                True,
+                1,
+                None,
+                MOCK_ADMIN.copy(),
+            )  # admin user_id=1 (R-12: row comes with the validation)
 
             # Mock user repo to return admin user
             mock_user_repo = MagicMock()
@@ -379,7 +384,12 @@ class TestAdminRequiredWebuiToken:
         ):
             # Mock WebUI manager
             mock_manager = MagicMock()
-            mock_manager.validate_token.return_value = (True, 42, None)  # non-admin user_id=42
+            mock_manager.validate_token_with_user.return_value = (
+                True,
+                42,
+                None,
+                {**MOCK_ADMIN, "id": 42, "role": "user"},
+            )  # non-admin user_id=42 (R-12)
 
             # Mock user repo to return non-admin user
             mock_user_repo = MagicMock()
@@ -410,7 +420,12 @@ class TestAdminRequiredWebuiToken:
         ):
             # Mock WebUI manager with invalid token
             mock_manager = MagicMock()
-            mock_manager.validate_token.return_value = (False, None, "Invalid signature")
+            mock_manager.validate_token_with_user.return_value = (
+                False,
+                None,
+                "Invalid signature",
+                None,
+            )
 
             with patch(
                 "app.services.webui_manager.get_webui_manager",
@@ -449,7 +464,12 @@ class TestAdminRequiredWebuiToken:
         ):
             # Mock WebUI manager
             mock_manager = MagicMock()
-            mock_manager.validate_token.return_value = (True, 999, None)  # unknown user_id
+            mock_manager.validate_token_with_user.return_value = (
+                True,
+                999,
+                None,
+                None,
+            )  # unknown user_id (R-12: no row -> 401)
 
             # Mock user repo to return None (user not found)
             mock_user_repo = MagicMock()
@@ -491,7 +511,7 @@ class TestAdminRequiredWebuiToken:
                     )
                     assert resp.status_code == 200
                     # WebUI manager should not have been called since session token succeeded
-                    mock_manager.validate_token.assert_not_called()
+                    mock_manager.validate_token_with_user.assert_not_called()
 
     def test_webui_token_fallback_when_session_invalid(self):
         """WebUI token should be used when session token is invalid."""
@@ -504,7 +524,12 @@ class TestAdminRequiredWebuiToken:
         ):
             # Mock WebUI manager
             mock_manager = MagicMock()
-            mock_manager.validate_token.return_value = (True, 1, None)
+            mock_manager.validate_token_with_user.return_value = (
+                True,
+                1,
+                None,
+                MOCK_ADMIN.copy(),
+            )
 
             # Mock user repo
             mock_user_repo = MagicMock()
