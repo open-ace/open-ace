@@ -1609,6 +1609,21 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
     # Create session
     session_token = None
+    # Issue #3379 (PR-A): a deactivated or soft-deleted user must not
+    # re-establish access via SSO — the identity lookup above only reads
+    # sso_identities, so without this check a freshly revoked session is
+    # immediately re-issued on the next IdP callback (the #3374 acceptance
+    # item "停用用户后无法恢复继续执行"; password login already refuses
+    # inactive accounts, this closes the SSO asymmetry).
+    if user_id and auth_result.token:
+        sso_user = UserRepository().get_user_by_id(user_id) or {}
+        if not sso_user.get("is_active", True) or sso_user.get("deleted_at"):
+            logger.warning(
+                "SSO login refused for deactivated/deleted user %s (provider %s)",
+                user_id,
+                provider_name,
+            )
+            user_id = None
     if user_id and auth_result.token:
         session_token = get_sso_manager().create_sso_session(
             user_id=user_id,

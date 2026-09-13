@@ -370,12 +370,20 @@ def api_update_user(user_id):
                 tenant_service.decrement_user_count(current_tenant_id)
                 tenant_service.increment_user_count(new_tenant_id)
 
+    # Issue #3379 (PR-A review): normalize is_active to a real boolean before
+    # use — JSON clients sending 0/1/"" for booleans would otherwise reach
+    # update_user raw (falsy → row deactivated in the DB) while the
+    # `is False` identity test below skips session revocation and the
+    # workspace stop: a half-deactivation with sessions left alive.
+    raw_is_active = data.get("is_active")
+    requested_is_active = bool(raw_is_active) if raw_is_active is not None else None
+
     success = user_repo.update_user(
         user_id=user_id,
         username=data.get("username"),
         email=data.get("email"),
         role=data.get("role"),
-        is_active=data.get("is_active"),
+        is_active=requested_is_active,
         system_account=system_account,
         tenant_id=new_tenant_id,
     )
@@ -391,21 +399,24 @@ def api_update_user(user_id):
                 details["role_change"] = {"from": old_role, "to": new_role}
             # Track status change
             old_active = current_user.get("is_active")
-            new_active = data.get("is_active")
+            new_active = requested_is_active
             if new_active is not None and old_active != new_active:
                 details["status_change"] = {"from": old_active, "to": new_active}
                 # Issue #3379 (PR-A): deactivating a user must stop their
-                # running workspace — same invariant as DELETE above. Also
+                # running workspace — same invariant as DELETE below. Also
                 # revoke the sessions: a disabled account must not keep
-                # logged-in sessions (login already refuses is_active=false,
-                # this closes the already-issued ones).
+                # logged-in sessions (password login already refuses
+                # is_active=false, this closes the already-issued ones).
                 if new_active is False:
+                    sessions_revoked = False
                     try:
                         user_repo.delete_all_sessions_for_user(user_id)
+                        sessions_revoked = True
                     except Exception as e:  # noqa: BLE001 - audit the miss
                         logger.warning(
                             f"Failed to revoke sessions for deactivated user {user_id}: {e}"
                         )
+                    details["sessions_revoked"] = sessions_revoked
                     workspace_stopped = False
                     try:
                         from app.services.webui_manager import get_webui_manager
@@ -464,11 +475,20 @@ def api_delete_user(user_id):
         f"web_user_auth_sessions={session_counts['web_user_auth_sessions']}"
     )
 
+    # Perform soft delete FIRST (Issue #3379 PR-A review): the synchronous
+    # workspace teardown below can take tens of seconds (sandboxed pods:
+    # final snapshot export + delete), and until deleted_at lands in the DB
+    # the token-side active-user check still sees the user alive — leaving
+    # already-issued URL tokens valid for that whole window. Soft-deleting
+    # first closes the token door immediately; the stop afterwards is
+    # fail-soft and needs no rollback.
+    workspace_stopped = False
+    success = user_repo.delete_user(user_id)
+
     # Issue #3379 (PR-A): a deactivated user must not keep a running workspace.
     # Stopping the instance also revokes the webui:<uid> LLM proxy token and
     # (for sandboxed instances) destroys the pod. Fail-soft: the token-side
-    # active-user check below still closes the door if the stop hiccups.
-    workspace_stopped = False
+    # active-user check above already closed the door if the stop hiccups.
     try:
         from app.services.webui_manager import get_webui_manager
 
@@ -478,9 +498,6 @@ def api_delete_user(user_id):
             workspace_stopped = True
     except Exception as e:  # noqa: BLE001 - deactivation must proceed
         logger.warning(f"Failed to stop WebUI instance for deleted user {user_id}: {e}")
-
-    # Perform soft delete
-    success = user_repo.delete_user(user_id)
 
     if success:
         # Issue #2755 P0-3/P0-4: Critical - decrement tenant user counter with proper error handling

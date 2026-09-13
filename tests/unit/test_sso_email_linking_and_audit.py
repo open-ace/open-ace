@@ -91,6 +91,10 @@ def test_finalize_sso_login_does_not_link_by_email_by_default(app_ctx):
     existing_admin.get.return_value = 1  # would-be victim account id
     user_repo.get_user_by_email.return_value = existing_admin
     user_repo.create_session.return_value = None
+    # Issue #3379 (PR-A): the pre-session status check resolves the user via
+    # the UserRepository class; default it to the freshly provisioned active
+    # user so the flow under test proceeds past the check.
+    user_repo.get_user_by_id.return_value = {"id": 99, "is_active": True}
 
     audit_logger = MagicMock()
 
@@ -103,6 +107,7 @@ def test_finalize_sso_login_does_not_link_by_email_by_default(app_ctx):
         patch.object(sso_module, "get_audit_logger", return_value=audit_logger),
         patch.object(sso_module, "_create_user_from_sso", return_value=99),
         patch.object(sso_module, "_get_session_timeout_hours", return_value=1),
+        patch("app.routes.sso.UserRepository", return_value=user_repo),
     ):
         sso_module._finalize_sso_login("corp-saml", _auth_result(email="admin@example.com"), None)
 
