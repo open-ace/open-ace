@@ -131,23 +131,21 @@ def _set_user_from_webui_token() -> bool:
         # instance secrets live on the singleton's registered instances).
         from app.services.webui_manager import get_webui_manager
 
-        ok, user_id, _ = get_webui_manager().validate_token(url_token)
-        if ok and user_id:
-            from app.repositories.user_repo import UserRepository
-
-            user_data = UserRepository().get_user_by_id(user_id)
-            if user_data:
-                _apply_user(
-                    {
-                        "id": user_id,
-                        "username": user_data.get("username"),
-                        "email": user_data.get("email"),
-                        "role": user_data.get("role"),
-                        "tenant_id": user_data.get("tenant_id"),
-                        "must_change_password": bool(user_data.get("must_change_password")),
-                    }
-                )
-                return True
+        # R-12 (#3379 review): the validating lookup returns the user row —
+        # no second get_user_by_id on this path.
+        ok, user_id, _, user_data = get_webui_manager().validate_token_with_user(url_token)
+        if ok and user_id and user_data:
+            _apply_user(
+                {
+                    "id": user_id,
+                    "username": user_data.get("username"),
+                    "email": user_data.get("email"),
+                    "role": user_data.get("role"),
+                    "tenant_id": user_data.get("tenant_id"),
+                    "must_change_password": bool(user_data.get("must_change_password")),
+                }
+            )
+            return True
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("remote user load: webui token validation failed: %s", e)
     return False

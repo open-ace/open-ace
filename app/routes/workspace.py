@@ -307,29 +307,28 @@ def load_user():
             from app.services.webui_manager import get_webui_manager
 
             webui_manager = get_webui_manager()
-            is_valid, user_id, error = webui_manager.validate_token(token)
-            if is_valid and user_id:
-                from app.repositories.user_repo import UserRepository
-
-                user_repo = UserRepository()
-                user_data = user_repo.get_user_by_id(user_id)
-                if user_data:
-                    g.user = {
-                        "id": user_id,
-                        "username": user_data.get("username"),
-                        "email": user_data.get("email"),
-                        "role": user_data.get("role"),
-                        "tenant_id": user_data.get("tenant_id"),
-                        "must_change_password": bool(user_data.get("must_change_password")),
-                    }
-                    g.user_id = user_id
-                    g.user_role = user_data.get("role")
-                    g.tenant_id = user_data.get("tenant_id")
-                    _refresh_session(token, user_repo=user_repo)
-                    password_change_response = enforce_password_change_requirement(g.user)
-                    if password_change_response is not None:
-                        return password_change_response
-                    return None
+            # R-12 (#3379 review): validate_token_with_user returns the user
+            # row from the same single lookup the status check used — the
+            # extra get_user_by_id here was a second identical query on
+            # every webui-token request.
+            is_valid, user_id, error, user_data = webui_manager.validate_token_with_user(token)
+            if is_valid and user_id and user_data:
+                g.user = {
+                    "id": user_id,
+                    "username": user_data.get("username"),
+                    "email": user_data.get("email"),
+                    "role": user_data.get("role"),
+                    "tenant_id": user_data.get("tenant_id"),
+                    "must_change_password": bool(user_data.get("must_change_password")),
+                }
+                g.user_id = user_id
+                g.user_role = user_data.get("role")
+                g.tenant_id = user_data.get("tenant_id")
+                _refresh_session(token)
+                password_change_response = enforce_password_change_requirement(g.user)
+                if password_change_response is not None:
+                    return password_change_response
+                return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")
 

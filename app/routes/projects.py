@@ -79,18 +79,18 @@ def _authenticate_user():
 
         manager = get_webui_manager()
         if manager:
-            valid, user_id, error = manager.validate_token(url_token)
-            if valid and user_id:
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    g.user = user  # Store full user object for system_account access
-                    g.user_id = user_id
-                    g.user_role = user.get("role")
-                    g.tenant_id = user.get("tenant_id")
-                    password_change_response = enforce_password_change_requirement(user)
-                    if password_change_response is not None:
-                        return password_change_response
-                    return None
+            # R-12 (#3379 review): the validating lookup returns the user
+            # row — no second get_user_by_id on this path.
+            valid, user_id, error, user = manager.validate_token_with_user(url_token)
+            if valid and user_id and user:
+                g.user = user  # Store full user object for system_account access
+                g.user_id = user.get("id")
+                g.user_role = user.get("role")
+                g.tenant_id = user.get("tenant_id")
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
+                return None
 
     return jsonify({"error": "Authentication required"}), 401
 

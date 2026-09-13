@@ -406,16 +406,14 @@ def webui_quota_check():
     from app.services.webui_manager import get_webui_manager
 
     manager = get_webui_manager()
-    valid, user_id, error = manager.validate_token(webui_token)
+    # R-12 (#3379 review): the validating lookup returns the user row — no
+    # second get_user_by_id on this path.
+    valid, user_id, error, user = manager.validate_token_with_user(webui_token)
 
-    if not valid or user_id is None:
+    if not valid or user_id is None or user is None:
         return jsonify({"error": f"Invalid token: {error}"}), 401
 
     try:
-        user = user_repo.get_user_by_id(user_id)
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
         # Get today's usage — session-only (agent_sessions) per #1125: the Work
         # page must not read the analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
