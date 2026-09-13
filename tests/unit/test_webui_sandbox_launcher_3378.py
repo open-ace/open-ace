@@ -12,6 +12,7 @@ Kata negative-only).
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -353,6 +354,56 @@ def test_failed_extract_never_touches_the_marker():
     assert result.restore_confirmed is False
     commands = [b["command"] for b in fake.command_bodies]
     assert not any(c.startswith("touch") for c in commands)
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="chmod 000 does not deny reads to root",
+)
+def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path, caplog):
+    """F-5a (review round 2): a chmod-000 stored snapshot raises
+    SnapshotUnreadableError on load; the degraded start (empty history,
+    restore_source=DEGRADED) still runs the full upload/extract/touch
+    sequence to unblock the entrypoint — but the CONTROL-PLANE confirmation
+    record must never exist for it: reconcile and the export guard key on
+    that record, and a record here would let the degraded empty tree
+    overwrite the unreadable snapshot at the next sweep."""
+    snapshot_slot = tmp_path / "webui-11.tar"
+    snapshot_slot.write_bytes(_state_tar())
+    snapshot_slot.chmod(0o000)
+    launcher = ws.SandboxedWebuiLauncher(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: FakeOpenSandboxApi(),
+        proxy_service_factory=lambda: _FakeProxyService(),
+        restore_timeout_seconds=2,
+        poll_interval_seconds=0.01,
+        state_root_override=str(tmp_path),
+    )
+    try:
+        with pytest.raises(ws.SnapshotUnreadableError):
+            launcher.load_snapshot(11)
+
+        with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+            result = launcher.launch(
+                user_id=11,
+                callback_url="http://openace.open-ace.svc.cluster.local:8080",
+                snapshot=None,
+                restore_source=ws.RESTORE_SOURCE_DEGRADED,
+            )
+
+        # The degrade is honest: unconfirmed restore, exports refuse...
+        assert result.restore_confirmed is False
+        assert launcher.export_snapshot(result.sandbox_id, restore_confirmed=False) is None
+        # ...and the CP record that reconcile trusts DOES NOT EXIST.
+        assert launcher.restore_confirmed_on_cp(result.sandbox_id) is False
+        record_dir = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME
+        assert not record_dir.exists() or list(record_dir.iterdir()) == []
+        # The entrypoint still got its unblock marker (empty-history start).
+        commands = [b["command"] for b in launcher._api.command_bodies]  # noqa: SLF001
+        assert any(c.startswith("touch /workspace/.openace-restore-done") for c in commands)
+        assert any("degraded restore source" in r.message for r in caplog.records)
+    finally:
+        snapshot_slot.chmod(0o644)  # restore so tmp_path cleanup can unlink
 
 
 # ── boot probes → contract memo (D3) ──────────────────────────────────

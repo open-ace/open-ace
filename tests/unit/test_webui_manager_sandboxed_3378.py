@@ -79,14 +79,22 @@ class _FakeLauncher:
     def load_snapshot(self, user_id):
         return self.snapshots.get(user_id)
 
-    def launch(self, *, user_id, callback_url, snapshot=None):
+    def launch(self, *, user_id, callback_url, snapshot=None, restore_source=None):
         self.launch_calls.append(
-            {"user_id": user_id, "callback_url": callback_url, "snapshot": snapshot}
+            {
+                "user_id": user_id,
+                "callback_url": callback_url,
+                "snapshot": snapshot,
+                "restore_source": restore_source,
+            }
         )
         self._next_id += 1
+        # Mirrors the real launcher (F-5a): a DEGRADED restore source never
+        # writes the CP confirmation record, so the restore stays unconfirmed.
+        confirmed = self._restore_confirmed and restore_source != "degraded"
         return _FakeLaunchResult(
             sandbox_id=f"sb-{user_id}-{self._next_id}",
-            restore_confirmed=self._restore_confirmed,
+            restore_confirmed=confirmed,
         )
 
     def resolve_webui_endpoint(self, sandbox_id):
@@ -464,7 +472,10 @@ def test_maintenance_is_fail_soft_per_instance():
 def test_unreadable_snapshot_degrades_start_and_suspends_exports():
     """T-E: an existing-but-unreadable snapshot is not a first launch — the
     pod starts with an EMPTY history, exports stay suspended (the unreadable
-    file is left for an operator), and the launch is recorded honestly."""
+    file is left for an operator), and the launch is recorded honestly.
+    F-5a: the degrade is carried INTO the launcher as the restore source, so
+    the launcher itself never writes a CP confirmation record for the
+    degraded start."""
 
     class _UnreadableSnapshotLauncher(_FakeLauncher):
         def load_snapshot(self, user_id):
@@ -478,9 +489,11 @@ def test_unreadable_snapshot_degrades_start_and_suspends_exports():
 
     instance = manager.get_user_instance(7)
     assert instance.restore_confirmed is False  # exports suspended
-    # The launch itself ran with the degraded (empty) history.
+    # The launch itself ran with the degraded (empty) history — and the
+    # launcher was TOLD it is degraded (the launcher refuses the CP record).
     assert len(launcher.launch_calls) == 1
     assert launcher.launch_calls[0]["snapshot"] is None
+    assert launcher.launch_calls[0]["restore_source"] == "degraded"
     # Maintenance and teardown both honor the suspended export guard.
     manager._maintain_sandboxed_instances()
     assert launcher.exports == [False]

@@ -69,6 +69,18 @@ WEBUI_POD_PORT = 3100
 RESTORE_MARKER_PATH = "/workspace/.openace-restore-done"
 RESTORE_CONFIRMED_DIRNAME = "restore-confirmed"
 
+# F-5a (review round 2): where the restored history CAME from. Only LOADED
+# (a stored snapshot was restored into the pod) and ABSENT (a genuine first
+# launch — nothing was ever stored) may persist the control-plane
+# restore-confirmation record. A DEGRADED start (the stored snapshot exists
+# but could not be read) still unblocks the entrypoint with an empty tree,
+# but NEVER writes the record: reconcile and the export guard key on the
+# record, so a degraded record would let the empty tree overwrite the
+# unreadable — possibly operator-repairable — snapshot at the next sweep.
+RESTORE_SOURCE_LOADED = "loaded"
+RESTORE_SOURCE_ABSENT = "absent"
+RESTORE_SOURCE_DEGRADED = "degraded"
+
 # Where the webui keeps its session tree inside the pod (the CLI's cwd encoding
 # of /workspace — same constant the provider pins for qwen transcripts).
 WEBUI_STATE_POD_DIR = "/home/agent/.qwen/projects/-workspace"
@@ -606,6 +618,7 @@ class SandboxedWebuiLauncher:
         user_id: int,
         callback_url: str,
         snapshot: bytes | None = None,
+        restore_source: str | None = None,
     ) -> SandboxedWebuiLaunchResult:
         """Create a webui pod, probe it, and restore its session snapshot.
 
@@ -613,8 +626,18 @@ class SandboxedWebuiLauncher:
         through (``workspace.webui_callback_url`` — the static probe already
         verified the tier's egress policy admits it). ``snapshot`` is the
         user's previous session-history tar, or None for a first launch.
+        ``restore_source`` (F-5a) names where the history came from — it
+        defaults to LOADED/ABSENT from ``snapshot``; a caller that degraded an
+        unreadable snapshot to an empty history MUST pass DEGRADED so the
+        control-plane confirmation record is never written for a degraded
+        start (see RESTORE_SOURCE_*).
         """
         from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
+
+        if restore_source is None:
+            restore_source = (
+                RESTORE_SOURCE_LOADED if snapshot is not None else RESTORE_SOURCE_ABSENT
+            )
 
         cfg, endpoint = self._resolve_endpoint()
         if not (endpoint.webui_image or "").strip():
@@ -682,7 +705,12 @@ class SandboxedWebuiLauncher:
         # not waste an upload, and the probe outcome feeds the contract memo.
         self._run_boot_probes(api, endpoint, spec, sandbox_id)
 
-        restore_confirmed = self.restore_sequence(api, sandbox_id, snapshot)
+        restore_confirmed = self.restore_sequence(
+            api,
+            sandbox_id,
+            snapshot,
+            allow_cp_record=restore_source != RESTORE_SOURCE_DEGRADED,
+        )
 
         return SandboxedWebuiLaunchResult(
             sandbox_id=sandbox_id,
@@ -858,7 +886,12 @@ class SandboxedWebuiLauncher:
     # ── restore (D2/N3) ──────────────────────────────────────────────
 
     def restore_sequence(
-        self, api: OpenSandboxApi, sandbox_id: str, snapshot: bytes | None
+        self,
+        api: OpenSandboxApi,
+        sandbox_id: str,
+        snapshot: bytes | None,
+        *,
+        allow_cp_record: bool = True,
     ) -> bool:
         """Upload + extract the snapshot, then touch the restore marker.
 
@@ -870,6 +903,13 @@ class SandboxedWebuiLauncher:
         record) start must leave it False so an empty tree can never overwrite
         a good snapshot. On degrade the entrypoint's own 60s counter lets the
         webui start anyway.
+
+        F-5a: ``allow_cp_record=False`` (the DEGRADED source — the stored
+        snapshot was unreadable, so this pod runs on an empty history) still
+        performs the full upload/extract/touch sequence (the entrypoint needs
+        its unblock marker) but NEVER writes the confirmation record: the
+        record is what reconcile trusts to export "the user's history", and
+        this pod's history is not the user's.
         """
         tar_bytes = snapshot if snapshot is not None else empty_state_tar()
         try:
@@ -893,6 +933,15 @@ class SandboxedWebuiLauncher:
         except OpenSandboxApiError as exc:
             logger.warning(
                 "webui sandbox %s: restore sequence failed (%s); degrading", sandbox_id, exc
+            )
+            return False
+        if not allow_cp_record:
+            logger.warning(
+                "webui sandbox %s: degraded restore source (the stored snapshot "
+                "was unreadable); NO control-plane restore-confirmation record "
+                "is written — exports and orphan reconcile will refuse this "
+                "pod's tree, protecting the unreadable snapshot on disk",
+                sandbox_id,
             )
             return False
         if not self.mark_restore_confirmed(sandbox_id):

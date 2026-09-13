@@ -1679,6 +1679,12 @@ class WebUIManager:
         # entrypoint still needs its unblock marker), keep exports suspended
         # (restore_confirmed=False) so nothing can overwrite the unreadable
         # file, and leave it on disk for an operator to repair.
+        # F-5a (review round 2): the degrade is passed INTO the launcher as
+        # the restore source — the launcher must never write the CP
+        # confirmation record for a degraded start (a record is what
+        # reconcile trusts to export "the user's history", and this pod's
+        # history is not the user's; the old post-hoc dataclasses.replace
+        # left the record on disk for the next sweep to trust).
         snapshot = None
         history_unreadable = False
         try:
@@ -1696,11 +1702,14 @@ class WebUIManager:
                 exc,
             )
             history_unreadable = True
-        result = launcher.launch(user_id=user_id, callback_url=callback_url, snapshot=snapshot)
-        if history_unreadable:
-            import dataclasses
+        from app.services.webui_sandbox import RESTORE_SOURCE_DEGRADED
 
-            result = dataclasses.replace(result, restore_confirmed=False)
+        result = launcher.launch(
+            user_id=user_id,
+            callback_url=callback_url,
+            snapshot=snapshot,
+            restore_source=RESTORE_SOURCE_DEGRADED if history_unreadable else None,
+        )
 
         port = self.allocate_port(user_id, WEBUI_FORM_SANDBOXED)
         # The instance object does not exist until after the proxy starts, so
