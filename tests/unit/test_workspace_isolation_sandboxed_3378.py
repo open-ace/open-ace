@@ -6,6 +6,10 @@ and multi_user_mode; kernel dimension vocabulary; runtime-unverified
 honesty), and the evaluate_isolation_requirement sandboxed branch.
 """
 
+from __future__ import annotations
+
+import os
+
 import pytest
 
 from app.services import workspace_isolation_contract as wic
@@ -75,11 +79,14 @@ def _single_web_process(monkeypatch):
 
     _sandboxed_readiness consults the live heartbeat root for peer web
     processes; tests must not depend on whatever the host happens to have
-    there (review follow-up on the multi-process reason code).
+    there (review follow-up on the multi-process reason code). Yields the
+    REAL reader so a test can opt back into the genuine read path (F-2④).
     """
     import app.services.webui_sandbox as wsandbox
 
+    real_reader = wsandbox.fresh_peer_heartbeats
     monkeypatch.setattr(wsandbox, "fresh_peer_heartbeats", lambda _override=None: [])
+    yield real_reader
 
 
 @pytest.fixture
@@ -483,8 +490,17 @@ def test_probe_refuses_sandboxed_when_peer_web_process_is_live(monkeypatch):
     assert reason.code == "sandbox_multi_process_unsupported"
 
 
-def test_probe_error_counting_peers_refuses_sandboxed(monkeypatch):
-    """Cannot prove this process is alone -> refuse (conservative direction)."""
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="chmod 000 does not deny reads to root",
+)
+def test_probe_error_counting_peers_refuses_sandboxed(monkeypatch, tmp_path, _single_web_process):
+    """Cannot prove this process is alone -> refuse (conservative direction).
+
+    F-2④ (review round 2): the failure is now exercised by a REAL
+    PermissionError — a chmod-000 heartbeat file under the state root — not a
+    mocked exception the real reader could never raise. The contract's
+    except-branch must actually be reachable through the real read path."""
     import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
 
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: _BackendCfg())
@@ -492,11 +508,17 @@ def test_probe_error_counting_peers_refuses_sandboxed(monkeypatch):
 
     import app.services.webui_sandbox as wsandbox
 
-    def _boom(_override=None):
-        raise RuntimeError("heartbeat root exploded")
-
-    monkeypatch.setattr(wsandbox, "fresh_peer_heartbeats", _boom)
-    cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
-    ok, tier, reason = wic._sandboxed_readiness(cfg)
-    assert ok is False
-    assert reason.code == "sandbox_multi_process_unsupported"
+    # Opt back into the REAL reader (the autouse fixture stubs it out).
+    monkeypatch.setattr(wsandbox, "fresh_peer_heartbeats", _single_web_process)
+    monkeypatch.setenv(wsandbox.STATE_ROOT_ENV, str(tmp_path))
+    locked = tmp_path / f"{wsandbox.HEARTBEAT_FILENAME_PREFIX}peer-generation-1.json"
+    locked.parent.mkdir(parents=True, exist_ok=True)
+    locked.write_text('{"pid": 1, "ts": 0}')
+    locked.chmod(0o000)
+    try:
+        cfg = _Cfg(webui_callback_url="http://openace.open-ace.svc.cluster.local:8080")
+        ok, tier, reason = wic._sandboxed_readiness(cfg)
+        assert ok is False
+        assert reason.code == "sandbox_multi_process_unsupported"
+    finally:
+        locked.chmod(0o644)  # restore so tmp_path cleanup can unlink

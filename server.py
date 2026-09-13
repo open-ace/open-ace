@@ -143,12 +143,17 @@ if __name__ == "__main__":
     # Issue #3378 (D5): the dev web process hosts the webui-pod orphan
     # reconcile, same env gate as the gunicorn web service. The reconcile runs
     # on its own greenlet (FEAS-R4-3), fail-soft, TEST-guarded — the helper
-    # itself enforces all three.
+    # itself enforces all three. F-2③ (review round 2): the same env gate also
+    # starts the fixed-cadence webui heartbeat timer.
     os.environ.setdefault("OPENACE_WEBUI_ORPHAN_RECONCILE", "1")
     try:
-        from app.services.webui_sandbox import maybe_spawn_webui_orphan_reconcile
+        from app.services.webui_sandbox import (
+            maybe_spawn_webui_heartbeat_timer,
+            maybe_spawn_webui_orphan_reconcile,
+        )
 
         maybe_spawn_webui_orphan_reconcile()
+        maybe_spawn_webui_heartbeat_timer()
     except Exception as _reconcile_error:  # noqa: BLE001 - fail-soft
         print(f"WARNING: webui orphan reconcile not started: {_reconcile_error}")
 

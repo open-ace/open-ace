@@ -639,8 +639,9 @@ class WebUIManager:
             # live sandboxed instances get a snapshot export (bounds the crash
             # loss window at ~5 minutes) and a renew clamped to their baked-in
             # proxy-token expiry. Best-effort per instance: one failing
-            # sandbox must not starve the others. The same tick refreshes the
-            # process heartbeat (T-D).
+            # sandbox must not starve the others. (F-2③, review round 2: the
+            # process heartbeat is NOT refreshed here anymore — a dedicated
+            # timer greenlet owns that, see webui_sandbox.)
             try:
                 self._sandbox_maintenance_tick()
             except Exception as e:
@@ -650,21 +651,18 @@ class WebUIManager:
             time.sleep(self.config.cleanup_interval_minutes * 60)
 
     def _sandbox_maintenance_tick(self) -> None:
-        """One maintenance gate pass: heartbeat refresh + instance upkeep.
+        """One maintenance gate pass: instance snapshot export + renew.
 
-        T-D: the heartbeat refresh rides the same cadence as the snapshot
-        export/renew so a peer reconcile can always see a live web process
-        within HEARTBEAT_FRESH_WINDOW_SECONDS. Fail-soft by design: an
-        unwritable state root skips it (peers then treat us as stale, the
-        conservative direction for THEIR sweep).
+        F-2③ (review round 2): the process heartbeat refresh NO LONGER rides
+        this tick. The old coupling let the refresh period ride the cleanup
+        interval (potentially far past HEARTBEAT_FRESH_WINDOW_SECONDS) and
+        left manager-less replicas heartbeating exactly once; the refresh now
+        lives in webui_sandbox's dedicated fixed-cadence timer greenlet.
         """
         now = time.monotonic()
         if now - self._last_sandbox_maintenance < SANDBOX_MAINTENANCE_INTERVAL_SECONDS:
             return
         self._last_sandbox_maintenance = now
-        from app.services.webui_sandbox import write_webui_heartbeat
-
-        write_webui_heartbeat()
         self._maintain_sandboxed_instances()
 
     def _live_sandboxed_instances(self) -> list[WebUIInstance]:
@@ -1804,7 +1802,17 @@ class WebUIManager:
                 user_id, f"single-user-{user_id}", self._remove_port_from_url(base_url)
             )
             self._single_user_instance = instance
-        return instance.url, instance.token
+            # F-1 (review round 2): capture the launch branch's url/token INSIDE
+            # _single_user_lock. The reuse branch's _mint_sandboxed_token
+            # REWRITES instance.token under the same lock; reading it after the
+            # release let a user who had been waiting on the lock receive the
+            # token the NEXT user minted (a cross-user credential handoff that
+            # validated against the admin-allowed URL-token paths). The reuse
+            # branch above already returns its own freshly minted local, and the
+            # multi-user branch's returns sit inside self._lock — this was the
+            # only lock-external read of a shared mutable token.
+            launch_url, launch_token = instance.url, instance.token
+        return launch_url, launch_token
 
     def _load_server_config(self) -> dict:
         """Load server configuration from config.json."""

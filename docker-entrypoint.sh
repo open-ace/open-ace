@@ -1622,6 +1622,7 @@ fi
 # (or any transitive dep) imports urllib3. This prevents urllib3.util.ssl_
 # RecursionError under the gevent event loop during LLM proxy outbound requests.
 exec python3 /app/gunicorn_entry.py \
+    --config python:app.gunicorn_worker \
     --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \

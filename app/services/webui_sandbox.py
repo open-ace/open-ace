@@ -110,18 +110,42 @@ _PROCESS_GENERATION = uuid.uuid4().hex
 #
 # The k8s reference manifest ships 3 replicas (HPA 3-10). Generation-based
 # orphan discrimination alone let every newly started replica sweep every
-# OTHER replica's live pods. Each web process now keeps a heartbeat file in
-# the shared state root (filename carries boot_id/pid, content carries
-# pid/boot_id/ts); the reconcile destroys nothing while another FRESH
-# heartbeat exists. The maintenance loop that refreshes the heartbeat lives
-# in webui_manager (SANDBOX_MAINTENANCE_INTERVAL_SECONDS = 300); the
-# freshness window below is 2x that plus a 60s scheduling grace, duplicated
-# here (not imported) to keep this module's import graph one-directional.
+# OTHER replica's live pods. Each web process keeps a heartbeat file in the
+# shared state root; the reconcile destroys nothing while another FRESH
+# heartbeat exists.
+#
+# Review round 2 (F-2) reworks the identity/cadence/cleanup contract:
+#
+# * Identity: the filename carries ``_PROCESS_GENERATION`` (a per-process
+#   uuid4), NOT ``(boot_id, pid)`` — same-node containers share the host's
+#   boot_id and frequently collide on pids, so single-node k3s/kind replicas
+#   used to mistake each other (or themselves) and void the mutex.
+# * Cadence: a dedicated timer greenlet (worker boot hook, same env gate as
+#   the reconcile) refreshes the file every HEARTBEAT_REFRESH_SECONDS. This
+#   is the ONLY refresh source: a replica without a manager instance used to
+#   write once and never again, and the old manager-loop refresh could ride a
+#   cleanup interval far beyond the freshness window.
+# * Cleanup: the heartbeat file is removed at process shutdown (atexit +
+#   gunicorn ``worker_exit``) so a restarted single-process deployment is not
+#   blocked by its own dead predecessor for a whole freshness window.
+# * Readability: an unreadable root/file is NOT "no peers" — readers treat it
+#   as "peers may exist" (fail-closed) instead of swallowing the OSError.
 HEARTBEAT_FILENAME_PREFIX = "webui-heartbeat-"
-HEARTBEAT_FRESH_WINDOW_SECONDS = 2 * 300.0 + 60.0
+HEARTBEAT_REFRESH_SECONDS = 300.0
+# Freshness window: two full refresh periods plus a scheduling grace, derived
+# from the FIXED refresh cadence above (window = 2*300+60 = 660s).
+HEARTBEAT_FRESH_WINDOW_SECONDS = 2 * HEARTBEAT_REFRESH_SECONDS + 60.0
 # Ancient heartbeat files (dead processes from previous deploys) are pruned
 # on every write so a long-lived mounted volume cannot accumulate them.
 HEARTBEAT_MAX_AGE_SECONDS = 24 * 3600.0
+# Explicit opt-out for the atexit heartbeat cleanup (F-2②). Tests that manage
+# heartbeat files by hand can set it to "0".
+HEARTBEAT_ATEXIT_ENV = "OPENACE_WEBUI_HEARTBEAT_ATEXIT"
+
+# The exact heartbeat file THIS process last wrote (drives shutdown cleanup —
+# only the file we ourselves created is ever unlinked by it).
+_last_heartbeat_path: Path | None = None
+_atexit_registered = False
 
 
 def _boot_id() -> str:
@@ -132,21 +156,33 @@ def _boot_id() -> str:
         return ""
 
 
+def _heartbeat_path(base: Path) -> Path:
+    """Return this process's heartbeat file: keyed by the per-process generation."""
+    return base / f"{HEARTBEAT_FILENAME_PREFIX}{_PROCESS_GENERATION}.json"
+
+
 def write_webui_heartbeat(state_root_override: str | Path | None = None) -> Path | None:
     """Write/refresh THIS process's heartbeat file (T-D, entirely fail-soft).
 
-    Called at reconcile time (web-process boot) and by the manager's
-    maintenance cycle every ~5 minutes. Returns the path written, or None
-    when the state root is unwritable — a missing heartbeat can only make a
-    PEER's sweep more conservative toward skipping, never less.
+    Called once per HEARTBEAT_REFRESH_SECONDS by the dedicated timer greenlet
+    (and once at reconcile time as a belt-and-braces registration). Returns
+    the path written, or None when the state root is unwritable — a missing
+    heartbeat can only make a PEER's sweep more conservative toward skipping,
+    never less.
     """
-    payload = {"pid": os.getpid(), "boot_id": _boot_id(), "ts": time.time()}
+    global _last_heartbeat_path
+    payload = {
+        "pid": os.getpid(),
+        "boot_id": _boot_id(),
+        # F-2①: the uniqueness key. (boot_id, pid) collides between same-node
+        # containers; a per-process uuid4 does not.
+        "generation": _PROCESS_GENERATION,
+        "ts": time.time(),
+    }
     try:
         base = state_root(state_root_override)
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = (
-            base / f"{HEARTBEAT_FILENAME_PREFIX}{payload['boot_id'] or 'nb'}-{payload['pid']}.json"
-        )
+        path = _heartbeat_path(base)
         temp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
         with open(temp, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
@@ -154,31 +190,109 @@ def write_webui_heartbeat(state_root_override: str | Path | None = None) -> Path
     except OSError as exc:
         logger.debug("webui heartbeat write failed (fail-soft): %s", exc)
         return None
+    _last_heartbeat_path = path
+    _register_heartbeat_atexit()
     _prune_stale_heartbeat_files(state_root_override)
     return path
+
+
+def _remove_own_heartbeat_atexit() -> None:
+    """Interpreter-exit hook: drop this process's heartbeat file (F-2②, fail-soft)."""
+    remove_own_heartbeat()
+
+
+def remove_own_heartbeat(state_root_override: str | Path | None = None) -> None:
+    """Delete THIS process's heartbeat file (idempotent, fail-soft, F-2②).
+
+    Registered via atexit on the first heartbeat write and called from the
+    gunicorn ``worker_exit`` hook, so a normally-stopped web process stops
+    looking like a live peer: without this, a restarted single-process
+    deployment was refused the sandboxed level (and its reconcile was
+    blocked) for up to a full freshness window by its own dead predecessor.
+    Only the file this process actually wrote (or would write under an
+    explicit override) is ever unlinked — nothing else in the state root.
+    """
+    global _last_heartbeat_path
+    candidates: list[Path] = []
+    if state_root_override is not None:
+        try:
+            candidates.append(_heartbeat_path(state_root(state_root_override)))
+        except Exception:  # noqa: BLE001 - cleanup must never raise
+            pass
+    if _last_heartbeat_path is not None:
+        candidates.append(_last_heartbeat_path)
+    for path in candidates:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.debug("webui heartbeat removal failed (fail-soft): %s", exc)
+    if state_root_override is None:
+        # Interpreter-exit call: forget the remembered path so a later
+        # explicit remove_own_heartbeat() is a clean no-op (idempotency).
+        _last_heartbeat_path = None
+
+
+def _register_heartbeat_atexit() -> None:
+    """Register the shutdown cleanup once (honors HEARTBEAT_ATEXIT_ENV=0)."""
+    global _atexit_registered
+    if _atexit_registered:
+        return
+    opt_out = os.environ.get(HEARTBEAT_ATEXIT_ENV, "").strip().lower()
+    if opt_out in {"0", "false", "no", "off"}:
+        return
+    import atexit
+
+    atexit.register(_remove_own_heartbeat_atexit)
+    _atexit_registered = True
 
 
 def _iter_heartbeat_entries(
     state_root_override: str | Path | None = None,
 ):
-    """Yield ``(path, entry)`` for every parseable heartbeat file (fail-soft)."""
+    """Yield ``(path, entry)`` for every parseable heartbeat file.
+
+    F-2④: "unreadable" is NOT "none". A heartbeat root that exists but cannot
+    be listed, or a heartbeat file that exists but cannot be read, raises
+    OSError to the caller — the contract's fail-closed "unreadable = a peer
+    may be live" branch and the reconcile's skip-sweep branch key on it. A
+    MISSING root (fresh deployment, nothing ever written) legitimately yields
+    nothing; a file that vanished mid-scan is gone; a file whose JSON does
+    not parse is not evidence of a live peer either. Legacy
+    ``webui-heartbeat-<boot_id>-<pid>.json`` files from a pre-F-2 process are
+    still yielded so a rolling upgrade keeps seeing the old replicas.
+    """
+    base = state_root(state_root_override)
     try:
-        base = state_root(state_root_override)
-        for path in sorted(base.glob(f"{HEARTBEAT_FILENAME_PREFIX}*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(data, dict):
-                yield path, data
-    except OSError:
-        return
+        candidates = sorted(
+            path
+            for path in base.iterdir()
+            if path.name.startswith(HEARTBEAT_FILENAME_PREFIX) and path.name.endswith(".json")
+        )
+    except FileNotFoundError:
+        return  # no state root yet: nothing was ever written — absent, not unreadable
+    for path in candidates:
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue  # raced with a peer's atomic replace/unlink: gone is gone
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue  # corrupt payload is not a live peer
+        if isinstance(data, dict):
+            yield path, data
 
 
 def _prune_stale_heartbeat_files(state_root_override: str | Path | None = None) -> None:
     """Unlink heartbeat files older than HEARTBEAT_MAX_AGE_SECONDS (fail-soft)."""
     cutoff = time.time() - HEARTBEAT_MAX_AGE_SECONDS
-    for path, data in list(_iter_heartbeat_entries(state_root_override)):
+    try:
+        entries = list(_iter_heartbeat_entries(state_root_override))
+    except OSError:
+        # Pruning is an optimisation riding the write path; an unreadable
+        # root must not turn a successful heartbeat write into a failure.
+        return
+    for path, data in entries:
         try:
             if float(data.get("ts") or 0) < cutoff:
                 path.unlink(missing_ok=True)
@@ -194,13 +308,20 @@ def fresh_peer_heartbeats(
     An entry counts when its ts is within HEARTBEAT_FRESH_WINDOW_SECONDS of
     now (a future ts — clock skew — reads as "just written" and counts as
     fresh; fail-safe in the skip direction). This process's own entry never
-    counts.
+    counts: it is identified by the per-process generation (F-2①), both in
+    the payload and in the filename — a same-node container sharing the
+    host's boot_id and our pid can no longer be mistaken for us.
+
+    Raises OSError when the heartbeat root or any heartbeat file cannot be
+    read (F-2④): "unreadable" means peer liveness cannot be established, and
+    callers must treat that as peers-present / skip, never as "we are alone".
     """
-    own_boot, own_pid = _boot_id(), os.getpid()
+    own_generation = _PROCESS_GENERATION
+    own_name = f"{HEARTBEAT_FILENAME_PREFIX}{own_generation}.json"
     now = time.time()
     peers: list[dict] = []
-    for _path, data in _iter_heartbeat_entries(state_root_override):
-        if data.get("pid") == own_pid and data.get("boot_id") == own_boot:
+    for path, data in _iter_heartbeat_entries(state_root_override):
+        if data.get("generation") == own_generation or path.name == own_name:
             continue
         try:
             if now - float(data.get("ts") or 0) <= HEARTBEAT_FRESH_WINDOW_SECONDS:
@@ -1794,7 +1915,19 @@ def reconcile_webui_orphans(
             "so peer liveness cannot be established"
         )
         return []
-    peers = fresh_peer_heartbeats(state_root_override)
+    try:
+        peers = fresh_peer_heartbeats(state_root_override)
+    except OSError as exc:
+        # F-2④: an UNREADABLE heartbeat root is the same proof failure as an
+        # unwritable one — every peer's heartbeat is hidden behind the OSError,
+        # so "0 peers" would mean "cannot prove we are alone", not "we are
+        # alone". Skip the sweep, exactly like the unwritable-write guard.
+        logger.warning(
+            "webui orphan reconcile skipped: heartbeat state root is unreadable "
+            "(%s), so peer liveness cannot be established",
+            exc,
+        )
+        return []
     if peers:
         logger.info(
             "webui orphan reconcile skipped: %d other web process(es) hold fresh "
@@ -1967,4 +2100,38 @@ def maybe_spawn_webui_orphan_reconcile() -> bool:
 
     gevent.spawn(_run)
     logger.info("webui orphan reconcile spawned (worker startup)")
+    return True
+
+
+def maybe_spawn_webui_heartbeat_timer() -> bool:
+    """Env-gated, TESTING-guarded heartbeat refresh greenlet (F-2③).
+
+    Returns True when a timer greenlet was spawned. The heartbeat refresh is
+    a FIXED 300s cadence driven by this timer — the single refresh source
+    (the manager's maintenance loop no longer refreshes it, and a replica
+    without a manager instance must still heartbeat). The first write happens
+    immediately at spawn so presence is registered from worker boot; every
+    write is fail-soft. HEARTBEAT_FRESH_WINDOW_SECONDS is derived from this
+    constant cadence (2*300 + 60), so the window derivation stays sound.
+    """
+    if os.environ.get(RECONCILE_ENV) != "1":
+        return False
+    # TESTING guard, same as the reconcile: a test process must never touch
+    # the real heartbeat state root.
+    if os.environ.get("PYTEST_VERSION") or os.environ.get("TESTING"):
+        logger.info("webui heartbeat timer skipped (test process)")
+        return False
+
+    import gevent
+
+    def _loop() -> None:
+        while True:
+            try:
+                write_webui_heartbeat()
+            except Exception:  # noqa: BLE001 - fail-soft: the web boot must not fail
+                logger.exception("webui heartbeat refresh failed (fail-soft)")
+            gevent.sleep(HEARTBEAT_REFRESH_SECONDS)
+
+    gevent.spawn(_loop)
+    logger.info("webui heartbeat timer spawned (%ss cadence)", int(HEARTBEAT_REFRESH_SECONDS))
     return True

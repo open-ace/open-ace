@@ -375,11 +375,34 @@ def test_reconcile_ignores_foreign_installation_client_side(tmp_path):
 # ── T-D: multi-replica heartbeat mutex ────────────────────────────────
 
 
-def _write_peer_heartbeat(root, *, ts, pid=12345, boot_id="peer-boot-1"):
-    import time as _time
+def _write_peer_heartbeat(
+    root,
+    *,
+    ts,
+    pid=12345,
+    generation=None,
+    legacy=False,
+):
+    """Write a PEER heartbeat (new generation-keyed format by default).
 
-    path = root / f"{ws.HEARTBEAT_FILENAME_PREFIX}{boot_id}-{pid}.json"
-    path.write_text(json.dumps({"pid": pid, "boot_id": boot_id, "ts": ts}))
+    ``legacy=True`` writes the pre-F-2 ``<boot_id>-<pid>.json`` shape so the
+    rolling-upgrade compatibility path (old replicas still count as peers)
+    stays covered.
+    """
+    generation = generation or f"peer-generation-{pid}"
+    if legacy:
+        name = f"{ws.HEARTBEAT_FILENAME_PREFIX}peer-boot-1-{pid}.json"
+        payload = {"pid": pid, "boot_id": "peer-boot-1", "ts": ts}
+    else:
+        name = f"{ws.HEARTBEAT_FILENAME_PREFIX}{generation}.json"
+        payload = {
+            "pid": pid,
+            "boot_id": "peer-boot-1",
+            "generation": generation,
+            "ts": ts,
+        }
+    path = root / name
+    path.write_text(json.dumps(payload))
     return path
 
 
@@ -450,6 +473,230 @@ def test_heartbeat_write_prunes_ancient_files(tmp_path):
     assert not ancient.exists()  # > 24h: pruned
     assert fresh.exists()
     assert ws.fresh_peer_heartbeats(str(tmp_path))  # peer 888 still counts
+
+
+# ── F-2 (review round 2): heartbeat identity / cleanup / timer / readability ──
+
+
+def test_heartbeat_identity_is_process_generation_not_boot_pid(tmp_path):
+    """F-2①: ``(boot_id, pid)`` is not unique across same-node containers
+    (shared host boot_id, colliding pids — the single-node k3s/kind shape).
+    A peer carrying OUR pid and boot_id must still count as a peer, and our
+    own file must not — the discriminator is the per-process generation."""
+    import os
+    import time
+
+    root = tmp_path
+    # Same-node "container collision": identical pid AND boot_id to ours,
+    # no generation key (the legacy payload the old identity matched on).
+    collision = root / f"{ws.HEARTBEAT_FILENAME_PREFIX}legacy-{os.getpid()}.json"
+    collision.write_text(
+        json.dumps({"pid": os.getpid(), "boot_id": ws._boot_id(), "ts": time.time()})
+    )
+    peers = ws.fresh_peer_heartbeats(str(root))
+    assert peers, "a peer sharing our (boot_id, pid) must not be mistaken for self"
+
+    # Our own heartbeat (fresh) still never counts — keyed by generation.
+    own = ws.write_webui_heartbeat(str(root))
+    assert own is not None
+    assert own.name == f"{ws.HEARTBEAT_FILENAME_PREFIX}{ws.current_process_generation()}.json"
+    fresh = ws.fresh_peer_heartbeats(str(root))
+    assert all(p.get("generation") != ws.current_process_generation() for p in fresh)
+
+
+def test_legacy_peer_heartbeat_still_counts_during_rolling_upgrade(tmp_path):
+    """F-2① compat: pre-F-2 replicas write ``<boot_id>-<pid>.json`` without a
+    generation key — a fresh one must keep blocking the sweep mid-upgrade."""
+    import time
+
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+    peer = _write_peer_heartbeat(tmp_path, ts=time.time(), pid=4242, legacy=True)
+
+    destroyed = ws.reconcile_webui_orphans(
+        backend_config=_backend(),
+        api_factory=lambda endpoint: fake,
+        state_root_override=str(tmp_path),
+    )
+    assert destroyed == []
+    assert orphan["id"] not in fake.deleted
+    assert peer.exists()
+
+
+def test_remove_own_heartbeat_is_idempotent_and_spares_peers(tmp_path):
+    """F-2②: shutdown cleanup unlinks ONLY this process's heartbeat file."""
+    import time
+
+    peer = _write_peer_heartbeat(tmp_path, ts=time.time(), pid=777)
+    own = ws.write_webui_heartbeat(str(tmp_path))
+    assert own is not None and own.exists()
+
+    ws.remove_own_heartbeat(str(tmp_path))
+    assert not own.exists()
+    assert peer.exists()  # a live peer's liveness is not ours to delete
+    # Idempotent: a second call (atexit + worker_exit both fire) is a no-op.
+    ws.remove_own_heartbeat(str(tmp_path))
+    assert peer.exists()
+
+
+def test_heartbeat_write_registers_atexit_unless_opted_out(tmp_path, monkeypatch):
+    """F-2②: the first successful write registers the atexit cleanup exactly
+    once; OPENACE_WEBUI_HEARTBEAT_ATEXIT=0 disables the registration."""
+    import atexit
+
+    registered = []
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn) or fn)
+    monkeypatch.setattr(ws, "_atexit_registered", False)
+    monkeypatch.setattr(ws, "_last_heartbeat_path", None)
+
+    assert ws.write_webui_heartbeat(str(tmp_path)) is not None
+    assert registered == [ws._remove_own_heartbeat_atexit]  # exactly once
+    assert ws.write_webui_heartbeat(str(tmp_path)) is not None
+    assert len(registered) == 1  # not re-registered
+
+    monkeypatch.setattr(ws, "_atexit_registered", False)
+    monkeypatch.setattr(ws, "_last_heartbeat_path", None)
+    monkeypatch.setattr(ws, "HEARTBEAT_ATEXIT_ENV", "OPENACE_TEST_HEARTBEAT_ATEXIT")
+    monkeypatch.setenv("OPENACE_TEST_HEARTBEAT_ATEXIT", "0")
+    assert ws.write_webui_heartbeat(str(tmp_path)) is not None
+    assert len(registered) == 1  # opt-out honored
+
+
+def test_gunicorn_worker_exit_hook_removes_own_heartbeat(monkeypatch, tmp_path):
+    """F-2②: the gunicorn worker_exit hook routes into the idempotent
+    removal (the shipped entrypoint activates it via
+    --config python:app.gunicorn_worker)."""
+    from app import gunicorn_worker
+
+    removed = []
+    monkeypatch.setattr(
+        "app.services.webui_sandbox.remove_own_heartbeat",
+        lambda *a, **kw: removed.append((a, kw)),
+    )
+    gunicorn_worker.worker_exit(server=None, worker=None)  # hook args unused here
+    assert len(removed) == 1
+
+
+def test_maybe_spawn_heartbeat_timer_env_and_testing_gates(monkeypatch):
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+    monkeypatch.delenv("TESTING", raising=False)
+    spawned = []
+    monkeypatch.setattr("gevent.spawn", lambda fn, *a, **kw: spawned.append(fn))
+
+    monkeypatch.delenv(ws.RECONCILE_ENV, raising=False)
+    assert ws.maybe_spawn_webui_heartbeat_timer() is False
+    assert spawned == []
+
+    monkeypatch.setenv(ws.RECONCILE_ENV, "1")
+    monkeypatch.setenv("PYTEST_VERSION", "1.0")
+    assert ws.maybe_spawn_webui_heartbeat_timer() is False
+    assert spawned == []
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+    monkeypatch.setenv("TESTING", "1")
+    assert ws.maybe_spawn_webui_heartbeat_timer() is False
+    assert spawned == []
+    monkeypatch.delenv("TESTING", raising=False)
+    assert ws.maybe_spawn_webui_heartbeat_timer() is True
+    assert len(spawned) == 1
+
+
+def test_heartbeat_timer_loop_writes_and_is_fail_soft(monkeypatch, tmp_path):
+    """F-2③: the timer loop refreshes on the FIXED cadence and survives a
+    failing write. gevent.sleep is faked to raise after the first iteration
+    so the (infinite) loop body is exercised exactly once without a real
+    greenlet hub — the #2457 worker-crash class."""
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.setenv(ws.RECONCILE_ENV, "1")
+    monkeypatch.setenv(ws.STATE_ROOT_ENV, str(tmp_path))
+    spawned = []
+    monkeypatch.setattr("gevent.spawn", lambda fn, *a, **kw: spawned.append(fn))
+
+    class _StopLoop(Exception):
+        pass
+
+    sleeps: list[float] = []
+
+    def _fake_sleep(seconds):
+        sleeps.append(seconds)
+        raise _StopLoop
+
+    monkeypatch.setattr("gevent.sleep", _fake_sleep)
+
+    # Healthy write: one refresh, then the fixed 300s cadence sleep.
+    assert ws.maybe_spawn_webui_heartbeat_timer() is True
+    with pytest.raises(_StopLoop):
+        spawned[0]()
+    own = tmp_path / f"{ws.HEARTBEAT_FILENAME_PREFIX}{ws.current_process_generation()}.json"
+    assert own.exists()
+    assert sleeps == [ws.HEARTBEAT_REFRESH_SECONDS]
+
+    # Exploding write: the loop must swallow it and still sleep (fail-soft).
+    def _explode(_override=None):
+        raise RuntimeError("state root exploded")
+
+    monkeypatch.setattr(ws, "write_webui_heartbeat", _explode)
+    sleeps.clear()
+    spawned.clear()
+    assert ws.maybe_spawn_webui_heartbeat_timer() is True
+    with pytest.raises(_StopLoop):
+        spawned[0]()
+    assert sleeps == [ws.HEARTBEAT_REFRESH_SECONDS]
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="chmod 000 does not deny reads to root",
+)
+def test_unreadable_peer_heartbeat_file_fails_closed(tmp_path):
+    """F-2④: an unreadable heartbeat FILE is a REAL PermissionError on the
+    read path (not a mocked exception) and must surface as "peer liveness
+    cannot be established" — never as "no peers"."""
+    import time
+
+    _write_peer_heartbeat(tmp_path, ts=time.time(), pid=31337)
+    locked = tmp_path / f"{ws.HEARTBEAT_FILENAME_PREFIX}peer-generation-31337.json"
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(OSError):
+            ws.fresh_peer_heartbeats(str(tmp_path))
+    finally:
+        locked.chmod(0o644)  # restore so tmp_path cleanup can unlink
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="chmod 000 does not deny reads to root",
+)
+def test_reconcile_skips_sweep_when_heartbeat_files_unreadable(tmp_path):
+    """F-2④ reconcile side: the sweep must not run while peer liveness
+    cannot be established — the same skip semantics as the unwritable-root
+    guard, now actually reachable through a real PermissionError."""
+    import time
+
+    fake = FakeOpenSandboxApi()
+    orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
+    _write_peer_heartbeat(tmp_path, ts=time.time(), pid=4711)
+    locked = tmp_path / f"{ws.HEARTBEAT_FILENAME_PREFIX}peer-generation-4711.json"
+    locked.chmod(0o000)
+    try:
+        destroyed = ws.reconcile_webui_orphans(
+            backend_config=_backend(),
+            api_factory=lambda endpoint: fake,
+            state_root_override=str(tmp_path),
+        )
+        assert destroyed == []
+        assert orphan["id"] not in fake.deleted
+        assert fake.command_bodies == []  # no export traffic either
+    finally:
+        locked.chmod(0o644)
+
+
+def test_missing_heartbeat_root_is_absent_not_unreadable(tmp_path):
+    """F-2④ boundary: a state root that never existed is a legitimate 'no
+    peers' (fresh deployment), distinct from an existing-but-unreadable one."""
+    empty_root = tmp_path / "never-created"
+    assert ws.fresh_peer_heartbeats(str(empty_root)) == []
 
 
 # ── positive trigger + TESTING guard + separate greenlet ───────────────

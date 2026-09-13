@@ -416,9 +416,12 @@ def test_periodic_maintenance_exports_and_renews_each_live_sandbox():
     assert launcher.renew_calls == [manager.get_user_instance(7).sandbox_id]
 
 
-def test_maintenance_tick_refreshes_process_heartbeat(tmp_path, monkeypatch):
-    """T-D: the maintenance cadence refreshes this process's heartbeat file
-    (the multi-replica reconcile mutex) before exporting/renewing."""
+def test_maintenance_tick_no_longer_refreshes_the_process_heartbeat(tmp_path, monkeypatch):
+    """F-2③ (review round 2): the heartbeat refresh moved OFF the manager
+    maintenance tick — a dedicated fixed-cadence timer greenlet in
+    webui_sandbox owns it (a cleanup interval longer than the freshness
+    window used to make the refresh period exceed it, and manager-less
+    replicas never refreshed at all). The tick still exports + renews."""
     from app.services import webui_sandbox as ws
 
     launcher = _FakeLauncher()
@@ -434,13 +437,15 @@ def test_maintenance_tick_refreshes_process_heartbeat(tmp_path, monkeypatch):
 
     manager._sandbox_maintenance_tick()
 
-    heartbeats = list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json"))
-    assert len(heartbeats) == 1
-    assert launcher.exports == [True]  # the tick still maintained the pod
-    # A second tick inside the window refreshes the heartbeat but is a no-op
-    # gate-wise (the maintenance interval has not elapsed).
+    # No heartbeat file was written by the tick (single refresh source: the
+    # timer, covered in test_webui_sandbox_reconcile_3378.py)...
+    assert list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json")) == []
+    # ...while the instance upkeep itself still ran.
+    assert launcher.exports == [True]
+    assert launcher.renew_calls == [manager.get_user_instance(7).sandbox_id]
+    # A second tick inside the window is a no-op gate-wise.
     manager._sandbox_maintenance_tick()
-    assert list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json")) == heartbeats
+    assert list(tmp_path.glob(f"{ws.HEARTBEAT_FILENAME_PREFIX}*.json")) == []
 
 
 def test_maintenance_is_fail_soft_per_instance():
@@ -550,6 +555,127 @@ def test_single_user_sandboxed_token_mints_for_the_requester():
     # And the pod-creator subject never leaks into the second user's token.
     assert not token_other.startswith("v2:3:")
     assert instance.user_id == 3  # the pod still belongs to its creator
+
+
+def test_single_user_sandboxed_launch_token_never_leaks_across_users_under_contention():
+    """F-1 (review round 2): the single-user LAUNCH branch must capture its
+    url/token INSIDE _single_user_lock. The reuse branch's
+    _mint_sandboxed_token rewrites instance.token under the same lock; the old
+    code read ``instance.token`` AFTER releasing the lock, so a user who had
+    been waiting on the lock could receive the token the NEXT requester minted
+    (a cross-user credential handoff that validates against the admin-allowed
+    URL-token paths).
+
+    Deterministic interleaving (pure threading — a gevent hub inside an xdist
+    worker is the #2457 worker-crash class): thread A walks the launch branch
+    with a launcher that parks until signaled (A holds the lock the whole
+    time), thread B queues on the lock and then walks the REUSE branch. The
+    instance's token reads are instrumented: a read made OUTSIDE the lock (the
+    old buggy window) parks until B's mint has certainly landed, so a
+    regression to the lock-external read fails deterministically instead of
+    relying on a scheduler race.
+    """
+    import threading
+
+    launch_entered = threading.Event()
+    release_launch = threading.Event()
+    b_minted = threading.Event()
+
+    class _ParkingLauncher(_FakeLauncher):
+        def launch(self, *, user_id, callback_url, snapshot=None, **kwargs):
+            launch_entered.set()
+            assert release_launch.wait(timeout=15), "launch was never released"
+            return super().launch(
+                user_id=user_id, callback_url=callback_url, snapshot=snapshot, **kwargs
+            )
+
+    launcher = _ParkingLauncher()
+    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
+    # Plain threading lock: the code under test only needs mutual exclusion,
+    # and this keeps the test off any real gevent hub.
+    manager._single_user_lock = threading.RLock()
+    lock = manager._single_user_lock
+
+    original_mint = manager._mint_sandboxed_token
+
+    def _mint(instance, *, requester_id=None):
+        token = original_mint(instance, requester_id=requester_id)
+        if requester_id == 9:
+            b_minted.set()
+        return token
+
+    manager._mint_sandboxed_token = _mint
+
+    def _gate_instance(instance):
+        """Route instance.token reads outside the lock through the interlock."""
+        base_cls = type(instance)
+
+        class _GatedInstance(base_cls):
+            def __getattribute__(self, name):
+                value = super().__getattribute__(name)
+                if name == "token" and not lock._is_owned():
+                    # The OLD code's window: the read happens after the lock
+                    # was released, so the queued reuse-branch mint (user 9)
+                    # is allowed to land first — deterministically exposing
+                    # the cross-user leak the fix removes.
+                    assert b_minted.wait(timeout=15), "queued mint never happened"
+                    return super().__getattribute__(name)
+                return value
+
+        instance.__class__ = _GatedInstance
+
+    original_launch = manager._launch_sandboxed
+
+    def _launch_and_gate(user_id, system_account, base_url):
+        instance = original_launch(user_id, system_account, base_url)
+        _gate_instance(instance)
+        return instance
+
+    manager._launch_sandboxed = _launch_and_gate
+
+    results: dict[str, tuple[str, str]] = {}
+    errors: dict[str, BaseException] = {}
+
+    def _launch_caller():
+        try:
+            results["a"] = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
+        except BaseException as exc:  # noqa: BLE001 - recorded then re-raised (scanner gate)
+            errors["a"] = exc
+            raise
+
+    def _reuse_caller():
+        try:
+            results["b"] = manager.get_user_webui_url(9, "u9", None, required_isolation="sandboxed")
+        except BaseException as exc:  # noqa: BLE001 - recorded then re-raised (scanner gate)
+            errors["b"] = exc
+            raise
+
+    thread_a = threading.Thread(target=_launch_caller, daemon=True)
+    thread_b = threading.Thread(target=_reuse_caller, daemon=True)
+    thread_a.start()
+    assert launch_entered.wait(timeout=15), "launch branch never entered"
+    # A holds the lock (parked inside the launcher); B is now queued on it.
+    thread_b.start()
+    thread_b.join(timeout=0.05)
+    assert thread_b.is_alive(), "B should be parked on _single_user_lock"
+
+    release_launch.set()
+    thread_a.join(timeout=15)
+    thread_b.join(timeout=15)
+    assert not thread_a.is_alive() and not thread_b.is_alive()
+    for key, exc in errors.items():
+        raise AssertionError(f"thread {key} raised: {exc!r}")
+
+    url_a, token_a = results["a"]
+    url_b, token_b = results["b"]
+    # One shared pod: A launched it, B reused it.
+    assert len(launcher.launch_calls) == 1
+    assert url_a == url_b
+    # F-1: each caller's token validates as THEIR OWN user — A never sees the
+    # token B minted while A was between the lock release and its return.
+    assert manager.validate_token(token_a)[:2] == (True, 7)
+    assert manager.validate_token(token_b)[:2] == (True, 9)
+    assert token_a.startswith("v2:7:") and token_b.startswith("v2:9:")
 
 
 def test_single_user_sandboxed_instance_resolves_for_proxy_token_lifecycle(monkeypatch, tmp_path):
