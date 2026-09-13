@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import gevent
@@ -453,6 +453,34 @@ def _webui_token_user(user_id: int) -> dict | None:
     from app.repositories.user_repo import UserRepository
 
     return UserRepository().get_user_by_id(user_id)
+
+
+def _tokens_valid_after_epoch(value: Any) -> float | None:
+    """Epoch seconds (UTC) of users.tokens_valid_after, or None when unset.
+
+    Issue #3379 review round 2 (R-5): the column is stamped on deactivation
+    and soft delete. SQLite returns it as a string ("2026-09-11 05:00:00"),
+    PostgreSQL as a naive datetime; both store UTC. An unparseable value
+    fails CLOSED (treated as +inf): the stamp exists to kill outstanding
+    tokens, and silently ignoring it would resurrect exactly the tokens the
+    deactivation meant to revoke.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace(" ", "T"))
+        except ValueError:
+            logger.warning("Unparseable users.tokens_valid_after value %r; failing closed", value)
+            return float("inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 
 class WebUIManager:
@@ -1013,8 +1041,32 @@ class WebUIManager:
         Returns:
             Tuple of (is_valid, user_id, error_message).
         """
+        ok, user_id, err, _user = self.validate_token_with_user(token)
+        return ok, user_id, err
+
+    def validate_token_with_user(
+        self, token: str
+    ) -> tuple[bool, int | None, str | None, dict | None]:
+        """
+        Validate an authentication token AND return the named user's row.
+
+        Issue #3379 review round 2 (R-12): the user lookup that the status
+        check already performs is handed back to the caller, so hot paths
+        (workspace before_request, fs, quota, session_access, the admin
+        decorator, projects) no longer issue a SECOND get_user_by_id per
+        request for the same row. ``validate_token`` keeps its 3-tuple
+        signature and delegates here.
+
+        Args:
+            token: Token string to validate.
+
+        Returns:
+            Tuple of (is_valid, user_id, error_message, user_row). user_row
+            is the users-table dict from the SAME single lookup that decided
+            the status check (None whenever validation failed).
+        """
         if not token:
-            return False, None, "Empty token"
+            return False, None, "Empty token", None
 
         # v2 format with TTL
         if token.startswith("v2:"):
@@ -1137,7 +1189,7 @@ class WebUIManager:
         except (ValueError, TypeError):
             return False, 0, 0
 
-    def _validate_token_v2(self, token: str) -> tuple[bool, int | None, str | None]:
+    def _validate_token_v2(self, token: str) -> tuple[bool, int | None, str | None, dict | None]:
         """Validate v2 format token with TTL.
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
@@ -1147,6 +1199,9 @@ class WebUIManager:
         re-verified against the named sandboxed instance's per-instance secret
         — a stopped sandbox leaves no matching instance, so its tokens fail
         (N8: 401 semantics after teardown).
+
+        Returns (is_valid, user_id, error, user_row) — see
+        validate_token_with_user (R-12) for the fourth element.
         """
         from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
 
@@ -1154,15 +1209,15 @@ class WebUIManager:
         if not valid:
             instance = self._find_sandboxed_instance_by_token(token)
             if instance is None:
-                return False, None, "Invalid signature"
+                return False, None, "Invalid signature", None
             valid, user_id, port = self._verify_v2_signature(token, instance.token_secret)
             if not valid:
-                return False, None, "Invalid signature"
+                return False, None, "Invalid signature", None
         try:
             parts = token.split(":")
             timestamp = int(parts[3])
         except (IndexError, ValueError) as e:
-            return False, None, f"Token parse error: {e}"
+            return False, None, f"Token parse error: {e}", None
 
         # Check TTL
         current_time = int(time.time())
@@ -1173,16 +1228,17 @@ class WebUIManager:
                 False,
                 None,
                 f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
+                None,
             )
 
         if age_seconds < 0:
-            return False, None, "Token timestamp is in the future"
+            return False, None, "Token timestamp is in the future", None
 
-        denial = self._user_token_denial(user_id)
+        denial, user = self._user_token_denial(user_id, token_timestamp=timestamp)
         if denial:
-            return False, None, denial
+            return False, None, denial, None
 
-        return True, user_id, None
+        return True, user_id, None, user
 
     def _find_sandboxed_instance_by_token(self, token: str) -> WebUIInstance | None:
         """Locate the sandboxed instance whose (user, port) a token carries."""
@@ -1194,15 +1250,18 @@ class WebUIManager:
         except (ValueError, TypeError):
             return None
 
-    def _validate_token_v1(self, token: str) -> tuple[bool, int | None, str | None]:
+    def _validate_token_v1(self, token: str) -> tuple[bool, int | None, str | None, dict | None]:
         """Validate v1 format token (legacy, no TTL).
 
         v1 format: {user_id}:{port}:{random}:{signature}
+
+        Returns (is_valid, user_id, error, user_row) — see
+        validate_token_with_user (R-12) for the fourth element.
         """
         try:
             parts = token.split(":")
             if len(parts) != 4:
-                return False, None, "Invalid token format"
+                return False, None, "Invalid token format", None
 
             user_id_str, port_str, random_part, signature = parts
             user_id: int = int(user_id_str)
@@ -1213,44 +1272,68 @@ class WebUIManager:
             ).hexdigest()[:16]
 
             if not hmac.compare_digest(signature, expected_signature):
-                return False, None, "Invalid signature"
+                return False, None, "Invalid signature", None
 
             # Note: We no longer check _port_allocations because each request
             # creates a new WebUIManager instance with empty allocations.
             # Signature validation is sufficient for security.
 
-            denial = self._user_token_denial(user_id)
+            # R-5: no token_timestamp — a set tokens_valid_after refuses v1
+            # tokens outright (they cannot prove they were minted after the
+            # deactivation).
+            denial, user = self._user_token_denial(user_id)
             if denial:
-                return False, None, denial
+                return False, None, denial, None
 
-            return True, user_id, None
+            return True, user_id, None, user
 
         except (ValueError, TypeError) as e:
-            return False, None, f"Token parse error: {e}"
+            return False, None, f"Token parse error: {e}", None
 
-    def _user_token_denial(self, user_id: int) -> str | None:
-        """Why a signature-valid webui token must still be refused, or None.
+    def _user_token_denial(
+        self, user_id: int, token_timestamp: int | None = None
+    ) -> tuple[str | None, dict | None]:
+        """Why a signature-valid webui token must still be refused, plus the row.
 
         Issue #3379 (PR-A): webui tokens are stateless (signature + TTL), so
         without this check a deactivated or soft-deleted user's already-issued
         URL tokens keep authenticating (URL_TOKEN_ALLOWED_PATHS admits admin
         routes) until their TTL lapses — the exact "停用用户后无法恢复继续
-        执行" acceptance item #3374 demands. The deactivation path also stops
-        the workspace; this is the token-side closure. Fail-closed on lookup
+        执行" acceptance item #3374 demands. Fail-closed on lookup
         errors: a token that cannot be tied to a live user does not pass.
+
+        Review round 2 (R-5): users.tokens_valid_after is stamped when an
+        account is deactivated (PUT) or soft-deleted (DELETE). A v2 token
+        embeds its mint time and is refused when it predates the stamp; a v1
+        token carries no timestamp and is refused outright while the stamp is
+        set. Reactivation and restore deliberately do NOT clear the stamp —
+        leaked URLs stay dead and a restored user simply mints fresh tokens
+        on their next /user-url (declared residual in the PR description).
+
+        Review round 2 (R-12): the same single lookup that decides the
+        denial is returned as the second element so callers need no second
+        get_user_by_id.
+
+        Returns:
+            (denial_reason, user_row): denial_reason None means the token may
+            pass, and user_row carries the user's DB row.
         """
         try:
             user = _webui_token_user(user_id)
         except Exception as e:  # noqa: BLE001 - fail closed on lookup failure
             logger.warning(f"Webui token user lookup failed for user {user_id}: {e}")
-            return "User status unavailable"
+            return "User status unavailable", None
         if not user:
-            return "User not found"
+            return "User not found", None
         if not user.get("is_active", True):
-            return "User is deactivated"
+            return "User is deactivated", None
         if user.get("deleted_at"):
-            return "User is deleted"
-        return None
+            return "User is deleted", None
+        valid_after = _tokens_valid_after_epoch(user.get("tokens_valid_after"))
+        if valid_after is not None:
+            if token_timestamp is None or token_timestamp < valid_after:
+                return "Token predates account deactivation", None
+        return None, user
 
     def get_user_webui_url(
         self,
@@ -2457,15 +2540,49 @@ class WebUIManager:
                 )
         self.release_port(instance.port, WEBUI_FORM_SANDBOXED)
 
-    def stop_user_webui(self, user_id: int):
+    def stop_user_webui(self, user_id: int) -> bool:
         """
         Stop the webui instance for a user.
 
+        Issue #3379 review round 2 (R-1): the registry pop runs under the
+        lock but the TEARDOWN runs OUTSIDE it, aligned with
+        cleanup_idle_instances (T-I). The teardown reaches the sandbox API
+        (final export + delete, up to ~90s per pod) and used to pin _lock
+        for that whole window, freezing every concurrent token validation
+        (_find_sandboxed_instance), LLM-proxy check (get_user_instance),
+        and /user-url hit for ALL users.
+
+        Equivalence with the old ``with self._lock:
+        self._stop_instance_internal(user_id)``: _stop_instance_internal's
+        entire locked section was an atomic check-and-pop of the user's
+        registry slot (absent user → no-op) followed by the teardown; the
+        ``pop(user_id, None)`` below performs the identical atomic
+        check-and-pop under the same lock, and _finish_stop_instance runs
+        the identical teardown — only the lock boundary around the teardown
+        moved. _stop_instance_internal itself is unchanged for its other
+        callers (get_user_webui_url, _reap_dead_sandboxed_async), which hold
+        the lock for their own registry invariants.
+
+        Single-user mode: the SHARED instance (``_single_user_instance``) is
+        deliberately NOT touched — it serves every user, so one user's
+        deactivation must not stop it (review round 2, R-6). The per-user
+        registry is empty in that mode, so this method is a no-op there;
+        callers record the distinction in their audit trail.
+
         Args:
             user_id: User ID to stop instance for.
+
+        Returns:
+            True when a per-user instance was found and its teardown ran;
+            False when the user had no registered instance (including the
+            single-user shared-instance shape).
         """
         with self._lock:
-            self._stop_instance_internal(user_id)
+            instance = self._instances.pop(user_id, None)
+        if instance is None:
+            return False
+        self._finish_stop_instance(instance)
+        return True
 
     def per_user_launch_readiness(self) -> str | None:
         """Account-independent per-user launch readiness (Issue #3374 reviews).
