@@ -1006,6 +1006,33 @@ def test_persist_rejects_non_tar_blob_and_keeps_previous(tmp_path):
     assert (tmp_path / "webui-4.tar").read_bytes() == good
 
 
+def test_persist_traverses_the_whole_tar_not_just_the_first_header(tmp_path):
+    """F-6.2: the old check only proved the FIRST header parsed. A tar whose
+    header is valid but whose body is cut short (a truncated download) must
+    fail validation and keep the last good snapshot — getmembers() walks
+    every member, so truncation anywhere raises."""
+    fake = FakeOpenSandboxApi()
+    launcher = _launcher_with_pod(fake, tmp_path)
+    good = _tar_bytes("old/good.tar", b"good")
+    (tmp_path / "webui-4.tar").write_bytes(good)
+
+    full = _tar_bytes("chats/big.jsonl", b"x" * 4096)
+    truncated = full[:1024]  # valid header; member body + end blocks are gone
+    assert len(truncated) < len(full)
+    # Sanity: the truncated blob still OPENS (exactly as far as the old
+    # header-only check ever got).
+    with tarfile.open(fileobj=io.BytesIO(truncated), mode="r:"):
+        pass
+
+    path = launcher.persist_snapshot(4, truncated)
+    assert path == tmp_path / "webui-4.tar"
+    assert path.read_bytes() == good  # nothing was replaced
+
+    # A well-formed full tar still replaces the slot.
+    launcher.persist_snapshot(4, full)
+    assert (tmp_path / "webui-4.tar").read_bytes() == full
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads through mode 000")
 def test_persist_refuses_to_overwrite_unreadable_snapshot(tmp_path):
     """T-E: an existing-but-unreadable snapshot is operator-recoverable; a

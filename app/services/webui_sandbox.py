@@ -1255,7 +1255,11 @@ class SandboxedWebuiLauncher:
           be recoverable by an operator; a fresh (possibly degraded) export
           must not destroy them;
         * validate the blob is a legal tar BEFORE replacing the last good
-          file — a truncated or corrupt transfer must never win;
+          file — a truncated or corrupt transfer must never win. F-6.2
+          (review round 2): the validation TRAVERSES the whole archive
+          (``getmembers()``), not just the first header — a tar whose first
+          member parses but whose body is truncated or garbage is treated
+          exactly like an unreadable snapshot: nothing is written;
         * write via ``O_EXCL`` at 0600 (no 0644 window), ``fsync`` the file,
           ``os.replace`` onto the slot, then ``fsync`` the directory so the
           rename itself is durable.
@@ -1275,8 +1279,12 @@ class SandboxedWebuiLauncher:
                 )
                 return path
         try:
-            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:"):
-                pass
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:") as tar:
+                # Full traversal (F-6.2): getmembers() walks every header and
+                # body block — a truncated archive (or garbage members after
+                # a valid first header) raises instead of passing the
+                # header-only check tarfile.open() performs on open.
+                tar.getmembers()
         except tarfile.TarError as exc:
             logger.warning(
                 "webui snapshot for user %s is not a valid tar archive (%s); "
