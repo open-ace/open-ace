@@ -213,7 +213,15 @@ def test_set_user_from_webui_token_populates_must_change_password():
         # earlier test may have created the real singleton, making a class
         # patch ineffective (observed on CI).
         with patch("app.services.webui_manager.get_webui_manager") as get_mgr:
-            get_mgr.return_value.validate_token.return_value = (True, 1, None)
+            # R-12 (#3379 review): session_access validates via
+            # validate_token_with_user (4-tuple carrying the user row) instead
+            # of validate_token + a second get_user_by_id.
+            get_mgr.return_value.validate_token_with_user.return_value = (
+                True,
+                1,
+                None,
+                MUST_CHANGE_USER,
+            )
             with patch("app.repositories.user_repo.UserRepository") as repo_cls:
                 repo_cls.return_value.get_user_by_id.return_value = MUST_CHANGE_USER
                 app = Flask(__name__)
