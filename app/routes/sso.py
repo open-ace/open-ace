@@ -1607,23 +1607,69 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                     provider_data=auth_result.user.to_dict(),
                 )
 
+        # Issue #3379 (PR-A / review round 2 R-2): a deactivated or
+        # soft-deleted user must not re-establish access via SSO — the
+        # identity lookup above only reads sso_identities, so without
+        # this check a freshly revoked session is immediately re-issued
+        # on the next IdP callback (the #3374 acceptance item
+        # "停用用户后无法恢复继续执行"; password login already refuses
+        # inactive accounts, this closes the SSO asymmetry).
+        #
+        # The check covers BOTH resolution paths (existing sso_identities
+        # match AND freshly linked/provisioned users) and runs BEFORE
+        # link_identity: binding the IdP identity onto an account the
+        # administrator just disabled would re-couple them even though
+        # login is refused (and email-linking must not attach a NEW IdP
+        # identity to a disabled account either). Fail-closed: a missing
+        # user row denies too (the old `or {}` default let a vanished row
+        # pass as active).
+        if user_id:
+            sso_user = UserRepository().get_user_by_id(user_id)
+            if not sso_user or not sso_user.get("is_active", True) or sso_user.get("deleted_at"):
+                logger.warning(
+                    "SSO login refused for deactivated/deleted user %s (provider %s)",
+                    user_id,
+                    provider_name,
+                )
+                # Audit the DENIAL with the user it names (the
+                # _AutoProvisionDenied precedent: auditing user_id=None
+                # here would erase exactly who was refused).
+                try:
+                    get_audit_logger().log(
+                        action=AuditAction.LOGIN.value,
+                        user_id=user_id,
+                        username=auth_result.user.username if auth_result.user else None,
+                        resource_type="sso_session",
+                        resource_id=provider_name,
+                        details={
+                            "provider": provider_name,
+                            "method": "sso",
+                            "denied_reason": "account_disabled",
+                            "email_linked": linked_by_email,
+                            "email_linking_enabled": _allow_email_linking(provider_name),
+                        },
+                        ip_address=request.remote_addr if request else None,
+                        user_agent=request.headers.get("User-Agent") if request else None,
+                        success=False,
+                    )
+                except Exception:
+                    logger.warning("Failed to audit-log SSO account-disabled denial", exc_info=True)
+                if frontend_url and _validate_redirect_uri(frontend_url):
+                    return redirect(f"{frontend_url}?sso_error=account_disabled")
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "account_disabled",
+                            "message": "This account is disabled. "
+                            "Please contact your administrator.",
+                        }
+                    ),
+                    403,
+                )
+
     # Create session
     session_token = None
-    # Issue #3379 (PR-A): a deactivated or soft-deleted user must not
-    # re-establish access via SSO — the identity lookup above only reads
-    # sso_identities, so without this check a freshly revoked session is
-    # immediately re-issued on the next IdP callback (the #3374 acceptance
-    # item "停用用户后无法恢复继续执行"; password login already refuses
-    # inactive accounts, this closes the SSO asymmetry).
-    if user_id and auth_result.token:
-        sso_user = UserRepository().get_user_by_id(user_id) or {}
-        if not sso_user.get("is_active", True) or sso_user.get("deleted_at"):
-            logger.warning(
-                "SSO login refused for deactivated/deleted user %s (provider %s)",
-                user_id,
-                provider_name,
-            )
-            user_id = None
     if user_id and auth_result.token:
         session_token = get_sso_manager().create_sso_session(
             user_id=user_id,
