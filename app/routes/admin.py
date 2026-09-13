@@ -49,6 +49,105 @@ def get_client_info():
     }
 
 
+def parse_is_active_field(value: Any) -> bool | None:
+    """Parse a request's is_active field into a real boolean (or None).
+
+    Issue #3379 review round 2 (R-3): ``bool(value)`` is not a parser —
+    ``bool("false")`` is True, so string/number payloads silently flipped
+    into the OPPOSITE state (a "false" deactivated the row on SQLite's
+    INTEGER affinity but bypassed the ``is False`` side-effect test, and on
+    PostgreSQL's native BOOLEAN the raw value errors or coerces by dialect —
+    the observable behavior reversed by backend). Only booleans, ints 0/1,
+    and the strings "true"/"false"/"1"/"0" (case-insensitive, whitespace
+    stripped) parse; anything else raises ValueError so the caller can 400
+    BEFORE any state changes land (the api_keys.py is_active precedent).
+
+    Returns None when the field is absent (caller leaves the column alone).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1"):
+            return True
+        if normalized in ("false", "0"):
+            return False
+    raise ValueError("is_active must be a boolean")
+
+
+def _spawn_background(fn) -> None:  # noqa: ANN001 - test seam
+    """Run *fn* on a fresh greenlet.
+
+    Issue #3379 review round 2 (R-1): the WebUI teardown (proxy-token
+    revocation + sandbox destroy with its final export) can take ~90s for
+    sandboxed pods; the admin request must return immediately. Tests patch
+    this seam to a synchronous executor so the spawned work is observable
+    without a gevent hub (#2457 lesson).
+    """
+    import gevent
+
+    gevent.spawn(fn)
+
+
+def _schedule_workspace_stop(user_id: int) -> dict[str, Any]:
+    """Schedule the user's WebUI teardown off the request path.
+
+    Issue #3379 review round 2 (R-1/R-6/R-11): stop_user_webui itself now
+    pops the registry slot under the manager lock and tears down outside it
+    (freeing every other user's token validations), but the destroy can
+    still take ~90s — the HTTP response must not wait for it. The audit
+    therefore records what was SCHEDULED, not what completed.
+
+    Uses peek_webui_manager() (never get_webui_manager(), #3374 review #13):
+    constructing a manager for a no-op would read config, mint a token
+    secret, and start the cleanup greenlet.
+
+    Single-user mode: stop_user_webui only touches the PER-USER registry,
+    which is empty in that mode — the SHARED instance serves every user and
+    is deliberately left running (declared residual). The audit says so
+    explicitly instead of implying a stop that cannot happen.
+
+    Returns:
+        Audit detail fields describing the outcome.
+    """
+    try:
+        from app.services.webui_manager import peek_webui_manager
+
+        manager = peek_webui_manager()
+    except Exception as e:  # noqa: BLE001 - deactivation must proceed
+        logger.warning(f"Failed to resolve WebUI manager for user {user_id}: {e}")
+        return {"workspace_stop_scheduled": False}
+
+    if manager is None:
+        return {"workspace_stop_scheduled": False}
+
+    if not getattr(manager.config, "multi_user_mode", True):
+        return {"workspace_stopped": "shared_instance_not_stopped"}
+
+    def _stop() -> None:
+        try:
+            # Identity re-check (_reap_dead_sandboxed_async precedent): if the
+            # singleton was replaced between the request and this greenlet,
+            # the old manager holds no live instances — nothing to stop.
+            from app.services.webui_manager import peek_webui_manager as _peek
+
+            if _peek() is manager:
+                manager.stop_user_webui(user_id)
+        except Exception as e:  # noqa: BLE001 - deactivation must proceed
+            logger.warning(f"Failed to stop WebUI instance for user {user_id}: {e}")
+
+    try:
+        _spawn_background(_stop)
+    except Exception as e:  # noqa: BLE001 - deactivation must proceed
+        logger.warning(f"Failed to schedule WebUI stop for user {user_id}: {e}")
+        return {"workspace_stop_scheduled": False}
+    return {"workspace_stop_scheduled": True}
+
+
 def reject_privilege_escalation(role: object) -> tuple[Any, int] | None:
     """Deny a tenant-scoped admin assigning a platform-level role.
 
@@ -311,6 +410,23 @@ def api_update_user(user_id):
     """Update a user."""
     data = request.get_json() or {}
 
+    # Issue #3379 review round 2 (R-3): parse is_active with an explicit
+    # parser BEFORE any state changes — bool("false") is True, so the old
+    # truthiness coercion accepted garbage, half-deactivated (SQLite), or
+    # errored late (PostgreSQL). Garbage must 400 here, ahead of the tenant
+    # counter mutations and update_user below.
+    try:
+        requested_is_active = parse_is_active_field(data.get("is_active"))
+    except ValueError:
+        return jsonify({"error": "is_active must be a boolean"}), 400
+
+    # Issue #3379 review round 2 (R-7): an admin must not deactivate
+    # themselves — the revocation below would kill their own session on the
+    # spot, and a lone admin could then only recover by direct DB surgery.
+    # DELETE already refuses self-deletion; PUT's deactivation now agrees.
+    if requested_is_active is False and g.user_id == user_id:
+        return jsonify({"error": "Cannot deactivate yourself"}), 400
+
     # Get current user state for audit diff (before update)
     current_user = user_repo.get_user_by_id(user_id)
 
@@ -370,13 +486,9 @@ def api_update_user(user_id):
                 tenant_service.decrement_user_count(current_tenant_id)
                 tenant_service.increment_user_count(new_tenant_id)
 
-    # Issue #3379 (PR-A review): normalize is_active to a real boolean before
-    # use — JSON clients sending 0/1/"" for booleans would otherwise reach
-    # update_user raw (falsy → row deactivated in the DB) while the
-    # `is False` identity test below skips session revocation and the
-    # workspace stop: a half-deactivation with sessions left alive.
-    raw_is_active = data.get("is_active")
-    requested_is_active = bool(raw_is_active) if raw_is_active is not None else None
+    # requested_is_active is a real boolean (or None) — parsed at the top of
+    # the handler (R-3); it flows to the DB write and to the side-effect
+    # decisions below unchanged.
 
     success = user_repo.update_user(
         user_id=user_id,
@@ -402,34 +514,34 @@ def api_update_user(user_id):
             new_active = requested_is_active
             if new_active is not None and old_active != new_active:
                 details["status_change"] = {"from": old_active, "to": new_active}
-                # Issue #3379 (PR-A): deactivating a user must stop their
-                # running workspace — same invariant as DELETE below. Also
-                # revoke the sessions: a disabled account must not keep
-                # logged-in sessions (password login already refuses
-                # is_active=false, this closes the already-issued ones).
-                if new_active is False:
-                    sessions_revoked = False
-                    try:
-                        user_repo.delete_all_sessions_for_user(user_id)
-                        sessions_revoked = True
-                    except Exception as e:  # noqa: BLE001 - audit the miss
-                        logger.warning(
-                            f"Failed to revoke sessions for deactivated user {user_id}: {e}"
-                        )
-                    details["sessions_revoked"] = sessions_revoked
-                    workspace_stopped = False
-                    try:
-                        from app.services.webui_manager import get_webui_manager
-
-                        manager = get_webui_manager()
-                        if manager is not None:
-                            manager.stop_user_webui(user_id)
-                            workspace_stopped = True
-                    except Exception as e:  # noqa: BLE001 - deactivation proceeds
-                        logger.warning(
-                            f"Failed to stop WebUI instance for deactivated user {user_id}: {e}"
-                        )
-                    details["workspace_stopped"] = workspace_stopped
+            # Issue #3379 (PR-A): deactivating a user must stop their
+            # running workspace — same invariant as DELETE below — and
+            # revoke the sessions: a disabled account must not keep
+            # logged-in sessions (password login already refuses
+            # is_active=false, this closes the already-issued ones).
+            #
+            # Review round 2 (R-10): the remediation runs whenever
+            # is_active=false is REQUESTED, not only on a true transition —
+            # both operations are idempotent, and an account that was already
+            # inactive (deactivated before this remediation existed, or by
+            # org sync) still owes its sessions and workspace the cleanup.
+            # The status_change audit above still records only real changes.
+            if new_active is False:
+                # R-5: stamp tokens_valid_after — URL tokens minted before
+                # this moment stay dead across a later reactivation.
+                details["tokens_invalidated"] = user_repo.set_tokens_valid_after(user_id)
+                # R-8: record the actual per-table counts (the repository
+                # swallows failures into zero counts — a constant True here
+                # used to claim a revoke that never happened).
+                sessions_revoked: dict[str, int] | None = None
+                try:
+                    sessions_revoked = user_repo.delete_all_sessions_for_user(user_id)
+                except Exception as e:  # noqa: BLE001 - audit the miss
+                    logger.warning(f"Failed to revoke sessions for deactivated user {user_id}: {e}")
+                details["sessions_revoked"] = sessions_revoked
+                # R-1/R-6/R-11: schedule the teardown off the request path;
+                # the audit records the scheduling outcome, truthfully.
+                details.update(_schedule_workspace_stop(user_id))
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.USER_UPDATE,
@@ -467,7 +579,33 @@ def api_delete_user(user_id):
     username = user.get("username")
     tenant_id = user.get("tenant_id")
 
-    # Issue #2755: Revoke all sessions before soft delete
+    # Perform soft delete FIRST (Issue #3379 PR-A review): the workspace
+    # teardown below can take tens of seconds (sandboxed pods: final snapshot
+    # export + delete), and until deleted_at lands in the DB the token-side
+    # active-user check still sees the user alive — leaving already-issued
+    # URL tokens valid for that whole window. Soft-deleting first closes the
+    # token door immediately; the stop afterwards is fail-soft and needs no
+    # rollback.
+    #
+    # Review round 2 (R-4): the session revocation now also runs AFTER the
+    # soft delete. get_session_by_token refuses sessions whose user is
+    # inactive or soft-deleted, so deleted_at closes the password-login door
+    # on its own; revoking BEFORE the soft delete instead left a window in
+    # which the still-active user could log back in and mint a fresh
+    # session that then survived the delete.
+    success = user_repo.delete_user(user_id)
+    if not success:
+        return jsonify({"error": "Failed to delete user"}), 500
+
+    # Issue #3379 review round 2 (R-5): stamp tokens_valid_after with the
+    # soft-delete time — v1 URL tokens (no TTL, formerly valid forever) and
+    # any v2 token minted before this moment stay dead even across a later
+    # restore (restore deliberately does not clear the stamp).
+    tokens_invalidated = user_repo.set_tokens_valid_after(user_id)
+
+    # Issue #2755: Revoke all sessions (after the soft delete — see the
+    # R-4 note above; the user-status check in get_session_by_token has
+    # already closed the door, this is row cleanup).
     session_counts = user_repo.delete_all_sessions_for_user(user_id)
     logger.info(
         f"Revoked sessions for user {user_id}: "
@@ -475,29 +613,16 @@ def api_delete_user(user_id):
         f"web_user_auth_sessions={session_counts['web_user_auth_sessions']}"
     )
 
-    # Perform soft delete FIRST (Issue #3379 PR-A review): the synchronous
-    # workspace teardown below can take tens of seconds (sandboxed pods:
-    # final snapshot export + delete), and until deleted_at lands in the DB
-    # the token-side active-user check still sees the user alive — leaving
-    # already-issued URL tokens valid for that whole window. Soft-deleting
-    # first closes the token door immediately; the stop afterwards is
-    # fail-soft and needs no rollback.
-    workspace_stopped = False
-    success = user_repo.delete_user(user_id)
-
-    # Issue #3379 (PR-A): a deactivated user must not keep a running workspace.
+    # Issue #3379 (PR-A): a deleted user must not keep a running workspace.
     # Stopping the instance also revokes the webui:<uid> LLM proxy token and
-    # (for sandboxed instances) destroys the pod. Fail-soft: the token-side
-    # active-user check above already closed the door if the stop hiccups.
-    try:
-        from app.services.webui_manager import get_webui_manager
-
-        manager = get_webui_manager()
-        if manager is not None:
-            manager.stop_user_webui(user_id)
-            workspace_stopped = True
-    except Exception as e:  # noqa: BLE001 - deactivation must proceed
-        logger.warning(f"Failed to stop WebUI instance for deleted user {user_id}: {e}")
+    # (for sandboxed instances) destroys the pod. Note (review round 2, R-6):
+    # the token-side active-user check only guards OPEN ACE's own URL-token
+    # endpoints — the WebUI validates its tokens itself (per-instance
+    # --token-secret, end-to-end with the browser), so a client pointed
+    # straight at the webui port is only closed out by the INSTANCE actually
+    # stopping. The teardown is therefore scheduled asynchronously (R-1) but
+    # not optional.
+    stop_details = _schedule_workspace_stop(user_id)
 
     if success:
         # Issue #2755 P0-3/P0-4: Critical - decrement tenant user counter with proper error handling
@@ -529,7 +654,8 @@ def api_delete_user(user_id):
                 "action": "delete",
                 "tenant_id": tenant_id,
                 "sessions_revoked": session_counts,
-                "workspace_stopped": workspace_stopped,
+                "tokens_invalidated": tokens_invalidated,
+                **stop_details,
                 "counter_decremented": counter_decremented,
             },
             **client_info,
@@ -565,6 +691,15 @@ def api_restore_user(user_id):
         }
     """
     data = request.get_json() or {}
+
+    # Issue #3379 review round 2 (R-3): restore accepts the same is_active
+    # shapes as PUT and must reject garbage the same way, before any
+    # quota/restore work — restore_user_with_update passes the raw value to
+    # the boolean column otherwise.
+    try:
+        restore_is_active = parse_is_active_field(data.get("is_active"))
+    except ValueError:
+        return jsonify({"error": "is_active must be a boolean"}), 400
 
     # Get the soft-deleted user
     user = user_repo.get_user_by_id(user_id)
@@ -666,7 +801,7 @@ def api_restore_user(user_id):
         email=new_email,
         password_hash=password_hash,
         role=role,
-        is_active=data.get("is_active"),
+        is_active=restore_is_active,
         system_account=system_account,
         tenant_id=None,  # Never change tenant during restore
     )
