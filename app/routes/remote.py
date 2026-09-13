@@ -38,6 +38,7 @@ from app.modules.workspace.remote_session_manager import get_remote_session_mana
 from app.modules.workspace.session_access import _set_user_from_token, _set_user_from_webui_token
 from app.modules.workspace.terminal_store import terminal_info_store
 from app.repositories.database import adapt_sql
+from app.utils.path_guard import is_valid_remote_path
 
 logger = logging.getLogger(__name__)
 
@@ -2896,13 +2897,17 @@ def agent_message():
             browser_token = _secrets.token_hex(32)
 
             # Issue #2183: Inject tenant_id and owner_user_id from machine
+            # Issue #3376: owner prefers the recorded requester over the
+            # machine creator (falls back when no record survived).
             tenant_id = None
             owner_user_id = None
             try:
                 machine = agent_mgr.get_machine(machine_id_for_vs)
                 if machine:
                     tenant_id = machine.get("tenant_id")
-                    owner_user_id = machine.get("created_by")
+                    owner_user_id = _resolve_vscode_reported_owner(
+                        agent_mgr, machine_id_for_vs, vscode_id
+                    )
                 else:
                     logger.error(
                         "Cannot create VSCode session: machine %s not found",
@@ -2925,6 +2930,23 @@ def agent_message():
                 return (
                     jsonify({"success": False, "error": "Cannot determine tenant for machine"}),
                     500,
+                )
+
+            # Review round 1 (#3376): peek semantics mean repeated 'running'
+            # reports resolve the same owner; warn only when it actually
+            # changes (e.g. a new /vscode/start re-recorded the requester).
+            previous = vscode_info_store.get(machine_id_for_vs, vscode_id)
+            previous_owner = previous.get("owner_user_id") if previous else None
+            if (
+                previous_owner is not None
+                and owner_user_id is not None
+                and previous_owner != owner_user_id
+            ):
+                logger.warning(
+                    "VSCode %s reported owner changed: %s -> %s",
+                    vscode_id[:8],
+                    previous_owner,
+                    owner_user_id,
                 )
 
             # Calculate expiration time
@@ -2962,10 +2984,33 @@ def agent_message():
             vscode_info_store.mark_stopped(machine_id_for_vs, vscode_id)
             logger.info("VSCode %s stopped", vscode_id[:8])
         elif status == "error":
+            # Review round 1 (#3376): attribute error-state sessions too.
+            # Previously they carried no tenant/owner, so
+            # _check_vscode_session_access treated them as unattributed and
+            # any tenant's tenant_admin passed the gate. Same resolution as
+            # 'running': machine tenant + peeked owner (falls back to the
+            # machine creator).
+            error_tenant_id = None
+            error_owner_user_id = None
+            try:
+                error_machine = agent_mgr.get_machine(machine_id_for_vs)
+                if error_machine:
+                    error_tenant_id = error_machine.get("tenant_id")
+                    error_owner_user_id = _resolve_vscode_reported_owner(
+                        agent_mgr, machine_id_for_vs, vscode_id
+                    )
+            except Exception as e:
+                logger.error("Failed to attribute error VSCode session %s: %s", vscode_id[:8], e)
             vscode_info_store.put(
                 machine_id_for_vs,
                 vscode_id,
-                {"status": "error", "error": error, "machine_id": machine_id_for_vs},
+                {
+                    "status": "error",
+                    "error": error,
+                    "machine_id": machine_id_for_vs,
+                    "tenant_id": error_tenant_id,
+                    "owner_user_id": error_owner_user_id,
+                },
             )
             logger.warning("VSCode %s error: %s", vscode_id[:8], error)
         elif status == "not_found":
@@ -3352,6 +3397,44 @@ def agent_message():
 # ==================== Terminal Management ====================
 
 
+def _check_terminal_session_access(terminal_id: str):
+    """Issue #3376: terminal endpoints require session ownership.
+
+    Allowed: platform admin (strict-role check), same-tenant tenant admin,
+    the session owner. The agent_sessions row is created by start_terminal
+    and outlives the in-memory terminal info (30-day session GC vs 24h
+    store TTL), so a missing row fails closed with 404. Returns an error
+    response tuple or None when access is allowed.
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    if is_platform_admin_role(g.user.get("role")):
+        return None
+    from app.modules.workspace.session_manager import get_session_manager
+
+    session = get_session_manager().get_session(terminal_id)
+    if session is None:
+        logger.warning(
+            "Terminal ownership denied: no session record for %s (user_id=%s)",
+            terminal_id[:8],
+            g.user.get("id"),
+        )
+        return jsonify({"error": "Terminal session not found"}), 404
+    if g.user.get("role") == "tenant_admin" and (
+        session.tenant_id is None or session.tenant_id == g.user.get("tenant_id")
+    ):
+        return None
+    if session.user_id != g.user.get("id"):
+        logger.warning(
+            "Terminal ownership denied: user_id=%s is not owner %s of %s",
+            g.user.get("id"),
+            session.user_id,
+            terminal_id[:8],
+        )
+        return jsonify({"error": "Access denied"}), 403
+    return None
+
+
 @remote_bp.route("/terminal/start", methods=["POST"])
 @machine_access_required
 def start_terminal():
@@ -3365,6 +3448,29 @@ def start_terminal():
 
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #3376: server-side work_dir validation. Remote-machine paths are
+    # not backend-local, so validation is STRUCTURAL only (see
+    # is_valid_remote_path: absolute /, ~/-relative, or Windows drive; no
+    # '..' segment; no NUL) — whether /etc or /root is a sane work dir is the
+    # remote agent's policy, not the backend blacklist's.
+    # Review round 1 (#3376, item 10): normalize falsy values to "" BEFORE
+    # validating. The old `work_dir and ...` guard silently skipped
+    # validation for 0/False/[]/{}; now those are explicitly "not provided"
+    # (default work dir), while any non-empty invalid value — including
+    # non-strings — is a 400.
+    work_dir = work_dir or ""
+    if work_dir and not is_valid_remote_path(work_dir):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid work_dir: must be an absolute (/), home-relative "
+                    "(~/), or Windows drive (C:\\) path without '..'",
+                }
+            ),
+            400,
+        )
 
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
@@ -3549,6 +3655,22 @@ def start_cli_terminal():
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
 
+    # Issue #3376 review round 1 (item 10): this endpoint feeds work_dir into
+    # the session record — same structural remote-path validation as the web
+    # terminal start. `or ""` above already normalizes falsy values to "not
+    # provided"; non-empty invalid values (incl. non-strings) are a 400.
+    if work_dir and not is_valid_remote_path(work_dir):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid work_dir: must be an absolute (/), home-relative "
+                    "(~/), or Windows drive (C:\\) path without '..'",
+                }
+            ),
+            400,
+        )
+
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     machine_name = (
@@ -3657,6 +3779,11 @@ def stop_terminal():
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
 
+    # Issue #3376: the terminal session itself must belong to the caller.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
+
     agent_mgr = get_remote_agent_manager()
     cmd = {
         "type": "command",
@@ -3717,6 +3844,11 @@ def attach_terminal(terminal_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: the terminal session itself must belong to the caller.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
 
     # Get machine's tenant_id for token generation
     attach_machine = agent_mgr.get_machine(machine_id)
@@ -3856,6 +3988,17 @@ def get_terminal_status(terminal_id):
         logger.info("get_terminal_status: found info, has_stored_token=%s", bool(stored_token))
         # If the provided token matches the stored proxy token, allow access
         if proxy_token and stored_token and hmac.compare_digest(proxy_token, stored_token):
+            # Issue #3376 review round 1 — honest semantics of this early
+            # path: it returns the FULL record, including the agent-side
+            # original_token/original_ws_url. The strip below only defends
+            # parties WITHOUT the token: whoever presents the terminal WS
+            # token (the browser it was issued to, and the internal
+            # websocket_proxy, which re-authenticates with the same token
+            # when redirecting across pods) IS the session's authenticated
+            # party and may see its own bridge credentials.
+            # Known gap (follow-up): an ownership change does NOT rotate the
+            # terminal WS token, so a previously-issued token keeps full
+            # access until the session ends.
             logger.info("get_terminal_status: proxy token matched, returning info")
             return jsonify({"success": True, "terminal": info})
 
@@ -3885,8 +4028,23 @@ def get_terminal_status(terminal_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
+    # Issue #3376: session ownership; machine access alone is not enough.
+    ownership_error = _check_terminal_session_access(terminal_id)
+    if ownership_error is not None:
+        return ownership_error
+
     if info:
-        return jsonify({"success": True, "terminal": info})
+        # Issue #3376: strip agent-side bridge credentials for token-less
+        # viewers. NOTE (review round 1): this is NOT confidentiality against
+        # the token holder — see the proxy-token early return above; whoever
+        # holds the terminal WS token can always fetch the full record for
+        # its own session. The strip protects session-cookie viewers that
+        # did not (yet) present the terminal token. Ownership change does
+        # not revoke the WS token (known gap, follow-up).
+        public_info = {
+            k: v for k, v in info.items() if k not in ("original_token", "original_ws_url")
+        }
+        return jsonify({"success": True, "terminal": public_info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})
 
 
@@ -4368,6 +4526,15 @@ def browse_remote_directory(machine_id):
     agent_mgr = get_remote_agent_manager()
     path = request.args.get("path")
 
+    # Issue #3376 review round 1 (item 10): the path parameter IS a remote
+    # path dispatched verbatim to the agent — validate it structurally
+    # before sending (an empty param keeps the machine work_dir default).
+    if path and not is_valid_remote_path(path):
+        return (
+            jsonify({"error": "Invalid path: must be an absolute path without '..'"}),
+            400,
+        )
+
     # Get machine info
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
@@ -4686,6 +4853,81 @@ def remote_git_file(machine_id):
 # ── Remote VSCode (code-server) endpoints ───────────────────────────
 
 
+def _resolve_vscode_reported_owner(agent_mgr, machine_id: str, vscode_id: str) -> int | None:
+    """Issue #3376: prefer the recorded requester over machine.created_by.
+
+    Review round 1: resolution PEEKS the owner record instead of consuming
+    it — agents re-report ``running`` on every re-attach, and the second
+    pop landed on the ``machine.created_by`` fallback, silently
+    transferring ownership. The record is only overwritten by a new
+    ``/vscode/start`` and ages out via the store TTL.
+    """
+    from app.modules.workspace.vscode_store import vscode_owner_store
+
+    pending = vscode_owner_store.peek(vscode_id)
+    if pending and pending[0] == machine_id:
+        return pending[1]
+    machine = agent_mgr.get_machine(machine_id) or {}
+    resolved = machine.get("created_by")
+    if pending:
+        logger.warning(
+            "VSCode %s owner record machine mismatch (recorded machine %s, report "
+            "machine %s); falling back to machine creator %s",
+            vscode_id[:8],
+            pending[0][:8],
+            machine_id[:8],
+            resolved,
+        )
+    return resolved
+
+
+def _check_vscode_session_access(machine_id: str, vscode_id: str, info: dict):
+    """Issue #3376: VSCode endpoints follow the #2183 proxy-auth role set.
+
+    Allowed: platform admin, session owner, same-tenant tenant admin,
+    machine-level admin permission. Everyone else (including cross-tenant
+    tenant admins) gets 403. Returns an error response tuple or None.
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    if is_platform_admin_role(g.user.get("role")):
+        return None
+    session_tenant = info.get("tenant_id")
+    user_tenant = g.user.get("tenant_id")
+    if session_tenant is not None and user_tenant != session_tenant:
+        audit_logger.log(
+            action="CROSS_TENANT_VSCODE_ACCESS_ATTEMPT",
+            severity="warning",
+            user_id=g.user.get("id"),
+            details={
+                "user_tenant_id": user_tenant,
+                "target_tenant_id": session_tenant,
+                "vscode_id": vscode_id[:8],
+            },
+        )
+        logger.warning(
+            "VSCode ownership denied (cross-tenant): user_id=%s, session tenant=%s",
+            g.user.get("id"),
+            session_tenant,
+        )
+        return jsonify({"error": "Access denied"}), 403
+    if g.user.get("id") == info.get("owner_user_id"):
+        return None
+    # Review round 1 (#3376): strict tenant equality, aligned with the #2183
+    # proxy auth — an unattributed session (tenant_id None) is NOT a wildcard
+    # that every tenant_admin can pass; it is rejected instead.
+    if g.user.get("role") == "tenant_admin" and user_tenant == session_tenant:
+        return None
+    if get_remote_agent_manager().get_user_permission(machine_id, g.user.get("id")) == "admin":
+        return None
+    logger.warning(
+        "VSCode ownership denied: user_id=%s is not owner %s",
+        g.user.get("id"),
+        info.get("owner_user_id"),
+    )
+    return jsonify({"error": "Access denied"}), 403
+
+
 @remote_bp.route("/vscode/start", methods=["POST"])
 @machine_access_required
 def remote_vscode_start():
@@ -4699,10 +4941,31 @@ def remote_vscode_start():
     if not project_path:
         return jsonify({"success": False, "error": "project_path is required"}), 400
 
+    # Issue #3376: same remote-path semantics as terminal work_dir —
+    # STRUCTURAL validation only (the path lives on the remote machine;
+    # see is_valid_remote_path). Non-string values are rejected here too.
+    if not is_valid_remote_path(project_path):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid project_path: must be an absolute (/), home-relative "
+                    "(~/), or Windows drive (C:\\) path without '..'",
+                }
+            ),
+            400,
+        )
+
     if not agent_mgr.is_agent_connected(machine_id):
         return jsonify({"success": False, "error": "Agent is not connected"}), 503
 
     vscode_id = str(uuid.uuid4())
+
+    # Issue #3376: remember the requester; the agent's async 'running'
+    # report only carries machine context.
+    from app.modules.workspace.vscode_store import vscode_owner_store
+
+    vscode_owner_store.record(vscode_id, machine_id, g.user["id"], g.user.get("tenant_id"))
     agent_mgr.send_command(
         machine_id,
         {
@@ -4729,6 +4992,31 @@ def remote_vscode_stop():
     if not vscode_id:
         return jsonify({"success": False, "error": "vscode_id is required"}), 400
 
+    # Issue #3376: stopping someone else's session is a destructive action;
+    # apply the same ownership gate as status/attach.
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        # Review round 1 (#3376, item 3): a missing store record must NOT skip
+        # the ownership gate — the in-memory store is lost on restart and is
+        # per-worker under k8s replicas. Fail closed (404) like the terminal
+        # side instead of sending an unguarded stop command.
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "VSCode session not found",
+                    "error_code": "vscode_session_not_found",
+                }
+            ),
+            404,
+        )
+    found_machine_id, found_info = found
+    gate = _check_vscode_session_access(found_machine_id, vscode_id, found_info)
+    if gate is not None:
+        return gate
+
     agent_mgr.send_command(
         machine_id,
         {
@@ -4739,8 +5027,6 @@ def remote_vscode_stop():
     )
 
     # Issue #2183: Mark as stopped to invalidate token immediately
-    from app.modules.workspace.vscode_store import vscode_info_store
-
     vscode_info_store.mark_stopped(machine_id, vscode_id)
 
     return jsonify({"success": True})
@@ -4786,6 +5072,11 @@ def remote_vscode_status(vscode_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: session ownership; machine access alone is not enough.
+    gate = _check_vscode_session_access(machine_id, vscode_id, info)
+    if gate is not None:
+        return gate
 
     status = info.get("status", "unknown")
     response = {"success": True, "status": status}
@@ -4842,6 +5133,29 @@ def remote_vscode_attach(vscode_id):
 
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
+
+    # Issue #3376: session ownership; machine access alone is not enough.
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        # Review round 1 (#3376, item 3): fail closed on a missing store
+        # record (restart / k8s multi-replica) — same semantics as stop and
+        # the terminal side. Never send attach commands unguarded.
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "VSCode session not found",
+                    "error_code": "vscode_session_not_found",
+                }
+            ),
+            404,
+        )
+    found_machine_id, found_info = found
+    gate = _check_vscode_session_access(found_machine_id, vscode_id, found_info)
+    if gate is not None:
+        return gate
 
     agent_mgr.send_command(
         machine_id,

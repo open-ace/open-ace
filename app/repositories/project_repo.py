@@ -282,6 +282,32 @@ class ProjectRepository:
         result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
+    def get_shared_project_paths(self, tenant_id: int | None = None) -> list[str]:
+        """Get realpath'd paths of active shared projects (Issue #3376).
+
+        Used by the fs browse/check-path home lock to keep explicitly
+        shared projects reachable for tenant members. A None tenant_id
+        yields no shared roots (home only) rather than every tenant's.
+        """
+        import os
+
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None:
+            return []
+        query = (
+            "SELECT path FROM projects "
+            "WHERE is_active IS TRUE AND is_shared IS TRUE AND tenant_id = ?"
+        )
+        rows = self.db.fetch_all(query, (normalized_tenant_id,)) or []
+        paths: list[str] = []
+        for row in rows:
+            raw = (row.get("path") if isinstance(row, dict) else row) or ""
+            if raw:
+                resolved = os.path.realpath(raw)
+                if resolved not in paths:
+                    paths.append(resolved)
+        return paths
+
     def get_all_projects(
         self,
         include_inactive: bool = False,
