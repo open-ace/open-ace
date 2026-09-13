@@ -103,6 +103,10 @@ def upgrade() -> None:
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
             "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
+            # Issue #3379 (R-5): WebUI URL-token invalidation stamp — carried
+            # through this SQLite table-recreate when the DB was bootstrapped
+            # from a newer schema snapshot (the tenant_version precedent).
+            "tokens_valid_after": "TIMESTAMP",
         }
 
         # Build CREATE TABLE statement dynamically
@@ -203,6 +207,10 @@ def downgrade() -> None:
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
             "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
+            # Issue #3379 (R-5): WebUI URL-token invalidation stamp — carried
+            # through this SQLite table-recreate when the DB was bootstrapped
+            # from a newer schema snapshot (the tenant_version precedent).
+            "tokens_valid_after": "TIMESTAMP",
         }
 
         # Build CREATE TABLE statement dynamically

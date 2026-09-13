@@ -473,6 +473,38 @@ class UserRepository:
             logger.error(f"Error updating user: {e}")
             return False
 
+    def set_tokens_valid_after(self, user_id: int, when: datetime | None = None) -> bool:
+        """
+        Stamp users.tokens_valid_after for a user (Issue #3379 review, R-5).
+
+        Marks every WebUI URL token minted BEFORE *when* as invalid: v2
+        tokens embed their mint timestamp and validation compares it against
+        this stamp; v1 tokens carry no timestamp and are refused outright
+        while the stamp is set. Called from the deactivation (PUT) and
+        soft-delete (DELETE) routes; a repeated deactivation re-sends and
+        REFRESHES the stamp (idempotent remediation, R-10).
+
+        Reactivation (PUT is_active=true) and restore deliberately do NOT
+        clear the stamp: tokens leaked before the deactivation stay dead,
+        and the restored user mints fresh tokens on their next /user-url
+        (declared residual — see the PR description).
+
+        Args:
+            user_id: User ID.
+            when: UTC-naive stamp time; defaults to now (UTC).
+
+        Returns:
+            bool: True if the row was stamped.
+        """
+        stamp = when or datetime.now(timezone.utc).replace(tzinfo=None)
+        query = adapt_sql("UPDATE users SET tokens_valid_after = ? WHERE id = ?")
+        try:
+            cursor = self.db.execute(query, (stamp, user_id))
+            return cast("bool", cursor.rowcount > 0)
+        except Exception as e:
+            logger.error(f"Error setting tokens_valid_after for user {user_id}: {e}")
+            return False
+
     def update_password(self, user_id: int, password_hash: str) -> bool:
         """
         Update user password.
@@ -705,6 +737,20 @@ class UserRepository:
         """
         Get session by token with user information.
 
+        Issue #3379 review round 2 (R-4): the session is refused unless its
+        user is active and not soft-deleted. This is the root-cause closure
+        for every "session outlives the deactivation" race — org-sync
+        deactivation (feishu/dingtalk write is_active directly), the
+        revoke→login→soft-delete window, and accounts deactivated before
+        this deploy: they all leave rows in ``sessions``, and every
+        session-token path (before_request hooks, /api/auth/me,
+        validate_session) funnels through this query. The route-level
+        revocation becomes a row-cleanup measure rather than the door.
+
+        ``is_active IS TRUE`` follows the get_all_users precedent: native on
+        PostgreSQL, supported by SQLite >= 3.23 — the same expression both
+        dialects already run elsewhere in this repository.
+
         Args:
             token: Session token.
 
@@ -716,6 +762,7 @@ class UserRepository:
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
+              AND u.is_active IS TRUE AND u.deleted_at IS NULL
         """)
 
         # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
