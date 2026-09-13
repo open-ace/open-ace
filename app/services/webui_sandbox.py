@@ -1883,7 +1883,10 @@ def reconcile_webui_orphans(
     control-plane restore-confirmation record (T-E; the in-pod marker is
     writable by the supervised process and proves nothing). The destroy
     itself is idempotent (404 = success) and never blocked by an export
-    failure.
+    failure. F-3 (review round 2): every orphan is processed under its own
+    try/except — one pod with an unreachable execd costs only ITS export,
+    never the round (previously the first failing execd call aborted the
+    loop and every remaining orphan survived to fail again next boot).
 
     Multi-replica mutex (T-D): the sweep first writes this process's
     heartbeat, then refuses to destroy ANYTHING while another FRESH
@@ -1965,8 +1968,31 @@ def reconcile_webui_orphans(
                 continue  # ours: a live pod of this very process
             if not sandbox_id:
                 continue
-            _export_orphan(api, sandbox_id, metadata, state_root_override, endpoint)
-            _delete_orphan(api, sandbox_id, state_root_override)
+            # F-3 (review round 2): each orphan is isolated — an unreachable
+            # execd (or any other per-pod failure) must cost ONLY that pod's
+            # export, never the rest of the sweep. The export failure still
+            # falls through to the destroy: an idle webui pod is cheaper than
+            # a leak, the same posture as destroy()'s wholesale final-export
+            # guard.
+            try:
+                _export_orphan(api, sandbox_id, metadata, state_root_override, endpoint)
+            except Exception as exc:  # noqa: BLE001 - one orphan must not abort the round
+                logger.warning(
+                    "webui orphan reconcile: export failed for %s (%s); "
+                    "continuing to the destroy",
+                    sandbox_id,
+                    exc,
+                )
+            try:
+                _delete_orphan(api, sandbox_id, state_root_override)
+            except Exception as exc:  # noqa: BLE001 - the sweep must survive any orphan
+                logger.warning(
+                    "webui orphan reconcile: destroy failed for %s (%s); "
+                    "it stays an orphan for the next sweep",
+                    sandbox_id,
+                    exc,
+                )
+                continue
             destroyed.append(sandbox_id)
     if destroyed:
         logger.info(

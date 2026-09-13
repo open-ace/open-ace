@@ -290,6 +290,51 @@ def test_reconcile_export_failure_does_not_block_destroy(tmp_path):
     assert not (tmp_path / "webui-7.tar").exists()
 
 
+def test_reconcile_one_unreachable_execd_does_not_abort_the_round(tmp_path, caplog):
+    """F-3 (review round 2): the first orphan's execd REFUSING CONNECTIONS (a
+    real raised OpenSandboxApiError out of run_command, not a scripted exit
+    code) used to abort the whole loop — that orphan and every one after it
+    survived to fail again on the next boot. Each orphan is now isolated: the
+    SECOND orphan is still exported + destroyed, and the unreachable one is
+    still delete-attempted."""
+
+    class _ExecdDownFake(FakeOpenSandboxApi):
+        def __init__(self, down_sandbox_id: str):
+            super().__init__()
+            self._down = down_sandbox_id
+
+        def _require_execd(self, sandbox_id: str) -> None:
+            if sandbox_id == self._down:
+                raise OpenSandboxApiError("connection refused: execd is gone")
+            super()._require_execd(sandbox_id)
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+
+    fake = _ExecdDownFake(down_sandbox_id="")
+    orphan1 = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
+    orphan2 = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="8")})
+    sid1, sid2 = orphan1["id"], orphan2["id"]
+    fake._down = sid1  # the first orphan's execd refuses connections
+    for sid, owner in ((sid1, 7), (sid2, 8)):
+        _confirm_restore_cp(tmp_path, sid)
+        fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+
+    with caplog.at_level("WARNING"):
+        destroyed = ws.reconcile_webui_orphans(
+            backend_config=_backend(),
+            api_factory=lambda endpoint: fake,
+            state_root_override=str(tmp_path),
+        )
+    # Both orphans are gone: the failing export of the first cost only its
+    # snapshot, and the second orphan was still fully exported + destroyed.
+    assert destroyed == [sid1, sid2]
+    assert sid1 in fake.deleted  # delete still attempted despite the execd outage
+    assert sid2 in fake.deleted
+    assert (tmp_path / "webui-8.tar").exists()  # orphan 2's history survived
+    assert not (tmp_path / "webui-7.tar").exists()  # orphan 1's export never ran
+    assert any("export failed" in record.message for record in caplog.records)
+
+
 def test_reconcile_export_tar_runs_under_exec_identity(tmp_path):
     """m5: the exporter's in-pod tar must carry the tier's uid/gid — the
     launcher gets the reconcile loop's endpoint injected explicitly (an
