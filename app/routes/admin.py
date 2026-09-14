@@ -136,7 +136,15 @@ def _schedule_workspace_stop(user_id: int) -> dict[str, Any]:
             from app.services.webui_manager import peek_webui_manager as _peek
 
             if _peek() is manager:
-                manager.stop_user_webui(user_id)
+                # Round 3 (review R-11): the bool says whether a per-user
+                # instance was actually found and stopped — logged here
+                # because the HTTP response only records the scheduling.
+                stopped = manager.stop_user_webui(user_id)
+                logger.info(
+                    "Scheduled WebUI stop for user %s completed: instance_stopped=%s",
+                    user_id,
+                    stopped,
+                )
         except Exception as e:  # noqa: BLE001 - deactivation must proceed
             logger.warning(f"Failed to stop WebUI instance for user {user_id}: {e}")
 

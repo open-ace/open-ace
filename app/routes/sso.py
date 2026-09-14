@@ -1533,6 +1533,75 @@ def _allow_email_linking(provider_name: str) -> bool:
     return bool(provider.config.extra_params.get("allow_email_linking"))
 
 
+def _refuse_disabled_sso_user(
+    user_id: int | None,
+    provider_name: str,
+    auth_result,
+    frontend_url: str | None,
+    linked_by_email: bool,
+):
+    """Issue #3379 (PR-A / review round 2 R-2 + round 3): refuse SSO login for
+    a deactivated or soft-deleted account.
+
+    Returns the denial response — 403 JSON, or a 302 to the whitelisted
+    frontend with ``sso_error=account_disabled`` — when the account must be
+    refused, and None when the login may proceed. Fail-closed: a missing user
+    row denies too (the old ``or {}`` default let a vanished row pass as
+    active).
+
+    Call BEFORE binding the IdP identity (``link_identity``) and after every
+    user_id resolution: an identity attached to a disabled account starts
+    working the moment an administrator re-enables the account, so the login
+    must be refused before any binding happens.
+    """
+    if not user_id:
+        return None
+    sso_user = UserRepository().get_user_by_id(user_id)
+    if sso_user and sso_user.get("is_active", True) and not sso_user.get("deleted_at"):
+        return None
+
+    logger.warning(
+        "SSO login refused for deactivated/deleted user %s (provider %s)",
+        user_id,
+        provider_name,
+    )
+    # Audit the DENIAL with the user it names (the _AutoProvisionDenied
+    # precedent: auditing user_id=None here would erase exactly who was
+    # refused).
+    try:
+        get_audit_logger().log(
+            action=AuditAction.LOGIN.value,
+            user_id=user_id,
+            username=auth_result.user.username if auth_result.user else None,
+            resource_type="sso_session",
+            resource_id=provider_name,
+            details={
+                "provider": provider_name,
+                "method": "sso",
+                "denied_reason": "account_disabled",
+                "email_linked": linked_by_email,
+                "email_linking_enabled": _allow_email_linking(provider_name),
+            },
+            ip_address=request.remote_addr if request else None,
+            user_agent=request.headers.get("User-Agent") if request else None,
+            success=False,
+        )
+    except Exception:
+        logger.warning("Failed to audit-log SSO account-disabled denial", exc_info=True)
+    if frontend_url and _validate_redirect_uri(frontend_url):
+        return redirect(f"{frontend_url}?sso_error=account_disabled")
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "account_disabled",
+                "message": "This account is disabled. Please contact your administrator.",
+            }
+        ),
+        403,
+    )
+
+
 def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | None):
     """Create/link the local user and establish Open ACE sessions after SSO success."""
     user_id = None
@@ -1556,6 +1625,15 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                 if existing_user:
                     user_id = existing_user.get("id")
                     linked_by_email = True  # an actual binding happened
+                    # R-2 (round 3): the email-linking match must be refused
+                    # BEFORE link_identity binds the IdP identity onto the
+                    # account — a binding made now comes alive on the next
+                    # reactivation.
+                    denial = _refuse_disabled_sso_user(
+                        user_id, provider_name, auth_result, frontend_url, linked_by_email
+                    )
+                    if denial is not None:
+                        return denial
 
             # Create new user if not found
             if not user_id:
@@ -1600,6 +1678,14 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
             # Link identity
             if user_id:
+                # R-2 (round 3): re-check after provisioning too (an admin can
+                # deactivate in the create→link window), still before the
+                # binding.
+                denial = _refuse_disabled_sso_user(
+                    user_id, provider_name, auth_result, frontend_url, linked_by_email
+                )
+                if denial is not None:
+                    return denial
                 get_sso_manager().link_identity(
                     user_id=user_id,
                     provider_name=provider_name,
@@ -1609,64 +1695,18 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
         # Issue #3379 (PR-A / review round 2 R-2): a deactivated or
         # soft-deleted user must not re-establish access via SSO — the
-        # identity lookup above only reads sso_identities, so without
-        # this check a freshly revoked session is immediately re-issued
-        # on the next IdP callback (the #3374 acceptance item
-        # "停用用户后无法恢复继续执行"; password login already refuses
-        # inactive accounts, this closes the SSO asymmetry).
-        #
-        # The check covers BOTH resolution paths (existing sso_identities
-        # match AND freshly linked/provisioned users) and runs BEFORE
-        # link_identity: binding the IdP identity onto an account the
-        # administrator just disabled would re-couple them even though
-        # login is refused (and email-linking must not attach a NEW IdP
-        # identity to a disabled account either). Fail-closed: a missing
-        # user row denies too (the old `or {}` default let a vanished row
-        # pass as active).
+        # identity lookup above only reads sso_identities, so without this
+        # check a freshly revoked session is immediately re-issued on the
+        # next IdP callback (the #3374 acceptance item "停用用户后无法恢复
+        # 继续执行"; password login already refuses inactive accounts, this
+        # closes the SSO asymmetry). This final gate covers the
+        # existing-identity resolution path.
         if user_id:
-            sso_user = UserRepository().get_user_by_id(user_id)
-            if not sso_user or not sso_user.get("is_active", True) or sso_user.get("deleted_at"):
-                logger.warning(
-                    "SSO login refused for deactivated/deleted user %s (provider %s)",
-                    user_id,
-                    provider_name,
-                )
-                # Audit the DENIAL with the user it names (the
-                # _AutoProvisionDenied precedent: auditing user_id=None
-                # here would erase exactly who was refused).
-                try:
-                    get_audit_logger().log(
-                        action=AuditAction.LOGIN.value,
-                        user_id=user_id,
-                        username=auth_result.user.username if auth_result.user else None,
-                        resource_type="sso_session",
-                        resource_id=provider_name,
-                        details={
-                            "provider": provider_name,
-                            "method": "sso",
-                            "denied_reason": "account_disabled",
-                            "email_linked": linked_by_email,
-                            "email_linking_enabled": _allow_email_linking(provider_name),
-                        },
-                        ip_address=request.remote_addr if request else None,
-                        user_agent=request.headers.get("User-Agent") if request else None,
-                        success=False,
-                    )
-                except Exception:
-                    logger.warning("Failed to audit-log SSO account-disabled denial", exc_info=True)
-                if frontend_url and _validate_redirect_uri(frontend_url):
-                    return redirect(f"{frontend_url}?sso_error=account_disabled")
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "account_disabled",
-                            "message": "This account is disabled. "
-                            "Please contact your administrator.",
-                        }
-                    ),
-                    403,
-                )
+            denial = _refuse_disabled_sso_user(
+                user_id, provider_name, auth_result, frontend_url, linked_by_email
+            )
+            if denial is not None:
+                return denial
 
     # Create session
     session_token = None

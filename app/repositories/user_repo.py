@@ -451,6 +451,17 @@ class UserRepository:
                 params.append(is_active)
             else:
                 params.append(1 if is_active else 0)
+            if is_active is False:
+                # Issue #3379 review round 3 (R-5 gap 1): stamp in the SAME
+                # UPDATE. The explicit set_tokens_valid_after calls live in
+                # the admin routes, but org-sync deactivations
+                # (feishu/dingtalk) call update_user directly — without this,
+                # an org-sync deactivation left the user's pre-deactivation
+                # URL tokens revivable by a later reactivation. Any
+                # is_active=False write refreshes the stamp (R-10 semantics);
+                # is_active=True deliberately does NOT clear it.
+                updates.append("tokens_valid_after = ?")
+                params.append(datetime.now(timezone.utc).replace(tzinfo=None))
 
         if system_account is not None:
             updates.append("system_account = ?")

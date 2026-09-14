@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import platform
 import pwd
@@ -1331,7 +1332,18 @@ class WebUIManager:
             return "User is deleted", None
         valid_after = _tokens_valid_after_epoch(user.get("tokens_valid_after"))
         if valid_after is not None:
-            if token_timestamp is None or token_timestamp < valid_after:
+            # Round 3 (review R-5 gap 2): compare at the token's own
+            # whole-second precision. Token timestamps are int(time.time())
+            # while the stamp carries microseconds, so a strict `<` rejected
+            # tokens minted in the SAME second as the stamp — e.g. an
+            # automated deactivate→reactivate→/user-url sequence (#3379
+            # acceptance) or an instance token minted in that second would
+            # stay dead for the instance's whole lifetime. The cost: a token
+            # minted in the same second BEFORE the deactivation survives —
+            # bounded by one second and negligible next to the stamp's goal.
+            # An unparseable stamp is +inf (fail closed) and has no floor.
+            floor_after = math.floor(valid_after) if math.isfinite(valid_after) else valid_after
+            if token_timestamp is None or token_timestamp < floor_after:
                 return "Token predates account deactivation", None
         return None, user
 

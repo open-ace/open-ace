@@ -207,6 +207,40 @@ def test_v2_token_minted_after_stamp_passes(monkeypatch):
     assert ok is True and user_id == 7 and err is None
 
 
+def test_v2_stamp_second_boundary_is_inclusive(monkeypatch):
+    """Round 3 (R-5 gap 2): token timestamps are whole seconds while the
+    stamp carries microseconds — a token minted in the SAME second as the
+    stamp must pass. The old strict `<` rejected it, which an automated
+    deactivate→reactivate→/user-url sequence (#3379 acceptance f-item) or an
+    instance token minted in that second would hit; one second earlier
+    stays dead."""
+    manager = _manager_with_secret()
+    token = manager.generate_token(7, 3100)
+    minted = int(time.time())  # the whole-second timestamp embedded in the token
+
+    # Stamp WITHIN the mint's second (microsecond remainder): floor(stamp)
+    # == minted → the token is NOT older than the stamp.
+    same_second = datetime.fromtimestamp(minted + 0.95, tz=timezone.utc)
+    monkeypatch.setattr(
+        wm,
+        "_webui_token_user",
+        lambda uid: {"id": uid, "is_active": True, "tokens_valid_after": same_second},
+    )
+    ok, user_id, err = manager.validate_token(token)
+    assert ok is True and user_id == 7 and err is None
+
+    # One second after the mint: still rejected (the stamp keeps doing its
+    # job; only the sub-second boundary became inclusive).
+    next_second = datetime.fromtimestamp(minted + 1.95, tz=timezone.utc)
+    monkeypatch.setattr(
+        wm,
+        "_webui_token_user",
+        lambda uid: {"id": uid, "is_active": True, "tokens_valid_after": next_second},
+    )
+    ok, user_id, err = manager.validate_token(token)
+    assert ok is False and user_id is None and "predates" in err
+
+
 def test_v2_stamp_as_sqlite_string_is_parsed(monkeypatch):
     """SQLite returns the column as a string — same comparison semantics."""
     manager = _manager_with_secret()
@@ -999,6 +1033,51 @@ def test_sso_denial_redirects_to_frontend_with_error(monkeypatch):
     assert created == []
 
 
+def test_sso_email_linking_denied_before_binding(monkeypatch):
+    """Round 3 (R-2): with email linking enabled, an IdP-asserted email that
+    matches a DEACTIVATED account must be refused BEFORE link_identity binds
+    the identity — the round-2 placement linked first, and the binding would
+    come alive the moment an administrator re-enables the account.
+    identity_uid=None forces the fresh-resolution path where the link is."""
+    import app.routes.sso as sso_mod
+
+    manager, created, audits = _sso_env(
+        monkeypatch,
+        row=lambda uid: {"id": uid, "is_active": False},
+        identity_uid=None,
+        create_uid=99,  # never reached: the email match denies first
+    )
+    monkeypatch.setattr(sso_mod, "_allow_email_linking", lambda provider: True)
+    monkeypatch.setattr(
+        sso_mod.user_repo,
+        "get_user_by_email",
+        lambda email, include_deleted=False: {"id": 42},
+    )
+
+    class _AuthColliding(_Auth):
+        class user:
+            provider_user_id = "idp-attacker-1"
+            email = "admin@example.com"
+            username = "idp-user"
+            to_dict = staticmethod(lambda: {})
+
+        token = type("T", (), {"access_token": "a", "refresh_token": "r", "expires_in": 3600})
+
+    from flask import Flask
+
+    app = Flask(__name__)
+    with app.test_request_context("/"):
+        resp, status = sso_mod._finalize_sso_login("corp", _AuthColliding(), None)
+    assert status == 403
+    assert resp.get_json()["error"] == "account_disabled"
+    # The binding must NOT have happened (the round-3 finding).
+    manager.link_identity.assert_not_called()
+    assert created == []
+    denial = [a for a in audits if a.get("details", {}).get("denied_reason")]
+    assert denial and denial[0]["user_id"] == 42
+    assert denial[0]["details"]["email_linked"] is True
+
+
 def test_sso_active_control_case_issues_sessions_and_links(monkeypatch):
     """R-9 control: an ACTIVE user must pass the check, get linked, and
     receive the sessions — deleting the is_active condition in sso.py must
@@ -1105,6 +1184,20 @@ def test_tokens_valid_after_stamped_and_refreshed(user_db):
     time.sleep(1.1)  # second-resolution timestamps: force a later value
     assert repo.set_tokens_valid_after(uid) is True  # default = now(UTC)
     assert repo.get_user_by_id(uid)["tokens_valid_after"] > "2026-09-11 00:00:00"
+
+
+def test_update_user_deactivation_stamps_tokens_valid_after(user_db):
+    """Round 3 (R-5 gap 1): org-sync paths call update_user(is_active=False)
+    directly — the stamp sinks into the same UPDATE, so an org-sync
+    deactivation kills the user's pre-deactivation URL tokens without any
+    admin PUT. Reactivation still does not clear it."""
+    repo, uid = user_db
+    assert repo.get_user_by_id(uid)["tokens_valid_after"] is None
+    assert repo.update_user(uid, is_active=False) is True
+    stamped = repo.get_user_by_id(uid)["tokens_valid_after"]
+    assert stamped is not None
+    assert repo.update_user(uid, is_active=True) is True
+    assert repo.get_user_by_id(uid)["tokens_valid_after"] == stamped
 
 
 def test_tokens_valid_after_survives_reactivation_and_restore(user_db):
