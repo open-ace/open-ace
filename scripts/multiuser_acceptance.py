@@ -179,6 +179,13 @@ def _single_user_env() -> dict[str, str]:
         "PORT": str(port),
         "WORKSPACE_PORT_RANGE_START": "13100",
         "WORKSPACE_PORT_RANGE_END": "13200",
+        # the bootstrap-written .env pins production (a multi-user requirement);
+        # item h targets the DEFAULT single-user shape, which is development and
+        # self-initializes a fresh database (init_db seeds admin + tenant 1).
+        # Inheriting production instead made the tail hit the same
+        # "Fresh database detected" refusal as the multi-user first run
+        # (review round 3, 4004859935).
+        "OPENACE_SECURITY_MODE": "development",
     }
 
 
@@ -1173,6 +1180,32 @@ def item_d_shared_projects(sc: Scenario) -> None:
         response=body,
     )
 
+    # review round 3 (4004860481): the API layer is only half the story. The
+    # shared dirs are group openace-shared (a GLOBAL group — every tenant's
+    # account joins at creation) with 2775/664, so cross-tenant and
+    # post-revocation access must ALSO be probed at the OS layer via the same
+    # channel item c uses to argue terminal equivalence. Expected to FAIL on
+    # the current product — recorded honestly; the design fix (tenant-scoped
+    # shared groups / 2770 + revocation reclaim) is tracked as #3396.
+    # Both probe groups run after the revocation above — carol's access is
+    # group-membership-based and unaffected by the revocation flag either
+    # way, so the ordering is immaterial; labels name what each proves.
+    for label, account in (
+        ("carol (other tenant) shell ls shared project -> EACCES", "carol"),
+        ("carol (other tenant) shell touch in shared project -> EACCES", "carol"),
+        ("bob shell ls shared project after revocation -> EACCES", "bob"),
+        ("bob shell touch after revocation -> EACCES", "bob"),
+    ):
+        cmd = f"touch {shared_path}/acc-probe" if "touch" in label else f"ls {shared_path}"
+        proc = compose_exec(SERVICE, cmd, user=account, timeout=15, check=False)
+        rec.check(
+            "d",
+            f"OS layer: {label}",
+            proc.returncode != 0,
+            f"rc={proc.returncode} — global openace-shared group grants OS access "
+            "the API layer denies (#3396)",
+        )
+
 
 def item_e_resource_limits(sc: Scenario) -> None:
     """(e) resource ceiling, cancellation, crash isolation."""
@@ -1400,16 +1433,21 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
                 f"uid={got or '<missing>'} expected={want} (UID drift / useradd renumbering)",
             )
     for dir_path in ("/home/bob", "/workspace/bob"):
-        got = compose_exec(
-            SERVICE, f"stat -c %u {dir_path}", timeout=15, check=False
+        # review round 3 (4004861021): assert by OWNER NAME — the uid-set
+        # approach missed admin and erin, which the entrypoint sync also
+        # creates OS accounts for (account = system_account or username), so
+        # bob's uid landing on either passed vacuously. Today's product leaves
+        # the dirs on an orphan uid (owner "UNKNOWN"); after #3390's
+        # placeholder-account fix the owner should be bob himself.
+        owner = compose_exec(
+            SERVICE, f"stat -c %U {dir_path}", timeout=15, check=False
         ).stdout.strip()
-        inheritor = active_uids.get(got, "")
         rec.check(
             "f",
             f"post-recreate: deactivated bob's {dir_path} not inherited by an active account",
-            not inheritor,
-            f"uid={got} belongs to active account {inheritor or '<none/absent>'} "
-            "(product: entrypoint re-useradds active users without uid pinning)",
+            owner in ("UNKNOWN", "bob"),
+            f"owner={owner!r} — inherited by an active account "
+            "(product: entrypoint re-useradds active users without uid pinning, #3390)",
         )
     for attacker in ("alice", "carol"):
         proc = compose_exec(SERVICE, "ls /home/bob", user=attacker, timeout=15, check=False)
@@ -1659,13 +1697,24 @@ def main() -> int:
             cwd=REPO_ROOT,
             timeout=120,
         )
-        # First REAL CI run (pull_request trigger, run 34834296021) surfaced
-        # the next abort point: a fresh PRODUCTION database refuses to start
-        # ("Fresh database detected ... Run migration job first"). The
-        # deployment flow initializes via a one-shot migration container
-        # (docs/en/DEPLOYMENT.md: "docker compose run --rm open-ace alembic
-        # upgrade head") — do exactly that, in the dedicated project.
-        compose("run", "--rm", SERVICE, "alembic", "upgrade", "head", timeout=600)
+        # DECLARED DEVIATION (product gap #3397, review round 3 4004859403):
+        # following DEPLOYMENT.md's multi-user Option 2 verbatim, a fresh
+        # production database refuses to boot ("Fresh database detected"),
+        # and a bare migration alone is not enough either — with the schema
+        # present the entrypoint skips init_db.py, so the default tenant and
+        # admin/admin123 never exist and admin_first_login would 401. The
+        # one-shot container below does BOTH (migrate + seed); the gap
+        # itself (documented fresh-install flow cannot start) is recorded
+        # as #3397 and stays in the run notes.
+        compose(
+            "run",
+            "--rm",
+            SERVICE,
+            "sh",
+            "-c",
+            "alembic upgrade head && python3 scripts/init_db.py",
+            timeout=600,
+        )
         compose("up", "-d", "--wait", timeout=900)
         compose("stop", SERVICE, timeout=300)
         merge_max_instances(3)

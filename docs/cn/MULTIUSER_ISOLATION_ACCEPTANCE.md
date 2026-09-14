@@ -8,11 +8,19 @@
 ## 1. 环境前提
 
 **产品前置（与 PR-A/#3384 同级）**：
-- **#3110（撰写时仍 OPEN）**：应用配置解析必须遵循 `OPENACE_CONFIG_DIR`（当前读
+- **#3387/#3110**：应用配置解析必须遵循 `OPENACE_CONFIG_DIR`（当前读
   `~/.open-ace`，读不到 config 卷）。修复前脚本在配置校验处快速失败并指名 #3110。
-- **共享命名空间预置**：产品尚无任何步骤创建 `<base>/shared`——d 项会把全新部署的
-  403 记为声明已知缺口（entrypoint 应在多用户模式下创建，属组 openace-shared、
-  2775），app 侧跟进。
+- **#3389 共享命名空间预置**：产品原无任何步骤创建 `<base>/shared`——d 项曾把全新
+  部署的 403 记为声明已知缺口。
+- **#3390（UID 漂移）**：容器重建后 entrypoint 按在役用户重新 useradd 且不固定
+  uid，已停用用户的目录被在役账号数字继承——f 项断言预期 FAIL，如实记录。
+- **#3394（已修，PR #3395）**：前端完整性检查期望与 vite 产物不符导致生产镜像
+  crash-loop。
+- **#3397（声明偏离）**：按 DEPLOYMENT.md 首装的多用户生产部署无法启动（空库被
+  拒；仅迁移又拿不到默认 admin）。脚本用一次性容器 `alembic upgrade head &&
+  init_db.py` 绕过，**属声明偏离**，见运行备注——产品修复后应还原为纯文档路径。
+- **#3396（OS 层共享隔离）**：共享目录为全局 `openace-shared` 组 2775/664——跨租户
+  与撤销后的 OS 层读写依然存在。d 项已加 OS 层探针，预期 FAIL，如实记录。
 
 - 真实 Linux 主机（`linux` + `docker` CLI + compose v2；脚本启动时强制检查）。
 - 足够拉起 3 个 qwen-code-webui 实例的内存（每实例约数百 MB）。
@@ -67,7 +75,7 @@ workflow 文件，所以触碰 `scripts/multiuser_acceptance.py` / 本 workflow 
 | a | 并发私有目录/历史/模型配置 | alice/bob 并发取 user-url；容器内扫 /proc | 各自端口、各自 UID（sudo -u 生效）、各自 0700 home；webui env 仅含互异的 `webui:<uid>` 代理 token，`OPENAI_API_KEY`==代理 token，无任何真实/敏感 key |
 | b | ID 篡改/穿越/symlink/越权恢复 | `required_isolation=none`；A 的会话 token 打 B 的会话路由；DB 播种 machines/agent_sessions/machine_assignments 后 B 停/连 A 的终端；fs browse B 的 workspace home（`/workspace/<B>`）、`../`、指向 B 的 symlink | floor 不降（仍 os_user）；403/404 矩阵逐项命中；fs 三例全部 400——`/workspace/<B>` 路径穿过 base-dir 门后由 realpath 解析 + #3376 home-lock 拒绝（`/home/*` 只会被 base-dir 前缀门拦下,测不到 home-lock,故攻击面选 workspace 侧） |
 | c | 环境无他人凭据；A 不进 B 私有区 | `docker exec -u alice` 读 B 的 webui `/proc/<pid>/environ`、`ls /home/bob` | EPERM/EACCES（真实 UID 语义）；模型配置分离同 a 项口径 |
-| d | 共享项目授权与撤销 | alice 建 `<base>/shared/acc-team-proj`；bob（同租户）/carol（异租户）browse；撤销后再 browse | bob 200、carol 400；撤销后 bob 400 |
+| d | 共享项目授权与撤销 | alice 建 `<base>/shared/acc-team-proj`；bob（同租户）/carol（异租户）browse；撤销后再 browse；**OS 层探针**（carol/bob 的 shell ls/touch，与 c 项同一通道） | bob 200、carol 400；撤销后 bob 400；OS 层探针预期 FAIL（全局 openace-shared 组，#3396 如实记录） |
 | e | 资源上限/取消/异常退出不影响他人 | 预置 `max_instances=3`；第 4 实例；admin 停 alice 实例；`kill -9` bob 的 webui | 第 4 实例 503（body 非结构化——如实记录，本身是验收发现）；他人会话与 /readyz 不受扰；释放的槽位可复用 |
 | f | 停用用户/撤销 token/重启 orphan | 停用 bob 后查会话/URL-token/进程/代理 token（代理 token 取自 webui 环境的 `OPENAI_API_KEY`——sudo 启动路径只内联该键集）；`up -d --force-recreate`（重建容器、保留卷——`restart` 不重建可写层，分辨不出 secret 是否真落在卷上）后容器内查进程与端口、alice 旧 token 复验 | 全部 401/进程销毁/代理 token 401；重建后无残留 webui 进程、3100–3200 容器内无监听；token_secret 卷持久化使旧 token 仍有效（#3377 的真实主张）。**依赖 PR-A（3384）** |
 | g | backend 不支持时明确拒绝 | 契约端点；user-url 请求 `sandboxed`；无映射用户（erin）请求 `os_user` | 契约 `isolation_level=os_user` 且 reasons **不含任何** SANDBOX_PROBE_REASON_CODES；400 `isolation_level_unsupported`；400 `identity_mapping_missing` |
