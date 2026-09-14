@@ -14,7 +14,7 @@ import os
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
-CONFIG_DIR = os.path.expanduser("~/.open-ace")
+CONFIG_DIR = os.environ.get("OPENACE_CONFIG_DIR") or os.path.expanduser("~/.open-ace")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DB_DIR = CONFIG_DIR  # Database is stored in the same directory
 DB_PATH = os.path.join(DB_DIR, "ace.db")
