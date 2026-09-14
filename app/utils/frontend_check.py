@@ -3,6 +3,9 @@ Frontend Build Integrity Check Module
 
 Validates frontend build artifacts exist and are complete before the application starts.
 Issue #3277: Prevent "Open ACE could not render" errors due to missing build artifacts.
+Issue #3394: The entry JS check now derives the expected filename from the Vite
+manifest instead of hardcoding main.*.js (the real vite entry chunk is
+index.<hash>.js), which crash-looped every production boot since #3277 landed.
 """
 
 import json
@@ -166,40 +169,126 @@ def check_manifest(dist_dir: Path) -> CheckResult:
     )
 
 
-def check_main_js(dist_dir: Path) -> CheckResult:
-    """Check if main entry JavaScript file exists."""
+def load_vite_manifest(dist_dir: Path) -> dict | None:
+    """Load .vite/manifest.json if it exists and is a usable JSON object.
+
+    Returns None when the manifest is absent, unreadable, not valid JSON, or
+    not a JSON object - callers treat that uniformly as "no manifest
+    available" (check_manifest reports the precise reason separately).
+    """
+    manifest_path = dist_dir / ".vite" / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def check_entry_js(dist_dir: Path) -> CheckResult:
+    """Check that the frontend entry JavaScript file exists and is non-empty.
+
+    The expected entry filename is derived from the already-validated
+    .vite/manifest.json: its ``index.html`` entry's ``file`` field points at
+    the real entry chunk (e.g. ``index.<hash>.js``). The vite config names
+    the entry chunk after its input (``index.html``), so the previously
+    hardcoded ``main.*.js`` glob never matched an actual build (Issue #3394).
+
+    Legacy tolerance: when no usable manifest exists, a non-empty
+    ``main.<hash>.js`` in the dist root still passes - ``emptyOutDir: false``
+    (#2879) means a deployment can carry mixed old/new artifacts, and older
+    builds had no manifest at all.
+    """
     if not dist_dir.exists():
         return CheckResult(
-            name="main.*.js",
+            name="entry.js",
             status=CheckStatus.MISSING,
             message="Build output directory does not exist",
             error_level=ErrorLevel.ERROR,
         )
 
-    # Find main.*.js files
-    main_js_files = list(dist_dir.glob("main.*.js"))
+    manifest = load_vite_manifest(dist_dir)
 
-    if len(main_js_files) == 0:
+    if manifest is not None:
+        entry_info = manifest.get("index.html")
+        entry_file = (
+            entry_info.get("file")
+            if isinstance(entry_info, dict) and isinstance(entry_info.get("file"), str)
+            else None
+        )
+
+        if not entry_file:
+            return CheckResult(
+                name="entry.js",
+                status=CheckStatus.INVALID,
+                message=(
+                    "manifest.json does not declare an index.html entry with a "
+                    "file field - cannot determine the entry JavaScript file"
+                ),
+                error_level=ErrorLevel.ERROR,
+            )
+
+        entry_path = (dist_dir / entry_file).resolve()
+        try:
+            entry_path.relative_to(dist_dir.resolve())
+        except ValueError:
+            return CheckResult(
+                name="entry.js",
+                status=CheckStatus.INVALID,
+                message=(f"manifest.json entry file escapes the dist directory: {entry_file}"),
+                error_level=ErrorLevel.ERROR,
+            )
+
+        if not entry_path.is_file():
+            return CheckResult(
+                name="entry.js",
+                status=CheckStatus.MISSING,
+                message=(
+                    f"Entry JavaScript file declared in manifest.json not found: {entry_file}"
+                ),
+                error_level=ErrorLevel.ERROR,
+            )
+
+        if entry_path.stat().st_size == 0:
+            return CheckResult(
+                name="entry.js",
+                status=CheckStatus.INVALID,
+                message=f"Entry JavaScript file declared in manifest.json is empty: {entry_file}",
+                error_level=ErrorLevel.ERROR,
+            )
+
         return CheckResult(
-            name="main.*.js",
-            status=CheckStatus.MISSING,
-            message="Main entry JavaScript file not found - build incomplete",
+            name="entry.js",
+            status=CheckStatus.OK,
+            message=f"Entry JavaScript file exists (from manifest.json): {entry_file}",
+        )
+
+    # No usable manifest - fall back to the legacy main.<hash>.js shape so
+    # older deployments (and mixed-artifact dists, #2879) keep booting.
+    main_js_files = sorted(dist_dir.glob("main.*.js"))
+
+    for main_js in main_js_files:
+        if main_js.is_file() and main_js.stat().st_size > 0:
+            return CheckResult(
+                name="entry.js",
+                status=CheckStatus.OK,
+                message=f"Legacy entry JavaScript file exists: {main_js.name}",
+            )
+
+    if main_js_files:
+        return CheckResult(
+            name="entry.js",
+            status=CheckStatus.INVALID,
+            message="Legacy entry JavaScript files are empty",
             error_level=ErrorLevel.ERROR,
         )
 
-    # Check if at least one main.*.js file has reasonable size (> 0 bytes)
-    for main_js in main_js_files:
-        if main_js.stat().st_size > 0:
-            return CheckResult(
-                name="main.*.js",
-                status=CheckStatus.OK,
-                message=f"Main entry file exists: {main_js.name}",
-            )
-
     return CheckResult(
-        name="main.*.js",
-        status=CheckStatus.INVALID,
-        message="Main entry JavaScript files are empty",
+        name="entry.js",
+        status=CheckStatus.MISSING,
+        message=(
+            "No frontend entry JavaScript file found (no usable Vite manifest "
+            "and no legacy main.*.js) - build incomplete"
+        ),
         error_level=ErrorLevel.ERROR,
     )
 
@@ -229,7 +318,7 @@ def check_frontend_build_integrity(
     checks = [
         check_index_html(dist_dir),
         check_manifest(dist_dir),
-        check_main_js(dist_dir),
+        check_entry_js(dist_dir),
     ]
 
     result.checks = checks
@@ -352,7 +441,7 @@ def get_frontend_build_status() -> dict:
 
     checks_dict = {}
     for check in result.checks:
-        checks_dict[check.name.replace(".*", "")] = {
+        checks_dict[check.name] = {
             "status": check.status.value,
             "message": check.message if check.status != CheckStatus.OK else None,
         }
