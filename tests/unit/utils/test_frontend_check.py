@@ -411,16 +411,20 @@ class TestCheckFrontendBuildOnStartup:
         with patch("app.utils.frontend_check.get_dist_dir") as mock_get_dist:
             mock_get_dist.return_value = real_shape_dist
 
-            # Must not raise
-            check_frontend_build_on_startup(flask_env="production", skip_env_var="")
+            result = check_frontend_build_on_startup(flask_env="production", skip_env_var="")
+            assert result is None  # no RuntimeError: the boot proceeds
 
-    def test_development_mode_missing_build_only_warns(self) -> None:
+    def test_development_mode_missing_build_only_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Dev keeps warn-only semantics: a missing build must not raise."""
         with patch("app.utils.frontend_check.get_dist_dir") as mock_get_dist:
             mock_get_dist.return_value = Path("/nonexistent/path")
 
-            # Must not raise
-            check_frontend_build_on_startup(flask_env="development", skip_env_var="")
+            with caplog.at_level("WARNING", logger="app.utils.frontend_check"):
+                result = check_frontend_build_on_startup(flask_env="development", skip_env_var="")
+            assert result is None  # warn-only: no raise
+            assert "frontend build artifacts are missing" in caplog.text.lower()
 
 
 class TestFormatErrorMessage:
