@@ -1,0 +1,70 @@
+name: multiuser-acceptance
+
+# Issue #3379 / #3374: multi-user real-Linux e2e isolation acceptance.
+# Deliberately a STANDALONE workflow (review round 3, 8508): the shared
+# ci.yml concurrency group cancels in-progress main runs on every push —
+# at real merge cadence this 45-minute job would be cancelled constantly.
+# This workflow has its own group and NEVER cancels itself, and supports
+# workflow_dispatch so the acceptance can actually be run on a feature
+# branch BEFORE merge.
+
+on:
+  push:
+    branches: [main]
+  # review round 4 (4003823515): pull_request events use the workflow file
+  # FROM THE PR BRANCH, so this gives the acceptance a REAL run on this very
+  # PR before merge (workflow_dispatch cannot — it requires the workflow to
+  # be registered on the default branch). Paths-filtered to the runner and
+  # this file.
+  pull_request:
+    paths:
+      - scripts/multiuser_acceptance.py
+      - .github/workflows/multiuser-acceptance.yml
+      - docs/cn/MULTIUSER_ISOLATION_ACCEPTANCE.md
+      - docs/en/MULTIUSER_ISOLATION_ACCEPTANCE.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multiuser-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  multiuser-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - name: Verify docker compose availability
+        run: docker compose version
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: production
+          push: false
+          load: true
+          tags: open-ace:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run multi-user isolation acceptance (#3379)
+        env:
+          # Pin compose to the locally built image — never the registry tag.
+          IMAGE_NAME: open-ace:${{ github.sha }}
+          ACCEPTANCE_BASE_URL: http://localhost:19888
+          ACCEPTANCE_RECORD_DIR: ${{ github.workspace }}/acceptance-records
+        run: |
+          python3 scripts/multiuser_acceptance.py
+      - name: Upload acceptance records
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: multiuser-acceptance-records-${{ github.sha }}
+          path: |
+            acceptance-records/
+          if-no-files-found: warn
+          retention-days: 90
