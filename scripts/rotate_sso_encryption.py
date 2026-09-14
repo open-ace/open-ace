@@ -7,15 +7,18 @@ Issue #1815 Finding 1: CLI tool for rotating SSO provider encryption keys.
 This script re-encrypts all SSO provider client_secrets with a new encryption key.
 
 Usage:
-    # Verify mode (dry-run, check if new key works)
+    # Pre-flight (dry-run): the new key can encrypt/decrypt, and every stored
+    # secret is decryptable with the CURRENT key (rotation would not lose data)
     python scripts/rotate_sso_encryption.py --verify --new-key <NEW_KEY>
 
-    # Execute mode (re-encrypt all providers)
+    # Execute mode (re-encrypt all providers, then re-check with the new key)
     python scripts/rotate_sso_encryption.py --new-key <NEW_KEY>
+
+After rotation, update OPENACE_ENCRYPTION_KEY to the new key and restart the
+service.
 
 Environment variables:
     OPENACE_ENCRYPTION_KEY: Current encryption key (required)
-    OPENACE_SSO_ENCRYPTION_KEY: Override key for this script
 """
 
 from __future__ import annotations
@@ -42,7 +45,12 @@ def get_current_encryption_key() -> str | None:
 
 
 def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
-    """Verify that the new key can decrypt all provider secrets.
+    """Pre-flight rotation checks (no data is modified).
+
+    1. The new key round-trips: a probe value encrypts and decrypts back
+       (catches unusable key material before touching any row).
+    2. Every stored client_secret decrypts with the CURRENT key — otherwise
+       re-encryption would silently corrupt those records.
 
     Args:
         db_url: Database URL.
@@ -51,16 +59,21 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
     Returns:
         Tuple of (success, list of provider names that failed).
     """
-    import tempfile
-
     from app.repositories.database import Database
-    from app.repositories.schema_init import load_schema_from_file
-    from app.utils.smtp_crypto import PasswordManager
+    from app.utils.smtp_crypto import SMTPPasswordManager
 
     db = Database(db_url=db_url)
+    pm_new = SMTPPasswordManager(encryption_key=new_key)
+    probe = pm_new.encrypt("openace-rotation-probe")
+    if pm_new.decrypt(probe) != "openace-rotation-probe":
+        logger.error("New key failed an encrypt/decrypt round-trip probe")
+        return False, ["<new-key-roundtrip>"]
 
-    # Create a temporary password manager with the new key
-    pm = PasswordManager(encryption_key=new_key)
+    old_key = get_current_encryption_key()
+    if not old_key:
+        logger.error("OPENACE_ENCRYPTION_KEY not set")
+        return False, ["<current-key-missing>"]
+    pm_old = SMTPPasswordManager(encryption_key=old_key)
 
     # Get all providers
     rows = db.fetch_all("SELECT name, config FROM sso_providers")
@@ -77,11 +90,13 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
             encrypted_secret = config.get("client_secret_encrypted", "")
 
             if encrypted_secret:
-                # Try to decrypt with new key
-                decrypted = pm.decrypt(encrypted_secret)
+                # Pre-rotation the stored secrets must decrypt with the
+                # CURRENT key; the new key only becomes the decryptor after
+                # rotation completes.
+                decrypted = pm_old.decrypt(encrypted_secret)
                 if decrypted:
                     success_count += 1
-                    logger.debug(f"Provider '{name}' can be decrypted with new key")
+                    logger.debug(f"Provider '{name}' decrypts with the current key")
                 else:
                     failed_providers.append(name)
                     logger.warning(f"Provider '{name}' returned empty decrypted value")
@@ -108,12 +123,12 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
         Tuple of (success, count of re-encrypted providers, list of failed providers).
     """
     from app.repositories.database import Database
-    from app.utils.smtp_crypto import PasswordManager
+    from app.utils.smtp_crypto import SMTPPasswordManager
 
     db = Database(db_url=db_url)
 
     # Create password manager with new key
-    pm_new = PasswordManager(encryption_key=new_key)
+    pm_new = SMTPPasswordManager(encryption_key=new_key)
 
     # Also need old key to decrypt first
     old_key = get_current_encryption_key()
@@ -121,7 +136,7 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
         logger.error("OPENACE_ENCRYPTION_KEY not set")
         return False, 0, []
 
-    pm_old = PasswordManager(encryption_key=old_key)
+    pm_old = SMTPPasswordManager(encryption_key=old_key)
 
     # Get all providers
     rows = db.fetch_all("SELECT name, config FROM sso_providers")
@@ -202,39 +217,63 @@ def main():
     logger.info(f"Using database: {db_url.split('@')[-1] if '@' in db_url else db_url}")
 
     if args.verify:
-        logger.info("Running in VERIFY mode (dry-run)")
+        logger.info("Running in VERIFY mode (dry-run pre-flight)")
         success, failed = verify_key_works(db_url, args.new_key)
 
         if success:
-            logger.info("✓ All providers can be decrypted with new key")
+            logger.info("✓ New key round-trips and all stored secrets decrypt with the current key")
             logger.info("You can now run in execute mode to re-encrypt")
         else:
-            logger.error(f"✗ {len(failed)} provider(s) failed verification: {failed}")
+            logger.error(f"✗ Pre-flight failed for: {failed}")
             sys.exit(1)
     else:
         logger.info("Running in EXECUTE mode")
         logger.warning("This will modify the database!")
 
-        # First verify
-        logger.info("Verifying new key...")
+        # Pre-flight: abort before touching any row if the current key cannot
+        # decrypt every stored secret or the new key is unusable.
+        logger.info("Running pre-flight checks...")
         verify_success, verify_failed = verify_key_works(db_url, args.new_key)
 
         if not verify_success:
-            logger.error(f"Verification failed for providers: {verify_failed}")
+            logger.error(f"Pre-flight failed for providers: {verify_failed}")
             logger.error("Aborting. Run with --verify first to see details.")
             sys.exit(1)
 
         # Execute rotation
         success, count, failed = rotate_keys(db_url, args.new_key)
 
-        if success:
-            logger.info(f"✓ Successfully re-encrypted {count} provider(s)")
-            logger.info(
-                "Update OPENACE_ENCRYPTION_KEY environment variable and restart the service"
-            )
-        else:
+        if not success:
             logger.error(f"✗ {len(failed)} provider(s) failed: {failed}")
             sys.exit(1)
+
+        # Post-rotation check: every stored secret must now decrypt with the
+        # NEW key (the operator's go/no-go signal before switching the env).
+        from app.repositories.database import Database
+        from app.utils.smtp_crypto import SMTPPasswordManager
+
+        db = Database(db_url=db_url)
+        pm = SMTPPasswordManager(encryption_key=args.new_key)
+        postcheck_failed = []
+        for row in db.fetch_all("SELECT name, config FROM sso_providers"):
+            encrypted = (json.loads(row["config"]) or {}).get("client_secret_encrypted", "")
+            if encrypted:
+                try:
+                    if not pm.decrypt(encrypted):
+                        postcheck_failed.append(row["name"])
+                except Exception as e:
+                    logger.warning(f"Provider '{row['name']}' post-check failed: {e}")
+                    postcheck_failed.append(row["name"])
+
+        if postcheck_failed:
+            logger.error(
+                f"✗ Rotation wrote {count} row(s) but post-check failed: {postcheck_failed}"
+            )
+            sys.exit(1)
+
+        logger.info(f"✓ Successfully re-encrypted {count} provider(s)")
+        logger.info("✓ All stored secrets decrypt with the new key")
+        logger.info("Update OPENACE_ENCRYPTION_KEY environment variable and restart the service")
 
 
 if __name__ == "__main__":

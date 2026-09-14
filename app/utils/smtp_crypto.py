@@ -19,17 +19,27 @@ logger = logging.getLogger(__name__)
 class SMTPPasswordManager:
     """Manager for SMTP password encryption, decryption, and masking."""
 
-    def __init__(self):
-        """Initialize password manager with encryption key."""
-        self._encryption_key = self._get_encryption_key()
+    def __init__(self, encryption_key: str | None = None):
+        """Initialize password manager with encryption key.
 
-    def _get_encryption_key(self) -> bytes:
+        Args:
+            encryption_key: Explicit key material (e.g. a candidate key during
+                rotation). When omitted, the key is derived from the
+                OPENACE_ENCRYPTION_KEY environment variable as before.
+        """
+        self._encryption_key = self._get_encryption_key(encryption_key)
+
+    def _get_encryption_key(self, encryption_key: str | None = None) -> bytes:
         """Derive the Fernet encryption key from OPENACE_ENCRYPTION_KEY.
 
-        The environment variable is hashed with SHA-256 to produce a 32-byte
+        The key material is hashed with SHA-256 to produce a 32-byte
         key, which is then base64-encoded for Fernet compatibility.
         """
-        key_env = get_encryption_key_material(purpose="SMTP password encryption")
+        key_env = (
+            encryption_key
+            if encryption_key is not None
+            else get_encryption_key_material(purpose="SMTP password encryption")
+        )
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
