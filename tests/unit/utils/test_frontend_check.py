@@ -195,6 +195,8 @@ class TestCheckEntryJs:
         assert result.status == CheckStatus.MISSING
         assert result.error_level == ErrorLevel.ERROR
 
+    @pytest.mark.regression
+    @pytest.mark.issue(3394)
     def test_real_build_shape_passes(self, temp_dist_dir: Path) -> None:
         """P0 regression case (Issue #3394): manifest-declared index.<hash>.js
         present and non-empty, with NO main.*.js anywhere, must PASS.
@@ -262,11 +264,15 @@ class TestCheckEntryJs:
         assert result.status == CheckStatus.INVALID
         assert result.error_level == ErrorLevel.ERROR
 
-    def test_unreadable_manifest_with_legacy_main_js(self, temp_dist_dir: Path) -> None:
-        """Corrupt manifest + non-empty legacy main.<hash>.js -> PASS (legacy tolerance).
+    def test_unreadable_manifest_missing_even_with_legacy_main_js(
+        self, temp_dist_dir: Path
+    ) -> None:
+        """Corrupt manifest + non-empty legacy main.<hash>.js -> MISSING.
 
-        #2879's emptyOutDir: false means deployments can carry mixed
-        old/new artifacts; an unreadable manifest must not brick the boot.
+        Review round (PR #3395): the legacy fallback could never rescue a
+        boot (check_manifest errors in the same integrity round), and this
+        repository's builds have never produced main.<hash>.js. The manifest
+        is the single source of truth for the entry.
         """
         vite_dir = temp_dist_dir / ".vite"
         vite_dir.mkdir()
@@ -275,32 +281,24 @@ class TestCheckEntryJs:
 
         result = check_entry_js(temp_dist_dir)
 
-        assert result.status == CheckStatus.OK
-        assert "legacy" in result.message.lower()
+        assert result.status == CheckStatus.MISSING
+        assert result.error_level == ErrorLevel.ERROR
+        assert "manifest" in result.message.lower()
 
-    def test_no_manifest_legacy_main_js_passes(self, temp_dist_dir: Path) -> None:
-        """No manifest at all + non-empty legacy main.<hash>.js -> PASS."""
+    def test_no_manifest_missing_even_with_legacy_main_js(self, temp_dist_dir: Path) -> None:
+        """No manifest at all -> MISSING regardless of stray main.*.js files."""
         (temp_dist_dir / "main.abc123.js").write_text("console.log('legacy')", encoding="utf-8")
 
-        result = check_entry_js(temp_dist_dir)
-
-        assert result.status == CheckStatus.OK
-        assert "legacy" in result.message.lower()
-
-    def test_no_manifest_no_main_js(self, temp_dist_dir: Path) -> None:
-        """No manifest and no main.*.js -> MISSING."""
         result = check_entry_js(temp_dist_dir)
 
         assert result.status == CheckStatus.MISSING
         assert result.error_level == ErrorLevel.ERROR
 
-    def test_no_manifest_empty_main_js(self, temp_dist_dir: Path) -> None:
-        """No manifest, only a 0-byte main.<hash>.js -> INVALID."""
-        (temp_dist_dir / "main.abc123.js").write_text("", encoding="utf-8")
-
+    def test_no_manifest_no_entry_js(self, temp_dist_dir: Path) -> None:
+        """No manifest and nothing else -> MISSING."""
         result = check_entry_js(temp_dist_dir)
 
-        assert result.status == CheckStatus.INVALID
+        assert result.status == CheckStatus.MISSING
         assert result.error_level == ErrorLevel.ERROR
 
 
@@ -405,6 +403,8 @@ class TestCheckFrontendBuildOnStartup:
 
             assert "Frontend build artifacts missing" in str(exc_info.value)
 
+    @pytest.mark.regression
+    @pytest.mark.issue(3394)
     def test_production_mode_real_build_boots(self, real_shape_dist: Path) -> None:
         """P0 regression guard (Issue #3394): a real vite build shape (no
         main.*.js) must NOT halt a production boot."""
@@ -454,6 +454,23 @@ class TestFormatErrorMessage:
 
 class TestGetFrontendBuildStatus:
     """Tests for get_frontend_build_status function."""
+
+    def test_skip_env_reports_ok_with_warning(self, temp_dist_dir, monkeypatch):
+        """PR #3395 review finding 2: OPENACE_SKIP_FRONTEND_CHECK=1 -> status
+        ok even with a missing build (previously /readyz kept 503-ing in
+        production security mode while the worker had booted - the hatch
+        rescued nothing)."""
+        monkeypatch.setenv("OPENACE_SKIP_FRONTEND_CHECK", "1")
+        with patch("app.utils.frontend_check.get_dist_dir", return_value=temp_dist_dir):
+            status = get_frontend_build_status()
+        assert status["status"] == "ok"
+        assert any("skipped" in w.lower() for w in status.get("warnings", []))
+
+    def test_without_skip_missing_build_reports_missing(self, temp_dist_dir, monkeypatch):
+        monkeypatch.delenv("OPENACE_SKIP_FRONTEND_CHECK", raising=False)
+        with patch("app.utils.frontend_check.get_dist_dir", return_value=temp_dist_dir):
+            status = get_frontend_build_status()
+        assert status["status"] == "missing"
 
     def test_returns_dict(self) -> None:
         """Should return a dictionary."""

@@ -192,11 +192,9 @@ def check_entry_js(dist_dir: Path) -> CheckResult:
     the real entry chunk (e.g. ``index.<hash>.js``). The vite config names
     the entry chunk after its input (``index.html``), so the previously
     hardcoded ``main.*.js`` glob never matched an actual build (Issue #3394).
-
-    Legacy tolerance: when no usable manifest exists, a non-empty
-    ``main.<hash>.js`` in the dist root still passes - ``emptyOutDir: false``
-    (#2879) means a deployment can carry mixed old/new artifacts, and older
-    builds had no manifest at all.
+    The manifest is the single source of truth; without a usable one there
+    is no reliable entry to check (check_manifest reports why in the same
+    integrity round).
     """
     if not dist_dir.exists():
         return CheckResult(
@@ -262,32 +260,19 @@ def check_entry_js(dist_dir: Path) -> CheckResult:
             message=f"Entry JavaScript file exists (from manifest.json): {entry_file}",
         )
 
-    # No usable manifest - fall back to the legacy main.<hash>.js shape so
-    # older deployments (and mixed-artifact dists, #2879) keep booting.
-    main_js_files = sorted(dist_dir.glob("main.*.js"))
-
-    for main_js in main_js_files:
-        if main_js.is_file() and main_js.stat().st_size > 0:
-            return CheckResult(
-                name="entry.js",
-                status=CheckStatus.OK,
-                message=f"Legacy entry JavaScript file exists: {main_js.name}",
-            )
-
-    if main_js_files:
-        return CheckResult(
-            name="entry.js",
-            status=CheckStatus.INVALID,
-            message="Legacy entry JavaScript files are empty",
-            error_level=ErrorLevel.ERROR,
-        )
-
+    # No usable manifest -> MISSING. Review round (PR #3395): a legacy
+    # main.<hash>.js fallback could never rescue a boot anyway — with the
+    # manifest unusable, check_manifest reports ERROR in the same integrity
+    # round and production startup still raises; and this repository's builds
+    # have never produced main.<hash>.js (entryFileNames '[name].[hash].js'
+    # with the index.html input since 2026-03). The manifest is the single
+    # source of truth for the entry.
     return CheckResult(
         name="entry.js",
         status=CheckStatus.MISSING,
         message=(
-            "No frontend entry JavaScript file found (no usable Vite manifest "
-            "and no legacy main.*.js) - build incomplete"
+            "No frontend entry JavaScript file found (no usable Vite manifest) "
+            "- see the manifest.json check for why the manifest is unusable"
         ),
         error_level=ErrorLevel.ERROR,
     )
@@ -437,7 +422,13 @@ def get_frontend_build_status() -> dict:
     Returns:
         Dict with status and individual check results
     """
-    result = check_frontend_build_integrity(skip_check=False)
+    # PR #3395 review: the escape hatch must gate readiness too — with
+    # skip_check hardcoded False, OPENACE_SKIP_FRONTEND_CHECK=1 let the
+    # worker boot but /readyz kept returning 503 under production security
+    # mode, so compose healthchecks never went green (the exact scenario
+    # the hatch exists for).
+    skip = os.environ.get("OPENACE_SKIP_FRONTEND_CHECK", "") == "1"
+    result = check_frontend_build_integrity(skip_check=skip)
 
     checks_dict = {}
     for check in result.checks:
