@@ -256,10 +256,10 @@ def dump_stack_logs(recorder: Recorder) -> None:
 # helper container — the SAME image under test, so nothing extra is pulled —
 # merges ONLY workspace.max_instances=3 into that config, and the second `up`
 # starts the app against it. Pre-seeding a 3-key config before the first up
-# (the round-1 design) would skip generate_default_config AND was written to
-# a volume the app does not read (#3110: the app resolves config at
-# ~/.open-ace; honoring OPENACE_CONFIG_DIR is an OPEN prerequisite — the
-# preseed proof in main() fails fast, naming #3110, until it lands).
+# (the round-1 design) would skip generate_default_config (and, before #3387
+# fixed #3110, was written to a volume the app did not read — the app resolved
+# config at ~/.open-ace). The preseed proof in main() still verifies that the
+# merged value actually reaches the running app.
 
 
 CONFIG_VOLUME = f"{MULTI_USER_PROJECT}_config-data"
