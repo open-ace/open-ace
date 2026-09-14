@@ -223,6 +223,24 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
 
 def _ensure_workspace_dirs(system_account: str, base_dir: str):
     """Ensure workspace directories exist with correct ownership."""
+    # Issue #3379 (PR #3389 review round 2): in Docker multi-user mode
+    # <base>/shared is the shared-project NAMESPACE ROOT (provisioned by the
+    # entrypoint, group openace-shared, 2775). An account literally named
+    # "shared" would map its workspace onto that root and this function's
+    # chown loop would TAKE IT OVER — breaking shared-project creation for
+    # everyone, hiding existing shared projects from the read-side home
+    # filter, and handing the account rename-power over other users' project
+    # directories (no sticky bit on the root). Fail closed: never touch the
+    # namespace root on behalf of an account. Full name reservation across
+    # admin/SSO/org-sync creation paths is tracked separately.
+    if system_account == "shared" and _is_docker_multi_user_mode():
+        logger.warning(
+            "refusing to provision workspace dirs for account 'shared': "
+            "%s/shared is the shared-project namespace root in multi-user "
+            "mode (issue #3379); rename the account",
+            base_dir,
+        )
+        return
     workspace_dir = f"{base_dir}/{system_account}"
     qwen_dir = f"{workspace_dir}/.qwen"
 

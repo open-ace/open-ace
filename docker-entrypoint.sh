@@ -1205,9 +1205,14 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
             echo "  WARNING: skipping shared-namespace provisioning for $_base_dir/shared — path collides with a real account or is not root-owned (administrator intervention required)"
             continue
         fi
-        mkdir -p "$_base_dir/shared"
-        chgrp "$SHARED_GROUP" "$_base_dir/shared"
-        chmod 2775 "$_base_dir/shared"
+        # review round 2 (4004368890): degrade to a warning, not a crash loop —
+        # a failed provisioning only means shared-project creation 403s until
+        # an administrator fixes it; the app's own dir/ownership failures are
+        # warning-grade too, and set -e would otherwise restart-loop the whole
+        # service on e.g. a root_squash NFS base dir.
+        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 2775 "$_base_dir/shared"; }; then
+            echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
+        fi
     done
     unset _base_dir _workspace_base_dirs
 
@@ -1487,6 +1492,20 @@ except Exception as e:
     print(f'Error syncing users and projects: {e}')
 " 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
+
+    # Issue #3379 (review round 2, 4004368045): enroll users into the shared
+    # group AFTER the DB sync. On a recreated container /etc/passwd starts
+    # empty, so the pre-sync pass skipped everyone (id <user> failed) and the
+    # sync's useradd does not add supplementary groups — without this pass,
+    # already-logged-in users (sessions live in postgres and survive
+    # recreation) keep getting 403 on shared-project creation until they
+    # re-login. usermod is idempotent; failures are best-effort.
+    for user_dir in /home/*/; do
+        username=$(basename "$user_dir")
+        if id "$username" &>/dev/null; then
+            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
+        fi
+    done
 
     # Configure sudoers for qwen-code-webui
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user

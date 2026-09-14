@@ -8,15 +8,18 @@ parent and every user's first shared-project creation EACCESed (HTTP 403).
 The #3376 first-class ``<base>/shared/<name>`` namespace needs its root to
 pre-exist, group-writable by ``openace-shared`` with setgid.
 
-These tests follow the text-assertion convention of
-``tests/unit/test_multi_user_config_2235.py`` (the entrypoint is a root-gated
-bash script; its provisioning logic was verified functionally in a Linux
-container during development — member user creates inside the namespace with
-the group inherited, a non-member is denied, reruns are idempotent and never
-touch existing contents).
+The provisioning block is tested FUNCTIONALLY (review round 2, 4004368482 —
+the previous text assertions survived three targeted mutations): the block is
+extracted from the entrypoint between its marker comments and executed under
+``set -e`` with ``mkdir``/``chgrp``/``chmod``/``id``/``stat`` replaced by
+recording function stubs, then the executed command sequences are asserted
+per scenario. The app-side takeover guard lives in
+``app/utils/workspace.py::_ensure_workspace_dirs`` and has its own tests in
+``TestEnsureWorkspaceDirsSharedGuard`` below.
 """
 
-import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -27,85 +30,172 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(3379)]
 
 ENTRYPOINT = ROOT / "docker-entrypoint.sh"
 
+START_MARKER = "# Ensure workspace base directory exists"
+END_MARKER = "unset _base_dir _workspace_base_dirs"
 
-def _entrypoint_content() -> str:
-    assert ENTRYPOINT.exists(), "docker-entrypoint.sh must exist"
-    return ENTRYPOINT.read_text(encoding="utf-8")
+# Executes the extracted block under `set -e` with stubbed system commands.
+# Logs one line per stub invocation; a failure is injected via FAIL to
+# exercise the warning-degradation path.
+_HARNESS = """
+CALLS_FILE="$TEST_TMP/calls"
+touch "$CALLS_FILE"
+# FAIL injects a failure ONLY for the shared-root steps (a failing BASE mkdir
+# legitimately aborts — pre-existing behavior outside this provisioning).
+mkdir() { echo "mkdir $*" >> "$CALLS_FILE"; if [ "$FAIL" = "mkdir" ] && [ "${1#/ws/shared}" != "$1" ] || [ "$1" = "$FAIL_BASE/shared" ]; then return 1; fi; return 0; }
+chgrp() { echo "chgrp $*" >> "$CALLS_FILE"; [ "$FAIL" = "chgrp" ] && return 1; return 0; }
+chmod() { echo "chmod $*" >> "$CALLS_FILE"; [ "$FAIL" = "chmod" ] && return 1; return 0; }
+id()    { echo "id $*" >> "$CALLS_FILE"; [ -n "$ID_SHARED_OK" ] && [ "$1" = "shared" ] && return 0; return 1; }
+stat()  { echo "stat $*" >> "$CALLS_FILE"; if [ -n "$STAT_OWNER" ]; then echo "$STAT_OWNER"; else echo "root"; fi; return 0; }
+set -e
+SHARED_GROUP=openace-shared
+# the extracted block assigns WORKSPACE_DIR from WORKSPACE_BASE_DIR
+WORKSPACE_BASE_DIR="$WORKSPACE_DIR_UNDER_TEST"
+FAIL_BASE="${WORKSPACE_DIR_UNDER_TEST%%,*}"
+"""
 
 
-def _multi_user_block(content: str) -> str:
-    """The multi-user setup block (group creation → /home perms)."""
-    start = content.index('SHARED_GROUP="openace-shared"')
-    end = content.index("# Fix /home directory permissions", start)
-    return content[start:end]
+def _extract_block() -> str:
+    content = ENTRYPOINT.read_text(encoding="utf-8")
+    start = content.index(START_MARKER)
+    end = content.index(END_MARKER, start) + len(END_MARKER)
+    block = content[start:end]
+    assert 'mkdir -p "$_base_dir/shared"' in block
+    return block
+
+
+def _run_block(
+    workspace_dir_value: str,
+    *,
+    id_shared_ok: bool = False,
+    stat_owner: str = "",
+    fail: str = "",
+    precreate_shared: bool = False,
+) -> str:
+    """Run the extracted provisioning block with stubs; returns rc + call log.
+
+    When the workspace value is the literal "TMP", a throwaway directory is
+    used as the base (so scenarios can pre-create <base>/shared and exercise
+    the -e branch of the collision guard)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ws = str(Path(tmp) / "base") if workspace_dir_value == "TMP" else workspace_dir_value
+        if precreate_shared:
+            Path(ws).mkdir(parents=True, exist_ok=True)
+            (Path(ws) / "shared").mkdir(exist_ok=True)
+        script = _HARNESS + _extract_block()
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "TEST_TMP": tmp,
+            "WORKSPACE_DIR_UNDER_TEST": ws,
+            "FAIL": fail,
+        }
+        if id_shared_ok:
+            env["ID_SHARED_OK"] = "1"
+        if stat_owner:
+            env["STAT_OWNER"] = stat_owner
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+        calls_path = Path(tmp) / "calls"
+        calls = calls_path.read_text() if calls_path.exists() else ""
+        return f"rc={proc.returncode}\n{calls}"
 
 
 class TestSharedNamespaceProvisioning:
-    def test_shared_root_provisioned_in_multi_user_block(self):
-        """<base>/shared is created group-writable (setgid) for the shared
-        project namespace, inside the multi-user block."""
-        block = _multi_user_block(_entrypoint_content())
+    def test_provisions_group_writable_setgid_root(self):
+        log = _run_block("/ws")
+        assert "mkdir -p /ws" in log
+        assert "mkdir -p /ws/shared" in log
+        assert "chgrp openace-shared /ws/shared" in log
+        assert "chmod 2775 /ws/shared" in log
+
+    def test_comma_list_iterates_and_trims(self):
+        log = _run_block("  /a , /b  ")
+        assert "mkdir -p /a/shared" in log and "mkdir -p /b/shared" in log
         assert (
-            'mkdir -p "$_base_dir/shared"' in block
-        ), "the shared namespace root must be provisioned in the multi-user block"
+            log.count("chmod 2775") == 2
+        ), "exactly two bases provisioned (empty/padded segments skipped)"
+        assert not any(", /" in ln or "/," in ln for ln in log.splitlines()), "no literal comma dir"
+
+    def test_skips_when_real_shared_account_exists(self):
+        log = _run_block("/ws", id_shared_ok=True)
+        assert "id shared" in log, "the guard probe must run"
+        assert "chmod 2775 /ws/shared" not in log, "guard must skip provisioning on collision"
+
+    def test_skips_when_existing_path_not_root_owned(self):
+        log = _run_block("TMP", stat_owner="someoneelse", precreate_shared=True)
         assert (
-            'chgrp "$SHARED_GROUP" "$_base_dir/shared"' in block
-        ), "the root must be group-owned by the shared project group"
-        assert 'chmod 2775 "$_base_dir/shared"' in block, (
-            "the root must be group-writable with setgid so shared files "
-            "inherit the openace-shared group"
+            "chgrp openace-shared" not in log
+        ), "non-root-owned existing root must not be re-provisioned"
+
+    def test_provisioning_failure_degrades_to_warning_not_abort(self):
+        for fail in ("mkdir", "chgrp", "chmod"):
+            log = _run_block("/ws", fail=fail)
+            assert log.startswith("rc=0"), f"{fail} failure must not abort the entrypoint"
+
+    def test_block_sits_after_group_creation_in_entrypoint(self):
+        """The chgrp references $SHARED_GROUP, so the entrypoint must create
+        the group before provisioning (ordering; textual by necessity — the
+        functional scenarios cannot see the surrounding file)."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        assert content.index("groupadd") < content.index('mkdir -p "$_base_dir/shared"')
+
+
+class TestPostSyncGroupEnrollment:
+    def test_enrollment_pass_exists_after_db_sync(self):
+        """Review round 2 (4004368045): on a recreated container the pre-sync
+        enrollment pass no-ops (empty /etc/passwd) and useradd adds no
+        supplementary groups — a second pass must run AFTER the DB sync."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        sync_end = content.index("open-ace-user-sync.log")
+        content.index('usermod -aG "$SHARED_GROUP"', sync_end)
+        assert "Syncing workspace users from database" in content[:sync_end]
+
+
+class _FakeProc:
+    def __init__(self, rc: int, out: str):
+        self.returncode = rc
+        self.stdout = out
+        self.stderr = ""
+
+
+class TestEnsureWorkspaceDirsSharedGuard:
+    """The app-side takeover guard (review round 2, 4004367597)."""
+
+    @pytest.fixture()
+    def stubbed(self, monkeypatch, tmp_path):
+        from app.utils import workspace as ws
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(
+            ws, "run_as_root_if_needed", lambda cmd: calls.append(tuple(cmd)) or _FakeProc(0, "")
         )
+        monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
 
-    def test_provisioning_is_idempotent_and_non_recursive(self):
-        """Only the root itself is touched — chgrp/chmod apply to
-        ``$_base_dir/shared`` alone, never ``-R``: user contents inside the
-        namespace survive restarts untouched."""
-        content = _entrypoint_content()
-        assert not re.search(
-            r'chgrp\s+-R\s+"\$SHARED_GROUP"\s+"\$_base_dir/shared"', content
-        ), "provisioning must not recursively rewrite ownership of user data"
-        assert not re.search(
-            r'chmod\s+-R\s+2775\s+"\$_base_dir/shared"', content
-        ), "provisioning must not recursively rewrite permissions of user data"
+        def fake_run(cmd, **kw):
+            calls.append(tuple(cmd))
+            out = "0" if "id" in cmd[:2] else ""
+            return _FakeProc(0, out)
 
-    def test_collision_guard_skips_real_shared_account(self):
-        """A real account named `shared` (or a non-root-owned path) must be
-        skipped with a warning, not re-chowned — ownership ping-pong with
-        the app's home provisioning would briefly group-open a private
-        home (review MINOR)."""
-        block = _multi_user_block(_entrypoint_content())
-        assert re.search(
-            r'id "shared" &>/dev/null', block
-        ), "the provisioning must probe for a real account named shared"
-        assert re.search(r"continue\n", block), "the guard must skip, not proceed"
+        monkeypatch.setattr(ws.subprocess, "run", fake_run)
+        return ws, calls, str(tmp_path)
 
-    def test_workspace_base_dir_supports_comma_list(self):
-        """WORKSPACE_BASE_DIR may be a comma-separated list (the fs layer's
-        multi-root semantics) — the provisioning iterates instead of creating
-        a literal ``a,b`` directory, and trims whitespace around each base."""
-        block = _multi_user_block(_entrypoint_content())
-        assert (
-            "IFS=',' read -r -a _workspace_base_dirs" in block
-        ), "the base dir must be split on commas before use"
-        # pure-bash trim (review NIT: `echo | xargs` aborts under set -e
-        # when a base dir contains a quote character)
-        assert (
-            "${_base_dir%%[![:space:]]*}" in block
-        ), "each base must be leading-trimmed (pure-bash parameter expansion)"
-        assert (
-            "${_base_dir##*[![:space:]]}" in block
-        ), "each base must be trailing-trimmed (pure-bash parameter expansion)"
+    def test_guard_refuses_shared_account_in_multi_user_mode(self, stubbed):
+        ws, calls, base = stubbed
+        ws._is_docker_multi_user_mode = lambda: True
+        ws._ensure_workspace_dirs("shared", base)
+        touched = [
+            c for c in calls if c and str(c[0]).split("/")[-1].startswith(("chown", "mkdir"))
+        ]
+        assert not touched, "the namespace root must not be taken over"
 
-    def test_provisioning_runs_after_group_creation(self):
-        """The chgrp targets $SHARED_GROUP, so the block must define the
-        group before provisioning (ordering guarantee)."""
-        block = _multi_user_block(_entrypoint_content())
-        assert block.index('SHARED_GROUP="openace-shared"') < block.index(
-            'mkdir -p "$_base_dir/shared"'
-        ), "shared root provisioning must come after the shared group exists"
-        # Pin the actual groupadd call too: the assignment alone would let a
-        # reordered groupadd (chgrp -> "invalid group" under set -e) slip
-        # through (review MINOR — mutation-verified).
-        assert block.index("groupadd") < block.index(
-            'mkdir -p "$_base_dir/shared"'
-        ), "the shared group must be CREATED before provisioning references it"
+    def test_guard_inactive_for_normal_accounts(self, stubbed):
+        ws, calls, base = stubbed
+        ws._is_docker_multi_user_mode = lambda: True
+        ws._ensure_workspace_dirs("alice", base)
+        assert any(str(c[0]).split("/")[-1].startswith("chown") for c in calls)
+
+    def test_guard_inactive_in_single_user_mode(self, stubbed):
+        ws, calls, base = stubbed
+        ws._is_docker_multi_user_mode = lambda: False
+        ws._ensure_workspace_dirs("shared", base)
+        assert any(
+            str(c[0]).split("/")[-1].startswith("chown") for c in calls
+        ), "single-user/package mode has no namespace root; 'shared' is an ordinary account there"
