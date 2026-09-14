@@ -42,7 +42,7 @@
 #     -t <your-registry>/open-ace-webui:<tag> .
 
 ARG BASE_REGISTRY=docker.io
-FROM ${BASE_REGISTRY}/node:20-bookworm-slim
+FROM ${BASE_REGISTRY}/node:22-bookworm-slim
 
 # Runtime tools the pod machinery needs (see header). ca-certificates for the
 # HTTPS call back to the control-plane LLM proxy.

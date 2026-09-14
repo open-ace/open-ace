@@ -1,10 +1,16 @@
 """Qwen CLI adapter --approval-mode mapping guard.
 
-The qwen-code CLI renamed the "suggest" approval mode to "default" between
-0.15.10 and 0.20 (enum at >=0.20: plan | default | auto-edit | auto | yolo;
-see packages/core/src/config/approval-mode.ts at tag v0.23.3). Dockerfile
-installs @qwen-code/qwen-code@0.23.3, so every mode the adapter emits must
-be in that enum or the CLI rejects the launch with an invalid-choice error.
+The qwen-code CLI's --approval-mode choices are plan | default | auto-edit |
+auto | yolo at 0.23.3 (0.15.10 already shipped plan | default | auto-edit |
+yolo; "auto" was added in between). "suggest" was never a valid value: the
+adapter's old ask->suggest mapping failed yargs choices validation at launch
+against the pinned 0.15.10 and would fail identically on 0.23.3 — verified
+locally: ``qwen --approval-mode suggest`` exits with
+"Invalid values: Choices: plan, default, auto-edit, auto, yolo".
+
+Dockerfile installs @qwen-code/qwen-code@0.23.3, so every mode the adapter
+emits must be in that enum or the CLI rejects the launch with an
+invalid-choice error.
 """
 
 import sys
@@ -36,7 +42,7 @@ def _approval_arg(permission_mode):
 @pytest.mark.parametrize(
     ("permission_mode", "expected"),
     [
-        ("ask", "default"),  # "suggest" was renamed to "default" in CLI 0.20
+        ("ask", "default"),  # old mapping passed "suggest", which no CLI version accepts
         ("suggest", "default"),  # legacy spelling still accepted
         ("auto", "auto"),
         ("bypass", "yolo"),

@@ -477,9 +477,9 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     # RHEL/CentOS/Rocky/Alma - use nodesource RPM repo
                     log_info "Installing Node.js via NodeSource (RPM)..."
                     if command -v curl &>/dev/null; then
-                        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
                     elif command -v wget &>/dev/null; then
-                        wget -qO- https://rpm.nodesource.com/setup_20.x | bash -
+                        wget -qO- https://rpm.nodesource.com/setup_22.x | bash -
                     fi
                     if command -v yum &>/dev/null; then
                         yum install -y nodejs
@@ -491,9 +491,9 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     # Debian/Ubuntu - use nodesource APT repo
                     log_info "Installing Node.js via NodeSource (APT)..."
                     if command -v curl &>/dev/null; then
-                        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
                     elif command -v wget &>/dev/null; then
-                        wget -qO- https://deb.nodesource.com/setup_20.x | bash -
+                        wget -qO- https://deb.nodesource.com/setup_22.x | bash -
                     fi
                     apt-get install -y nodejs
                     ;;
