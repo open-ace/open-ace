@@ -216,7 +216,10 @@ def test_v2_stamp_second_boundary_is_inclusive(monkeypatch):
     stays dead."""
     manager = _manager_with_secret()
     token = manager.generate_token(7, 3100)
-    minted = int(time.time())  # the whole-second timestamp embedded in the token
+    # Read the mint straight from the token (v2:{uid}:{port}:{timestamp}:…):
+    # taking a separate int(time.time()) races the second boundary between
+    # minting and reading, making the "same second" premise flaky (round 4).
+    minted = int(token.split(":")[3])
 
     # Stamp WITHIN the mint's second (microsecond remainder): floor(stamp)
     # == minted → the token is NOT older than the stamp.
@@ -1075,7 +1078,10 @@ def test_sso_email_linking_denied_before_binding(monkeypatch):
     assert created == []
     denial = [a for a in audits if a.get("details", {}).get("denied_reason")]
     assert denial and denial[0]["user_id"] == 42
-    assert denial[0]["details"]["email_linked"] is True
+    # Round 4: a denial never binds — email_linked records the ACTUAL outcome
+    # (success-path convention); the match itself is flagged separately.
+    assert denial[0]["details"]["email_linked"] is False
+    assert denial[0]["details"]["email_match_refused"] is True
 
 
 def test_sso_active_control_case_issues_sessions_and_links(monkeypatch):

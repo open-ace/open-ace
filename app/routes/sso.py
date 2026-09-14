@@ -1538,7 +1538,7 @@ def _refuse_disabled_sso_user(
     provider_name: str,
     auth_result,
     frontend_url: str | None,
-    linked_by_email: bool,
+    email_match_refused: bool,
 ):
     """Issue #3379 (PR-A / review round 2 R-2 + round 3): refuse SSO login for
     a deactivated or soft-deleted account.
@@ -1579,7 +1579,13 @@ def _refuse_disabled_sso_user(
                 "provider": provider_name,
                 "method": "sso",
                 "denied_reason": "account_disabled",
-                "email_linked": linked_by_email,
+                # Round 4: a denial never binds — email_linked records the
+                # ACTUAL linking outcome (the success-path convention), so it
+                # is always False here; email_match_refused says the IdP
+                # email MATCHED this (disabled) account even though the
+                # binding was refused.
+                "email_linked": False,
+                "email_match_refused": email_match_refused,
                 "email_linking_enabled": _allow_email_linking(provider_name),
             },
             ip_address=request.remote_addr if request else None,
@@ -1630,7 +1636,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                     # account — a binding made now comes alive on the next
                     # reactivation.
                     denial = _refuse_disabled_sso_user(
-                        user_id, provider_name, auth_result, frontend_url, linked_by_email
+                        user_id, provider_name, auth_result, frontend_url, True
                     )
                     if denial is not None:
                         return denial
@@ -1682,7 +1688,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                 # deactivate in the create→link window), still before the
                 # binding.
                 denial = _refuse_disabled_sso_user(
-                    user_id, provider_name, auth_result, frontend_url, linked_by_email
+                    user_id, provider_name, auth_result, frontend_url, False
                 )
                 if denial is not None:
                     return denial
@@ -1703,7 +1709,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
         # existing-identity resolution path.
         if user_id:
             denial = _refuse_disabled_sso_user(
-                user_id, provider_name, auth_result, frontend_url, linked_by_email
+                user_id, provider_name, auth_result, frontend_url, False
             )
             if denial is not None:
                 return denial
