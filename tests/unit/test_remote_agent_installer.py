@@ -678,7 +678,8 @@ def _run_ps1_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
     harness_file.write_text(harness, encoding="utf-8")
 
     env = dict(os.environ)
-    env["PATH"] = str(fake_bin)
+    # prepend (not replace): pwsh itself must stay resolvable
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         ["pwsh", "-NoProfile", "-File", str(harness_file)],
         env=env,
