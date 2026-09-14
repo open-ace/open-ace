@@ -172,3 +172,95 @@ def test_qwen_node_gates_fail_the_install():
         encoding="utf-8"
     )
     assert "return 1" in pkg  # install_webui gate; caller wraps it in `if`
+
+
+def _qwen_stack_functions() -> str:
+    """Extract the Node-gate + pinned-install functions verbatim from the
+    package-method installer for sandboxed execution tests."""
+    script = (
+        REPO_ROOT / "scripts" / "install-central" / "package-method" / "install.sh"
+    ).read_text(encoding="utf-8")
+    start = script.index("QWEBUI_VERSION=")
+    end = script.index("create_webui_symlinks() {")
+    return script[start:end]
+
+
+def _run_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None):
+    """Execute install_qwen_stack() from the installer under a fake PATH.
+
+    npm is a recorder; node/qwen/qwen-code-webui are shims. No dnf/yum/apt on
+    PATH, so a Node upgrade can never succeed in the sandbox — exactly the
+    "npm present, Node 20, webui missing" host the PR #3386 review found
+    bypassing the gate.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("sed", "cut", "grep"):
+        os.symlink(_which(tool), fake_bin / tool)
+    npm_log = tmp_path / "npm.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    if node_version is not None:
+        shim("node", f"echo '{node_version}'")
+    shim("npm", f'echo "$@" >> "{npm_log}"')
+    if qwen_version is not None:
+        shim("qwen", f"echo '{qwen_version}'")
+    shim("qwen-code-webui", "exit 0")
+
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n" + _qwen_stack_functions() + "\ninstall_qwen_stack\n"
+    )
+    return (
+        subprocess.run(
+            ["/bin/bash", "-c", harness],
+            env={"PATH": str(fake_bin), "NPM_LOG": str(npm_log)},
+            text=True,
+            capture_output=True,
+            check=False,
+        ),
+        npm_log,
+    )
+
+
+def test_qwen_stack_gates_node20_before_any_npm_install(tmp_path):
+    """Regression (PR #3386 review): a host with npm present and Node 20 must
+    not reach `npm install` at all (npm exits 0 on a mere EBADENGINE warning
+    and used to install an unsupported combination)."""
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v20.19.1", qwen_version="0.23.3")
+
+    assert result.returncode == 1
+    # npm was never invoked (recorder log absent or empty)
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def test_qwen_stack_installs_pinned_versions_on_node22(tmp_path):
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version="0.23.3")
+
+    assert result.returncode == 0
+    assert npm_log.read_text(encoding="utf-8").splitlines() == [
+        "install -g qwen-code-webui@0.2.43",
+        "install -g @qwen-code/qwen-code@0.23.3",
+    ]
+
+
+def test_qwen_stack_verifies_installed_cli_version(tmp_path):
+    """The pinned install must verify, not trust npm's exit code: a stale
+    qwen on PATH (0.15.10) fails the stack check."""
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version="0.15.10")
+
+    assert result.returncode == 1
+
+
+def test_package_installer_runs_gated_stack_before_fresh_and_upgrade_split():
+    """Contract: the gated pinned install runs for BOTH fresh installs and
+    upgrades (existing old webui/CLI must also reach the pinned versions)."""
+    pkg = (REPO_ROOT / "scripts" / "install-central" / "package-method" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+    gate_pos = pkg.index("if ! install_qwen_stack; then")
+    split_pos = pkg.index('if [ "$DO_UPGRADE" != "yes" ]; then\n        setup_postgresql')
+    assert gate_pos < split_pos

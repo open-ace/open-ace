@@ -1679,87 +1679,96 @@ stop_webui_systemd_service() {
     return 0
 }
 
-# Install qwen-code-webui via npm if not found
-install_webui() {
-    print_info "Installing qwen-code-webui via npm..."
-    print_info "This may take several minutes, please wait..."
+# Canonical qwen stack versions for the package-method runtime. Keep in sync
+# with the Dockerfile pair (qwen-code-webui@0.2.43 + @qwen-code/qwen-code@0.23.3).
+QWEBUI_VERSION="0.2.43"
+QWEN_CLI_VERSION="0.23.3"
 
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_warning "npm not found, installing Node.js via NodeSource..."
-        print_info "Downloading Node.js 22.x setup script..."
-        if [ "$EUID" -eq 0 ]; then
-            # Use NodeSource to get Node.js 22.x
-            if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-                curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-                if command -v dnf &>/dev/null; then
-                    dnf install -y nodejs
-                else
-                    yum install -y nodejs
-                fi
-            elif command -v apt-get &>/dev/null; then
-                curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-                apt-get install -y nodejs
-            else
-                print_error "Cannot install Node.js automatically on this system"
-                print_info "Please install Node.js 22+ manually"
-                return 1
-            fi
-        else
-            print_error "Not running as root, cannot install Node.js automatically"
-            print_info "Please run with sudo: curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - && sudo yum install -y nodejs"
-            return 1
-        fi
+# Node major version, 0 when node is absent (guarded: never aborts the script).
+node_major_version() {
+    if ! command -v node &>/dev/null; then
+        echo 0
+        return 0
     fi
+    local version
+    version="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
+    echo "${version:-0}"
+}
 
-    # Install qwen-code-webui globally (with progress)
-    print_info "Downloading qwen-code-webui package..."
-    print_info "Package size: ~50MB, this may take 2-5 minutes depending on network speed"
-    if npm install -g qwen-code-webui; then
-        print_success "qwen-code-webui installed successfully"
+# Ensure Node >= 22 (required by @qwen-code/qwen-code@0.23.3, engines.node >=22;
+# npm only warns EBADENGINE and still exits 0). Upgrades in place via NodeSource
+# when an older Node is present; fails explicitly when it cannot reach 22.
+ensure_node_22() {
+    local major
+    major="$(node_major_version)"
+    if [ "$major" -ge 22 ]; then
+        return 0
+    fi
+    if [ "$major" -gt 0 ]; then
+        print_info "Node ${major} < 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION}); upgrading Node.js..."
     else
-        print_error "Failed to install qwen-code-webui"
+        print_info "Node.js not found; installing Node.js 22.x..."
+    fi
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root required to install/upgrade Node.js. Install Node >= 22 and re-run."
         return 1
     fi
-
-    # Check and install qwen-code CLI (required by qwen-code-webui).
-    # @qwen-code/qwen-code >= 0.23 declares engines.node >=22; npm only warns
-    # (EBADENGINE) and still exits 0, so gate on the real version — otherwise
-    # a host that already has Node 20 would "succeed" into an unsupported
-    # combination.
-    local qwen_node_major
-    if command -v node &>/dev/null; then
-        qwen_node_major="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        if command -v dnf &>/dev/null; then
+            dnf install -y nodejs
+        else
+            yum install -y nodejs
+        fi
+    elif command -v apt-get &>/dev/null; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        apt-get install -y nodejs
     else
-        qwen_node_major=0
-    fi
-    qwen_node_major="${qwen_node_major:-0}"
-    if [ "$qwen_node_major" -lt 22 ]; then
-        print_error "Node >= 22 is required by @qwen-code/qwen-code (found: ${qwen_node_major})."
-        print_error "Refusing to install an unsupported Node/CLI combination."
-        print_error "Upgrade Node.js (https://nodesource.com or your package manager) and re-run."
+        print_error "Cannot install/upgrade Node.js automatically on this system. Install Node >= 22 and re-run."
         return 1
     fi
-    if ! command -v qwen &>/dev/null; then
-        print_info ""
-        print_info "qwen-code CLI not found, installing..."
-        print_info "This is required for qwen-code-webui to function"
-        print_info "Package size: ~30MB, this may take 1-3 minutes"
-        if npm install -g @qwen-code/qwen-code; then
-            print_success "qwen-code CLI installed successfully"
-        else
-            print_warning "Failed to install qwen-code CLI automatically"
-            print_info "You may need to install it manually: npm install -g @qwen-code/qwen-code"
-        fi
-    else
-        print_success "qwen-code CLI already installed"
+    major="$(node_major_version)"
+    if [ "$major" -lt 22 ]; then
+        print_error "Node upgrade did not reach >= 22 (found: ${major}). Refusing to continue."
+        return 1
     fi
-
-    # Create symlinks in /usr/bin for easier access
-    create_webui_symlinks
-
+    print_success "Node.js $(node --version) active"
     return 0
 }
+
+# Single gated, pinned install path for the qwen stack. EVERY deployment path
+# (fresh install, existing-but-missing webui, and upgrades of existing
+# webui/CLI) funnels through here: Node gate first, then explicit pinned
+# versions, then verification. Never installs an unpinned/latest version.
+install_qwen_stack() {
+    ensure_node_22 || return 1
+    if ! command -v npm &>/dev/null; then
+        print_error "npm not available after Node setup; cannot install the qwen stack."
+        return 1
+    fi
+    print_info "Installing qwen-code-webui@${QWEBUI_VERSION} + @qwen-code/qwen-code@${QWEN_CLI_VERSION}..."
+    if ! npm install -g "qwen-code-webui@${QWEBUI_VERSION}"; then
+        print_error "Failed to install qwen-code-webui@${QWEBUI_VERSION}"
+        return 1
+    fi
+    if ! npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}"; then
+        print_error "Failed to install @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
+        return 1
+    fi
+    if ! command -v qwen-code-webui &>/dev/null; then
+        print_error "qwen-code-webui not on PATH after install"
+        return 1
+    fi
+    if ! qwen --version 2>/dev/null | grep -q "${QWEN_CLI_VERSION}"; then
+        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: $(qwen --version 2>/dev/null || echo none))"
+        return 1
+    fi
+    print_success "qwen stack ready: webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION}"
+    return 0
+}
+
 
 # Create symlinks in /usr/bin for qwen-code-webui and qwen-code executables
 # This ensures all users can access these commands regardless of npm global install location
@@ -1879,58 +1888,27 @@ find_webui_executable() {
         return 0
     fi
 
-    # Not found, check if npm is available
+    # Not found: EVERY install path (npm present or not) funnels through the
+    # single gated, pinned installer — an unpinned `npm install -g <pkg>`
+    # would follow npm's "latest" (currently engines.node >=22) past a mere
+    # EBADENGINE warning and leave an unsupported Node/CLI combination.
     print_warning "qwen-code-webui not found" >&2
-    if command -v npm &>/dev/null; then
-        print_info "npm is available, installing qwen-code-webui..." >&2
-        print_info "This may take several minutes, please wait..." >&2
-        print_info "Downloading qwen-code-webui (~50MB)..." >&2
-        if npm install -g qwen-code-webui >&2; then
-            print_success "qwen-code-webui installed successfully" >&2
-            # Check and install qwen-code CLI (required by qwen-code-webui)
-            if ! command -v qwen &>/dev/null; then
-                print_info "" >&2
-                print_info "qwen-code CLI not found, installing..." >&2
-                print_info "This is required for qwen-code-webui to function" >&2
-                print_info "Downloading qwen-code (~30MB)..." >&2
-                npm install -g @qwen-code/qwen-code >&2 || print_warning "Failed to install qwen-code CLI" >&2
-            fi
-            # Create symlinks in /usr/bin (if running as root)
-            create_webui_symlinks >&2
-            # Try to find again after installation
-            if command -v qwen-code-webui &>/dev/null; then
-                which qwen-code-webui
-                return 0
-            fi
-            # Check common paths again
-            for candidate in "${candidates[@]}"; do
-                if [ -x "$candidate" ]; then
-                    echo "$candidate"
-                    return 0
-                fi
-            done
-        else
-            print_error "Failed to install qwen-code-webui via npm" >&2
-            return 1
-        fi
-    else
-        # npm not available, need to install Node.js first
-        print_info "npm not available, installing Node.js 22.x via NodeSource..." >&2
-        if install_webui >&2; then
-            # Try to find again after installation
-            if command -v qwen-code-webui &>/dev/null; then
-                which qwen-code-webui
-                return 0
-            fi
-            # Check common paths again
-            for candidate in "${candidates[@]}"; do
-                if [ -x "$candidate" ]; then
-                    echo "$candidate"
-                    return 0
-                fi
-            done
-        fi
+    if ! install_qwen_stack >&2; then
+        print_error "Failed to install the qwen stack (Node >= 22 gate or pinned install failed)" >&2
+        return 1
     fi
+    create_webui_symlinks >&2
+    # Try to find again after installation
+    if command -v qwen-code-webui &>/dev/null; then
+        which qwen-code-webui
+        return 0
+    fi
+    for candidate in "${candidates[@]}"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
 
     return 1
 }
@@ -4293,6 +4271,15 @@ install_local() {
         else
             config_dir="/home/$DEPLOY_USER/.open-ace"
         fi
+    fi
+
+    # Ensure the qwen stack (Node >= 22 + pinned webui/CLI) on BOTH fresh
+    # installs and upgrades: existing-but-old webui/CLI deployments must also
+    # reach the pinned versions (PR #3386 review).
+    if ! install_qwen_stack; then
+        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
+        print_error "Fix Node/npm and re-run."
+        exit 1
     fi
 
     # Setup PostgreSQL (detect or install) - skip for upgrade (DB config already exists)
