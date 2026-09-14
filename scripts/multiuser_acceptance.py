@@ -17,8 +17,11 @@ Usage (from the repository root, on a linux host with docker + compose):
 
 Environment:
     ACCEPTANCE_BASE_URL     default http://localhost:19888
-    ACCEPTANCE_KEEP_STACK=1 keep the compose stack up on exit (manual review)
+    ACCEPTANCE_KEEP_STACK=1 keep the MULTI-USER stack up on exit (manual
+                           review; the single-user tail always self-cleans)
     ACCEPTANCE_RECORD_DIR   default test-results/acceptance-records
+    ACCEPTANCE_SINGLE_BASE_URL  default http://localhost:19889 — the single-
+                           user tail's URL; also drives its published PORT
 
 Flow (plan v2.1 §3): bootstrap env -> pre-seed config.json into the config
 volume (workspace.multi-user, max_instances=3) BEFORE first start ->
@@ -1516,9 +1519,11 @@ def main() -> int:
 
     json_path, md_path = recorder.render()
     failed = recorder.failed
+    exempt = sum(1 for i in recorder.items if i["result"] == "EXEMPT")
+    passed = sum(1 for i in recorder.items if i["result"] == "PASS")
     print(
         f"\nACCEPTANCE {'PASS' if not failed else 'FAIL'}: "
-        f"{len(recorder.items) - len(failed)} passed, {len(failed)} failed"
+        f"{passed} passed, {len(failed)} failed, {exempt} exempt"
     )
     print(f"record: {json_path}\n        {md_path}")
     for item in failed:
