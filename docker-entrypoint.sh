@@ -1175,11 +1175,14 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # Ensure workspace base directory exists
     # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
     # layer's _home_roots_for_user semantics) — a single `mkdir -p` on the
-    # raw value would create a literal "a,b" directory.
+    # raw value would create a literal "a,b" directory. Trimming is pure
+    # bash (review NIT): `echo | xargs` aborts under set -e when a base dir
+    # contains a quote character.
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
     IFS=',' read -r -a _workspace_base_dirs <<< "$WORKSPACE_DIR"
     for _base_dir in "${_workspace_base_dirs[@]}"; do
-        _base_dir="$(echo "$_base_dir" | xargs)"
+        _base_dir="${_base_dir#"${_base_dir%%[![:space:]]*}"}"
+        _base_dir="${_base_dir%"${_base_dir##*[![:space:]]}"}"
         [ -z "$_base_dir" ] && continue
         mkdir -p "$_base_dir"
 
@@ -1191,6 +1194,17 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         # to pre-exist, group-writable by openace-shared with setgid so
         # shared files inherit the group. Idempotent on restarts; only the
         # root itself is touched, never its contents.
+        #
+        # Review MINOR (account-named-shared guard): if a REAL account named
+        # "shared" exists, <base>/shared is that account's home root —
+        # re-chgrp/chmod on every restart would ping-pong ownership with the
+        # app's _ensure_workspace_dirs and group-open a private home in
+        # between. The app side already rejects the collision fail-closed at
+        # registration (path_guard); the entrypoint skips loudly instead.
+        if id "shared" &>/dev/null || { [ -e "$_base_dir/shared" ] && [ "$(stat -c '%U' "$_base_dir/shared" 2>/dev/null)" != "root" ]; }; then
+            echo "  WARNING: skipping shared-namespace provisioning for $_base_dir/shared — path collides with a real account or is not root-owned (administrator intervention required)"
+            continue
+        fi
         mkdir -p "$_base_dir/shared"
         chgrp "$SHARED_GROUP" "$_base_dir/shared"
         chmod 2775 "$_base_dir/shared"

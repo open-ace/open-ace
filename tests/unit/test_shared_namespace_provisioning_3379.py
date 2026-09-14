@@ -68,6 +68,17 @@ class TestSharedNamespaceProvisioning:
             r'chmod\s+-R\s+2775\s+"\$_base_dir/shared"', content
         ), "provisioning must not recursively rewrite permissions of user data"
 
+    def test_collision_guard_skips_real_shared_account(self):
+        """A real account named `shared` (or a non-root-owned path) must be
+        skipped with a warning, not re-chowned — ownership ping-pong with
+        the app's home provisioning would briefly group-open a private
+        home (review MINOR)."""
+        block = _multi_user_block(_entrypoint_content())
+        assert re.search(
+            r'id "shared" &>/dev/null', block
+        ), "the provisioning must probe for a real account named shared"
+        assert re.search(r"continue\n", block), "the guard must skip, not proceed"
+
     def test_workspace_base_dir_supports_comma_list(self):
         """WORKSPACE_BASE_DIR may be a comma-separated list (the fs layer's
         multi-root semantics) — the provisioning iterates instead of creating
@@ -76,9 +87,14 @@ class TestSharedNamespaceProvisioning:
         assert (
             "IFS=',' read -r -a _workspace_base_dirs" in block
         ), "the base dir must be split on commas before use"
-        assert re.search(
-            r'echo "\$_base_dir" \| xargs', block
-        ), "each base must be whitespace-trimmed"
+        # pure-bash trim (review NIT: `echo | xargs` aborts under set -e
+        # when a base dir contains a quote character)
+        assert (
+            "${_base_dir%%[![:space:]]*}" in block
+        ), "each base must be leading-trimmed (pure-bash parameter expansion)"
+        assert (
+            "${_base_dir##*[![:space:]]}" in block
+        ), "each base must be trailing-trimmed (pure-bash parameter expansion)"
 
     def test_provisioning_runs_after_group_creation(self):
         """The chgrp targets $SHARED_GROUP, so the block must define the
@@ -87,3 +103,9 @@ class TestSharedNamespaceProvisioning:
         assert block.index('SHARED_GROUP="openace-shared"') < block.index(
             'mkdir -p "$_base_dir/shared"'
         ), "shared root provisioning must come after the shared group exists"
+        # Pin the actual groupadd call too: the assignment alone would let a
+        # reordered groupadd (chgrp -> "invalid group" under set -e) slip
+        # through (review MINOR — mutation-verified).
+        assert block.index("groupadd") < block.index(
+            'mkdir -p "$_base_dir/shared"'
+        ), "the shared group must be CREATED before provisioning references it"
