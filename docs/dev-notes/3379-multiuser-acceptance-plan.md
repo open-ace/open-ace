@@ -1,3 +1,10 @@
+> 历史方案记录（v2.1，已按 #3383 后的惯例从 docs/superpowers/ 迁至 docs/dev-notes/）。
+> 落地差异：脚本定名 `scripts/multiuser_acceptance.py`（按 scripts/ 功能命名惯例，去掉 issue 编号）；
+> PR 评审 round 3 起改为专用 compose 项目 + 两段式 config 合并（entrypoint 生成后再改
+> max_instances，不再首启前预置 3 键 JSON），并以 #3110（app 读取 ~/.open-ace 而非
+> OPENACE_CONFIG_DIR）为声明前置。执行细节以双语手册为准：
+> docs/{cn,en}/MULTIUSER_ISOLATION_ACCEPTANCE.md。
+
 # Issue #3379: 多用户模式真实 Linux 端到端隔离验收 — 方案 v2.1（终稿）
 
 状态: **审查通过（APPROVE）**,进入实现（审查轨迹: 首轮 1B+4M+4m+2Q → v2 复核 2M+5m+1Q → v2.1 终审 APPROVE 含 3 处编辑级残留,已随手清零）
@@ -26,7 +33,7 @@ Worktree: `.worktrees/3379-acceptance`（branch `feat/3379-multiuser-acceptance`
 
 交付物：
 
-1. **`scripts/multiuser_acceptance_3379.py`** — 独立验收脚本（不进 pytest 收集，#2457 先例）：bootstrap env → 预置 config → compose overlay `up -d --wait` → 建 two-tenant three-user 场景 → 按 9 项清单执行硬断言 → 产出带时间戳的 JSON+MD 验收记录;
+1. **`scripts/multiuser_acceptance.py`** — 独立验收脚本（不进 pytest 收集，#2457 先例）：bootstrap env → 预置 config → compose overlay `up -d --wait` → 建 two-tenant three-user 场景 → 按 9 项清单执行硬断言 → 产出带时间戳的 JSON+MD 验收记录;
 2. **`docs/MULTIUSER_ISOLATION_ACCEPTANCE.md`** — 验收手册：执行步骤、环境前提、9 项清单的攻击/期望对照表（3376 design §7 式）、记录模板、sandboxed 声明性豁免与集群扩展清单;
 3. **CI 接线** — ci.yml 新增**独立 job** `multiuser-acceptance`（main-push 触发、观察期独立不并入 docker job）：**自带镜像构建步骤**（与 docker job 同款 build-push-action local load，产出 `open-ace:$GITHUB_SHA`——job 间不共享本地镜像，不自建则 IMAGE_NAME 落空）、`IMAGE_NAME=open-ace:$GITHUB_SHA` 驱动 compose、显式 `timeout-minutes`、验收记录与失败时 `compose logs` 上传 artifact。
 
@@ -47,7 +54,7 @@ Worktree: `.worktrees/3379-acceptance`（branch `feat/3379-multiuser-acceptance`
 | b | ID 篡改/cwd 替换/symlink/穿越/历史恢复越权 | user-url 带 `required_isolation=none` 不能降 floor;A 的 session token 打 B 的 workspace 路由 → 403/404 矩阵;**terminal 会话归属**: DB 播种三件套——machines 表机器 M 行、alice 的 agent_sessions 行（挂 M）、bob 的 machine_assignments 行（挂 M;attach 的 machine_id 从 body 读）→ bob 调 stop/attach 带 alice 会话 → 403,伪造不存在会话 → 404（门闸先于 agent 交互,无需 live agent）;fs browse/check-path 打 B 的 home、`../` 与 A home 下指向 B 的 symlink（root 侧预置）→ 400;restore_session 跨用户 → 403/404 | vscode 归属门闸（in-memory store 无法外部播种）: 单测覆盖引用（test_vscode_ownership_3376.py,25 个测试函数）+ 手册豁免声明（compose 无 remote agent）;remote 路径结构性校验（is_valid_remote_path）为纯形状校验、不拒他人 home 路径——手册如实说明 #3376 的语义边界 |
 | c | 环境/进程信息无他人 key/token;A 终端/WebUI/VSCode 不进 B 私有区 | `/proc/<B-webui-pid>/environ` 以 A 的 shell 读 → EPERM（或内容无 B 凭据）;A 的 webui env 全量 dump 断言无真实 API key（仅 proxy token）;**终端等价断言** `docker exec … sudo -u alice ls /home/bob` → EACCES（真实 UID 语义;与"用户 A 的终端"的等价性入手册论证——终端命令以 alice UID 执行,OS 层无差别） | VSCode: 同 b 项豁免 |
 | d | 共享项目授权与撤销 | alice 建 `<base>/shared/team-proj` → bob（同租户）browse 可达、carol（异租户）不可达;删共享行后 bob browse → 400 | — |
-| e | 资源上限/取消/异常退出不影响他人 | **预置 config.json（首启前写 config 卷）调 max_instances=3** → 第 4 实例 503（body 如实记录并标注非结构化——本身是验收发现）;stop alice 实例 → bob 会话与 /readyz 不受扰;kill -9 alice 的 webui 进程 → bob 实例健康检查不受扰、治理面存活;"取消任务"以实例停止+会话终止近似,手册声明覆盖边界 | — |
+| e | 资源上限/取消/异常退出不影响他人 | **预置 config.json（首启前写 config 卷）调 max_instances=3** → 第 4 实例 503（body 如实记录并标注非结构化——本身是验收发现）;停 alice 实例 → bob 会话与 /readyz 不受扰;kill -9 bob 的 webui 进程 → bob 实例健康检查不受扰、治理面存活;"取消任务"以实例停止+会话终止近似,手册声明覆盖边界 | — |
 | f | 停用用户/撤销 token/重启 orphan（**依赖 PR-A**） | 停用 bob → session 401、**URL-token 401（PR-A 后）**、实例销毁、proxy token 撤销、prestart 不再发生;`docker compose restart open-ace` → **容器内**（compose exec）断言: 无残留 sudo webui 进程、3100-3200 无监听（宿主侧 docker-proxy 恒监听,不作断言）、token_secret 持久化使 token 重启后仍有效（#3377 验证点） | "临时材料按策略清理"= 容器生命周期语义,手册声明;控制面重启而容器不死的形态在 compose 不存在,手册声明 |
 | g | backend 不支持时明确拒绝 | 契约端点断言 `isolation_level=os_user` + enforced/unsupported 维度、**reasons 不含任何 SANDBOX_PROBE_REASON_CODES 码**（backend-unconfigured 被契约静默,multi_process 在无 backend 时不可达——确定性断言）;user-url 请求 `sandboxed` → 400 `isolation_level_unsupported`（reasons 空落回通用码）;映射缺失用户默认路径 → 400 `identity_mapping_missing`;无共享 UID 回退（进程 UID 断言） | — |
 | h | 单用户模式无退化 | 验收末段 `compose down` → 基础 compose（单用户）up → 契约 `none`/单实例 3100、admin 登录、/readyz 冒烟 | 默认 UI 人工点检 |
@@ -67,7 +74,7 @@ Worktree: `.worktrees/3379-acceptance`（branch `feat/3379-multiuser-acceptance`
 - 脚本遵循 `multiuser_smoke.py` 风格：`main()` 强制 linux + docker 可用（`shutil.which("docker")`），非零退出码 = 验收失败;env 驱动（`ACCEPTANCE_BASE_URL` 缺省 http://localhost:19888;`ACCEPTANCE_KEEP_STACK=1` 保留现场便于人工复核）;**HTTP 用 stdlib urllib**（runner 免 pip install）;
 - 不进 pytest 收集（文件名不含 test_ 前缀、无 pytest 依赖）;
 - compose 以 `up -d --wait` 起（attached 会挂前台日志）;
-- 场景搭建顺序: bootstrap env（三个 `:?` 密钥）→ **预置 config.json 进 config 卷**（workspace.enabled/multi_user_mode/max_instances=3,首启生成只在无 config 时运行）→ up -d --wait → 先建租户（POST /api/admin/tenants）再建用户（强制 tenant_id;POST 触发真实 useradd wrapper）;
+- 场景搭建顺序: bootstrap env（三个 `:?` 密钥）→ **预置 config.json 进 config 卷**（workspace.enabled/multi_user_mode/max_instances=3,首启生成只在无 config 时运行）→ up -d --wait → 先建租户（POST /api/tenants）再建用户（强制 tenant_id;POST 触发真实 useradd wrapper）;
 - CI: 独立 job `multiuser-acceptance`（main-push、观察期;**自带 buildx 构建+load 步骤**产出 `open-ace:$GITHUB_SHA`——job 间不共享本地镜像）、`IMAGE_NAME=open-ace:$GITHUB_SHA`（否则 compose 拉 openace/open-ace:latest,受测代码与指纹脱钩）、`timeout-minutes` 显式、`docker compose` 二进制可用性先行验证、失败 dump `compose logs` 进 artifact;
 - 清理：验收结束 `compose down -v`（KEEP_STACK 例外）。
 

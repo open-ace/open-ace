@@ -5,9 +5,19 @@ against a **real multi-user Linux deployment**, how to read the acceptance
 record produced by `scripts/multiuser_acceptance.py`, and which
 boundaries are covered by **declared exemptions** rather than automated
 assertions. The approved plan of record is
-`docs/superpowers/plans/2026-09-13-issue-3379-multiuser-acceptance.md` (v2.1).
+`docs/dev-notes/3379-multiuser-acceptance-plan.md` (v2.1).
 
 ## 1. Environment prerequisites
+
+**Product prerequisites (same tier as PR-A/#3384)**:
+- **#3110 (OPEN at the time of writing)**: the app's config resolution must
+  honor `OPENACE_CONFIG_DIR` (it currently reads `~/.open-ace` and never
+  sees the config volume). Until it lands, the script fails fast at the
+  config proof, naming #3110.
+- **Shared-namespace provisioning**: nothing in the product creates
+  `<base>/shared` yet — item (d) records the fresh-deployment 403 as a
+  declared known gap (the entrypoint should create it in multi-user mode,
+  openace-shared group, 2775); app-side follow-up.
 
 - A real Linux host (`linux` + `docker` CLI + compose v2; enforced at startup).
 - Enough memory for three qwen-code-webui instances (a few hundred MB each).
@@ -36,17 +46,28 @@ ACCEPTANCE_RECORD_DIR=./my-records \
 python3 scripts/multiuser_acceptance.py
 ```
 
-Flow: bootstrap env (generates the three mandatory secrets) → **pre-seed
-config.json into the config volume** (`workspace.multi_user_mode=true`,
-`max_instances=3`; the volume is created with compose labels when absent so
-the first `up` adopts it) → `up -d --wait` → default-admin first login with
-password change → two-tenant, five-user scenario (tenant-1:
+Flow: **refuse if the dedicated project has state** → bootstrap env (the
+three mandatory secrets) → **two-phase config** (first `up` lets the
+entrypoint generate the full multi-user config → stop → a same-image helper
+container merges ONLY `max_instances=3` → second `up`) → default-admin first
+login with password change → two-tenant, five-user scenario (tenant-1:
 alice/bob/dave/erin, tenant-2: carol; `system_account` triggers the real
 useradd wrapper) → nine-item assertions → single-user regression tail →
 `down -v` (unless KEEP_STACK).
 
+Both stacks run in DEDICATED compose projects (`acceptance-multi` /
+`acceptance-single`) — an existing deployment beside this checkout is never
+touched; if the dedicated project already holds containers/volumes the script
+refuses to run (exit `2`, printing the cleanup command).
+
 Exit codes: `0` all passed; `1` failures or an aborted run (compose logs are
-dumped into the record directory); `2` environment unsuitable.
+dumped into the record directory on BOTH paths — including a completed run
+with failures); `2` environment unsuitable or non-empty dedicated project.
+
+First REAL run on a branch (before merge): the standalone
+`multiuser-acceptance` workflow supports `workflow_dispatch` — trigger it
+from the Actions page or
+`gh workflow run multiuser-acceptance.yml --ref <branch>`.
 
 ## 3. Nine-item checklist: attack / expectation matrix
 
@@ -57,7 +78,7 @@ dumped into the record directory); `2` environment unsuitable.
 | c | No other user's credentials in env; A's tools stay out of B's area | `docker exec -u alice` reading B's webui `/proc/<pid>/environ`, `ls /home/bob` | EPERM/EACCES (real-UID semantics); model-config separation shares item a's evidence channel |
 | d | Shared-project grant and revocation | alice creates `<base>/shared/acc-team-proj`; bob (same tenant) / carol (other tenant) browse; browse again after revocation | bob 200, carol 400; after revocation bob 400 |
 | e | Resource ceilings / cancellation / crash isolation | Pre-seeded `max_instances=3`; a 4th instance; admin stops alice's instance; `kill -9` bob's webui | 4th instance 503 (body unstructured — recorded verbatim, itself an acceptance finding); others' sessions and /readyz undisturbed; the freed slot is reusable |
-| f | Deactivation / token revocation / restart orphans | After deactivating bob: session, URL-token, process, proxy token; after `compose restart`: in-container process and port checks; alice's old token re-verified | All 401 / instance destroyed / proxy token 401; no leftover webui processes after restart, nothing listening on 3100–3200 in-container; token_secret persistence keeps the old token valid (#3377). **Depends on PR-A (#3384)** |
+| f | Deactivation / token revocation / restart orphans | After deactivating bob: session, URL-token, process, proxy token (read from the webui env's `OPENAI_API_KEY` — the sudo-launch path inlines only that known key set); after `up -d --force-recreate` (container recreated, volumes kept — `restart` keeps the writable layer and cannot distinguish a secret on the volume from one left in the layer): in-container process and port checks; alice's old token re-verified | All 401 / instance destroyed / proxy token 401; no leftover webui processes after recreation, nothing listening on 3100–3200 in-container; token_secret volume persistence keeps the old token valid (#3377's actual claim). **Depends on PR-A (#3384)** |
 | g | Explicit refusal when a backend/level is unavailable | Contract endpoint; user-url requesting `sandboxed`; unmapped user (erin) requesting `os_user` | Contract `isolation_level=os_user` with reasons containing **no** SANDBOX_PROBE_REASON_CODES; 400 `isolation_level_unsupported`; 400 `identity_mapping_missing` |
 | h | No regression in single-user mode | Base compose in its OWN project (port 19889, fresh volumes), leaving the multi-user stack untouched | Contract `none`, single instance on 3100 (recorded as a declared exemption if the app-side single-user launch limitation fires — §5.8), admin login, /readyz 200 |
 | i | Publishable sample / permission conditions / capability matrix / real results | Recorder | Record carries git SHA, image digest, docker/compose versions, kernel, policy_revision; capability matrix cross-references `WORKSPACE_ISOLATION_CAPABILITIES` |
@@ -120,15 +141,17 @@ dumped into the record directory); `2` environment unsuitable.
    behavior), with this boundary declared.
 7. **Unstructured max_instances 503 body**: recorded verbatim — it is itself
    an acceptance finding, not an assertion failure.
-8. **Single-user 3100 instance launch (conditional exemption)**: single-user
-   containers run as uid 1000 and never provision an OS account for the
-   default admin, so the sudo-launch path cannot bring up the 3100 instance
-   in that shape — a known app-side single-user limitation outside #3374's
-   multi-user scope. The script treats it conditionally: a healthy launch
-   PASSes; a 502/503 is recorded verbatim and flagged EXEMPT (with the
-   static-analysis rationale) instead of failing the acceptance; any other
-   status fails. The exemption collapses back into a hard assertion once
-   the app side is fixed. Note: the single-user tail runs in its own
+8. **Single-user 3100 instance launch (conditional exemption,
+   cause-confirmed)**: single-user containers run as uid 1000 and never
+   provision an OS account for the default admin, so the sudo-launch path
+   cannot bring up the 3100 instance in that shape — a known app-side
+   single-user limitation outside #3374's multi-user scope. The script
+   treats it conditionally: a healthy launch PASSes; a 502/503 is EXEMPT
+   **only when the declared cause is confirmed** (in-container `id admin`
+   fails) — any other 502/503 (a broken webui binary, a ready-timeout, a
+   real regression) FAILs, so the exemption cannot swallow regressions.
+   The exemption collapses back into a hard assertion once the app side is
+   fixed. Note: the single-user tail runs in its own
    compose project (web port 19889, workspace port range offset to
    13100-13200 to avoid colliding with the multi-user stack's 3100-3200)
    — in that shape the single-user webui is not reachable at its

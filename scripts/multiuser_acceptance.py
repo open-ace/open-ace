@@ -23,13 +23,23 @@ Environment:
     ACCEPTANCE_SINGLE_BASE_URL  default http://localhost:19889 — the single-
                            user tail's URL; also drives its published PORT
 
-Flow (plan v2.1 §3): bootstrap env -> pre-seed config.json into the config
-volume (workspace.multi-user, max_instances=3) BEFORE first start ->
-`up -d --wait` -> default-admin first login + password change ->
-two-tenant three-user scenario (alice/bob @tenant-1, carol @tenant-2,
-each with a system_account so POST /api/admin/users runs the real useradd
-wrapper) -> nine-item assertions (a..i) -> single-user regression tail ->
-`compose down -v` (unless KEEP_STACK).
+PREREQUISITES (declared, same tier as PR-A/#3384 was):
+- #3110 (OPEN at the time of writing): the app must honor
+  OPENACE_CONFIG_DIR for its config resolution. Until it lands, the script
+  aborts at the config proof with a message naming #3110.
+- multi-user shared-namespace provisioning: nothing in the product creates
+  <base>/shared yet — item (d) records the fresh-deployment 403 as a
+  declared known gap until the entrypoint provisions it.
+
+Flow: refuse-if-project-has-state -> bootstrap env -> first `up -d --wait`
+(entrypoint generates the full config) -> stop -> merge max_instances=3
+(same-image helper) -> second `up -d --wait` -> default-admin first login +
+password change -> two-tenant multi-user scenario (system_account triggers
+the real useradd wrapper) -> nine-item assertions (a..i) -> single-user
+regression tail (own compose project) -> `down -v` (unless KEEP_STACK).
+Both stacks run in DEDICATED compose projects (acceptance-multi /
+acceptance-single) — an existing deployment beside this checkout is never
+touched.
 """
 
 from __future__ import annotations
@@ -95,15 +105,24 @@ def run(
     return proc
 
 
-def compose(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:
+MULTI_USER_PROJECT = "acceptance-multi"
+
+
+def compose(*args: str, timeout: int = 600, check: bool = True) -> subprocess.CompletedProcess:
+    """Multi-user stack compose — ALWAYS pinned to the dedicated
+    `acceptance-multi` project (review round 3, 6493): without -p it would
+    resolve to the directory-name default, i.e. the SAME project a
+    production checkout runs (DEPLOYMENT.md instructs exactly that) — the
+    script would then overwrite that deployment's config.json and `down -v`
+    its volumes."""
     docker = shutil.which("docker")
     if not docker:
         raise AcceptanceError("docker CLI is unavailable")
-    cmd = [docker, "compose", "-f", COMPOSE_FILES[0]]
+    cmd = [docker, "compose", "-p", MULTI_USER_PROJECT, "-f", COMPOSE_FILES[0]]
     for extra in COMPOSE_FILES[1:]:
         cmd += ["-f", extra]
     cmd += list(args)
-    return run(cmd, cwd=REPO_ROOT, timeout=timeout)
+    return run(cmd, cwd=REPO_ROOT, timeout=timeout, check=check)
 
 
 SINGLE_USER_BASE_URL = os.environ.get(
@@ -163,7 +182,7 @@ def _single_user_env() -> dict[str, str]:
     }
 
 
-def compose_base(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:
+def compose_base(*args: str, timeout: int = 600, check: bool = True) -> subprocess.CompletedProcess:
     """Compose against the SINGLE-USER base file only, in its own project
     (review F10): item (h) runs beside the multi-user stack instead of
     replacing it, so ACCEPTANCE_KEEP_STACK leaves the MULTI-USER stack up
@@ -177,20 +196,31 @@ def compose_base(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:
         "-f",
         str(REPO_ROOT / "docker-compose.yml"),
     ]
-    cmd += _single_user_override_files()
+    for override in _single_user_override_files():
+        cmd += ["-f", override]
     cmd += list(args)
-    return run(cmd, cwd=REPO_ROOT, env=_single_user_env(), timeout=timeout)
+    return run(cmd, cwd=REPO_ROOT, env=_single_user_env(), timeout=timeout, check=check)
 
 
-def compose_exec(service: str, shell_cmd: str, *, user: str | None = None, timeout: int = 120):
+def compose_exec(
+    service: str,
+    shell_cmd: str,
+    *,
+    user: str | None = None,
+    timeout: int = 120,
+    check: bool = True,
+):
     """Run a command INSIDE the service container (plan §3-f: restart and
     process assertions must be container-side — the host-side docker-proxy
-    always listens on published ports and would be a permanent false pass)."""
+    always listens on published ports and would be a permanent false pass).
+    check=False for commands whose NON-ZERO exit is the expected, isolated
+    outcome (review 7134: with check hardwired True, a correctly-denied
+    cross-user read aborted the whole acceptance run)."""
     args = ["exec", "-T"]
     if user:
         args += ["-u", user]
     args += [service, "sh", "-c", shell_cmd]
-    return compose(*args, timeout=timeout)
+    return compose(*args, timeout=timeout, check=check)
 
 
 def compose_down_volumes() -> None:
@@ -202,6 +232,7 @@ def dump_stack_logs(recorder: Recorder) -> None:
     artifact). Both projects are dumped — item h runs its own single-user
     project, and it must not lose its logs because of that (review round 2,
     finding 2)."""
+    RECORD_DIR.mkdir(parents=True, exist_ok=True)
     for name, fn in (("compose-logs.txt", compose), ("compose-logs-single.txt", compose_base)):
         try:
             proc = fn("logs", "--no-color", "--tail", "400", timeout=120)
@@ -210,89 +241,87 @@ def dump_stack_logs(recorder: Recorder) -> None:
             recorder.note(f"{name} dump failed: {exc}")
 
 
-# ── config.json pre-seeding (plan §3: max_instances=3 via the config volume) ──
+# ── config: two-phase generate-then-merge (review round 3, 6725) ─────────
+#
+# The first `up` lets the ENTRYPOINT generate the complete multi-user config
+# (required_isolation_level floor, token_secret, upload_auth_key …); then a
+# helper container — the SAME image under test, so nothing extra is pulled —
+# merges ONLY workspace.max_instances=3 into that config, and the second `up`
+# starts the app against it. Pre-seeding a 3-key config before the first up
+# (the round-1 design) would skip generate_default_config AND was written to
+# a volume the app does not read (#3110: the app resolves config at
+# ~/.open-ace; honoring OPENACE_CONFIG_DIR is an OPEN prerequisite — the
+# preseed proof in main() fails fast, naming #3110, until it lands).
 
 
-def compose_project_name() -> str:
-    explicit = os.environ.get("COMPOSE_PROJECT_NAME", "").strip()
-    raw = explicit or REPO_ROOT.name
-    import re
-
-    normalized = re.sub(r"[^a-z0-9_-]", "", raw.lower())
-    normalized = re.sub(r"^[^a-z0-9]+", "", normalized)
-    if not normalized:
-        raise AcceptanceError("cannot determine the Compose project name")
-    return normalized
+CONFIG_VOLUME = f"{MULTI_USER_PROJECT}_config-data"
 
 
-def find_config_volume() -> str:
-    """Locate the config-data volume BY LABEL (the bootstrap_compose_env.py
-    precedent) — hand-assembling the volume name is a footgun: project-name
-    normalization differs silently and a typo creates an orphan volume the
-    app never reads. The volume does not exist before the first `up`, so the
-    pre-seed path CREATES it (with compose's labels) for compose to adopt."""
-    docker = shutil.which("docker")
-    project = compose_project_name()
-    proc = run(
-        [
-            docker,
-            "volume",
-            "ls",
-            "-q",
-            "--filter",
-            f"label=com.docker.compose.project={project}",
-            "--filter",
-            f"label=com.docker.compose.volume={CONFIG_VOLUME_LABEL}",
-        ],
-        timeout=30,
-    )
-    names = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if not names:
-        # named <project>_config-data with compose's own labels so the first
-        # `up` adopts it instead of creating a fresh one
-        volume_name = f"{project}_config-data"
-        run(
+def refuse_if_project_has_state() -> None:
+    """Refuse (exit path) when the dedicated project already holds state —
+    overlapping runs and half-torn stacks must not be silently reused, and a
+    fresh acceptance must never run on top of stale containers/volumes
+    (review 6493)."""
+    docker = shutil.which("docker") or "docker"
+    leftovers = []
+    for kind, probe in (
+        (
+            "containers",
+            ["ps", "-aq", "--filter", f"label=com.docker.compose.project={MULTI_USER_PROJECT}"],
+        ),
+        (
+            "volumes",
             [
-                docker,
                 "volume",
-                "create",
-                "--label",
-                f"com.docker.compose.project={project}",
-                "--label",
-                "com.docker.compose.volume=config-data",
-                volume_name,
+                "ls",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={MULTI_USER_PROJECT}",
             ],
-            timeout=30,
+        ),
+    ):
+        proc = run([docker, *probe], check=False, timeout=30)
+        if proc.stdout.strip():
+            leftovers.append(kind)
+    if leftovers:
+        print(
+            f"refusing to run: compose project '{MULTI_USER_PROJECT}' already has "
+            f"{'+'.join(leftovers)}; clean it first: docker compose -p {MULTI_USER_PROJECT} "
+            f"-f docker-compose.yml -f docker-compose.multi-user.yml down -v --remove-orphans",
+            file=sys.stderr,
         )
-        return volume_name
-    return names[0]
+        raise SystemExit(2)
 
 
-def preseed_config() -> dict[str, Any]:
-    """Write workspace config (multi-user ON, max_instances=3) into the config
-    volume via a helper container BEFORE the first `up`: first-boot config
-    generation only runs when no config.json exists, so post-start edits
-    would be ignored. max_instances=3 makes item (e) deterministic without
-    actually launching dozens of WebUI processes."""
-    config = {
-        "workspace": {
-            "enabled": True,
-            "multi_user_mode": True,
-            "max_instances": 3,
-        }
-    }
-    volume = find_config_volume()
-    docker = shutil.which("docker")
-    script = (
-        "mkdir -p /config && "
-        f"echo {json.dumps(json.dumps(config))} > /config/config.json && "
-        "chmod 644 /config/config.json && cat /config/config.json"
+def merge_max_instances(max_instances: int = 3) -> None:
+    """Merge workspace.max_instances into the config the entrypoint generated
+    (same-image helper container; read-modify-write preserves every other
+    key). Volume name is deterministic under the dedicated project."""
+    docker = shutil.which("docker") or "docker"
+    image = os.environ.get("IMAGE_NAME") or "openace/open-ace:latest"
+    merge_code = (
+        "import json\n"
+        "p='/config/config.json'\n"
+        "c=json.load(open(p))\n"
+        f"c.setdefault('workspace', {{}})['max_instances'] = {max_instances}\n"
+        "json.dump(c, open(p,'w'), indent=2)\n"
+        "print('merged:', json.load(open(p))['workspace'])\n"
     )
     run(
-        [docker, "run", "--rm", "-v", f"{volume}:/config", "alpine:3.20", "sh", "-c", script],
-        timeout=180,
+        [
+            docker,
+            "run",
+            "--rm",
+            "-v",
+            f"{CONFIG_VOLUME}:/config",
+            image,
+            "python3",
+            "-c",
+            merge_code,
+        ],
+        cwd=REPO_ROOT,
+        timeout=300,
     )
-    return config
 
 
 # ── HTTP helper (stdlib urllib — no pip install on the runner) ───────────
@@ -391,9 +420,9 @@ class Recorder:
         return ok
 
     def collect_fingerprint(self) -> None:
-        git_sha = "?"
+        git_sha = ""
         try:
-            git_sha = run(["git", "rev-parse", "HEAD"], timeout=30).stdout.strip()
+            git_sha = run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, timeout=30).stdout.strip()
         except Exception:  # noqa: BLE001 - fingerprint is best effort
             pass
         image = os.environ.get("IMAGE_NAME", "openace/open-ace:latest")
@@ -841,13 +870,15 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
     # Model-config separation (same evidence channel as item c): each webui
     # env carries ONLY proxy tokens — no real/dynamic model keys — and the
     # two proxy tokens differ.
+    # review 7374: on the sudo-launch path the proxy token reaches the webui
+    # ONLY as the inlined OPENAI_API_KEY (popen_env=None — the parent env has
+    # no OPENACE_PROXY_TOKEN for sudo env_keep to preserve). Read it there.
     envs = {name: webui_env_of(ports[name], name) for name in ("alice", "bob")}
     for name, env in envs.items():
         rec.check(
             "a",
-            f"{name} webui env: OPENAI_API_KEY is the proxy token",
-            env.get("OPENAI_API_KEY") == env.get("OPENACE_PROXY_TOKEN")
-            and bool(env.get("OPENACE_PROXY_TOKEN")),
+            f"{name} webui env: OPENAI_API_KEY is a proxy token (present)",
+            bool(env.get("OPENAI_API_KEY")),
             f"keys={sorted(k for k in env if k.endswith(('KEY', 'TOKEN')))}",
         )
         dynamic_leak = {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"} & set(env)
@@ -860,8 +891,17 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
     rec.check(
         "a",
         "alice/bob proxy tokens differ",
-        envs["alice"].get("OPENACE_PROXY_TOKEN") != envs["bob"].get("OPENACE_PROXY_TOKEN"),
+        bool(envs["alice"].get("OPENAI_API_KEY"))
+        and envs["alice"]["OPENAI_API_KEY"] != envs["bob"].get("OPENAI_API_KEY"),
     )
+    # app-side note (7374): OPENACE_PROXY_TOKEN is NOT exported on the sudo
+    # path — recorded, not asserted (would be a product change, follow-up)
+    if all("OPENACE_PROXY_TOKEN" not in envs[name] for name in ("alice", "bob")):
+        recorder_note = (
+            "OPENACE_PROXY_TOKEN absent from webui env (sudo-launch inlines only the "
+            "known key set); the proxy token reaches the webui as OPENAI_API_KEY"
+        )
+        rec.note(recorder_note)
     # History roots are per-account by construction (0700 homes); record the
     # materialized layout for the manual browser-side screenshot review.
     listing = compose_exec(SERVICE, "ls -la /home/alice /home/bob", timeout=15).stdout
@@ -1004,9 +1044,14 @@ def item_c_environment_isolation(sc: Scenario) -> None:
     bob_proc = find_webui_process(bob_port, "bob")
     rec.check("c", "bob webui process located", bob_proc is not None, f"port={bob_port}")
     if bob_proc:
-        # alice (docker exec -u alice) cannot read bob's webui environ
+        # alice (docker exec -u alice) cannot read bob's webui environ —
+        # non-zero is the EXPECTED outcome, so check=False (review 7134)
         proc = compose_exec(
-            SERVICE, f"cat /proc/{bob_proc['pid']}/environ", user="alice", timeout=15
+            SERVICE,
+            f"cat /proc/{bob_proc['pid']}/environ",
+            user="alice",
+            timeout=15,
+            check=False,
         )
         rec.check(
             "c",
@@ -1015,7 +1060,7 @@ def item_c_environment_isolation(sc: Scenario) -> None:
             f"rc={proc.returncode}",
         )
         # Terminal equivalence: a shell AS alice cannot list bob's home
-        proc = compose_exec(SERVICE, "ls /home/bob", user="alice", timeout=15)
+        proc = compose_exec(SERVICE, "ls /home/bob", user="alice", timeout=15, check=False)
         rec.check(
             "c",
             "alice shell ls /home/bob -> EACCES",
@@ -1034,23 +1079,29 @@ def item_d_shared_projects(sc: Scenario) -> None:
     status, body, _ = http("GET", "/api/workspace/config", token=r.users["alice"]["token"])
     base_dir = (body or {}).get("base_dir", "/workspace")
     shared_path = f"{base_dir}/shared/acc-team-proj"
-    # F3: `create_dir: true` runs sudo -u alice mkdir under <base>/shared — on
-    # a fresh volume that root is root:root 0755 (the entrypoint only mkdir's
-    # it), so alice's mkdir would EACCES and the route would 403. Provision
-    # the namespace root the way a deployment does: group-writable for
-    # openace-shared (created by the entrypoint; users are members).
-    compose_exec(
-        SERVICE,
-        f"mkdir -p {base_dir}/shared && chgrp openace-shared {base_dir}/shared "
-        f"&& chmod 2775 {base_dir}/shared",
-        timeout=15,
-    )
+    # review 7550: NOTHING in the product creates <base>/shared — on a fresh
+    # deployment `create_dir: true` runs sudo -u alice mkdir under a
+    # root:root 0755 parent and the route returns 403. The script does NOT
+    # provision the directory (an earlier round did, and the PASS then hid
+    # this product gap); the 403 is recorded as a declared known gap with an
+    # app-side follow-up, and the grant/revoke matrix runs only when the
+    # product can actually create the project.
     status, body, _ = http(
         "POST",
         "/api/projects",
         token=r.users["alice"]["token"],
         body={"path": shared_path, "name": "acc-team-proj", "is_shared": True, "create_dir": True},
     )
+    if status != 201:
+        rec.exempt(
+            "d",
+            "shared-project creation: known product gap (no <base>/shared provisioning)",
+            f"status={status} on a fresh deployment — entrypoint should create "
+            f"{base_dir}/shared (openace-shared, 2775) in multi-user mode; app-side "
+            "follow-up. Grant/revoke matrix skipped until it lands.",
+            response=body,
+        )
+        return
     rec.check(
         "d",
         "alice creates shared project",
@@ -1150,6 +1201,12 @@ def item_e_resource_limits(sc: Scenario) -> None:
         )[-1]
     )
     bob_proc = find_webui_process(bob_port, "bob")
+    rec.check(
+        "e",
+        "bob webui process located for kill -9",
+        bob_proc is not None,
+        f"port={bob_port}",
+    )
     if bob_proc:
         # F2: kill the bob-uid webui itself — killing the sudo parent would
         # orphan the node process and keep the port alive
@@ -1188,14 +1245,16 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
     bob_webui_token = bob.get("webui_token") or http(
         "GET", "/api/workspace/user-url", token=bob["token"]
     )[1].get("token")
-    bob_proxy_token = webui_env_of(bob_port, "bob").get("OPENACE_PROXY_TOKEN", "")
-    # F2: a missing proxy token must FAIL the record, not silently skip the
-    # llm-proxy revocation assertion below
+    # review 7374: the proxy token reaches the webui as OPENAI_API_KEY
+    # (sudo-launch inlines the known key set only)
+    bob_proxy_token = webui_env_of(bob_port, "bob").get("OPENAI_API_KEY", "")
+    # F2/7374: a missing proxy token must FAIL the record, not silently skip
+    # the llm-proxy revocation assertion below
     rec.check(
         "f",
         "bob proxy token captured pre-deactivation",
         bool(bob_proxy_token),
-        "no OPENACE_PROXY_TOKEN in bob's webui env — uid-filtered process match failed?",
+        "no OPENAI_API_KEY proxy token in bob's webui env — uid-filtered process match failed?",
     )
 
     # deactivation (PR-A): sessions revoked, URL token refused, workspace
@@ -1257,23 +1316,27 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
         response=body,
     )
 
-    # Control-plane restart: container-side assertions ONLY (host docker-proxy
-    # always listens on published ports — permanent false pass).
+    # Control-plane recreation: container-side assertions ONLY (host
+    # docker-proxy always listens on published ports — permanent false pass).
     alice_url_token = r.users["alice"].get("webui_token") or http(
         "GET", "/api/workspace/user-url", token=r.users["alice"]["token"]
     )[1].get("token")
-    compose("restart", SERVICE, timeout=300)
+    # review 8026: `compose restart` keeps the SAME container writable layer,
+    # so a secret merely left there would also survive — indistinguishable
+    # from volume persistence (#3377's actual claim). Recreate the container
+    # (volumes kept): only a volume-persisted secret keeps the token valid.
+    compose("up", "-d", "--force-recreate", SERVICE, timeout=600)
     wait_ready(rec)
     processes = [p for p in _proc_table() if "--token-secret" in p["cmd"]]
     rec.check(
         "f",
-        "no leftover webui processes after restart",
+        "no leftover webui processes after recreation",
         not processes,
         f"leftover={[p['cmd'][:80] for p in processes]}",
     )
     rec.check(
         "f",
-        "ports 3100-3200 silent in-container after restart",
+        "ports 3100-3200 silent in-container after recreation",
         listening_ports_in_range(3100, 3200) == [],
         f"{listening_ports_in_range(3100, 3200)}",
     )
@@ -1287,7 +1350,7 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
     )
     rec.check(
         "f",
-        "alice URL token still valid after restart (#3377 secret persisted)",
+        "alice URL token valid after container RECREATION (#3377 secret on volume)",
         status == 200,
         f"status={status}",
         response=body,
@@ -1375,6 +1438,14 @@ def item_h_single_user_regression(recorder: Recorder) -> dict[str, Any]:
     return {}
 
 
+def _single_user_has_no_admin_os_account() -> bool:
+    """Confirm the DECLARED cause of the single-user 3100 launch failure:
+    the container has no OS user for the default admin (review 8278 — a bare
+    502/503 could just as well be a real regression)."""
+    proc = compose_base("exec", "-T", SERVICE, "id", "admin", timeout=60, check=False)
+    return proc.returncode != 0
+
+
 def _item_h_assertions(rec: Recorder) -> None:
     token, user = login("admin", "admin123")
     if user.get("must_change_password"):
@@ -1397,16 +1468,17 @@ def _item_h_assertions(rec: Recorder) -> None:
     url = (body or {}).get("url", "") if isinstance(body, dict) else ""
     if status == 200 and url.endswith(":3100"):
         rec.check("h", "single shared instance on 3100", True, f"url={url}", response=body)
-    elif status in (502, 503):
-        # F5 (declared exemption): single-user containers run as uid 1000 and
-        # never provision an OS account for the default admin, so the
-        # sudo-launch path cannot bring up the 3100 instance — an app-side
-        # single-user limitation OUTSIDE the multi-user scope of #3374.
-        # Recorded verbatim as EXEMPT (excluded from pass/fail counts).
+    elif status in (502, 503) and _single_user_has_no_admin_os_account():
+        # F5 (declared exemption), tightened per review 8278: exempted ONLY
+        # when the declared cause is confirmed — the container has no OS
+        # user for the default admin (uid-1000 single-user shape). Any other
+        # 502/503 (broken webui binary, ready-timeout, max-instances …) FAILS
+        # so real single-user regressions are not swallowed.
         rec.exempt(
             "h",
             "single 3100 instance: app-side single-user launch limitation",
-            f"status={status} — declared exemption, see handbook §5.8",
+            f"status={status} with declared cause confirmed (no OS user 'admin') — "
+            "see handbook §5.8",
             response=body,
         )
         rec.note(
@@ -1431,11 +1503,14 @@ def item_i_record_and_crossrefs(recorder: Recorder) -> None:
     """(i) publishable sample, permission conditions, capability matrix."""
     rec = recorder
     print("[i] record assembly and cross-references")
+    import re as _re
+
+    sha = rec.fingerprint.get("git_sha", "")
     rec.check(
         "i",
-        "fingerprint captured",
-        bool(rec.fingerprint.get("git_sha")),
-        f"{rec.fingerprint.get('git_sha')}",
+        "fingerprint captured (git SHA pinned to this repository)",
+        bool(_re.fullmatch(r"[0-9a-f]{40}", str(sha))),
+        f"git_sha={sha!r}",
     )
     rec.note(
         "capability matrix: docs WORKSPACE_ISOLATION_CAPABILITIES; permissions: "
@@ -1461,13 +1536,18 @@ def main() -> int:
     recorder.collect_fingerprint()
     sc: Scenario | None = None
     try:
-        # 1. env bootstrap + config preseed + stack up
+        # 1. refuse dirty state, bootstrap env, two-phase up (review round 3):
+        #    first up -> entrypoint generates the FULL config -> stop -> merge
+        #    max_instances=3 (same-image helper) -> second up
+        refuse_if_project_has_state()
         run(
             [sys.executable, str(REPO_ROOT / "scripts" / "bootstrap_compose_env.py")],
             cwd=REPO_ROOT,
             timeout=120,
         )
-        preseed_config()
+        compose("up", "-d", "--wait", timeout=900)
+        compose("stop", SERVICE, timeout=300)
+        merge_max_instances(3)
         compose("up", "-d", "--wait", timeout=900)
         wait_ready(recorder)
 
@@ -1481,8 +1561,12 @@ def main() -> int:
         status, body, _ = http("GET", "/api/workspace/config", token=sc.admin_token)
         if not isinstance(body, dict) or body.get("max_instances") != 3:
             raise AcceptanceError(
-                f"config preseed ineffective: max_instances="
-                f"{body.get('max_instances') if isinstance(body, dict) else body}"
+                "config merge ineffective: /api/workspace/config reports max_instances="
+                f"{body.get('max_instances') if isinstance(body, dict) else body} "
+                "(expected 3). Most likely cause: #3110 is still OPEN — the app resolves "
+                "its config at ~/.open-ace and ignores OPENACE_CONFIG_DIR, so it never "
+                "reads the volume config this script merges. #3110 is a declared "
+                "PREREQUISITE of this acceptance (same tier as PR-A/#3384 was)."
             )
         recorder.note("pre-seeded config active: multi_user_mode on, max_instances=3")
         sc.build()
@@ -1495,6 +1579,10 @@ def main() -> int:
         item_g_backend_refusal(sc)
         item_h_single_user_regression(recorder)
         item_i_record_and_crossrefs(recorder)
+        if recorder.failed:
+            # review 7769: a COMPLETED run with failures must also capture
+            # logs — the finally teardown would otherwise destroy them
+            dump_stack_logs(recorder)
     except Exception as exc:  # noqa: BLE001 - F6: ANY crash must still render
         import traceback
 

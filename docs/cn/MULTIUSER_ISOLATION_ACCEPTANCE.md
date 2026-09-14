@@ -3,9 +3,16 @@
 本手册描述如何在**真实 Linux 多用户部署**上执行 #3374 的九项验收清单，如何阅读
 `scripts/multiuser_acceptance.py` 产出的验收记录，以及哪些边界以**声明性豁免**
 的形式覆盖（而非自动化断言）。方案终稿见
-`docs/superpowers/plans/2026-09-13-issue-3379-multiuser-acceptance.md`（v2.1，已审查通过）。
+`docs/dev-notes/3379-multiuser-acceptance-plan.md`（v2.1，已审查通过）。
 
 ## 1. 环境前提
+
+**产品前置（与 PR-A/#3384 同级）**：
+- **#3110（撰写时仍 OPEN）**：应用配置解析必须遵循 `OPENACE_CONFIG_DIR`（当前读
+  `~/.open-ace`，读不到 config 卷）。修复前脚本在配置校验处快速失败并指名 #3110。
+- **共享命名空间预置**：产品尚无任何步骤创建 `<base>/shared`——d 项会把全新部署的
+  403 记为声明已知缺口（entrypoint 应在多用户模式下创建，属组 openace-shared、
+  2775），app 侧跟进。
 
 - 真实 Linux 主机（`linux` + `docker` CLI + compose v2；脚本启动时强制检查）。
 - 足够拉起 3 个 qwen-code-webui 实例的内存（每实例约数百 MB）。
@@ -30,14 +37,22 @@ ACCEPTANCE_RECORD_DIR=./my-records \
 python3 scripts/multiuser_acceptance.py
 ```
 
-脚本流程：bootstrap env（生成三个必填密钥）→ **预置 config.json 进 config 卷**
-（`workspace.multi_user_mode=true`、`max_instances=3`；卷不存在时带 compose label
-创建，首个 `up` 采纳）→ `up -d --wait` → 默认 admin 首登改密 → 建两租户五用户
+脚本流程：**拒绝非空的专用项目状态** → bootstrap env（生成三个必填密钥）→
+**两段式配置**（首次 `up` 由 entrypoint 生成完整多用户配置 → stop → 用同镜像辅助
+容器只合并 `max_instances=3` → 二次 `up`）→ 默认 admin 首登改密 → 建两租户五用户
 （tenant-1：alice/bob/dave/erin，tenant-2：carol；`system_account` 触发真实
 useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEEP_STACK 除外）。
 
-退出码：`0` 全部通过；`1` 有失败项或中途终止（此时 compose logs 落盘进记录目录）；
-`2` 环境不满足。
+两套栈都运行在**专用 compose 项目**（`acceptance-multi` / `acceptance-single`）里——
+同一 checkout 旁的已有部署永远不会被触碰；脚本开始时若发现专用项目残留容器/卷会拒绝
+执行（退出码 `2`，并打印清理命令）。
+
+退出码：`0` 全部通过；`1` 有失败项或中途终止（两种情况下 compose logs 均落盘进记录
+目录——含跑完但有 FAIL 的路径）；`2` 环境不满足或专用项目非空。
+
+在分支上真实首跑（合入前）：独立 workflow `multiuser-acceptance` 支持
+`workflow_dispatch`，可在 PR 分支手动触发（Actions 页或
+`gh workflow run multiuser-acceptance.yml --ref <branch>`）。
 
 ## 3. 九项清单：攻击 / 期望对照表
 
@@ -48,7 +63,7 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
 | c | 环境无他人凭据；A 不进 B 私有区 | `docker exec -u alice` 读 B 的 webui `/proc/<pid>/environ`、`ls /home/bob` | EPERM/EACCES（真实 UID 语义）；模型配置分离同 a 项口径 |
 | d | 共享项目授权与撤销 | alice 建 `<base>/shared/acc-team-proj`；bob（同租户）/carol（异租户）browse；撤销后再 browse | bob 200、carol 400；撤销后 bob 400 |
 | e | 资源上限/取消/异常退出不影响他人 | 预置 `max_instances=3`；第 4 实例；admin 停 alice 实例；`kill -9` bob 的 webui | 第 4 实例 503（body 非结构化——如实记录，本身是验收发现）；他人会话与 /readyz 不受扰；释放的槽位可复用 |
-| f | 停用用户/撤销 token/重启 orphan | 停用 bob 后查会话/URL-token/进程/代理 token；`compose restart` 后容器内查进程与端口、alice 旧 token 复验 | 全部 401/进程销毁/代理 token 401；重启后无残留 webui 进程、3100–3200 容器内无监听；token_secret 持久化使旧 token 仍有效（#3377）。**依赖 PR-A（#3384）** |
+| f | 停用用户/撤销 token/重启 orphan | 停用 bob 后查会话/URL-token/进程/代理 token（代理 token 取自 webui 环境的 `OPENAI_API_KEY`——sudo 启动路径只内联该键集）；`up -d --force-recreate`（重建容器、保留卷——`restart` 不重建可写层，分辨不出 secret 是否真落在卷上）后容器内查进程与端口、alice 旧 token 复验 | 全部 401/进程销毁/代理 token 401；重建后无残留 webui 进程、3100–3200 容器内无监听；token_secret 卷持久化使旧 token 仍有效（#3377 的真实主张）。**依赖 PR-A（3384）** |
 | g | backend 不支持时明确拒绝 | 契约端点；user-url 请求 `sandboxed`；无映射用户（erin）请求 `os_user` | 契约 `isolation_level=os_user` 且 reasons **不含任何** SANDBOX_PROBE_REASON_CODES；400 `isolation_level_unsupported`；400 `identity_mapping_missing` |
 | h | 单用户模式无退化 | 独立 compose 项目（端口 19889）起基础栈,自带全新卷,不影响多用户栈 | 契约 `none`、单实例 3100（若触发 app 侧单用户启动限制则记声明豁免,见 §5.8）、admin 登录、/readyz 200 |
 | i | 发布样例/权限条件/能力矩阵/真实结果 | 记录器 | 记录含 git SHA、镜像 digest、docker/compose 版本、内核、policy_revision；能力矩阵交叉引用 `WORKSPACE_ISOLATION_CAPABILITIES` |
@@ -97,11 +112,12 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
    期望行为），覆盖边界如本条声明。
 7. **max_instances 503 body 非结构化**：如实记录——这本身是一条验收发现，不是
    断言失败。
-8. **单用户 3100 实例启动（条件豁免）**：单用户容器以 uid 1000 运行且不会为默认
-   admin 预置 OS 账号，sudo 启动路径在该形态下无法拉起 3100 实例——这是 app 侧
-   单用户形态的已知限制，在 #3374 的多用户范围之外。脚本对该项做条件处理：
-   正常启动则 PASS；502/503 则原样记录并标记 EXEMPT（附静态分析依据），不作为
-   验收失败；其余状态码视为失败。待 app 侧修复后豁免自动收敛为断言。另注：单用户尾段
+8. **单用户 3100 实例启动（条件豁免，原因确认制）**：单用户容器以 uid 1000 运行且
+   不会为默认 admin 预置 OS 账号，sudo 启动路径在该形态下无法拉起 3100 实例——app 侧
+   单用户形态的已知限制，在 #3374 的多用户范围之外。脚本对该项做条件处理：正常启动则
+   PASS；**仅当 502/503 且容器内 `id admin` 确认失败**（声明的成因被证实）才记 EXEMPT，
+   其余 502/503（如 webui 二进制损坏等真实回归）一律 FAIL——避免豁免吞掉回归。
+   待 app 侧修复后豁免自动收敛为断言。另注：单用户尾段
    在独立 compose 项目中运行（web 端口 19889、工作区端口段偏移到 13100–13200，避免
    与多用户栈的 3100–3200 冲突）——该形态下单用户 webui 不在其广播的主机 URL 上可达，
    h 项断言全部为 API 层，不依赖直连它。
