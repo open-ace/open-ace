@@ -1173,8 +1173,29 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     done
 
     # Ensure workspace base directory exists
+    # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
+    # layer's _home_roots_for_user semantics) — a single `mkdir -p` on the
+    # raw value would create a literal "a,b" directory.
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
-    mkdir -p "$WORKSPACE_DIR"
+    IFS=',' read -r -a _workspace_base_dirs <<< "$WORKSPACE_DIR"
+    for _base_dir in "${_workspace_base_dirs[@]}"; do
+        _base_dir="$(echo "$_base_dir" | xargs)"
+        [ -z "$_base_dir" ] && continue
+        mkdir -p "$_base_dir"
+
+        # Issue #3379 (multi-user acceptance gap): provision the shared
+        # namespace root. POST /api/projects with create_dir runs
+        # `sudo -u <user> mkdir -p` — on a fresh volume the parent is
+        # root:root 0755 and every user's creation EACCESes (403). The
+        # #3376 first-class <base>/shared/<name> namespace needs its root
+        # to pre-exist, group-writable by openace-shared with setgid so
+        # shared files inherit the group. Idempotent on restarts; only the
+        # root itself is touched, never its contents.
+        mkdir -p "$_base_dir/shared"
+        chgrp "$SHARED_GROUP" "$_base_dir/shared"
+        chmod 2775 "$_base_dir/shared"
+    done
+    unset _base_dir _workspace_base_dirs
 
     # Fix /home directory permissions (Issue #1249)
     # When data/home is mounted as /home, restrictive 700 permissions prevent
