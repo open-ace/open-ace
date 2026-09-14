@@ -128,7 +128,12 @@ dumped into the record directory); `2` environment unsuitable.
    PASSes; a 502/503 is recorded verbatim and flagged EXEMPT (with the
    static-analysis rationale) instead of failing the acceptance; any other
    status fails. The exemption collapses back into a hard assertion once
-   the app side is fixed.
+   the app side is fixed. Note: the single-user tail runs in its own
+   compose project (web port 19889, workspace port range offset to
+   13100-13200 to avoid colliding with the multi-user stack's 3100-3200)
+   — in that shape the single-user webui is not reachable at its
+   advertised host URL; the item-h assertions are all API-level and never
+   connect to it.
 
 ## 6. Deployment note (carried from #3384)
 
