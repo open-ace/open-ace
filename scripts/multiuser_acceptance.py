@@ -1659,6 +1659,13 @@ def main() -> int:
             cwd=REPO_ROOT,
             timeout=120,
         )
+        # First REAL CI run (pull_request trigger, run 34834296021) surfaced
+        # the next abort point: a fresh PRODUCTION database refuses to start
+        # ("Fresh database detected ... Run migration job first"). The
+        # deployment flow initializes via a one-shot migration container
+        # (docs/en/DEPLOYMENT.md: "docker compose run --rm open-ace alembic
+        # upgrade head") — do exactly that, in the dedicated project.
+        compose("run", "--rm", SERVICE, "alembic", "upgrade", "head", timeout=600)
         compose("up", "-d", "--wait", timeout=900)
         compose("stop", SERVICE, timeout=300)
         merge_max_instances(3)
