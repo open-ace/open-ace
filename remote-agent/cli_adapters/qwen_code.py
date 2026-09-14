@@ -99,7 +99,14 @@ class QwenCodeAdapter(BaseCLIAdapter):
                 "bypass": "yolo",  # Dangerous: full autonomy, no prompts
                 "full-auto": "yolo",  # Alias for bypass
                 # Legacy aliases for backward compatibility
-                "auto-edit": "auto-edit",  # Real CLI mode since 0.20
+                # "auto-edit" must stay yolo (NOT the CLI's real auto-edit mode,
+                # which prompts for shell commands): it is the default
+                # permission_mode of unattended autonomous workflows
+                # (autonomous/models.py), and remote headless sessions have no
+                # human to answer the CLI's shell-approval prompts — with the
+                # permission policy disabled (default) the request would buffer
+                # for a frontend that is never there and stall until timeout.
+                "auto-edit": "yolo",
                 "suggest": "default",  # Pre-0.20 spelling of "default"
             }
             cli_mode = approval_mode_map.get(permission_mode, permission_mode)

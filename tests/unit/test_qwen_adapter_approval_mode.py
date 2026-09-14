@@ -41,7 +41,11 @@ def _approval_arg(permission_mode):
         ("auto", "auto"),
         ("bypass", "yolo"),
         ("full-auto", "yolo"),
-        ("auto-edit", "auto-edit"),  # real CLI mode since 0.20
+        # NOT the CLI's real auto-edit mode (which prompts for shell):
+        # "auto-edit" is the default permission_mode of unattended autonomous
+        # workflows; headless remote sessions have no human to answer the
+        # CLI's shell-approval prompts, so it must map to a non-prompting mode.
+        ("auto-edit", "yolo"),
     ],
 )
 def test_permission_mode_maps_to_valid_cli_mode(permission_mode, expected):

@@ -18,7 +18,6 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 | `openace-run-as.sh`、`openace-fetch-wrapper`、`openace-validate-launch`、`openace-ssh-sync` | scheduler / workspace 模块、`docker-entrypoint.sh` |
 | `setup-cgroup-v2.sh` | sandbox policy |
 | `push.sh` | 自主开发 orchestrator |
-| `migrate_security_mode.sh` | `app/__init__.py` |
 
 ### 2. CI / 质量门禁（workflows + pre-commit 引用）
 
@@ -36,7 +35,7 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 - `open-ace.service`、`openace-scheduler.service` — systemd 单元
 - sudoers 家族：`generate-sudoers.sh`、`upgrade-sudoers-security.sh`、`openace-{cat,chown,mkdir,rm,restore-sudoers,useradd,write-as,webui-launch}.sh`、`openace-{gh,git}.py`
 - 发布：`release.sh`、`gen_requirements_lock.sh`、`generate_changelog.py`
-- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`、`migrate_encryption_keys_to_db.py`
+- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
 
 ### 4. 应急工具（低频但关键，勿当死代码清理）
 
