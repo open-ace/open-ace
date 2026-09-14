@@ -717,9 +717,11 @@ def admin_required(f=None):
 
                 manager = get_webui_manager()
                 if manager:
-                    # Validate token (supports v1 and v2 formats)
-                    valid, user_id, error = manager.validate_token(url_token)
-                    if valid and user_id:
+                    # Validate token (supports v1 and v2 formats).
+                    # R-12 (#3379 review): the validating lookup returns the
+                    # user row — no second get_user_by_id on this path.
+                    valid, user_id, error, user = manager.validate_token_with_user(url_token)
+                    if valid and user_id and user:
                         # Log URL token usage
                         is_legacy = not url_token.startswith("v2:")
                         _log_url_token_usage(
@@ -729,44 +731,39 @@ def admin_required(f=None):
                             is_legacy=is_legacy,
                         )
 
-                        # Load user from database to check role
-                        from app.repositories.user_repo import UserRepository
+                        # Issue #1832 F1: surface a latent security
+                        # weakening without changing behavior. The row comes
+                        # from get_user_by_id's SELECT * and must carry
+                        # must_change_password; if the key is ever absent
+                        # (e.g. a future SELECT narrowing),
+                        # enforce_password_change_requirement silently
+                        # treats it as falsy and the forced password change
+                        # is bypassed. Historical behavior is to proceed, so
+                        # we keep doing that but log so the silent bypass is
+                        # observable. This finding does NOT fix the
+                        # semantics — it only makes the weakening visible.
+                        if "must_change_password" not in user:
+                            logger.warning(
+                                "WebUI-token admin path: user dict lacks "
+                                "'must_change_password' key (user_id=%s); "
+                                "forced password change cannot be enforced "
+                                "— latent auth weakening, see Issue #1832 F1",
+                                user_id,
+                            )
+                        # Issue #2179: Accept all admin variants
+                        user_role = user.get("role")
+                        if user_role not in ("admin", "platform_admin", "tenant_admin"):
+                            return jsonify({"error": "Admin access required"}), 403
 
-                        user_repo = UserRepository()
-                        user = user_repo.get_user_by_id(user_id)
-                        if user:
-                            # Issue #1832 F1: surface a latent security
-                            # weakening without changing behavior. get_user_by_id
-                            # returns SELECT * and must carry must_change_password;
-                            # if the key is ever absent (e.g. a future SELECT
-                            # narrowing), enforce_password_change_requirement
-                            # silently treats it as falsy and the forced password
-                            # change is bypassed. Historical behavior is to
-                            # proceed, so we keep doing that but log so the silent
-                            # bypass is observable. This finding does NOT fix the
-                            # semantics — it only makes the weakening visible.
-                            if "must_change_password" not in user:
-                                logger.warning(
-                                    "WebUI-token admin path: user dict lacks "
-                                    "'must_change_password' key (user_id=%s); "
-                                    "forced password change cannot be enforced "
-                                    "— latent auth weakening, see Issue #1832 F1",
-                                    user_id,
-                                )
-                            # Issue #2179: Accept all admin variants
-                            user_role = user.get("role")
-                            if user_role not in ("admin", "platform_admin", "tenant_admin"):
-                                return jsonify({"error": "Admin access required"}), 403
+                        g.user = user
+                        g.user_id = user_id
+                        g.user_role = user_role
+                        g.tenant_id = user.get("tenant_id")
 
-                            g.user = user
-                            g.user_id = user_id
-                            g.user_role = user_role
-                            g.tenant_id = user.get("tenant_id")
-
-                            password_change_response = enforce_password_change_requirement(user)
-                            if password_change_response is not None:
-                                return password_change_response
-                            return func(*args, **kwargs)
+                        password_change_response = enforce_password_change_requirement(user)
+                        if password_change_response is not None:
+                            return password_change_response
+                        return func(*args, **kwargs)
 
             # No valid authentication found
             return jsonify({"error": "Authentication required"}), 401
