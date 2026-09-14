@@ -87,19 +87,20 @@ class QwenCodeAdapter(BaseCLIAdapter):
             args.extend(["--resume", session_id])
 
         # Issue #2645: Map permission_mode to Qwen CLI --approval-mode flags.
-        # Qwen CLI supports: "suggest", "auto", "yolo" (per tests/issues/166)
-        # - "ask": Safe mode, suggests actions for confirmation ("suggest")
+        # CLI >= 0.20 supports: "plan", "default", "auto-edit", "auto", "yolo"
+        # ("suggest" was renamed to "default" between 0.15 and 0.20).
+        # - "ask": Safe mode, suggests actions for confirmation ("default")
         # - "auto": Safe automatic mode ("auto")
         # - "bypass": Dangerous mode, full autonomy ("yolo")
         if permission_mode:
             approval_mode_map = {
-                "ask": "suggest",  # Safe: suggest actions, require confirmation
+                "ask": "default",  # Safe: suggest actions, require confirmation
                 "auto": "auto",  # Safe automatic: auto-execute with some limits
                 "bypass": "yolo",  # Dangerous: full autonomy, no prompts
                 "full-auto": "yolo",  # Alias for bypass
                 # Legacy aliases for backward compatibility
-                "auto-edit": "yolo",
-                "suggest": "suggest",
+                "auto-edit": "auto-edit",  # Real CLI mode since 0.20
+                "suggest": "default",  # Pre-0.20 spelling of "default"
             }
             cli_mode = approval_mode_map.get(permission_mode, permission_mode)
             args.extend(["--approval-mode", cli_mode])

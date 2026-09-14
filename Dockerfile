@@ -103,7 +103,7 @@ RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources
     && ps --version >/dev/null \
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
+    && npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3 \
     # === code-server Installation (for local workspace VS Code button) ===
     # NOTE: On Debian, the install script uses deb package which ignores --prefix
     # and always installs to /usr/bin/code-server
@@ -188,42 +188,6 @@ COPY --chown=open-ace:open-ace . .
 
 # Copy frontend build output from frontend-builder stage (Issue #1260)
 COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
-
-# Patch qwen-code-webui "Allow All" permission for remote sessions:
-# the onAllowAll handler lacks the WebSocket branch, so remote-session
-# permission requests (requestId-only) never get answered and time out as
-# "denied". Script is version-pinned and fails the build on drift.
-RUN python3 /app/scripts/patch-qwen-webui-permission.py
-
-# Patch qwen-code-webui conversation-history listing:
-# 1) getHistoryFiles only scanned the project root, missing chats/*.jsonl;
-# 2) groupConversations collapsed every CLI session (assistant messages carry
-#    no message.id, so empty id sets were treated as duplicates). Both made
-#    "view conversation history" show nothing and open projects as new chats.
-# Script is version-pinned and fails the build on drift.
-RUN python3 /app/scripts/patch-qwen-webui-histories.py
-
-# Patch qwen-code-webui in-app navigation so it keeps URL query params
-# (workspaceType=remote, machineId, token, encodedProjectName, openace_url):
-# sessionId nav, both "view conversation history" buttons, and the
-# project-selector nav all rebuilt the URL with a bare URLSearchParams,
-# dropping the remote context and degrading ChatPage to local mode (silent
-# chat failure + file-changes HTTP 403). Script is version-pinned and fails
-# the build on drift.
-RUN python3 /app/scripts/patch-qwen-webui-navparams.py
-
-# Patch qwen-code-webui VS Code folder parameter for remote workspaces:
-# the folder parameter lacks "/" prefix for Windows paths (C:/workspace),
-# causing code-server to fail with "Unable to resolve resource".
-# Script is version-pinned and fails the build on drift.
-RUN python3 /app/scripts/patch-qwen-webui-vscode-folder.py
-#
-# Patch qwen-code-webui local mode permission confirmation dialog (Issue #2593):
-# the processStreamLine function does not handle CLI's `control_request` messages,
-# so local mode permission dialogs never appear. This adds handling to convert
-# control_request to permission_request format.
-# Script is version-pinned and fails the build on drift.
-RUN python3 /app/scripts/patch-qwen-webui-local-permission.py
 
 # Copy and set up entrypoint script
 # Use python to convert Windows line endings (CRLF) to Unix (LF) and remove BOM - Issue #1988
