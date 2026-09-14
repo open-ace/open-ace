@@ -228,6 +228,8 @@ if ($InstallCli) {
                 try { $nodeMajor = [int]((node --version) -replace '^v','' -split '\.')[0] } catch {}
                 if ($nodeMajor -lt 22) {
                     Write-Host "[ERROR] Node >= 22 is required by qwen-code-cli (found: $nodeMajor). Refusing to install an unsupported Node/CLI combination. Upgrade Node.js and re-run." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
                 } else {
                 npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {

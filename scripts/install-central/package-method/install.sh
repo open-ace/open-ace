@@ -1728,7 +1728,11 @@ install_webui() {
     # a host that already has Node 20 would "succeed" into an unsupported
     # combination.
     local qwen_node_major
-    qwen_node_major="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    if command -v node &>/dev/null; then
+        qwen_node_major="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    else
+        qwen_node_major=0
+    fi
     qwen_node_major="${qwen_node_major:-0}"
     if [ "$qwen_node_major" -lt 22 ]; then
         print_error "Node >= 22 is required by @qwen-code/qwen-code (found: ${qwen_node_major})."

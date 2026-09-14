@@ -90,3 +90,85 @@ def test_powershell_installer_downloads_all_cli_adapters():
 
     assert match is not None
     assert sorted(re.findall(r'"([^"]+)"', match.group(1))) == expected
+
+
+def _node_probe_function() -> str:
+    """Extract get_node_major() verbatim from install.sh for strict-mode tests."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    match = re.search(r"^get_node_major\(\) \{.*?^\}", script, re.DOTALL | re.MULTILINE)
+    assert match is not None, "get_node_major() not found in install.sh"
+    return match.group(0)
+
+
+def _strict_bash_probe(tmp_path, node_version: str | None):
+    """Run get_node_major under `bash -euo pipefail` with a PATH lacking node.
+
+    Mirrors the PR #3386 review repro: install.sh runs with `set -euo
+    pipefail`, so an unguarded `node --version | ...` pipeline aborts with
+    exit 127 on fresh machines before the NodeSource branch can run.
+    """
+    fake_bin = tmp_path / "probe-bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("sed", "cut"):
+        os.symlink(_which(tool), fake_bin / tool)
+    if node_version is not None:
+        (fake_bin / "node").write_text(f"#!/bin/sh\necho '{node_version}'\n", encoding="utf-8")
+        (fake_bin / "node").chmod(0o755)
+
+    return subprocess.run(
+        [
+            "/bin/bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            f"{_node_probe_function()}; get_node_major",
+        ],
+        env={"PATH": str(fake_bin)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _which(tool: str) -> str:
+    import shutil
+
+    path = shutil.which(tool)
+    assert path is not None, f"{tool} not available for probe test"
+    return path
+
+
+def test_node_probe_survives_missing_node_under_strict_mode(tmp_path):
+    """Regression (PR #3386 review): no 127 abort when node/npm are absent."""
+    result = _strict_bash_probe(tmp_path, node_version=None)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "0"
+
+
+def test_node_probe_reads_major_version(tmp_path):
+    result20 = _strict_bash_probe(tmp_path / "v20", node_version="v20.19.1")
+    result22 = _strict_bash_probe(tmp_path / "v22", node_version="v22.22.3")
+
+    assert result20.stdout.strip() == "20"
+    assert result22.stdout.strip() == "22"
+
+
+def test_qwen_node_gates_fail_the_install():
+    """Regression (PR #3386 review): the Node<22 gates must end the install
+    with a failure status, not print errors and continue to register a
+    machine whose cli_tool=qwen-code-cli can never run."""
+    sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    qwen_case = re.search(r"qwen-code-cli\)(.*?)claude-code\)", sh, re.DOTALL)
+    assert qwen_case is not None
+    assert "exit 1" in qwen_case.group(1)
+
+    ps1 = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+    ps1_case = re.search(r'"qwen-code-cli" \{(.*?)"claude-code" \{', ps1, re.DOTALL)
+    assert ps1_case is not None
+    assert "exit 1" in ps1_case.group(1)
+
+    pkg = (REPO_ROOT / "scripts" / "install-central" / "package-method" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "return 1" in pkg  # install_webui gate; caller wraps it in `if`

@@ -32,6 +32,20 @@ log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Node major version, 0 when node is absent. Guarded for `set -euo
+# pipefail`: a bare `node --version | ...` pipeline returns 127 on machines
+# without node and aborts the script before the NodeSource install branch
+# could ever run (PR #3386 review).
+get_node_major() {
+    if ! command -v node &>/dev/null; then
+        echo 0
+        return 0
+    fi
+    local version
+    version="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
+    echo "${version:-0}"
+}
+
 # Defaults
 SERVER_URL=""
 REGISTRATION_TOKEN=""
@@ -450,8 +464,7 @@ if [[ -n "$INSTALL_CLI" ]]; then
 
     # @qwen-code/qwen-code >= 0.23 declares engines.node >=22; npm only warns
     # (EBADENGINE) and still exits 0, so the version must be gated explicitly.
-    NODE_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
-    NODE_MAJOR="${NODE_MAJOR:-0}"
+    NODE_MAJOR="$(get_node_major)"
     NEED_NODE_22=0
     if [[ "$INSTALL_CLI" == "qwen-code-cli" && "$NODE_MAJOR" -lt 22 ]]; then
         NEED_NODE_22=1
@@ -557,12 +570,15 @@ if [[ -n "$INSTALL_CLI" ]]; then
             qwen-code-cli)
                 # Hard gate: npm exits 0 on a mere EBADENGINE warning, which
                 # would "succeed" into an unsupported Node/CLI combination.
-                NODE_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
-                NODE_MAJOR="${NODE_MAJOR:-0}"
+                # Fails the whole install: the machine config below declares
+                # cli_tool=qwen-code-cli, so continuing would register a
+                # machine that can never run it (PR #3386 review).
+                NODE_MAJOR="$(get_node_major)"
                 if [ "$NODE_MAJOR" -lt 22 ]; then
                     log_error "Node >= 22 is required by @qwen-code/qwen-code (found: ${NODE_MAJOR})."
                     log_error "Refusing to install an unsupported Node/CLI combination."
                     log_error "Upgrade Node.js (https://nodesource.com or your package manager) and re-run."
+                    exit 1
                 else
                     npm install -g @qwen-code/qwen-code@latest 2>/dev/null && \
                         log_success "qwen-code-cli installed" || \
