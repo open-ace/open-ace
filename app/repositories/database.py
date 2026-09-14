@@ -14,7 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Database configuration
-CONFIG_DIR = os.path.expanduser("~/.open-ace")
+CONFIG_DIR = os.environ.get("OPENACE_CONFIG_DIR") or os.path.expanduser("~/.open-ace")
 DEFAULT_SQLITE_PATH = os.path.join(CONFIG_DIR, "ace.db")
 
 

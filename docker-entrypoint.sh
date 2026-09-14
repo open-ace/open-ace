@@ -1173,8 +1173,56 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     done
 
     # Ensure workspace base directory exists
+    # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
+    # layer's _home_roots_for_user semantics) — a single `mkdir -p` on the
+    # raw value would create a literal "a,b" directory. Trimming is pure
+    # bash (review NIT): `echo | xargs` aborts under set -e when a base dir
+    # contains a quote character.
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
-    mkdir -p "$WORKSPACE_DIR"
+    IFS=',' read -r -a _workspace_base_dirs <<< "$WORKSPACE_DIR"
+    for _base_dir in "${_workspace_base_dirs[@]}"; do
+        _base_dir="${_base_dir#"${_base_dir%%[![:space:]]*}"}"
+        _base_dir="${_base_dir%"${_base_dir##*[![:space:]]}"}"
+        [ -z "$_base_dir" ] && continue
+        mkdir -p "$_base_dir"
+
+        # Issue #3379 (multi-user acceptance gap): provision the shared
+        # namespace root. POST /api/projects with create_dir runs
+        # `sudo -u <user> mkdir -p` — on a fresh volume the parent is
+        # root:root 0755 and every user's creation EACCESes (403). The
+        # #3376 first-class <base>/shared/<name> namespace needs its root
+        # to pre-exist, group-writable by openace-shared with setgid so
+        # shared files inherit the group. Idempotent on restarts; only the
+        # root itself is touched, never its contents.
+        #
+        # Review MINOR (account-named-shared guard): if a REAL account named
+        # "shared" exists, <base>/shared is that account's home root —
+        # re-chgrp/chmod on every restart would ping-pong ownership with the
+        # app's _ensure_workspace_dirs and group-open a private home in
+        # between. The app side already rejects the collision fail-closed at
+        # registration (path_guard); the entrypoint skips loudly instead.
+        if id "shared" &>/dev/null || { [ -e "$_base_dir/shared" ] && [ "$(stat -c '%U' "$_base_dir/shared" 2>/dev/null)" != "root" ]; }; then
+            echo "  WARNING: skipping shared-namespace provisioning for $_base_dir/shared — path collides with a real account or is not root-owned (administrator intervention required)"
+            continue
+        fi
+        # review round 2 (4004368890): degrade to a warning, not a crash loop —
+        # a failed provisioning only means shared-project creation 403s until
+        # an administrator fixes it; the app's own dir/ownership failures are
+        # warning-grade too, and set -e would otherwise restart-loop the whole
+        # service on e.g. a root_squash NFS base dir.
+        # chmod 3775 (review round 3, 4004874853): +sticky — rename(2) only
+        # needs write+search on the parent, and openace-shared is a GLOBAL
+        # group (every tenant's account joins), so without the sticky bit any
+        # member could mv/replace another tenant's project directory. Sticky
+        # blocks non-owner renames at the root; sudo -u <user> mkdir for new
+        # projects and root-run setup_permissions_with_depth_limit are
+        # unaffected. Content-level cross-tenant access inside projects is
+        # the global-group design itself — tracked as #3396.
+        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3775 "$_base_dir/shared"; }; then
+            echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
+        fi
+    done
+    unset _base_dir _workspace_base_dirs
 
     # Fix /home directory permissions (Issue #1249)
     # When data/home is mounted as /home, restrictive 700 permissions prevent
@@ -1452,6 +1500,20 @@ except Exception as e:
     print(f'Error syncing users and projects: {e}')
 " 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
+
+    # Issue #3379 (review round 2, 4004368045): enroll users into the shared
+    # group AFTER the DB sync. On a recreated container /etc/passwd starts
+    # empty, so the pre-sync pass skipped everyone (id <user> failed) and the
+    # sync's useradd does not add supplementary groups — without this pass,
+    # already-logged-in users (sessions live in postgres and survive
+    # recreation) keep getting 403 on shared-project creation until they
+    # re-login. usermod is idempotent; failures are best-effort.
+    for user_dir in /home/*/; do
+        username=$(basename "$user_dir")
+        if id "$username" &>/dev/null; then
+            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
+        fi
+    done
 
     # Configure sudoers for qwen-code-webui
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user

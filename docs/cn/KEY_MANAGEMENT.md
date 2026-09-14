@@ -193,7 +193,9 @@ openssl rand -hex 32
 
 1. 立即生成并设置新密钥
 2. 撤销所有活跃 Proxy Token（如适用）
-3. 轮换所有加密凭据
+3. 轮换所有加密凭据（SSO Provider 的 `client_secret` 可用
+   `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>` 批量重加密，
+   先以 `--verify` 干跑确认）
 4. 审计访问日志查找可疑活动
 5. 记录事件和修复步骤
 
