@@ -671,7 +671,10 @@ def _run_ps1_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
         "$prevErrorAction = $ErrorActionPreference\n"
         "$ErrorActionPreference = 'Continue'\n"
         "switch ('qwen-code-cli') {\n"
-        '"qwen-code-cli" {\n' + _ps1_qwen_case_body() + "\n}\n}\n"
+        # the extracted body already closes the qwen case block; the wrapper
+        # opens the switch and closes it ONCE (an extra brace makes the whole
+        # harness a parse error, and pwsh then exits 1 for the wrong reason).
+        '"qwen-code-cli" {\n' + _ps1_qwen_case_body() + "\n}\n"
         "Write-Output 'CASE_COMPLETED'\n"
     )
     harness_file = tmp_path / "harness.ps1"
