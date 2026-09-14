@@ -222,11 +222,19 @@ if ($InstallCli) {
 
         switch ($InstallCli) {
             "qwen-code-cli" {
+                # @qwen-code/qwen-code >= 0.23 requires Node >= 22; npm exits 0
+                # on a mere EBADENGINE warning, so gate on the real version.
+                $nodeMajor = 0
+                try { $nodeMajor = [int]((node --version) -replace '^v','' -split '\.')[0] } catch {}
+                if ($nodeMajor -lt 22) {
+                    Write-Host "[ERROR] Node >= 22 is required by qwen-code-cli (found: $nodeMajor). Refusing to install an unsupported Node/CLI combination. Upgrade Node.js and re-run." -ForegroundColor Red
+                } else {
                 npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[OK] qwen-code-cli installed" -ForegroundColor Green
                 } else {
                     Write-Host "[WARN] Failed to install qwen-code-cli" -ForegroundColor Yellow
+                }
                 }
             }
             "claude-code" {

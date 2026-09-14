@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
 """
-Open ACE - SSO Encryption Key Rotation Script
+Open ACE - Encryption Key Rotation Script
 
-Issue #1815 Finding 1: CLI tool for rotating SSO provider encryption keys.
+Issue #1815 Finding 1: CLI tool for rotating the OPENACE_ENCRYPTION_KEY-bound
+ciphertext across every store that shares the key.
 
-This script re-encrypts all SSO provider client_secrets with a new encryption key.
+OPENACE_ENCRYPTION_KEY protects more than SSO providers. This script rotates
+ALL of the following stores in ONE transaction:
+
+  - sso_providers.config["client_secret_encrypted"]          (JSON-embedded)
+  - api_key_store.encrypted_key
+  - smtp_settings.encrypted_password
+  - model_gateway_config.encrypted_api_key
+  - dingtalk_settings.app_secret_enc / fallback_webhook_secret_enc
+  - feishu_settings.app_secret_enc
+  - webhook_settings.webhook_secret_enc
+  - notification_preferences.dingtalk_webhook_secret
+
+Values in the key-registry format ("v1k<key_id>:..." prefix) are encrypted
+with the data keys from OPENACE_ENCRYPTION_KEYS (plural) and are NOT bound to
+this key — they are detected and skipped. Unprefixed values are identical
+whether written via SMTPPasswordManager or registry legacy key 0 (same
+SHA-256 derivation), so both rotate here.
 
 Usage:
     # Pre-flight (dry-run): the new key can encrypt/decrypt, and every stored
     # secret is decryptable with the CURRENT key (rotation would not lose data)
     python scripts/rotate_sso_encryption.py --verify --new-key <NEW_KEY>
 
-    # Execute mode (re-encrypt all providers, then re-check with the new key)
+    # Execute mode (re-encrypt all stores, then re-check with the new key)
     python scripts/rotate_sso_encryption.py --new-key <NEW_KEY>
 
 After rotation, update OPENACE_ENCRYPTION_KEY to the new key and restart the
@@ -20,9 +37,9 @@ script decrypts with OPENACE_ENCRYPTION_KEY and re-encrypts with --new-key —
 switching the environment variable first makes the stored ciphertext
 undecryptable.
 
-All row updates are written in a single transaction; a mid-batch failure
-rolls the whole rotation back so a retry (or a single key switch) always
-recovers.
+All row updates across all stores are written in a single transaction; a
+mid-batch failure rolls the whole rotation back so a retry (or a single key
+switch) always recovers.
 
 Environment variables:
     OPENACE_ENCRYPTION_KEY: Current (old) encryption key (required)
@@ -34,6 +51,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -45,10 +63,68 @@ if project_root not in sys.path:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Every (table, column) whose ciphertext is derived from OPENACE_ENCRYPTION_KEY
+# (SHA-256 -> Fernet, see SMTPPasswordManager). Keep in sync with schema and
+# the repositories that write these columns.
+DIRECT_SECRET_COLUMNS: list[tuple[str, str]] = [
+    ("api_key_store", "encrypted_key"),
+    ("smtp_settings", "encrypted_password"),
+    ("model_gateway_config", "encrypted_api_key"),
+    ("dingtalk_settings", "app_secret_enc"),
+    ("dingtalk_settings", "fallback_webhook_secret_enc"),
+    ("feishu_settings", "app_secret_enc"),
+    ("webhook_settings", "webhook_secret_enc"),
+    ("notification_preferences", "dingtalk_webhook_secret"),
+]
+
+# Ciphertexts prefixed like "v1k<key_id>:..." belong to the key registry and
+# are encrypted with the OPENACE_ENCRYPTION_KEYS (plural) data keys; rotating
+# the single-key env does not affect them.
+_REGISTRY_PREFIX_RE = re.compile(r"^v1k\d+:")
+
+
+def _is_registry_format(ciphertext: str) -> bool:
+    return bool(_REGISTRY_PREFIX_RE.match(ciphertext))
+
 
 def get_current_encryption_key() -> str | None:
     """Get the current encryption key from environment."""
     return os.environ.get("OPENACE_ENCRYPTION_KEY")
+
+
+def _iter_secret_values(db) -> list[tuple[str, str]]:
+    """Collect every key-bound ciphertext as (store_label, ciphertext).
+
+    Registry-format values are skipped (not bound to this key); empty/NULL
+    values are skipped (nothing to rotate).
+    """
+    values: list[tuple[str, str]] = []
+
+    for table, column in DIRECT_SECRET_COLUMNS:
+        rows = db.fetch_all(
+            f"SELECT {column} AS v FROM {table} " f"WHERE {column} IS NOT NULL AND {column} != ''"
+        )
+        for row in rows:
+            ciphertext = row["v"]
+            if _is_registry_format(ciphertext):
+                logger.debug(f"{table}.{column}: registry-format value, skipped")
+                continue
+            values.append((f"{table}.{column}", ciphertext))
+
+    for row in db.fetch_all("SELECT name, config FROM sso_providers WHERE config IS NOT NULL"):
+        try:
+            encrypted = (json.loads(row["config"]) or {}).get("client_secret_encrypted", "")
+        except (json.JSONDecodeError, TypeError):
+            values.append((f"sso_providers/{row['name']}", "<invalid-json>"))
+            continue
+        if not encrypted:
+            continue
+        if _is_registry_format(encrypted):
+            logger.debug(f"sso_providers/{row['name']}: registry-format value, skipped")
+            continue
+        values.append((f"sso_providers/{row['name']}", encrypted))
+
+    return values
 
 
 def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
@@ -56,15 +132,15 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
 
     1. The new key round-trips: a probe value encrypts and decrypts back
        (catches unusable key material before touching any row).
-    2. Every stored client_secret decrypts with the CURRENT key — otherwise
-       re-encryption would silently corrupt those records.
+    2. Every stored secret in EVERY store decrypts with the CURRENT key —
+       otherwise re-encryption would silently corrupt those records.
 
     Args:
         db_url: Database URL.
         new_key: New encryption key to test.
 
     Returns:
-        Tuple of (success, list of provider names that failed).
+        Tuple of (success, list of store labels that failed).
     """
     from app.repositories.database import Database
     from app.utils.smtp_crypto import SMTPPasswordManager
@@ -82,111 +158,121 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
         return False, ["<current-key-missing>"]
     pm_old = SMTPPasswordManager(encryption_key=old_key)
 
-    # Get all providers
-    rows = db.fetch_all("SELECT name, config FROM sso_providers")
-
-    failed_providers = []
-    success_count = 0
-
-    for row in rows:
-        name = row["name"]
-        config_str = row["config"]
-
+    failed_stores: list[str] = []
+    checked = 0
+    for label, ciphertext in _iter_secret_values(db):
+        if ciphertext == "<invalid-json>":
+            failed_stores.append(label)
+            logger.warning(f"{label}: config is not valid JSON")
+            continue
         try:
-            config = json.loads(config_str)
-            encrypted_secret = config.get("client_secret_encrypted", "")
-
-            if encrypted_secret:
-                # Pre-rotation the stored secrets must decrypt with the
-                # CURRENT key; the new key only becomes the decryptor after
-                # rotation completes.
-                decrypted = pm_old.decrypt(encrypted_secret)
-                if decrypted:
-                    success_count += 1
-                    logger.debug(f"Provider '{name}' decrypts with the current key")
-                else:
-                    failed_providers.append(name)
-                    logger.warning(f"Provider '{name}' returned empty decrypted value")
+            if pm_old.decrypt(ciphertext):
+                checked += 1
             else:
-                # No encrypted secret, skip
-                logger.debug(f"Provider '{name}' has no encrypted secret")
-
+                failed_stores.append(label)
+                logger.warning(f"{label}: empty decrypted value")
         except Exception as e:
-            failed_providers.append(name)
-            logger.warning(f"Provider '{name}' failed: {e}")
+            failed_stores.append(label)
+            logger.warning(f"{label}: {e}")
 
-    success = len(failed_providers) == 0
-    return success, failed_providers
+    if checked:
+        logger.info(f"Pre-flight: {checked} value(s) decrypt with the current key")
+    return len(failed_stores) == 0, failed_stores
 
 
 def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
-    """Re-encrypt all provider secrets with the new key.
+    """Re-encrypt every key-bound secret across all stores with the new key.
 
     Args:
         db_url: Database URL.
         new_key: New encryption key.
 
     Returns:
-        Tuple of (success, count of re-encrypted providers, list of failed providers).
+        Tuple of (success, count of re-encrypted values, list of failed stores).
     """
     from app.repositories.database import Database
     from app.utils.smtp_crypto import SMTPPasswordManager
 
     db = Database(db_url=db_url)
 
-    # Create password manager with new key (constructor rejects empty/weak/
-    # short candidates before anything below can touch the database)
+    # Constructor rejects empty/weak/short candidates before anything below
+    # can touch the database.
     pm_new = SMTPPasswordManager(encryption_key=new_key)
 
-    # Also need old key to decrypt first
     old_key = get_current_encryption_key()
     if not old_key:
         logger.error("OPENACE_ENCRYPTION_KEY not set")
         return False, 0, []
-
     pm_old = SMTPPasswordManager(encryption_key=old_key)
 
-    # Get all providers
-    rows = db.fetch_all("SELECT name, config FROM sso_providers")
+    # Decrypt and re-encrypt EVERYTHING (all stores) before the first write,
+    # then write all updates in a single transaction. A per-row autocommit
+    # would leave partially rotated stores on a mid-batch failure —
+    # unrecoverable with a single key switch.
+    # Write plan entries: (sql, params, label)
+    updates: list[tuple[str, tuple, str]] = []
+    failed_stores: list[str] = []
 
-    # Decrypt and re-encrypt EVERYTHING before the first write, then write all
-    # updates in a single transaction. A per-row autocommit (db.execute) would
-    # leave a partially rotated table on a mid-batch failure — unrecoverable
-    # with a single key switch, since some rows would need the old key and
-    # some the new one.
-    updates: list[tuple[str, str]] = []
-    failed_providers = []
+    for table, column in DIRECT_SECRET_COLUMNS:
+        rows = db.fetch_all(
+            f"SELECT {column} AS v FROM {table} " f"WHERE {column} IS NOT NULL AND {column} != ''"
+        )
+        for row in rows:
+            old_ct = row["v"]
+            label = f"{table}.{column}"
+            if _is_registry_format(old_ct):
+                continue
+            try:
+                plaintext = pm_old.decrypt(old_ct)
+                if not plaintext:
+                    failed_stores.append(label)
+                    logger.error(f"{label}: empty decrypted value")
+                    continue
+                new_ct = pm_new.encrypt(plaintext)
+            except Exception as e:
+                failed_stores.append(label)
+                logger.error(f"{label}: {e}")
+                continue
+            # Match on the old ciphertext itself: PK-agnostic and
+            # backend-agnostic (Fernet ciphertexts are unique per row-value).
+            updates.append(
+                (f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_ct, old_ct), label)
+            )
 
-    for row in rows:
+    for row in db.fetch_all("SELECT name, config FROM sso_providers WHERE config IS NOT NULL"):
         name = row["name"]
-        config_str = row["config"]
-
+        label = f"sso_providers/{name}"
         try:
-            config = json.loads(config_str)
-            encrypted_secret = config.get("client_secret_encrypted", "")
-
-            if encrypted_secret:
-                # Decrypt with old key
-                client_secret = pm_old.decrypt(encrypted_secret)
-
-                if client_secret:
-                    # Re-encrypt with new key
-                    new_encrypted = pm_new.encrypt(client_secret)
-                    config["client_secret_encrypted"] = new_encrypted
-                    updates.append((name, json.dumps(config)))
-                else:
-                    failed_providers.append(name)
-                    logger.error(f"Failed to decrypt provider '{name}'")
-            else:
-                logger.debug(f"Provider '{name}' has no encrypted secret, skipping")
-
+            config = json.loads(row["config"])
+            old_ct = (config or {}).get("client_secret_encrypted", "")
+        except (json.JSONDecodeError, TypeError) as e:
+            failed_stores.append(label)
+            logger.error(f"{label}: config is not valid JSON: {e}")
+            continue
+        if not old_ct or _is_registry_format(old_ct):
+            continue
+        try:
+            plaintext = pm_old.decrypt(old_ct)
+            if not plaintext:
+                failed_stores.append(label)
+                logger.error(f"{label}: empty decrypted value")
+                continue
+            config["client_secret_encrypted"] = pm_new.encrypt(plaintext)
         except Exception as e:
-            failed_providers.append(name)
-            logger.error(f"Failed to re-encrypt provider '{name}': {e}")
+            failed_stores.append(label)
+            logger.error(f"{label}: {e}")
+            continue
+        updates.append(
+            (
+                "UPDATE sso_providers SET config = ? WHERE name = ?",
+                (json.dumps(config), name),
+                label,
+            )
+        )
 
-    if failed_providers:
-        logger.error("No rows written: every row must re-encrypt cleanly first")
-        return False, 0, failed_providers
+    if failed_stores:
+        logger.error("No rows written: every value must re-encrypt cleanly first")
+        return False, 0, failed_stores
 
     try:
         # db._adapt_sql (not the module-level adapt_sql) because placeholders
@@ -194,24 +280,39 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
         # postgres-configured host is exactly this script's test/ops usage.
         with db.connection() as conn:
             cursor = conn.cursor()
-            for name, new_config_str in updates:
-                cursor.execute(
-                    db._adapt_sql("UPDATE sso_providers SET config = ? WHERE name = ?"),
-                    (new_config_str, name),
-                )
+            for sql, params, _label in updates:
+                cursor.execute(db._adapt_sql(sql), params)
             conn.commit()
     except Exception as e:
         logger.error(f"Rotation write failed; transaction rolled back: {e}")
-        return False, 0, [name for name, _ in updates]
+        return False, 0, [label for _, _, label in updates]
 
-    for name, _ in updates:
-        logger.info(f"Re-encrypted provider '{name}'")
+    for _, _, label in updates:
+        logger.info(f"Re-encrypted {label}")
     return True, len(updates), []
+
+
+def postcheck_new_key(db_url: str, new_key: str) -> list[str]:
+    """Verify every key-bound value decrypts with the new key."""
+    from app.repositories.database import Database
+    from app.utils.smtp_crypto import SMTPPasswordManager
+
+    db = Database(db_url=db_url)
+    pm = SMTPPasswordManager(encryption_key=new_key)
+    failed: list[str] = []
+    for label, ciphertext in _iter_secret_values(db):
+        try:
+            if not pm.decrypt(ciphertext):
+                failed.append(label)
+        except Exception as e:
+            logger.warning(f"{label} post-check failed: {e}")
+            failed.append(label)
+    return failed
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rotate SSO provider encryption keys (Issue #1815)"
+        description="Rotate OPENACE_ENCRYPTION_KEY-bound encryption keys (Issue #1815)"
     )
     parser.add_argument(
         "--new-key",
@@ -273,7 +374,7 @@ def main():
         verify_success, verify_failed = verify_key_works(db_url, args.new_key)
 
         if not verify_success:
-            logger.error(f"Pre-flight failed for providers: {verify_failed}")
+            logger.error(f"Pre-flight failed for stores: {verify_failed}")
             logger.error("Aborting. Run with --verify first to see details.")
             sys.exit(1)
 
@@ -281,34 +382,19 @@ def main():
         success, count, failed = rotate_keys(db_url, args.new_key)
 
         if not success:
-            logger.error(f"✗ {len(failed)} provider(s) failed: {failed}")
+            logger.error(f"✗ Rotation failed for: {failed}")
             sys.exit(1)
 
         # Post-rotation check: every stored secret must now decrypt with the
         # NEW key (the operator's go/no-go signal before switching the env).
-        from app.repositories.database import Database
-        from app.utils.smtp_crypto import SMTPPasswordManager
-
-        db = Database(db_url=db_url)
-        pm = SMTPPasswordManager(encryption_key=args.new_key)
-        postcheck_failed = []
-        for row in db.fetch_all("SELECT name, config FROM sso_providers"):
-            encrypted = (json.loads(row["config"]) or {}).get("client_secret_encrypted", "")
-            if encrypted:
-                try:
-                    if not pm.decrypt(encrypted):
-                        postcheck_failed.append(row["name"])
-                except Exception as e:
-                    logger.warning(f"Provider '{row['name']}' post-check failed: {e}")
-                    postcheck_failed.append(row["name"])
-
+        postcheck_failed = postcheck_new_key(db_url, args.new_key)
         if postcheck_failed:
             logger.error(
-                f"✗ Rotation wrote {count} row(s) but post-check failed: {postcheck_failed}"
+                f"✗ Rotation wrote {count} value(s) but post-check failed: {postcheck_failed}"
             )
             sys.exit(1)
 
-        logger.info(f"✓ Successfully re-encrypted {count} provider(s)")
+        logger.info(f"✓ Successfully re-encrypted {count} value(s) across all stores")
         logger.info("✓ All stored secrets decrypt with the new key")
         logger.info("Update OPENACE_ENCRYPTION_KEY environment variable and restart the service")
 

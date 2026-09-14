@@ -448,21 +448,42 @@ log_success "Dependencies installed"
 if [[ -n "$INSTALL_CLI" ]]; then
     log_info "Installing CLI tool: $INSTALL_CLI..."
 
-    # Check if npm is available, if not try to install Node.js
+    # @qwen-code/qwen-code >= 0.23 declares engines.node >=22; npm only warns
+    # (EBADENGINE) and still exits 0, so the version must be gated explicitly.
+    NODE_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    NODE_MAJOR="${NODE_MAJOR:-0}"
+    NEED_NODE_22=0
+    if [[ "$INSTALL_CLI" == "qwen-code-cli" && "$NODE_MAJOR" -lt 22 ]]; then
+        NEED_NODE_22=1
+    fi
+
+    # Install Node.js when npm is missing, or upgrade it when an existing
+    # Node is too old for the requested CLI.
     if ! command -v npm &>/dev/null; then
         log_info "npm not found, attempting to install Node.js..."
+    elif [ "$NEED_NODE_22" -eq 1 ]; then
+        log_info "Node ${NODE_MAJOR} < 22 (required by @qwen-code/qwen-code >= 0.23); upgrading Node.js..."
+    fi
+    if ! command -v npm &>/dev/null || [ "$NEED_NODE_22" -eq 1 ]; then
 
         # Detect OS and install Node.js
         if [[ "$(uname)" == "Darwin" ]]; then
-            # macOS - use Homebrew
+            # macOS - use Homebrew (upgrade in place when Node already installed)
             log_info "Detected macOS. Installing Node.js via Homebrew..."
+            brew_node() {
+                if brew list --versions node &>/dev/null; then
+                    brew upgrade node
+                else
+                    brew install node
+                fi
+            }
             if command -v brew &>/dev/null; then
-                brew install node
+                brew_node
             else
                 log_warn "Homebrew not found. Installing Homebrew first..."
                 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
                 if command -v brew &>/dev/null; then
-                    brew install node
+                    brew_node
                 else
                     log_warn "Failed to install Homebrew. Please install Node.js manually:"
                     log_warn "  1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
@@ -508,9 +529,14 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     pacman -Sy --noconfirm nodejs npm
                     ;;
                 sles|suse)
-                    # SUSE - use zypper
+                    # SUSE - use zypper (nodejs22 required by qwen-code >= 0.23;
+                    # nodejs20 fallback only serves CLIs with older engines —
+                    # the version gate below refuses qwen on it either way)
                     log_info "Installing Node.js via zypper..."
-                    zypper install -y nodejs20
+                    if ! zypper install -y nodejs22; then
+                        log_warn "nodejs22 unavailable in configured repos; trying nodejs20"
+                        zypper install -y nodejs20
+                    fi
                     ;;
                 *)
                     log_warn "Unsupported OS: $ID. Cannot auto-install Node.js."
@@ -529,9 +555,19 @@ if [[ -n "$INSTALL_CLI" ]]; then
     if command -v npm &>/dev/null; then
         case "$INSTALL_CLI" in
             qwen-code-cli)
-                npm install -g @qwen-code/qwen-code@latest 2>/dev/null && \
-                    log_success "qwen-code-cli installed" || \
-                    log_warn "Failed to install qwen-code-cli. You can install it manually later."
+                # Hard gate: npm exits 0 on a mere EBADENGINE warning, which
+                # would "succeed" into an unsupported Node/CLI combination.
+                NODE_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+                NODE_MAJOR="${NODE_MAJOR:-0}"
+                if [ "$NODE_MAJOR" -lt 22 ]; then
+                    log_error "Node >= 22 is required by @qwen-code/qwen-code (found: ${NODE_MAJOR})."
+                    log_error "Refusing to install an unsupported Node/CLI combination."
+                    log_error "Upgrade Node.js (https://nodesource.com or your package manager) and re-run."
+                else
+                    npm install -g @qwen-code/qwen-code@latest 2>/dev/null && \
+                        log_success "qwen-code-cli installed" || \
+                        log_warn "Failed to install qwen-code-cli. You can install it manually later."
+                fi
                 ;;
             claude-code)
                 npm install -g @anthropic-ai/claude-code@latest 2>/dev/null && \

@@ -7,8 +7,8 @@
       "min_tests": 8112,
       "min_files": 250,
       "last_updated": "2026-09-14",
-      "update_reason": "Three changes in one PR. (1) scripts/ one-off cleanup: deleted tests/unit/test_admin_role_migration.py (19 items) with its subject scripts migrate_admin_role{,_rollback}.py — superseded by alembic 20260810_001 (#2332). (2) qwen stack upgrade (webui 0.2.40->0.2.43, CLI 0.15.10->0.23.3): deleted the 3 patch-script unit tests (test_patch_qwen_webui_{histories,navparams,vscode_folder}.py) with their subject scripts — the five patched bugs are fixed upstream (ivycomputing/qwen-code-webui PRs #236-#240) — and added tests/unit/test_qwen_adapter_approval_mode.py (8 items; guards the approval-mode mapping against the CLI enum). (3) review-round fixes on rotate_sso_encryption: added tests/unit/test_rotate_sso_encryption.py (7 items; mid-write atomicity rollback + explicit candidate-key validation). min unchanged (8112).",
-      "actual_collected": 13618,
+      "update_reason": "Four changes in one PR. (1) scripts/ one-off cleanup: deleted tests/unit/test_admin_role_migration.py (19 items) with its subject scripts migrate_admin_role{,_rollback}.py — superseded by alembic 20260810_001 (#2332). (2) qwen stack upgrade (webui 0.2.40->0.2.43, CLI 0.15.10->0.23.3): deleted the 3 patch-script unit tests (test_patch_qwen_webui_{histories,navparams,vscode_folder}.py) with their subject scripts — the five patched bugs are fixed upstream (ivycomputing/qwen-code-webui PRs #236-#240) — and added tests/unit/test_qwen_adapter_approval_mode.py (8 items; guards the approval-mode mapping against the CLI enum). (3)-(4) review rounds on rotate_sso_encryption: added tests/unit/test_rotate_sso_encryption.py (8 items; mid-write atomicity rollback, explicit candidate-key validation, and multi-store coverage of every OPENACE_ENCRYPTION_KEY-bound table). min unchanged (8112).",
+      "actual_collected": 13619,
       "actual_files": 842,
       "threshold_percent": 96
     },

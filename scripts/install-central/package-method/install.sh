@@ -1687,27 +1687,27 @@ install_webui() {
     # Check if npm is available
     if ! command -v npm &>/dev/null; then
         print_warning "npm not found, installing Node.js via NodeSource..."
-        print_info "Downloading Node.js 20.x setup script..."
+        print_info "Downloading Node.js 22.x setup script..."
         if [ "$EUID" -eq 0 ]; then
-            # Use NodeSource to get Node.js 20.x
+            # Use NodeSource to get Node.js 22.x
             if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
                 if command -v dnf &>/dev/null; then
                     dnf install -y nodejs
                 else
                     yum install -y nodejs
                 fi
             elif command -v apt-get &>/dev/null; then
-                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
                 apt-get install -y nodejs
             else
                 print_error "Cannot install Node.js automatically on this system"
-                print_info "Please install Node.js 20+ manually"
+                print_info "Please install Node.js 22+ manually"
                 return 1
             fi
         else
             print_error "Not running as root, cannot install Node.js automatically"
-            print_info "Please run with sudo: curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo yum install -y nodejs"
+            print_info "Please run with sudo: curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - && sudo yum install -y nodejs"
             return 1
         fi
     fi
@@ -1722,7 +1722,20 @@ install_webui() {
         return 1
     fi
 
-    # Check and install qwen-code CLI (required by qwen-code-webui)
+    # Check and install qwen-code CLI (required by qwen-code-webui).
+    # @qwen-code/qwen-code >= 0.23 declares engines.node >=22; npm only warns
+    # (EBADENGINE) and still exits 0, so gate on the real version — otherwise
+    # a host that already has Node 20 would "succeed" into an unsupported
+    # combination.
+    local qwen_node_major
+    qwen_node_major="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    qwen_node_major="${qwen_node_major:-0}"
+    if [ "$qwen_node_major" -lt 22 ]; then
+        print_error "Node >= 22 is required by @qwen-code/qwen-code (found: ${qwen_node_major})."
+        print_error "Refusing to install an unsupported Node/CLI combination."
+        print_error "Upgrade Node.js (https://nodesource.com or your package manager) and re-run."
+        return 1
+    fi
     if ! command -v qwen &>/dev/null; then
         print_info ""
         print_info "qwen-code CLI not found, installing..."
@@ -1898,7 +1911,7 @@ find_webui_executable() {
         fi
     else
         # npm not available, need to install Node.js first
-        print_info "npm not available, installing Node.js 20.x via NodeSource..." >&2
+        print_info "npm not available, installing Node.js 22.x via NodeSource..." >&2
         if install_webui >&2; then
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
@@ -4161,9 +4174,9 @@ build_frontend() {
     major_version=$(echo "$node_version" | cut -d. -f1)
 
     if [ "$major_version" -lt 20 ]; then
-        print_warning "Node.js version $node_version is too old. Need Node.js 20 or later."
+        print_warning "Node.js version $node_version is too old. Need Node.js 20 or later (22 for the qwen CLI runtime)."
         print_warning "Frontend build will be skipped."
-        print_info "To build the frontend manually, install Node.js 20+ and run: cd $target_path/frontend && npm run build"
+        print_info "To build the frontend manually, install Node.js 22+ and run: cd $target_path/frontend && npm run build"
         return 0
     fi
 

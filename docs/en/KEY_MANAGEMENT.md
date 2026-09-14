@@ -195,14 +195,20 @@ openssl rand -hex 32
    stores and pause writes to them
 2. Revoke all active proxy tokens (if applicable)
 3. Keep `OPENACE_ENCRYPTION_KEY` set to the **old** key and rotate all
-   encrypted credentials (SSO provider `client_secret` values can be
-   re-encrypted in bulk with `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`;
-   run the `--verify` pre-flight first. The script reads the environment
-   variable as the old key and `--new-key` as the new one — switching the
-   environment variable before rotating makes the old ciphertext
-   undecryptable and fails the pre-flight)
-4. Only after every store sharing this key has been migrated, switch
-   `OPENACE_ENCRYPTION_KEY` to the new key and restart the service
+   encrypted credentials: `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`
+   re-encrypts every store protected by the key in a **single transaction**
+   (`sso_providers`, `api_key_store`, `smtp_settings`,
+   `model_gateway_config`, `dingtalk_settings`, `feishu_settings`,
+   `webhook_settings`, `notification_preferences`; `v1k<id>:`-prefixed
+   key-registry ciphertexts are bound to the `OPENACE_ENCRYPTION_KEYS` data
+   keys instead and are skipped automatically). Run the `--verify`
+   pre-flight first. The script reads the environment variable as the old
+   key and `--new-key` as the new one — switching the environment variable
+   before rotating makes the old ciphertext undecryptable and fails the
+   pre-flight
+4. Only after the rotation completes (the script re-checks every store with
+   the new key after writing) and no other store sharing this key remains,
+   switch `OPENACE_ENCRYPTION_KEY` to the new key and restart the service
 5. Audit access logs for suspicious activity; document incident and
    remediation steps
 
