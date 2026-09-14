@@ -171,7 +171,7 @@ class TestEnsureWorkspaceDirsSharedGuard:
         # tests leaked across the session — route through monkeypatch
         modes: list[bool] = []
         monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: bool(modes))
-        ws._acceptance_mode_flag = modes
+        monkeypatch.setattr(ws, "_acceptance_mode_flag", modes, raising=False)
 
         def fake_run(cmd, **kw):
             calls.append(tuple(cmd))
