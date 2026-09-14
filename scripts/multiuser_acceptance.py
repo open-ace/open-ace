@@ -312,10 +312,18 @@ def merge_max_instances(max_instances: int = 3) -> None:
             docker,
             "run",
             "--rm",
+            # review round 4 (4003820636): bypass the image ENTRYPOINT (its
+            # production security-mode validation exit-1s without
+            # OPENACE_SECURITY_MODE before ever reaching our args) and run as
+            # root — the config the entrypoint generated is root:root 0600,
+            # unreadable for the image's default USER 1000.
+            "--user",
+            "0",
+            "--entrypoint",
+            "python3",
             "-v",
             f"{CONFIG_VOLUME}:/config",
             image,
-            "python3",
             "-c",
             merge_code,
         ],
@@ -725,7 +733,9 @@ class Scenario:
             # driven deterministically — require a fresh stack.
             raise AcceptanceError(
                 "default admin has no must_change_password flag; "
-                "run with a fresh stack (compose down -v first)"
+                "run with a fresh stack: docker compose -p acceptance-multi "
+                "-f docker-compose.yml -f docker-compose.multi-user.yml "
+                "down -v --remove-orphans"
             )
         status, body, _ = http(
             "POST",
@@ -1092,12 +1102,19 @@ def item_d_shared_projects(sc: Scenario) -> None:
         token=r.users["alice"]["token"],
         body={"path": shared_path, "name": "acc-team-proj", "is_shared": True, "create_dir": True},
     )
-    if status != 201:
+    # review round 4 (4003822238): exempt ONLY the declared cause — a 403
+    # with the shared root genuinely absent (probe, don't assume). Any other
+    # non-201 flows into the normal FAIL path so shared-path regressions
+    # (400/409/500/401) are not swallowed by the exemption.
+    shared_root_missing = (
+        compose_exec(SERVICE, f"test -d {base_dir}/shared", timeout=15, check=False).returncode != 0
+    )
+    if status == 403 and shared_root_missing:
         rec.exempt(
             "d",
             "shared-project creation: known product gap (no <base>/shared provisioning)",
-            f"status={status} on a fresh deployment — entrypoint should create "
-            f"{base_dir}/shared (openace-shared, 2775) in multi-user mode; app-side "
+            f"status={status} with {base_dir}/shared confirmed absent — entrypoint "
+            "should create it (openace-shared, 2775) in multi-user mode; app-side "
             "follow-up. Grant/revoke matrix skipped until it lands.",
             response=body,
         )
@@ -1110,6 +1127,8 @@ def item_d_shared_projects(sc: Scenario) -> None:
         request=shared_path,
         response=body,
     )
+    if status != 201:
+        return
     project_id = (body or {}).get("project", {}).get("id")
 
     status, body, _ = http(
@@ -1355,6 +1374,51 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
         f"status={status}",
         response=body,
     )
+
+    # review round 4 (4003821831) — UID drift across recreation: a fresh
+    # container is a fresh /etc/passwd; the entrypoint re-useradds only the
+    # ACTIVE users (no ORDER BY, no uid pinning), so a deactivated user's
+    # numeric uid can be inherited by an active account — putting /home/<bob>
+    # (0700) and /workspace/<bob> under that account's ownership. Expected to
+    # FAIL on the current product: recorded honestly as a #3374-scope finding
+    # (app-side follow-up issue filed; uid pinning/reuse is the fix shape).
+    active_accounts = [
+        name for name, info in r.users.items() if info.get("system_account") and name != "bob"
+    ]
+    active_uids = {}
+    for name in active_accounts:
+        want = container_uid_of(name)
+        active_uids[want] = name
+        for dir_path in (f"/home/{name}", f"/workspace/{name}"):
+            got = compose_exec(
+                SERVICE, f"stat -c %u {dir_path}", timeout=15, check=False
+            ).stdout.strip()
+            rec.check(
+                "f",
+                f"post-recreate ownership: {dir_path} belongs to {name}",
+                got == want,
+                f"uid={got or '<missing>'} expected={want} (UID drift / useradd renumbering)",
+            )
+    for dir_path in ("/home/bob", "/workspace/bob"):
+        got = compose_exec(
+            SERVICE, f"stat -c %u {dir_path}", timeout=15, check=False
+        ).stdout.strip()
+        inheritor = active_uids.get(got, "")
+        rec.check(
+            "f",
+            f"post-recreate: deactivated bob's {dir_path} not inherited by an active account",
+            not inheritor,
+            f"uid={got} belongs to active account {inheritor or '<none/absent>'} "
+            "(product: entrypoint re-useradds active users without uid pinning)",
+        )
+    for attacker in ("alice", "carol"):
+        proc = compose_exec(SERVICE, "ls /home/bob", user=attacker, timeout=15, check=False)
+        rec.check(
+            "f",
+            f"post-recreate isolation: {attacker} shell ls /home/bob -> EACCES",
+            proc.returncode != 0,
+            f"rc={proc.returncode}",
+        )
     rec.note(
         "ephemeral materials live and die with the container lifecycle (handbook); "
         "the control-plane-restart-without-container-death shape does not exist under compose"
@@ -1434,16 +1498,65 @@ def item_h_single_user_regression(recorder: Recorder) -> dict[str, Any]:
         _item_h_assertions(rec)
     finally:
         BASE_URL = saved_base
+        # review round 4 (4003823086): main()'s log dumps run AFTER this
+        # finally — capture the single-user logs to the record directory
+        # BEFORE tearing the project down, or they are gone forever.
+        try:
+            RECORD_DIR.mkdir(parents=True, exist_ok=True)
+            proc = compose_base("logs", "--no-color", "--tail", "400", timeout=120)
+            (RECORD_DIR / "compose-logs-single.txt").write_text(proc.stdout, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - best effort
+            rec.note(f"compose-logs-single.txt dump failed: {exc}")
         compose_base("down", "-v", "--remove-orphans", timeout=300)
     return {}
 
 
-def _single_user_has_no_admin_os_account() -> bool:
-    """Confirm the DECLARED cause of the single-user 3100 launch failure:
-    the container has no OS user for the default admin (review 8278 — a bare
-    502/503 could just as well be a real regression)."""
-    proc = compose_base("exec", "-T", SERVICE, "id", "admin", timeout=60, check=False)
-    return proc.returncode != 0
+def _single_user_launch_capability(rec: Recorder, admin_token: str) -> bool:
+    """REAL capability assertion for the single-user 3100 launch (review
+    round 4, 4003822666): the `id admin` probe was constant-true — the image
+    simply has no OS user 'admin', so it never distinguished the declared
+    limitation from a real regression.
+
+    Instead, exercise the launch chain itself: create a user whose
+    system_account IS the container's own account ('open-ace', uid 1000).
+    Single-user login takes the direct-launch branch (current_user ==
+    system_account, no sudo), so its user-url MUST return 200/:3100. With
+    that asserted, the default admin's 503 can be exempted as the declared
+    limitation without swallowing regressions: a broken webui binary fails
+    THIS check loudly."""
+    status, body, _ = http(
+        "POST",
+        "/api/admin/users",
+        token=admin_token,
+        body={
+            "username": "opener",
+            "email": "opener@acceptance.test",
+            "password": "Opener-Acceptance-2026!x",
+            "tenant_id": 1,
+            "system_account": "open-ace",
+        },
+    )
+    if status != 201:
+        rec.check(
+            "h",
+            "single-user launch capability (system_account=open-ace user)",
+            False,
+            f"setup failed: {status}",
+            response=body,
+        )
+        return False
+    opener_token, _ = login("opener", "Opener-Acceptance-2026!x")
+    status, body, _ = http("GET", "/api/workspace/user-url", token=opener_token)
+    url = (body or {}).get("url", "") if isinstance(body, dict) else ""
+    ok = status == 200 and url.endswith(":3100")
+    rec.check(
+        "h",
+        "single-user launch capability: direct-branch user gets 3100",
+        ok,
+        f"status={status} url={url}",
+        response=body,
+    )
+    return ok
 
 
 def _item_h_assertions(rec: Recorder) -> None:
@@ -1464,34 +1577,31 @@ def _item_h_assertions(rec: Recorder) -> None:
         f"level={snapshot.get('isolation_level')}",
         response=snapshot,
     )
+    # REAL capability first (review 4003822666): if the direct-branch user
+    # cannot launch, nothing may be exempted below
+    capability_ok = _single_user_launch_capability(rec, token)
     status, body, _ = http("GET", "/api/workspace/user-url", token=token)
     url = (body or {}).get("url", "") if isinstance(body, dict) else ""
     if status == 200 and url.endswith(":3100"):
-        rec.check("h", "single shared instance on 3100", True, f"url={url}", response=body)
-    elif status in (502, 503) and _single_user_has_no_admin_os_account():
-        # F5 (declared exemption), tightened per review 8278: exempted ONLY
-        # when the declared cause is confirmed — the container has no OS
-        # user for the default admin (uid-1000 single-user shape). Any other
-        # 502/503 (broken webui binary, ready-timeout, max-instances …) FAILS
-        # so real single-user regressions are not swallowed.
+        rec.check("h", "default admin gets the shared 3100 instance", True, f"url={url}")
+    elif status in (502, 503) and capability_ok:
+        # F5 declared limitation (see handbook §5.8): the single-user image
+        # has no OS account for the default admin, so the sudo path cannot
+        # launch for it — but the launch chain itself is proven healthy by
+        # the capability assertion above, so this cannot hide a regression.
         rec.exempt(
             "h",
-            "single 3100 instance: app-side single-user launch limitation",
-            f"status={status} with declared cause confirmed (no OS user 'admin') — "
-            "see handbook §5.8",
+            "default admin 3100: app-side single-user mapping limitation",
+            f"status={status}; launch capability separately asserted healthy "
+            "(system_account=open-ace user returned 200/:3100) — see handbook §5.8",
             response=body,
-        )
-        rec.note(
-            "single-user user-url returned "
-            f"{status}; declared exempt (uid-1000 container, no OS account for admin) — "
-            "app-side follow-up, not a multi-user regression"
         )
     else:
         rec.check(
             "h",
-            "single shared instance on 3100",
+            "default admin gets the shared 3100 instance",
             False,
-            f"unexpected status={status} url={url}",
+            f"unexpected status={status} url={url} (capability_ok={capability_ok})",
             response=body,
         )
     status, body, _ = http("GET", "/api/auth/me", token=token)
@@ -1535,11 +1645,15 @@ def main() -> int:
     recorder = Recorder()
     recorder.collect_fingerprint()
     sc: Scenario | None = None
+    # review round 4 (4003820998): refuse BEFORE the try — SystemExit(2) is a
+    # BaseException and sails past `except Exception` into the finally, which
+    # used to down -v the very project the refusal meant to protect (a
+    # KEEP_STACK review session, or a concurrent run's single-user project).
+    refuse_if_project_has_state()
     try:
-        # 1. refuse dirty state, bootstrap env, two-phase up (review round 3):
+        # 1. bootstrap env, two-phase up (review round 3):
         #    first up -> entrypoint generates the FULL config -> stop -> merge
         #    max_instances=3 (same-image helper) -> second up
-        refuse_if_project_has_state()
         run(
             [sys.executable, str(REPO_ROOT / "scripts" / "bootstrap_compose_env.py")],
             cwd=REPO_ROOT,

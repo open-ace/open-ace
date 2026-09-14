@@ -11,6 +11,17 @@ name: multiuser-acceptance
 on:
   push:
     branches: [main]
+  # review round 4 (4003823515): pull_request events use the workflow file
+  # FROM THE PR BRANCH, so this gives the acceptance a REAL run on this very
+  # PR before merge (workflow_dispatch cannot — it requires the workflow to
+  # be registered on the default branch). Paths-filtered to the runner and
+  # this file.
+  pull_request:
+    paths:
+      - scripts/multiuser_acceptance.py
+      - .github/workflows/multiuser-acceptance.yml
+      - docs/cn/MULTIUSER_ISOLATION_ACCEPTANCE.md
+      - docs/en/MULTIUSER_ISOLATION_ACCEPTANCE.md
   workflow_dispatch:
 
 permissions:

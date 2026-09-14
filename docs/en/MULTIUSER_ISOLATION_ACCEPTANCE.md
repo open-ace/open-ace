@@ -22,8 +22,15 @@ assertions. The approved plan of record is
 - A real Linux host (`linux` + `docker` CLI + compose v2; enforced at startup).
 - Enough memory for three qwen-code-webui instances (a few hundred MB each).
 - **A fresh stack**: the script requires the default admin to be in the
-  must_change_password state. After any previous run, first
-  `docker compose -f docker-compose.yml -f docker-compose.multi-user.yml down -v`.
+  must_change_password state. After any previous run, first clean the
+  DEDICATED project (not the default one — that may be the production
+  deployment in the same checkout):
+  `docker compose -p acceptance-multi -f docker-compose.yml -f docker-compose.multi-user.yml down -v --remove-orphans`.
+- **Host exclusivity**: the multi-user stack inherits the base compose's
+  daemon-global container names (`open-ace`, …) and holds host ports 19888
+  and 3100–3200 — with a product stack already running, the acceptance
+  aborts cleanly at `up` (name/port conflict). Coexistence would need a
+  rename+offset override like the single-user tail's (declared, not built).
 - On CI, a dedicated `multiuser-acceptance` job (main-push, observation
   period) builds its own image and drives compose with
   `IMAGE_NAME=open-ace:$GITHUB_SHA` — the tested code and the image
@@ -64,10 +71,12 @@ Exit codes: `0` all passed; `1` failures or an aborted run (compose logs are
 dumped into the record directory on BOTH paths — including a completed run
 with failures); `2` environment unsuitable or non-empty dedicated project.
 
-First REAL run on a branch (before merge): the standalone
-`multiuser-acceptance` workflow supports `workflow_dispatch` — trigger it
-from the Actions page or
-`gh workflow run multiuser-acceptance.yml --ref <branch>`.
+First REAL run on a branch (before merge): the workflow's `pull_request`
+trigger uses the workflow file FROM THE PR BRANCH, so any PR touching
+`scripts/multiuser_acceptance.py`, the workflow, or the handbooks runs the
+acceptance for real in CI. (`workflow_dispatch` needs the workflow
+registered on the default branch first — that is why pre-merge dispatch
+404s.)
 
 ## 3. Nine-item checklist: attack / expectation matrix
 
@@ -141,17 +150,17 @@ from the Actions page or
    behavior), with this boundary declared.
 7. **Unstructured max_instances 503 body**: recorded verbatim — it is itself
    an acceptance finding, not an assertion failure.
-8. **Single-user 3100 instance launch (conditional exemption,
-   cause-confirmed)**: single-user containers run as uid 1000 and never
-   provision an OS account for the default admin, so the sudo-launch path
-   cannot bring up the 3100 instance in that shape — a known app-side
-   single-user limitation outside #3374's multi-user scope. The script
-   treats it conditionally: a healthy launch PASSes; a 502/503 is EXEMPT
-   **only when the declared cause is confirmed** (in-container `id admin`
-   fails) — any other 502/503 (a broken webui binary, a ready-timeout, a
-   real regression) FAILs, so the exemption cannot swallow regressions.
-   The exemption collapses back into a hard assertion once the app side is
-   fixed. Note: the single-user tail runs in its own
+8. **Default-admin 3100 launch (capability-separated exemption)**:
+   single-user containers run as uid 1000 and never provision an OS account
+   for the default admin, so the sudo path cannot launch the 3100 instance
+   FOR THE ADMIN — a known app-side mapping limitation. The script first
+   makes a REAL capability assertion: a user with
+   `system_account=open-ace` (the container's own account) takes the
+   sudo-free direct-launch branch and its user-url must return 200/:3100 —
+   if that fails, the admin's 502/503 FAILs too (no regression can hide).
+   Only with the capability proven does the admin's 502/503 record as
+   EXEMPT (the declared limitation). The exemption collapses once the app
+   side maps an account for the default admin. Note: the single-user tail runs in its own
    compose project (web port 19889, workspace port range offset to
    13100-13200 to avoid colliding with the multi-user stack's 3100-3200)
    — in that shape the single-user webui is not reachable at its

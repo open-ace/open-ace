@@ -16,8 +16,13 @@
 
 - 真实 Linux 主机（`linux` + `docker` CLI + compose v2；脚本启动时强制检查）。
 - 足够拉起 3 个 qwen-code-webui 实例的内存（每实例约数百 MB）。
-- **全新栈**：脚本要求默认 admin 处于 must_change_password 状态；若之前跑过，
-  先 `docker compose -f docker-compose.yml -f docker-compose.multi-user.yml down -v`。
+- **全新栈**：脚本要求默认 admin 处于 must_change_password 状态；若之前跑过，先清理
+  **专用项目**（不是默认项目——后者可能是同一 checkout 下的生产部署）：
+  `docker compose -p acceptance-multi -f docker-compose.yml -f docker-compose.multi-user.yml down -v --remove-orphans`。
+- **主机独占**：多用户栈沿用基础 compose 的全局唯一容器名（`open-ace` 等）并占用
+  19888 与 3100–3200 端口——主机上已有产品栈在跑时验收会在 `up` 处干净中止（容器名/
+  端口冲突）。如需共存，后续可像单用户尾段一样生成改名+偏移端口的 override（当前以
+  声明代替）。
 - CI 上由独立 job `multiuser-acceptance` 执行（main-push 触发，观察期），自带
   buildx 构建并以 `IMAGE_NAME=open-ace:$GITHUB_SHA` 驱动 compose——受测代码与
   镜像指纹严格对应，不会误拉 `openace/open-ace:latest`。
@@ -50,9 +55,10 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
 退出码：`0` 全部通过；`1` 有失败项或中途终止（两种情况下 compose logs 均落盘进记录
 目录——含跑完但有 FAIL 的路径）；`2` 环境不满足或专用项目非空。
 
-在分支上真实首跑（合入前）：独立 workflow `multiuser-acceptance` 支持
-`workflow_dispatch`，可在 PR 分支手动触发（Actions 页或
-`gh workflow run multiuser-acceptance.yml --ref <branch>`）。
+在分支上真实首跑（合入前）：workflow 的 `pull_request` 触发器使用 **PR 分支里的**
+workflow 文件，所以触碰 `scripts/multiuser_acceptance.py` / 本 workflow / 手册的 PR
+会在 CI 上真实执行验收（`workflow_dispatch` 需要默认分支先注册该 workflow，合入前
+不可用——404 的原因）。
 
 ## 3. 九项清单：攻击 / 期望对照表
 
@@ -112,12 +118,12 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
    期望行为），覆盖边界如本条声明。
 7. **max_instances 503 body 非结构化**：如实记录——这本身是一条验收发现，不是
    断言失败。
-8. **单用户 3100 实例启动（条件豁免，原因确认制）**：单用户容器以 uid 1000 运行且
-   不会为默认 admin 预置 OS 账号，sudo 启动路径在该形态下无法拉起 3100 实例——app 侧
-   单用户形态的已知限制，在 #3374 的多用户范围之外。脚本对该项做条件处理：正常启动则
-   PASS；**仅当 502/503 且容器内 `id admin` 确认失败**（声明的成因被证实）才记 EXEMPT，
-   其余 502/503（如 webui 二进制损坏等真实回归）一律 FAIL——避免豁免吞掉回归。
-   待 app 侧修复后豁免自动收敛为断言。另注：单用户尾段
+8. **默认 admin 的 3100 启动（能力分离制豁免）**：单用户容器以 uid 1000 运行且不会
+   为默认 admin 预置 OS 账号，sudo 启动路径在该形态下无法为 admin 拉起 3100 实例——
+   app 侧已知映射限制。脚本先做**真实能力断言**：创建 `system_account=open-ace`（容器
+   自身账户）的用户走免 sudo 直启分支，其 user-url 必须 200/:3100——该断言失败则 admin
+   的 502/503 也一律 FAIL（回归不被吞）；能力断言通过时，admin 的 502/503 才记 EXEMPT
+   （声明限制）。待 app 侧为 admin 提供映射后豁免自动收敛。另注：单用户尾段
    在独立 compose 项目中运行（web 端口 19889、工作区端口段偏移到 13100–13200，避免
    与多用户栈的 3100–3200 冲突）——该形态下单用户 webui 不在其广播的主机 URL 上可达，
    h 项断言全部为 API 层，不依赖直连它。
