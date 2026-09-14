@@ -416,7 +416,7 @@ jobs:
         github.event_name == 'pull_request' ||
         (github.event_name == 'workflow_dispatch' && inputs.healed_sha != '')
       )
-    needs: [changes, lint, test, frontend, build, postgres-test, false-positive-scan, security-gate]
+    needs: [changes, lint, test, frontend, build, postgres-test, false-positive-scan, security-gate, docker-sandbox]
     runs-on: ubuntu-24.04
     steps:
       - name: Validate required and selected lanes
@@ -429,10 +429,11 @@ jobs:
           POSTGRES: ${{ needs.postgres-test.result }}
           SCAN: ${{ needs.false-positive-scan.result }}
           SECURITY: ${{ needs.security-gate.result }}
+          SANDBOX: ${{ needs.docker-sandbox.result }}
         run: |
           python - <<'PY'
           import os
-          required = {name: os.environ[name] for name in ("CHANGES", "LINT", "TEST", "BUILD")}
+          required = {name: os.environ[name] for name in ("CHANGES", "LINT", "TEST", "BUILD", "SANDBOX")}
           selected = {name: os.environ[name] for name in ("FRONTEND", "POSTGRES", "SCAN", "SECURITY")}
           failures = {name: result for name, result in required.items() if result != "success"}
           failures.update(

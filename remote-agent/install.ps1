@@ -240,7 +240,17 @@ if ($InstallCli) {
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 }
-                $qwenVersion = (qwen --version) 2>&1
+                # $LASTEXITCODE only reflects the LAST native program that
+                # actually RAN: if qwen is not on PATH, the failed invocation
+                # runs no native program and the stale npm exit code (0)
+                # survives — and 2>&1 would bind a truthy ErrorRecord to the
+                # variable. Confirm the command exists first, fail closed.
+                if (-not (Get-Command qwen -ErrorAction SilentlyContinue)) {
+                    Write-Host "[ERROR] qwen-code-cli installed but 'qwen' is not on PATH." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
+                }
+                $qwenVersion = & qwen --version 2>$null
                 if ($LASTEXITCODE -ne 0 -or -not $qwenVersion) {
                     Write-Host "[ERROR] qwen-code-cli installed but 'qwen --version' verification failed." -ForegroundColor Red
                     $ErrorActionPreference = $prevErrorAction

@@ -4,6 +4,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -638,3 +640,90 @@ def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
     # ... but the pinned install (bash -s -- <versions>) was never invoked
     assert "-- 0.2.43" not in ssh_calls
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def _ps1_qwen_case_body() -> str:
+    """Extract the qwen-code-cli switch block verbatim from install.ps1."""
+    script = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+    match = re.search(r'"qwen-code-cli" \{\n(.*?)\n            "claude-code" \{', script, re.DOTALL)
+    assert match is not None, "qwen-code-cli block not found in install.ps1"
+    return match.group(1)
+
+
+def _run_ps1_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
+    """Execute the extracted PowerShell qwen block under pwsh with a fake
+    PATH (npm/node shims, qwen optionally absent)."""
+    import shutil
+
+    fake_bin = tmp_path / "ps-bin"
+    fake_bin.mkdir(parents=True)
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f"echo npm-output; exit {npm_exit}")
+    shim("node", "echo 'v22.22.3'")
+    if with_qwen:
+        shim("qwen", "echo '0.23.3'")
+
+    harness = (
+        "$prevErrorAction = $ErrorActionPreference\n"
+        "$ErrorActionPreference = 'Continue'\n"
+        "switch ('qwen-code-cli') {\n"
+        '"qwen-code-cli" {\n' + _ps1_qwen_case_body() + "\n}\n}\n"
+        "Write-Output 'CASE_COMPLETED'\n"
+    )
+    harness_file = tmp_path / "harness.ps1"
+    harness_file.write_text(harness, encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PATH"] = str(fake_bin)
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(harness_file)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+# GitHub-hosted runners ship pwsh on Linux; dev machines may not have it.
+_pwsh_available = None
+
+
+def _pwsh_exists() -> bool:
+    global _pwsh_available
+    if _pwsh_available is None:
+        import shutil
+
+        _pwsh_available = shutil.which("pwsh") is not None
+    return _pwsh_available
+
+
+@pytest.mark.skipif(not _pwsh_exists(), reason="pwsh not installed locally; runs on CI runners")
+def test_ps1_qwen_missing_after_install_is_fatal(tmp_path):
+    """PR #3386 review: npm exit 0 + qwen NOT on PATH must fail closed —
+    $LASTEXITCODE keeps the stale npm code when the invocation runs no
+    native program, and 2>&1 binds a truthy ErrorRecord, so the naive
+    check printed success and registered a broken agent."""
+    result = _run_ps1_qwen_case(tmp_path, npm_exit=0, with_qwen=False)
+
+    assert result.returncode == 1
+    assert "CASE_COMPLETED" not in result.stdout
+
+
+@pytest.mark.skipif(not _pwsh_exists(), reason="pwsh not installed locally; runs on CI runners")
+def test_ps1_qwen_npm_failure_is_fatal(tmp_path):
+    result = _run_ps1_qwen_case(tmp_path, npm_exit=1, with_qwen=True)
+
+    assert result.returncode == 1
+    assert "CASE_COMPLETED" not in result.stdout
+
+
+@pytest.mark.skipif(not _pwsh_exists(), reason="pwsh not installed locally; runs on CI runners")
+def test_ps1_qwen_happy_path_completes(tmp_path):
+    result = _run_ps1_qwen_case(tmp_path, npm_exit=0, with_qwen=True)
+
+    assert result.returncode == 0
+    assert "CASE_COMPLETED" in result.stdout

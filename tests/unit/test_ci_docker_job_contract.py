@@ -116,3 +116,24 @@ def test_docker_job_runs_the_multiuser_deployment_smoke():
         "WORKSPACE_BASE_DIR=/workspace",
     ):
         assert f"-e {env}" in run, f"smoke step lost -e {env}"
+
+
+def test_docker_sandbox_blocks_the_pr_gate():
+    """PR #3386 review: docker-sandbox must be a REQUIRED PR-gate input.
+
+    The repo ruleset's only required status check is "PR Gate"; if the
+    sandbox-image job were not wired into its needs/validation, a sandbox
+    build regression (e.g. the uid/gid-1000 clash) could not block a merge.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    gate = workflow["jobs"]["pr-gate"]
+
+    assert "docker-sandbox" in gate["needs"]
+
+    gate_step = gate["steps"][0]
+    assert (
+        gate_step.get("env", {}).get("SANDBOX") == "${{ needs.docker-sandbox.result }}"
+    ), "gate must read the sandbox job result"
+    assert '"SANDBOX"' in gate_step.get(
+        "run", ""
+    ), "gate must validate the sandbox result as required"
