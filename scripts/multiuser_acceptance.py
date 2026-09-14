@@ -13,7 +13,7 @@ FAILED, and the stack can be kept for manual inspection.
 
 Usage (from the repository root, on a linux host with docker + compose):
 
-    python3 scripts/multiuser_acceptance_3379.py
+    python3 scripts/multiuser_acceptance.py
 
 Environment:
     ACCEPTANCE_BASE_URL     default http://localhost:19888

@@ -506,7 +506,7 @@ jobs:
   # of the docker job and NOT a PR gate. It brings up the full multi-user
   # compose stack on the runner (postgres + production image + real
   # useradd/sudo wrapper + real webui processes) and executes the nine-item
-  # acceptance checklist via scripts/multiuser_acceptance_3379.py.
+  # acceptance checklist via scripts/multiuser_acceptance.py.
   #
   # The job builds its own image: jobs do NOT share local images, and
   # without a local build IMAGE_NAME would fall back to pulling
@@ -540,7 +540,7 @@ jobs:
           ACCEPTANCE_BASE_URL: http://localhost:19888
           ACCEPTANCE_RECORD_DIR: ${{ github.workspace }}/acceptance-records
         run: |
-          python3 scripts/multiuser_acceptance_3379.py
+          python3 scripts/multiuser_acceptance.py
       - name: Upload acceptance records
         if: always()
         uses: actions/upload-artifact@v7

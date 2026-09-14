@@ -1,7 +1,7 @@
 # 多用户隔离验收手册（#3379 / #3374）
 
 本手册描述如何在**真实 Linux 多用户部署**上执行 #3374 的九项验收清单，如何阅读
-`scripts/multiuser_acceptance_3379.py` 产出的验收记录，以及哪些边界以**声明性豁免**
+`scripts/multiuser_acceptance.py` 产出的验收记录，以及哪些边界以**声明性豁免**
 的形式覆盖（而非自动化断言）。方案终稿见
 `docs/superpowers/plans/2026-09-13-issue-3379-multiuser-acceptance.md`（v2.1，已审查通过）。
 
@@ -19,15 +19,15 @@
 
 ```bash
 # 本地（在仓库根目录；可先 export IMAGE_NAME=open-ace:<tag> 指定待测镜像）
-python3 scripts/multiuser_acceptance_3379.py
+python3 scripts/multiuser_acceptance.py
 
 # 保留现场做人工复核（跳过收尾 down -v）
-ACCEPTANCE_KEEP_STACK=1 python3 scripts/multiuser_acceptance_3379.py
+ACCEPTANCE_KEEP_STACK=1 python3 scripts/multiuser_acceptance.py
 
 # 自定义服务地址 / 记录目录
 ACCEPTANCE_BASE_URL=http://host:19888 \
 ACCEPTANCE_RECORD_DIR=./my-records \
-python3 scripts/multiuser_acceptance_3379.py
+python3 scripts/multiuser_acceptance.py
 ```
 
 脚本流程：bootstrap env（生成三个必填密钥）→ **预置 config.json 进 config 卷**

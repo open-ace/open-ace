@@ -2,7 +2,7 @@
 
 This handbook describes how to execute the #3374 nine-item acceptance checklist
 against a **real multi-user Linux deployment**, how to read the acceptance
-record produced by `scripts/multiuser_acceptance_3379.py`, and which
+record produced by `scripts/multiuser_acceptance.py`, and which
 boundaries are covered by **declared exemptions** rather than automated
 assertions. The approved plan of record is
 `docs/superpowers/plans/2026-09-13-issue-3379-multiuser-acceptance.md` (v2.1).
@@ -24,15 +24,15 @@ assertions. The approved plan of record is
 
 ```bash
 # Locally (repo root; optionally export IMAGE_NAME=open-ace:<tag> first)
-python3 scripts/multiuser_acceptance_3379.py
+python3 scripts/multiuser_acceptance.py
 
 # Keep the stack up for manual inspection (skip the final down -v)
-ACCEPTANCE_KEEP_STACK=1 python3 scripts/multiuser_acceptance_3379.py
+ACCEPTANCE_KEEP_STACK=1 python3 scripts/multiuser_acceptance.py
 
 # Custom service URL / record directory
 ACCEPTANCE_BASE_URL=http://host:19888 \
 ACCEPTANCE_RECORD_DIR=./my-records \
-python3 scripts/multiuser_acceptance_3379.py
+python3 scripts/multiuser_acceptance.py
 ```
 
 Flow: bootstrap env (generates the three mandatory secrets) → **pre-seed
