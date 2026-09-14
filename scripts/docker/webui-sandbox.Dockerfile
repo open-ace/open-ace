@@ -37,7 +37,7 @@
 # (`webui_image_not_allowed`). See docs/sandbox-backends.md section 8 and
 # docs/workspace-isolation-capabilities.md section 6.
 #
-# Build from the repository root (the webui patch scripts are COPYed in):
+# Build from the repository root:
 #   docker build -f scripts/docker/webui-sandbox.Dockerfile \
 #     -t <your-registry>/open-ace-webui:<tag> .
 
@@ -54,31 +54,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # qwen-code-webui + the qwen-code CLI it drives, pinned to the same pair the
-# control-plane image installs (the patch scripts below fail the build on
-# version drift). `--prefix /usr` puts the packages at
+# control-plane image installs. `--prefix /usr` puts the packages at
 # /usr/lib/node_modules and the bin at /usr/bin/qwen-code-webui - the layout
-# the patch scripts below are hard-coded against.
+# the entrypoint/launch paths are hard-coded against.
 RUN npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g --prefix /usr qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
+    && npm install -g --prefix /usr qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3 \
     && test -x /usr/bin/qwen-code-webui \
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js
-
-# The same version-pinned webui patches the control-plane image applies
-# (permission handling, conversation-history listing, nav params, vscode
-# folder) - without the histories patch the in-app history view stays empty
-# even though the control-plane snapshot/restore keeps working.
-COPY scripts/patch-qwen-webui-permission.py \
-     scripts/patch-qwen-webui-histories.py \
-     scripts/patch-qwen-webui-navparams.py \
-     scripts/patch-qwen-webui-vscode-folder.py \
-     scripts/patch-qwen-webui-local-permission.py \
-     /tmp/
-RUN python3 /tmp/patch-qwen-webui-permission.py \
-    && python3 /tmp/patch-qwen-webui-histories.py \
-    && python3 /tmp/patch-qwen-webui-navparams.py \
-    && python3 /tmp/patch-qwen-webui-vscode-folder.py \
-    && python3 /tmp/patch-qwen-webui-local-permission.py \
-    && rm -f /tmp/patch-qwen-webui-*.py
 
 # Non-root runtime user: uid/gid 1000, home /home/agent (the bootstrap mkdirs
 # /home/agent and /workspace for this uid; the kubelet mounts the ephemeral

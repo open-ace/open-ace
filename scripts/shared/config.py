@@ -42,7 +42,7 @@ def _safe_path(path: str) -> str:
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
-CONFIG_DIR = _safe_path(os.path.expanduser("~/.open-ace"))
+CONFIG_DIR = _safe_path(os.environ.get("OPENACE_CONFIG_DIR") or os.path.expanduser("~/.open-ace"))
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DB_DIR = CONFIG_DIR  # Database is stored in the same directory
 DB_PATH = os.path.join(DB_DIR, "ace.db")
