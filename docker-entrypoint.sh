@@ -1210,7 +1210,15 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         # an administrator fixes it; the app's own dir/ownership failures are
         # warning-grade too, and set -e would otherwise restart-loop the whole
         # service on e.g. a root_squash NFS base dir.
-        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 2775 "$_base_dir/shared"; }; then
+        # chmod 3775 (review round 3, 4004874853): +sticky — rename(2) only
+        # needs write+search on the parent, and openace-shared is a GLOBAL
+        # group (every tenant's account joins), so without the sticky bit any
+        # member could mv/replace another tenant's project directory. Sticky
+        # blocks non-owner renames at the root; sudo -u <user> mkdir for new
+        # projects and root-run setup_permissions_with_depth_limit are
+        # unaffected. Content-level cross-tenant access inside projects is
+        # the global-group design itself — tracked as #3396.
+        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3775 "$_base_dir/shared"; }; then
             echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
         fi
     done

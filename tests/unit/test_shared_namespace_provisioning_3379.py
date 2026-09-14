@@ -41,7 +41,7 @@ CALLS_FILE="$TEST_TMP/calls"
 touch "$CALLS_FILE"
 # FAIL injects a failure ONLY for the shared-root steps (a failing BASE mkdir
 # legitimately aborts — pre-existing behavior outside this provisioning).
-mkdir() { echo "mkdir $*" >> "$CALLS_FILE"; if [ "$FAIL" = "mkdir" ] && [ "${1#/ws/shared}" != "$1" ] || [ "$1" = "$FAIL_BASE/shared" ]; then return 1; fi; return 0; }
+mkdir() { echo "mkdir $*" >> "$CALLS_FILE"; if [ "$FAIL" = "mkdir" ]; then case "$*" in *"/shared") return 1;; esac; fi; return 0; }
 chgrp() { echo "chgrp $*" >> "$CALLS_FILE"; [ "$FAIL" = "chgrp" ] && return 1; return 0; }
 chmod() { echo "chmod $*" >> "$CALLS_FILE"; [ "$FAIL" = "chmod" ] && return 1; return 0; }
 id()    { echo "id $*" >> "$CALLS_FILE"; [ -n "$ID_SHARED_OK" ] && [ "$1" = "shared" ] && return 0; return 1; }
@@ -50,7 +50,6 @@ set -e
 SHARED_GROUP=openace-shared
 # the extracted block assigns WORKSPACE_DIR from WORKSPACE_BASE_DIR
 WORKSPACE_BASE_DIR="$WORKSPACE_DIR_UNDER_TEST"
-FAIL_BASE="${WORKSPACE_DIR_UNDER_TEST%%,*}"
 """
 
 
@@ -104,20 +103,20 @@ class TestSharedNamespaceProvisioning:
         assert "mkdir -p /ws" in log
         assert "mkdir -p /ws/shared" in log
         assert "chgrp openace-shared /ws/shared" in log
-        assert "chmod 2775 /ws/shared" in log
+        assert "chmod 3775 /ws/shared" in log, "sticky bit required (cross-tenant rename guard)"
 
     def test_comma_list_iterates_and_trims(self):
         log = _run_block("  /a , /b  ")
         assert "mkdir -p /a/shared" in log and "mkdir -p /b/shared" in log
         assert (
-            log.count("chmod 2775") == 2
+            log.count("chmod 3775") == 2
         ), "exactly two bases provisioned (empty/padded segments skipped)"
         assert not any(", /" in ln or "/," in ln for ln in log.splitlines()), "no literal comma dir"
 
     def test_skips_when_real_shared_account_exists(self):
         log = _run_block("/ws", id_shared_ok=True)
         assert "id shared" in log, "the guard probe must run"
-        assert "chmod 2775 /ws/shared" not in log, "guard must skip provisioning on collision"
+        assert "chmod 3775 /ws/shared" not in log, "guard must skip provisioning on collision"
 
     def test_skips_when_existing_path_not_root_owned(self):
         log = _run_block("TMP", stat_owner="someoneelse", precreate_shared=True)
@@ -168,6 +167,11 @@ class TestEnsureWorkspaceDirsSharedGuard:
             ws, "run_as_root_if_needed", lambda cmd: calls.append(tuple(cmd)) or _FakeProc(0, "")
         )
         monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
+        # review round 3: setting ws._is_docker_multi_user_mode directly in
+        # tests leaked across the session — route through monkeypatch
+        modes: list[bool] = []
+        monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: bool(modes))
+        ws._acceptance_mode_flag = modes
 
         def fake_run(cmd, **kw):
             calls.append(tuple(cmd))
@@ -179,7 +183,7 @@ class TestEnsureWorkspaceDirsSharedGuard:
 
     def test_guard_refuses_shared_account_in_multi_user_mode(self, stubbed):
         ws, calls, base = stubbed
-        ws._is_docker_multi_user_mode = lambda: True
+        ws._acceptance_mode_flag.append(True)
         ws._ensure_workspace_dirs("shared", base)
         touched = [
             c for c in calls if c and str(c[0]).split("/")[-1].startswith(("chown", "mkdir"))
@@ -188,13 +192,12 @@ class TestEnsureWorkspaceDirsSharedGuard:
 
     def test_guard_inactive_for_normal_accounts(self, stubbed):
         ws, calls, base = stubbed
-        ws._is_docker_multi_user_mode = lambda: True
+        ws._acceptance_mode_flag.append(True)
         ws._ensure_workspace_dirs("alice", base)
         assert any(str(c[0]).split("/")[-1].startswith("chown") for c in calls)
 
     def test_guard_inactive_in_single_user_mode(self, stubbed):
         ws, calls, base = stubbed
-        ws._is_docker_multi_user_mode = lambda: False
         ws._ensure_workspace_dirs("shared", base)
         assert any(
             str(c[0]).split("/")[-1].startswith("chown") for c in calls
