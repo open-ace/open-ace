@@ -6,10 +6,10 @@
     "default": {
       "min_tests": 8112,
       "min_files": 250,
-      "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 FINAL batch 17: e2e exodus + machinery retirement. 165 items migrated from tests/issues to tests/e2e/* (nightly e2e lane, governance-inventoried, manifest 292->457 nodeids) + 1 TS spec to frontend/e2e; 4 audited deletions; tests/issues tree deleted; issue-collection suite/layer/gate/conftest-backfill/quarantine-probe/baseline-comparator retired. default actuals 11718/783 = 11779 - 61 (test_legacy_issue_baseline.py's classify params, retired with its subject script); min unchanged (8112)",
-      "actual_collected": 11718,
-      "actual_files": 783,
+      "last_updated": "2026-09-14",
+      "update_reason": "Two changes in one PR. (1) scripts/ one-off cleanup: deleted tests/unit/test_admin_role_migration.py (19 items) with its subject scripts migrate_admin_role{,_rollback}.py — superseded by alembic 20260810_001 (#2332). (2) qwen stack upgrade (webui 0.2.40->0.2.43, CLI 0.15.10->0.23.3): deleted the 3 patch-script unit tests (test_patch_qwen_webui_{histories,navparams,vscode_folder}.py) with their subject scripts — the five patched bugs are fixed upstream (ivycomputing/qwen-code-webui PRs #236-#240) — and added tests/unit/test_qwen_adapter_approval_mode.py (8 items; guards the suggest->default approval-mode rename). min unchanged (8112).",
+      "actual_collected": 13611,
+      "actual_files": 841,
       "threshold_percent": 96
     },
     "critical": {
