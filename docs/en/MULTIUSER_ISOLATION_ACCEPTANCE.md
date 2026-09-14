@@ -10,14 +10,29 @@ assertions. The approved plan of record is
 ## 1. Environment prerequisites
 
 **Product prerequisites (same tier as PR-A/#3384)**:
-- **#3110 (OPEN at the time of writing)**: the app's config resolution must
-  honor `OPENACE_CONFIG_DIR` (it currently reads `~/.open-ace` and never
-  sees the config volume). Until it lands, the script fails fast at the
-  config proof, naming #3110.
-- **Shared-namespace provisioning**: nothing in the product creates
-  `<base>/shared` yet — item (d) records the fresh-deployment 403 as a
-  declared known gap (the entrypoint should create it in multi-user mode,
-  openace-shared group, 2775); app-side follow-up.
+- **#3387/#3110 (merged)**: the app's config resolution honors
+  `OPENACE_CONFIG_DIR` (it used to read `~/.open-ace` and never see the
+  config volume).
+- **#3389 shared-namespace provisioning**: nothing in the product created
+  `<base>/shared` — item (d) used to record the fresh-deployment 403 as a
+  declared known gap; the entrypoint now provisions it (openace-shared
+  group, **3775** with the sticky bit).
+- **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
+  active users without uid pinning — a deactivated user's directories are
+  numerically inherited by an active account. Item (f) asserts this by
+  owner name and is expected to FAIL until the fix lands (recorded
+  honestly).
+- **#3394 (fixed, PR #3395)**: the frontend integrity check expected a
+  `main.*.js` that vite never produced — production images crash-looped.
+- **#3396 (OS-layer shared isolation)**: shared dirs are group
+  openace-shared (GLOBAL — every tenant's account joins) 2775/664 —
+  cross-tenant and post-revocation OS-level access persists. Item (d) has
+  OS-layer probes, expected to FAIL, recorded honestly.
+- **#3397 (declared deviation)**: a fresh multi-user production deployment
+  following DEPLOYMENT.md cannot start (empty DB refused; a bare migration
+  leaves no default admin). The script works around it with a one-shot
+  `alembic upgrade head && init_db.py` container — a DECLARED deviation
+  recorded in every run's notes; revert to the documented path once fixed.
 
 - A real Linux host (`linux` + `docker` CLI + compose v2; enforced at startup).
 - Enough memory for three qwen-code-webui instances (a few hundred MB each).

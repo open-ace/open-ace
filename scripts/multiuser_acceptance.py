@@ -24,9 +24,10 @@ Environment:
                            user tail's URL; also drives its published PORT
 
 PREREQUISITES (declared, same tier as PR-A/#3384 was):
-- #3110 (OPEN at the time of writing): the app must honor
-  OPENACE_CONFIG_DIR for its config resolution. Until it lands, the script
-  aborts at the config proof with a message naming #3110.
+- #3110 (fixed by #3387): the app honors OPENACE_CONFIG_DIR for its config
+  resolution. If this proof fails on a post-#3387 image, check that the
+  merge step actually ran and the config volume name matches the dedicated
+  project before suspecting a regression.
 - multi-user shared-namespace provisioning: nothing in the product creates
   <base>/shared yet — item (d) records the fresh-deployment 403 as a
   declared known gap until the entrypoint provisions it.
@@ -1715,6 +1716,11 @@ def main() -> int:
             "alembic upgrade head && python3 scripts/init_db.py",
             timeout=600,
         )
+        recorder.note(
+            "DECLARED DEVIATION (#3397): fresh production DB initialized via a one-shot "
+            "'alembic upgrade head && init_db.py' container - DEPLOYMENT.md multi-user "
+            "Option 2 cannot boot a fresh deployment (empty DB refused in production)"
+        )
         compose("up", "-d", "--wait", timeout=900)
         compose("stop", SERVICE, timeout=300)
         merge_max_instances(3)
@@ -1733,10 +1739,10 @@ def main() -> int:
             raise AcceptanceError(
                 "config merge ineffective: /api/workspace/config reports max_instances="
                 f"{body.get('max_instances') if isinstance(body, dict) else body} "
-                "(expected 3). Most likely cause: #3110 is still OPEN — the app resolves "
-                "its config at ~/.open-ace and ignores OPENACE_CONFIG_DIR, so it never "
-                "reads the volume config this script merges. #3110 is a declared "
-                "PREREQUISITE of this acceptance (same tier as PR-A/#3384 was)."
+                "(expected 3). #3110/#3387 already fixed config-dir resolution — "
+                "verify the image under test actually contains #3387, then check the "
+                "merge step ran (look for the DECLARED DEVIATION note) and that the "
+                "config volume is acceptance-multi_config-data."
             )
         recorder.note("pre-seeded config active: multi_user_mode on, max_instances=3")
         sc.build()
