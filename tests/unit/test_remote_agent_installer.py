@@ -266,16 +266,32 @@ def test_package_installer_runs_gated_stack_before_fresh_and_upgrade_split():
     assert gate_pos < split_pos
 
 
-def _run_remote_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None):
-    """Execute ensure_qwen_stack_remote() with a fake ssh that simulates the
-    remote host by running the transported script in the same sandbox (fake
-    node/npm recorder/qwen shim/sudo pass-through)."""
+def _run_remote_qwen_stack(
+    tmp_path,
+    node_version: str | None,
+    qwen_version: str | None,
+    *,
+    uid: str = "1000",
+    with_sudo: bool = False,
+    prefix_writable: bool = True,
+):
+    """Execute ensure_qwen_stack_remote() with a fake ssh simulating the
+    remote host: it logs the invocation and runs the transported script
+    locally under /bin/bash with the same sandbox PATH.
+
+    uid/with_sudo/prefix_writable control the remote privilege landscape the
+    PR #3386 review asked to cover: root without sudo, user-scoped npm
+    (writable prefix, no sudo), and system prefix with passwordless sudo.
+    """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "grep"):
+    for tool in ("sed", "cut", "grep", "true"):
         os.symlink(_which(tool), fake_bin / tool)
     npm_log = tmp_path / "npm.log"
-    ssh_log = tmp_path / "ssh.log"
+    npm_prefix = tmp_path / ("npm-prefix-writable" if prefix_writable else "npm-prefix-ro")
+    npm_prefix.mkdir(parents=True)
+    if not prefix_writable:
+        npm_prefix.chmod(0o500)
 
     def shim(name: str, body: str) -> None:
         (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
@@ -283,16 +299,26 @@ def _run_remote_qwen_stack(tmp_path, node_version: str | None, qwen_version: str
 
     if node_version is not None:
         shim("node", f"echo '{node_version}'")
-    shim("npm", f'echo "$@" >> "{npm_log}"')
+    shim("id", f"echo '{uid}'")
+    # npm: 'config get prefix' answers the prefix; installs are recorded
+    shim(
+        "npm",
+        f'if [ "$1" = "config" ]; then echo "{npm_prefix}"; exit 0; fi\n'
+        f'echo "$@" >> "{npm_log}"',
+    )
     if qwen_version is not None:
         shim("qwen", f"echo '{qwen_version}'")
     shim("qwen-code-webui", "exit 0")
-    shim("sudo", 'exec "$@"')
-    # fake ssh: log the invocation, then run the transported script locally
-    # (simulating the remote shell with the same fake PATH)
+    if with_sudo:
+        # passwordless sudo: '-n ...' drops the flag and passes through
+        shim("sudo", 'if [ "$1" = "-n" ]; then shift; fi\nexec "$@"')
+    # fake ssh: log args, drop the remote spec, exec the rest (bash -s -- args)
+    ssh_log = tmp_path / "ssh.log"
     shim(
         "ssh",
-        f'echo "$@" >> "{ssh_log}"\nexec /bin/sh -c "$2"',
+        f'echo "$@" >> "{ssh_log}"\nshift\n'
+        'if [ "$1" = "bash" ]; then shift; exec /bin/bash "$@"; fi\n'
+        'exec "$@"',
     )
 
     harness = (
@@ -313,21 +339,76 @@ def _run_remote_qwen_stack(tmp_path, node_version: str | None, qwen_version: str
     )
 
 
-def test_deploy_ensures_pinned_stack_on_remote(tmp_path):
-    """Regression (PR #3386 review): SSH deploys must install and verify the
-    pinned qwen stack on the remote host, not just copy new app code."""
+def test_deploy_remote_node20_without_upgrade_route_refuses(tmp_path):
+    """Node 20 on the simulated remote, non-root without passwordless sudo
+    and no supported package manager: refuse BEFORE any npm install."""
     result, npm_log = _run_remote_qwen_stack(
         tmp_path, node_version="v20.19.1", qwen_version="0.23.3"
     )
-    # Node 20 on the simulated remote with no supported package manager:
-    # the remote script must refuse (exit 1) BEFORE any npm install.
+
     assert result.returncode == 1
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
 
 
-def test_deploy_remote_node22_installs_pinned_versions(tmp_path):
+def test_deploy_remote_root_without_sudo_installs_directly(tmp_path):
+    """Root login on a sudo-less minimal system must work (PR #3386 review)."""
     result, npm_log = _run_remote_qwen_stack(
-        tmp_path, node_version="v22.22.3", qwen_version="0.23.3"
+        tmp_path,
+        node_version="v22.22.3",
+        qwen_version="0.23.3",
+        uid="0",
+        with_sudo=False,
+    )
+
+    assert result.returncode == 0
+    assert npm_log.read_text(encoding="utf-8").splitlines() == [
+        "install -g qwen-code-webui@0.2.43",
+        "install -g @qwen-code/qwen-code@0.23.3",
+    ]
+
+
+def test_deploy_remote_user_scoped_npm_needs_no_sudo(tmp_path):
+    """Non-root with a writable (nvm-style) npm prefix installs directly."""
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path,
+        node_version="v22.22.3",
+        qwen_version="0.23.3",
+        uid="1000",
+        with_sudo=False,
+        prefix_writable=True,
+    )
+
+    assert result.returncode == 0
+    assert npm_log.read_text(encoding="utf-8").splitlines() == [
+        "install -g qwen-code-webui@0.2.43",
+        "install -g @qwen-code/qwen-code@0.23.3",
+    ]
+
+
+def test_deploy_remote_unwritable_prefix_without_sudo_refuses(tmp_path):
+    """Non-root, system (unwritable) npm prefix, no passwordless sudo:
+    refuse instead of sudo-invoking npm that cannot work."""
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path,
+        node_version="v22.22.3",
+        qwen_version="0.23.3",
+        uid="1000",
+        with_sudo=False,
+        prefix_writable=False,
+    )
+
+    assert result.returncode == 1
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def test_deploy_remote_system_prefix_uses_passwordless_sudo(tmp_path):
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path,
+        node_version="v22.22.3",
+        qwen_version="0.23.3",
+        uid="1000",
+        with_sudo=True,
+        prefix_writable=False,
     )
 
     assert result.returncode == 0
@@ -345,6 +426,82 @@ def test_deploy_remote_version_mismatch_fails(tmp_path):
     assert result.returncode == 1
 
 
+def test_maybe_install_skips_for_api_only_deployment(tmp_path):
+    """WORKSPACE disabled via --config and no existing qwen stack: the
+    installer must not require Node/npm at all (PR #3386 review)."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True)
+    npm_log = tmp_path / "npm.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f'echo "$@" >> "{npm_log}"')
+
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n"
+        "WORKSPACE_ENABLED=false\nWORKSPACE_MULTI_USER_MODE=false\n"
+        + _qwen_stack_functions()
+        + "\nmaybe_install_qwen_stack\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def test_maybe_install_proceeds_when_workspace_enabled(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("sed", "cut", "grep"):
+        os.symlink(_which(tool), fake_bin / tool)
+    npm_log = tmp_path / "npm.log"
+    npm_prefix = tmp_path / "prefix"
+    npm_prefix.mkdir()
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("node", "echo 'v22.22.3'")
+    shim(
+        "npm",
+        f'if [ "$1" = "config" ]; then echo "{npm_prefix}"; exit 0; fi\n'
+        f'echo "$@" >> "{npm_log}"',
+    )
+    shim("qwen", "echo '0.23.3'")
+    shim("qwen-code-webui", "exit 0")
+
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n"
+        "WORKSPACE_ENABLED=true\nWORKSPACE_MULTI_USER_MODE=true\n"
+        + _qwen_stack_functions()
+        + "\nmaybe_install_qwen_stack\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert npm_log.read_text(encoding="utf-8").splitlines() == [
+        "install -g qwen-code-webui@0.2.43",
+        "install -g @qwen-code/qwen-code@0.23.3",
+    ]
+
+
 def test_deploy_wires_stack_check_before_fresh_upgrade_split():
     """Contract: install_deploy runs the remote stack check before dispatching
     to do_upgrade_remote / do_fresh_install_remote."""
@@ -354,3 +511,70 @@ def test_deploy_wires_stack_check_before_fresh_upgrade_split():
     deploy_pos = pkg.index('ensure_qwen_stack_remote "$remote"')
     split_pos = pkg.index('do_upgrade_remote "$remote"')
     assert deploy_pos < split_pos
+
+
+def _agent_qwen_case_body() -> str:
+    """Extract the qwen-code-cli case body verbatim from the agent installer."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    match = re.search(
+        r'case "\$INSTALL_CLI" in\n            qwen-code-cli\)\n(.*?)\n                ;;',
+        script,
+        re.DOTALL,
+    )
+    assert match is not None, "qwen-code-cli case not found in agent installer"
+    return match.group(1)
+
+
+def _run_agent_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
+    fake_bin = tmp_path / "agent-bin"
+    fake_bin.mkdir(parents=True)
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f"exit {npm_exit}")
+    shim("node", "echo 'v22.22.3'")
+    if with_qwen:
+        shim("qwen", "echo '0.23.3'")
+
+    harness = (
+        "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
+        "log_error() { :; }\nget_node_major() { echo 22; }\n"
+        "INSTALL_CLI=qwen-code-cli\n"
+        'case "$INSTALL_CLI" in\n            qwen-code-cli)\n'
+        + _agent_qwen_case_body()
+        + "\n                ;;\nesac\n"
+        "echo CASE_COMPLETED\n"
+    )
+    return subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_agent_installer_qwen_npm_failure_is_fatal(tmp_path):
+    """PR #3386 review: npm failing for the requested qwen CLI must abort the
+    install (the machine config declares cli_tool=qwen-code-cli), not warn
+    and register an agent whose default CLI cannot start."""
+    result = _run_agent_qwen_case(tmp_path, npm_exit=1, with_qwen=True)
+
+    assert result.returncode == 1
+    assert "CASE_COMPLETED" not in result.stdout
+
+
+def test_agent_installer_qwen_version_verification_is_fatal(tmp_path):
+    result = _run_agent_qwen_case(tmp_path, npm_exit=0, with_qwen=False)
+
+    assert result.returncode == 1
+    assert "CASE_COMPLETED" not in result.stdout
+
+
+def test_agent_installer_qwen_happy_path_completes(tmp_path):
+    result = _run_agent_qwen_case(tmp_path, npm_exit=0, with_qwen=True)
+
+    assert result.returncode == 0
+    assert "CASE_COMPLETED" in result.stdout

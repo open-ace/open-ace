@@ -1772,6 +1772,44 @@ install_qwen_stack() {
 
 # Create symlinks in /usr/bin for qwen-code-webui and qwen-code executables
 # This ensures all users can access these commands regardless of npm global install location
+# Install the qwen stack ONLY when this deployment actually uses it, and
+# only AFTER the fresh/upgrade decision (PR #3386 review):
+#  - workspace capabilities enabled (WORKSPACE_ENABLED / multi-user), or
+#  - a managed stack already exists on this host (its upgrade must reach the
+#    pinned versions).
+# API-only deployments (--config WORKSPACE_ENABLED=false /
+# WORKSPACE_MULTI_USER_MODE=false, no existing stack) skip Node/npm entirely,
+# and a declined upgrade never mutates Node or global npm packages.
+maybe_install_qwen_stack() {
+    if [ "$WORKSPACE_ENABLED" != "true" ] \
+        && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
+        && ! command -v qwen-code-webui >/dev/null 2>&1 \
+        && ! command -v qwen >/dev/null 2>&1; then
+        print_info "Workspace disabled and no existing qwen stack found; skipping qwen stack installation (API-only deployment)."
+        return 0
+    fi
+    if ! install_qwen_stack; then
+        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
+        print_error "Fix Node/npm and re-run."
+        exit 1
+    fi
+}
+
+# Deploy-mode variant of maybe_install_qwen_stack() (see its docstring).
+maybe_install_qwen_stack_remote() {
+    local remote="$1"
+    if [ "$WORKSPACE_ENABLED" != "true" ] \
+        && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
+        && ! ssh "$remote" "command -v qwen-code-webui >/dev/null 2>&1 || command -v qwen >/dev/null 2>&1"; then
+        print_info "Workspace disabled and no existing qwen stack on ${remote}; skipping qwen stack installation (API-only deployment)."
+        return 0
+    fi
+    if ! ensure_qwen_stack_remote "$remote"; then
+        print_error "Remote qwen stack installation/verification failed."
+        exit 1
+    fi
+}
+
 # Ensure the qwen stack (Node >= 22 + pinned webui/CLI) on a REMOTE deploy
 # target via ssh — the deploy-mode equivalent of install_qwen_stack(). Runs
 # the same gate/versions/verification; sudo is used on the remote when the
@@ -1780,47 +1818,76 @@ install_qwen_stack() {
 ensure_qwen_stack_remote() {
     local remote="$1"
     print_info "Ensuring qwen stack on ${remote} (Node >= 22 + webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION})..."
-    ssh "$remote" "
-        set -e
-        node_major() {
-            if command -v node >/dev/null 2>&1; then
-                node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1
-            else
-                echo 0
-            fi
-        }
-        if [ \"\$(node_major)\" -lt 22 ]; then
-            echo 'Node < 22 on remote; installing/upgrading via NodeSource...'
-            if command -v apt-get >/dev/null 2>&1; then
-                curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
-                sudo apt-get install -y nodejs
-            elif command -v dnf >/dev/null 2>&1; then
-                curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-                sudo dnf install -y nodejs
-            elif command -v yum >/dev/null 2>&1; then
-                curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-                sudo yum install -y nodejs
-            else
-                echo 'ERROR: cannot install Node.js on remote (no supported package manager); install Node >= 22 manually and re-run.' >&2
-                exit 1
-            fi
-        fi
-        if [ \"\$(node_major)\" -lt 22 ]; then
-            echo \"ERROR: Node >= 22 required on remote (found \$(node_major))\" >&2
-            exit 1
-        fi
-        sudo npm install -g qwen-code-webui@${QWEBUI_VERSION}
-        sudo npm install -g @qwen-code/qwen-code@${QWEN_CLI_VERSION}
-        command -v qwen-code-webui >/dev/null 2>&1 || { echo 'ERROR: qwen-code-webui not on PATH after install' >&2; exit 1; }
-        qwen --version 2>/dev/null | grep -q '${QWEN_CLI_VERSION}' || { echo \"ERROR: qwen CLI version mismatch on remote (expected ${QWEN_CLI_VERSION}, got \$(qwen --version 2>/dev/null || echo none))\" >&2; exit 1; }
-        echo 'REMOTE_QWEN_STACK_OK'
-    " || {
-        print_error "Failed to install/verify the qwen stack on ${remote}."
-        print_error "Ensure Node >= 22 and npm with sudo work on the remote, then re-run."
-        return 1
-    }
-    print_success "qwen stack ready on ${remote}"
-    return 0
+    # sudo is chosen per-host, never unconditional (PR #3386 review): root
+    # without sudo must work; a user-scoped npm (nvm / writable prefix) must
+    # install directly; sudo is only used when non-root AND passwordless.
+    if ssh "$remote" bash -s -- "$QWEBUI_VERSION" "$QWEN_CLI_VERSION" <<'REMOTE_QWEN_SCRIPT'
+set -e
+WEBUI_VER="$1"
+CLI_VER="$2"
+node_major() {
+    if command -v node >/dev/null 2>&1; then
+        node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1
+    else
+        echo 0
+    fi
+}
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        SUDO="sudo"
+    fi
+fi
+if [ "$(node_major)" -lt 22 ]; then
+    echo "Node < 22 on remote; installing/upgrading via NodeSource..."
+    if [ "$(id -u)" -ne 0 ] && [ -z "$SUDO" ]; then
+        echo "ERROR: non-root login without passwordless sudo cannot upgrade Node; install Node >= 22 manually and re-run." >&2
+        exit 1
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} apt-get install -y nodejs
+    elif command -v dnf >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} dnf install -y nodejs
+    elif command -v yum >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} yum install -y nodejs
+    else
+        echo "ERROR: cannot install Node.js on remote (no supported package manager); install Node >= 22 manually and re-run." >&2
+        exit 1
+    fi
+fi
+if [ "$(node_major)" -lt 22 ]; then
+    echo "ERROR: Node >= 22 required on remote (found $(node_major))" >&2
+    exit 1
+fi
+command -v npm >/dev/null 2>&1 || { echo "ERROR: npm not available on remote" >&2; exit 1; }
+# npm strategy: install directly when the global prefix is writable by the
+# login user (nvm / user-scoped installs); use sudo only for system prefixes.
+NPM_PREFIX="$(npm config get prefix 2>/dev/null || true)"
+NPM_CMD=(npm)
+if [ -n "$NPM_PREFIX" ] && [ ! -w "$NPM_PREFIX" ]; then
+    if [ -n "$SUDO" ]; then
+        NPM_CMD=(sudo npm)
+    else
+        echo "ERROR: npm prefix ${NPM_PREFIX} is not writable and no sudo is available on the remote." >&2
+        exit 1
+    fi
+fi
+"${NPM_CMD[@]}" install -g "qwen-code-webui@${WEBUI_VER}"
+"${NPM_CMD[@]}" install -g "@qwen-code/qwen-code@${CLI_VER}"
+command -v qwen-code-webui >/dev/null 2>&1 || { echo "ERROR: qwen-code-webui not on PATH after install" >&2; exit 1; }
+qwen --version 2>/dev/null | grep -q "${CLI_VER}" || { echo "ERROR: qwen CLI version mismatch on remote (expected ${CLI_VER}, got $(qwen --version 2>/dev/null || echo none))" >&2; exit 1; }
+echo "REMOTE_QWEN_STACK_OK"
+REMOTE_QWEN_SCRIPT
+    then
+        print_success "qwen stack ready on ${remote}"
+        return 0
+    fi
+    print_error "Failed to install/verify the qwen stack on ${remote}."
+    print_error "Ensure Node >= 22 and a writable npm prefix (or sudo) work on the remote, then re-run."
+    return 1
 }
 
 create_webui_symlinks() {
@@ -4324,15 +4391,6 @@ install_local() {
         fi
     fi
 
-    # Ensure the qwen stack (Node >= 22 + pinned webui/CLI) on BOTH fresh
-    # installs and upgrades: existing-but-old webui/CLI deployments must also
-    # reach the pinned versions (PR #3386 review).
-    if ! install_qwen_stack; then
-        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
-        print_error "Fix Node/npm and re-run."
-        exit 1
-    fi
-
     # Setup PostgreSQL (detect or install) - skip for upgrade (DB config already exists)
     if [ "$DO_UPGRADE" != "yes" ]; then
         setup_postgresql
@@ -4340,12 +4398,14 @@ install_local() {
 
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
+        maybe_install_qwen_stack
         do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
     elif [ -d "$target_path" ] && [ -f "$target_path/server.py" ]; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
         if [ "$upgrade" = "yes" ]; then
+            maybe_install_qwen_stack
             do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
         else
             print_info "Installation cancelled."
@@ -4355,8 +4415,10 @@ install_local() {
         # Directory exists but no valid installation
         print_warning "Directory exists at: $target_path but no valid installation found"
         print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        maybe_install_qwen_stack
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     else
+        maybe_install_qwen_stack
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
 
@@ -4839,22 +4901,16 @@ install_deploy() {
     fi
     print_success "SSH connection OK"
 
-    # Ensure the qwen stack on the remote host for BOTH fresh installs and
-    # upgrades (PR #3386 review): a remote deploy must reach the pinned
-    # webui/CLI versions and Node >= 22, not just updated app code.
-    if ! ensure_qwen_stack_remote "$remote"; then
-        print_error "Remote qwen stack installation/verification failed."
-        exit 1
-    fi
-
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
+        maybe_install_qwen_stack_remote "$remote"
         do_upgrade_remote "$remote" "$target_path"
     elif ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/server.py' ]"; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
         if [ "$upgrade" = "yes" ]; then
+            maybe_install_qwen_stack_remote "$remote"
             do_upgrade_remote "$remote" "$target_path"
         else
             print_info "Installation cancelled."
@@ -4864,8 +4920,10 @@ install_deploy() {
         # Directory exists but no valid installation
         print_warning "Directory exists at: $target_path but no valid installation found"
         print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        maybe_install_qwen_stack_remote "$remote"
         do_fresh_install_remote "$remote" "$target_path"
     else
+        maybe_install_qwen_stack_remote "$remote"
         do_fresh_install_remote "$remote" "$target_path"
     fi
 

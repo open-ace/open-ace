@@ -580,9 +580,20 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     log_error "Upgrade Node.js (https://nodesource.com or your package manager) and re-run."
                     exit 1
                 else
-                    npm install -g @qwen-code/qwen-code@latest 2>/dev/null && \
-                        log_success "qwen-code-cli installed" || \
-                        log_warn "Failed to install qwen-code-cli. You can install it manually later."
+                    # Propagate npm failure (PR #3386 review): the config
+                    # below declares cli_tool=qwen-code-cli, so a soft warn
+                    # here would register an agent whose default CLI can
+                    # never start.
+                    if ! npm install -g @qwen-code/qwen-code@latest; then
+                        log_error "Failed to install qwen-code-cli."
+                        log_error "Fix npm/network/permissions and re-run; refusing to register a machine whose default CLI cannot run."
+                        exit 1
+                    fi
+                    if ! qwen --version >/dev/null 2>&1; then
+                        log_error "qwen-code-cli installed but 'qwen --version' verification failed."
+                        exit 1
+                    fi
+                    log_success "qwen-code-cli installed ($(qwen --version 2>/dev/null || echo unknown))"
                 fi
                 ;;
             claude-code)
@@ -595,6 +606,11 @@ if [[ -n "$INSTALL_CLI" ]]; then
                 ;;
         esac
     else
+        if [[ "$INSTALL_CLI" == "qwen-code-cli" ]]; then
+            log_error "npm is not available and could not be installed; qwen-code-cli cannot be set up."
+            log_error "Install Node.js >= 22 (with npm) manually and re-run."
+            exit 1
+        fi
         log_warn "npm still not available after attempting Node.js installation."
         log_warn "Please install Node.js manually and then run:"
         log_warn "  npm install -g @qwen-code/qwen-code@latest"

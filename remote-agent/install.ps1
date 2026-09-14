@@ -232,11 +232,21 @@ if ($InstallCli) {
                     exit 1
                 } else {
                 npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "[OK] qwen-code-cli installed" -ForegroundColor Green
-                } else {
-                    Write-Host "[WARN] Failed to install qwen-code-cli" -ForegroundColor Yellow
+                if ($LASTEXITCODE -ne 0) {
+                    # Propagate npm failure (PR #3386 review): the config
+                    # declares cli_tool=qwen-code-cli, so a soft warn would
+                    # register an agent whose default CLI can never start.
+                    Write-Host "[ERROR] Failed to install qwen-code-cli. Fix npm/network/permissions and re-run." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
                 }
+                $qwenVersion = (qwen --version) 2>&1
+                if ($LASTEXITCODE -ne 0 -or -not $qwenVersion) {
+                    Write-Host "[ERROR] qwen-code-cli installed but 'qwen --version' verification failed." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
+                }
+                Write-Host "[OK] qwen-code-cli installed ($qwenVersion)" -ForegroundColor Green
                 }
             }
             "claude-code" {
@@ -252,6 +262,10 @@ if ($InstallCli) {
         # Restore error handling
         $ErrorActionPreference = $prevErrorAction
     } else {
+        if ($InstallCli -eq "qwen-code-cli") {
+            Write-Host "[ERROR] npm not found and qwen-code-cli cannot be installed. Install Node.js >= 22 (with npm) manually and re-run." -ForegroundColor Red
+            exit 1
+        }
         Write-Host "[WARN] npm not found. Skipping CLI installation." -ForegroundColor Yellow
     }
 }

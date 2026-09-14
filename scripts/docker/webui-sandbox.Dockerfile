@@ -65,8 +65,13 @@ RUN npm config set registry https://registry.npmmirror.com/ \
 # Non-root runtime user: uid/gid 1000, home /home/agent (the bootstrap mkdirs
 # /home/agent and /workspace for this uid; the kubelet mounts the ephemeral
 # volumes, the image only needs the account and the HOME to exist).
-RUN groupadd -g 1000 agent \
-    && useradd -u 1000 -g agent -d /home/agent -s /bin/bash agent \
+# node:22-bookworm-slim already ships a uid/gid 1000 `node` user/group
+# (same layout node:20 had), so creating `agent` at 1000 would fail with
+# "GID 1000 already exists". Reuse that account: rename user+group to
+# `agent` and move the home to /home/agent — the uid/gid and home layout
+# the bootstrap/launch paths expect.
+RUN groupmod -n agent node \
+    && usermod -l agent -d /home/agent -m node \
     && mkdir -p /home/agent /workspace \
     && chown -R agent:agent /home/agent /workspace
 
