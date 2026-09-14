@@ -264,3 +264,93 @@ def test_package_installer_runs_gated_stack_before_fresh_and_upgrade_split():
     gate_pos = pkg.index("if ! install_qwen_stack; then")
     split_pos = pkg.index('if [ "$DO_UPGRADE" != "yes" ]; then\n        setup_postgresql')
     assert gate_pos < split_pos
+
+
+def _run_remote_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None):
+    """Execute ensure_qwen_stack_remote() with a fake ssh that simulates the
+    remote host by running the transported script in the same sandbox (fake
+    node/npm recorder/qwen shim/sudo pass-through)."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("sed", "cut", "grep"):
+        os.symlink(_which(tool), fake_bin / tool)
+    npm_log = tmp_path / "npm.log"
+    ssh_log = tmp_path / "ssh.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    if node_version is not None:
+        shim("node", f"echo '{node_version}'")
+    shim("npm", f'echo "$@" >> "{npm_log}"')
+    if qwen_version is not None:
+        shim("qwen", f"echo '{qwen_version}'")
+    shim("qwen-code-webui", "exit 0")
+    shim("sudo", 'exec "$@"')
+    # fake ssh: log the invocation, then run the transported script locally
+    # (simulating the remote shell with the same fake PATH)
+    shim(
+        "ssh",
+        f'echo "$@" >> "{ssh_log}"\nexec /bin/sh -c "$2"',
+    )
+
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n"
+        + _qwen_stack_functions()
+        + '\nensure_qwen_stack_remote "deploy-user@remote-host"\n'
+    )
+    return (
+        subprocess.run(
+            ["/bin/bash", "-c", harness],
+            env={"PATH": str(fake_bin), "NPM_LOG": str(npm_log)},
+            text=True,
+            capture_output=True,
+            check=False,
+        ),
+        npm_log,
+    )
+
+
+def test_deploy_ensures_pinned_stack_on_remote(tmp_path):
+    """Regression (PR #3386 review): SSH deploys must install and verify the
+    pinned qwen stack on the remote host, not just copy new app code."""
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path, node_version="v20.19.1", qwen_version="0.23.3"
+    )
+    # Node 20 on the simulated remote with no supported package manager:
+    # the remote script must refuse (exit 1) BEFORE any npm install.
+    assert result.returncode == 1
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def test_deploy_remote_node22_installs_pinned_versions(tmp_path):
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path, node_version="v22.22.3", qwen_version="0.23.3"
+    )
+
+    assert result.returncode == 0
+    assert npm_log.read_text(encoding="utf-8").splitlines() == [
+        "install -g qwen-code-webui@0.2.43",
+        "install -g @qwen-code/qwen-code@0.23.3",
+    ]
+
+
+def test_deploy_remote_version_mismatch_fails(tmp_path):
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path, node_version="v22.22.3", qwen_version="0.15.10"
+    )
+
+    assert result.returncode == 1
+
+
+def test_deploy_wires_stack_check_before_fresh_upgrade_split():
+    """Contract: install_deploy runs the remote stack check before dispatching
+    to do_upgrade_remote / do_fresh_install_remote."""
+    pkg = (REPO_ROOT / "scripts" / "install-central" / "package-method" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+    deploy_pos = pkg.index('ensure_qwen_stack_remote "$remote"')
+    split_pos = pkg.index('do_upgrade_remote "$remote"')
+    assert deploy_pos < split_pos

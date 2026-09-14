@@ -1772,6 +1772,57 @@ install_qwen_stack() {
 
 # Create symlinks in /usr/bin for qwen-code-webui and qwen-code executables
 # This ensures all users can access these commands regardless of npm global install location
+# Ensure the qwen stack (Node >= 22 + pinned webui/CLI) on a REMOTE deploy
+# target via ssh — the deploy-mode equivalent of install_qwen_stack(). Runs
+# the same gate/versions/verification; sudo is used on the remote when the
+# login user is not root. Fails hard so a remote deploy never finishes with
+# app code updated but the old webui/CLI (and possibly Node 20) still active.
+ensure_qwen_stack_remote() {
+    local remote="$1"
+    print_info "Ensuring qwen stack on ${remote} (Node >= 22 + webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION})..."
+    ssh "$remote" "
+        set -e
+        node_major() {
+            if command -v node >/dev/null 2>&1; then
+                node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1
+            else
+                echo 0
+            fi
+        }
+        if [ \"\$(node_major)\" -lt 22 ]; then
+            echo 'Node < 22 on remote; installing/upgrading via NodeSource...'
+            if command -v apt-get >/dev/null 2>&1; then
+                curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+                sudo apt-get install -y nodejs
+            elif command -v dnf >/dev/null 2>&1; then
+                curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+                sudo dnf install -y nodejs
+            elif command -v yum >/dev/null 2>&1; then
+                curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+                sudo yum install -y nodejs
+            else
+                echo 'ERROR: cannot install Node.js on remote (no supported package manager); install Node >= 22 manually and re-run.' >&2
+                exit 1
+            fi
+        fi
+        if [ \"\$(node_major)\" -lt 22 ]; then
+            echo \"ERROR: Node >= 22 required on remote (found \$(node_major))\" >&2
+            exit 1
+        fi
+        sudo npm install -g qwen-code-webui@${QWEBUI_VERSION}
+        sudo npm install -g @qwen-code/qwen-code@${QWEN_CLI_VERSION}
+        command -v qwen-code-webui >/dev/null 2>&1 || { echo 'ERROR: qwen-code-webui not on PATH after install' >&2; exit 1; }
+        qwen --version 2>/dev/null | grep -q '${QWEN_CLI_VERSION}' || { echo \"ERROR: qwen CLI version mismatch on remote (expected ${QWEN_CLI_VERSION}, got \$(qwen --version 2>/dev/null || echo none))\" >&2; exit 1; }
+        echo 'REMOTE_QWEN_STACK_OK'
+    " || {
+        print_error "Failed to install/verify the qwen stack on ${remote}."
+        print_error "Ensure Node >= 22 and npm with sudo work on the remote, then re-run."
+        return 1
+    }
+    print_success "qwen stack ready on ${remote}"
+    return 0
+}
+
 create_webui_symlinks() {
     # Check if running as root (required to write to /usr/bin)
     if [ "$EUID" -ne 0 ]; then
@@ -4787,6 +4838,14 @@ install_deploy() {
         }
     fi
     print_success "SSH connection OK"
+
+    # Ensure the qwen stack on the remote host for BOTH fresh installs and
+    # upgrades (PR #3386 review): a remote deploy must reach the pinned
+    # webui/CLI versions and Node >= 22, not just updated app code.
+    if ! ensure_qwen_stack_remote "$remote"; then
+        print_error "Remote qwen stack installation/verification failed."
+        exit 1
+    fi
 
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
