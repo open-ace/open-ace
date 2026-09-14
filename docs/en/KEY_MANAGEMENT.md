@@ -191,13 +191,20 @@ openssl rand -hex 32
 
 ### Key Compromise Response
 
-1. Immediately generate and set new key
+1. Generate the new key but do **not** enable it yet; back up the affected
+   stores and pause writes to them
 2. Revoke all active proxy tokens (if applicable)
-3. Rotate all encrypted credentials (SSO provider `client_secret` values can be
+3. Keep `OPENACE_ENCRYPTION_KEY` set to the **old** key and rotate all
+   encrypted credentials (SSO provider `client_secret` values can be
    re-encrypted in bulk with `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`;
-   dry-run with `--verify` first)
-4. Audit access logs for suspicious activity
-5. Document incident and remediation steps
+   run the `--verify` pre-flight first. The script reads the environment
+   variable as the old key and `--new-key` as the new one — switching the
+   environment variable before rotating makes the old ciphertext
+   undecryptable and fails the pre-flight)
+4. Only after every store sharing this key has been migrated, switch
+   `OPENACE_ENCRYPTION_KEY` to the new key and restart the service
+5. Audit access logs for suspicious activity; document incident and
+   remediation steps
 
 ## Database Schema
 

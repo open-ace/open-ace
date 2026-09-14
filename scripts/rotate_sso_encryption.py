@@ -15,10 +15,17 @@ Usage:
     python scripts/rotate_sso_encryption.py --new-key <NEW_KEY>
 
 After rotation, update OPENACE_ENCRYPTION_KEY to the new key and restart the
-service.
+service. Run BOTH modes while the environment still holds the OLD key: the
+script decrypts with OPENACE_ENCRYPTION_KEY and re-encrypts with --new-key —
+switching the environment variable first makes the stored ciphertext
+undecryptable.
+
+All row updates are written in a single transaction; a mid-batch failure
+rolls the whole rotation back so a retry (or a single key switch) always
+recovers.
 
 Environment variables:
-    OPENACE_ENCRYPTION_KEY: Current encryption key (required)
+    OPENACE_ENCRYPTION_KEY: Current (old) encryption key (required)
 """
 
 from __future__ import annotations
@@ -127,7 +134,8 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
 
     db = Database(db_url=db_url)
 
-    # Create password manager with new key
+    # Create password manager with new key (constructor rejects empty/weak/
+    # short candidates before anything below can touch the database)
     pm_new = SMTPPasswordManager(encryption_key=new_key)
 
     # Also need old key to decrypt first
@@ -141,7 +149,12 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
     # Get all providers
     rows = db.fetch_all("SELECT name, config FROM sso_providers")
 
-    re_encrypted_count = 0
+    # Decrypt and re-encrypt EVERYTHING before the first write, then write all
+    # updates in a single transaction. A per-row autocommit (db.execute) would
+    # leave a partially rotated table on a mid-batch failure — unrecoverable
+    # with a single key switch, since some rows would need the old key and
+    # some the new one.
+    updates: list[tuple[str, str]] = []
     failed_providers = []
 
     for row in rows:
@@ -160,15 +173,7 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
                     # Re-encrypt with new key
                     new_encrypted = pm_new.encrypt(client_secret)
                     config["client_secret_encrypted"] = new_encrypted
-
-                    # Update database
-                    new_config_str = json.dumps(config)
-                    db.execute(
-                        "UPDATE sso_providers SET config = ? WHERE name = ?",
-                        (new_config_str, name),
-                    )
-                    re_encrypted_count += 1
-                    logger.info(f"Re-encrypted provider '{name}'")
+                    updates.append((name, json.dumps(config)))
                 else:
                     failed_providers.append(name)
                     logger.error(f"Failed to decrypt provider '{name}'")
@@ -179,8 +184,29 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
             failed_providers.append(name)
             logger.error(f"Failed to re-encrypt provider '{name}': {e}")
 
-    success = len(failed_providers) == 0
-    return success, re_encrypted_count, failed_providers
+    if failed_providers:
+        logger.error("No rows written: every row must re-encrypt cleanly first")
+        return False, 0, failed_providers
+
+    try:
+        # db._adapt_sql (not the module-level adapt_sql) because placeholders
+        # must match THIS instance's backend — a temp sqlite db_url on a
+        # postgres-configured host is exactly this script's test/ops usage.
+        with db.connection() as conn:
+            cursor = conn.cursor()
+            for name, new_config_str in updates:
+                cursor.execute(
+                    db._adapt_sql("UPDATE sso_providers SET config = ? WHERE name = ?"),
+                    (new_config_str, name),
+                )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Rotation write failed; transaction rolled back: {e}")
+        return False, 0, [name for name, _ in updates]
+
+    for name, _ in updates:
+        logger.info(f"Re-encrypted provider '{name}'")
+    return True, len(updates), []
 
 
 def main():
@@ -204,6 +230,17 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Validate the candidate key up front with the same rules the runtime
+    # applies (SMTPPasswordManager rejects empty/weak/<32-char candidates),
+    # so an unusable key exits cleanly before any database work.
+    from app.utils.smtp_crypto import SMTPPasswordManager
+
+    try:
+        SMTPPasswordManager(encryption_key=args.new_key)
+    except ValueError as e:
+        logger.error(f"Invalid --new-key: {e}")
+        sys.exit(1)
 
     # Check current key is set
     current_key = get_current_encryption_key()

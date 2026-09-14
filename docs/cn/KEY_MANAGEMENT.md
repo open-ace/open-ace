@@ -191,13 +191,17 @@ openssl rand -hex 32
 
 ### 密钥泄露响应
 
-1. 立即生成并设置新密钥
+1. 生成新密钥但**暂不启用**；备份受影响的存储并暂停相关写入
 2. 撤销所有活跃 Proxy Token（如适用）
-3. 轮换所有加密凭据（SSO Provider 的 `client_secret` 可用
-   `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>` 批量重加密，
-   先以 `--verify` 干跑确认）
-4. 审计访问日志查找可疑活动
-5. 记录事件和修复步骤
+3. 保持 `OPENACE_ENCRYPTION_KEY` 仍为**旧密钥**，轮换所有加密凭据
+   （SSO Provider 的 `client_secret` 可用
+   `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>` 批量重加密；
+   先以 `--verify` 做 pre-flight 干跑。脚本以环境变量为旧钥、
+   `--new-key` 为新钥——若在轮换前就把环境变量切成新钥，旧密文将
+   无法解密，pre-flight 会失败）
+4. 确认所有共享该密钥的存储全部迁移完成后，才把
+   `OPENACE_ENCRYPTION_KEY` 切换为新密钥并重启服务
+5. 审计访问日志查找可疑活动，记录事件和修复步骤
 
 ## 数据库 Schema
 

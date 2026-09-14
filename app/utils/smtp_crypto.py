@@ -12,8 +12,13 @@ import logging
 from typing import cast
 
 from app.utils.security_env import get_encryption_key_material
+from app.utils.security_mode import is_weak_secret_value
 
 logger = logging.getLogger(__name__)
+
+# Minimum length for explicit candidate keys, mirroring the runtime rule for
+# OPENACE_ENCRYPTION_KEY (validate_secret_strength default min_length=32).
+EXPLICIT_KEY_MIN_LENGTH = 32
 
 
 class SMTPPasswordManager:
@@ -26,6 +31,15 @@ class SMTPPasswordManager:
             encryption_key: Explicit key material (e.g. a candidate key during
                 rotation). When omitted, the key is derived from the
                 OPENACE_ENCRYPTION_KEY environment variable as before.
+
+        Raises:
+            ValueError: If an explicitly provided key is empty, a known weak
+                placeholder, or shorter than EXPLICIT_KEY_MIN_LENGTH. Unlike
+                the environment path (which only warns in development mode),
+                an invalid EXPLICIT key is always rejected: there is no
+                auto-generation fallback for a caller-supplied value, and a
+                rotation completed with such a key would leave ciphertext the
+                production runtime then refuses to load.
         """
         self._encryption_key = self._get_encryption_key(encryption_key)
 
@@ -35,11 +49,20 @@ class SMTPPasswordManager:
         The key material is hashed with SHA-256 to produce a 32-byte
         key, which is then base64-encoded for Fernet compatibility.
         """
-        key_env = (
-            encryption_key
-            if encryption_key is not None
-            else get_encryption_key_material(purpose="SMTP password encryption")
-        )
+        if encryption_key is not None:
+            if (
+                not encryption_key
+                or is_weak_secret_value(encryption_key)
+                or len(encryption_key) < EXPLICIT_KEY_MIN_LENGTH
+            ):
+                raise ValueError(
+                    "Explicit encryption key is empty, weak, or shorter than "
+                    f"{EXPLICIT_KEY_MIN_LENGTH} chars; generate one: "
+                    'python3 -c "import secrets; print(secrets.token_hex(32))"'
+                )
+            key_env = encryption_key
+        else:
+            key_env = get_encryption_key_material(purpose="SMTP password encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
