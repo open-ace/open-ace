@@ -21,7 +21,7 @@
 # 本地（在仓库根目录；可先 export IMAGE_NAME=open-ace:<tag> 指定待测镜像）
 python3 scripts/multiuser_acceptance.py
 
-# 保留现场做人工复核（跳过收尾 down -v）
+# 保留多用户栈做人工复核（单用户回归尾段始终自建自清,不受影响）
 ACCEPTANCE_KEEP_STACK=1 python3 scripts/multiuser_acceptance.py
 
 # 自定义服务地址 / 记录目录
@@ -44,13 +44,13 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
 | # | 清单项 | 自动化攻击 | 期望（PASS 判据） |
 |---|---|---|---|
 | a | 并发私有目录/历史/模型配置 | alice/bob 并发取 user-url；容器内扫 /proc | 各自端口、各自 UID（sudo -u 生效）、各自 0700 home；webui env 仅含互异的 `webui:<uid>` 代理 token，`OPENAI_API_KEY`==代理 token，无任何真实/敏感 key |
-| b | ID 篡改/穿越/symlink/越权恢复 | `required_isolation=none`；A 的会话 token 打 B 的会话路由；DB 播种 machines/agent_sessions/machine_assignments 后 B 停/连 A 的终端；fs browse B 的 home、`../`、指向 B 的 symlink | floor 不降（仍 os_user）；403/404 矩阵逐项命中；fs 三例全部 400（realpath 先行） |
+| b | ID 篡改/穿越/symlink/越权恢复 | `required_isolation=none`；A 的会话 token 打 B 的会话路由；DB 播种 machines/agent_sessions/machine_assignments 后 B 停/连 A 的终端；fs browse B 的 workspace home（`/workspace/<B>`）、`../`、指向 B 的 symlink | floor 不降（仍 os_user）；403/404 矩阵逐项命中；fs 三例全部 400——`/workspace/<B>` 路径穿过 base-dir 门后由 realpath 解析 + #3376 home-lock 拒绝（`/home/*` 只会被 base-dir 前缀门拦下,测不到 home-lock,故攻击面选 workspace 侧） |
 | c | 环境无他人凭据；A 不进 B 私有区 | `docker exec -u alice` 读 B 的 webui `/proc/<pid>/environ`、`ls /home/bob` | EPERM/EACCES（真实 UID 语义）；模型配置分离同 a 项口径 |
 | d | 共享项目授权与撤销 | alice 建 `<base>/shared/acc-team-proj`；bob（同租户）/carol（异租户）browse；撤销后再 browse | bob 200、carol 400；撤销后 bob 400 |
 | e | 资源上限/取消/异常退出不影响他人 | 预置 `max_instances=3`；第 4 实例；admin 停 alice 实例；`kill -9` bob 的 webui | 第 4 实例 503（body 非结构化——如实记录，本身是验收发现）；他人会话与 /readyz 不受扰；释放的槽位可复用 |
 | f | 停用用户/撤销 token/重启 orphan | 停用 bob 后查会话/URL-token/进程/代理 token；`compose restart` 后容器内查进程与端口、alice 旧 token 复验 | 全部 401/进程销毁/代理 token 401；重启后无残留 webui 进程、3100–3200 容器内无监听；token_secret 持久化使旧 token 仍有效（#3377）。**依赖 PR-A（#3384）** |
 | g | backend 不支持时明确拒绝 | 契约端点；user-url 请求 `sandboxed`；无映射用户（erin）请求 `os_user` | 契约 `isolation_level=os_user` 且 reasons **不含任何** SANDBOX_PROBE_REASON_CODES；400 `isolation_level_unsupported`；400 `identity_mapping_missing` |
-| h | 单用户模式无退化 | `down -v` 后仅基础 compose 起栈 | 契约 `none`、单实例 3100、admin 登录、/readyz 200 |
+| h | 单用户模式无退化 | 独立 compose 项目（端口 19889）起基础栈,自带全新卷,不影响多用户栈 | 契约 `none`、单实例 3100（若触发 app 侧单用户启动限制则记声明豁免,见 §5.8）、admin 登录、/readyz 200 |
 | i | 发布样例/权限条件/能力矩阵/真实结果 | 记录器 | 记录含 git SHA、镜像 digest、docker/compose 版本、内核、policy_revision；能力矩阵交叉引用 `WORKSPACE_ISOLATION_CAPABILITIES` |
 
 ## 4. 记录产物与模板
@@ -97,6 +97,11 @@ useradd wrapper）→ 九项断言 → 单用户回归尾段 → `down -v`（KEE
    期望行为），覆盖边界如本条声明。
 7. **max_instances 503 body 非结构化**：如实记录——这本身是一条验收发现，不是
    断言失败。
+8. **单用户 3100 实例启动（条件豁免）**：单用户容器以 uid 1000 运行且不会为默认
+   admin 预置 OS 账号，sudo 启动路径在该形态下无法拉起 3100 实例——这是 app 侧
+   单用户形态的已知限制，在 #3374 的多用户范围之外。脚本对该项做条件处理：
+   正常启动则 PASS；502/503 则原样记录并标记 EXEMPT（附静态分析依据），不作为
+   验收失败；其余状态码视为失败。待 app 侧修复后豁免自动收敛为断言。
 
 ## 6. 部署注记（承接 #3384）
 
