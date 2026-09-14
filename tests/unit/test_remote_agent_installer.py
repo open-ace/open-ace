@@ -578,3 +578,63 @@ def test_agent_installer_qwen_happy_path_completes(tmp_path):
 
     assert result.returncode == 0
     assert "CASE_COMPLETED" in result.stdout
+
+
+def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
+    """Regression (PR #3386 review): an interactively confirmed remote UPGRADE
+    of an existing API-only deployment (workspace flags false in the REMOTE
+    config.json, no qwen stack on the remote) must skip the stack gate —
+    interactive_config only reads the LOCAL config, so the flags would
+    otherwise still hold their `true` defaults."""
+    home = tmp_path / "remote-home"
+    (home / ".open-ace").mkdir(parents=True)
+    (home / ".open-ace" / "config.json").write_text(
+        '{"workspace": {"enabled": false, "multi_user_mode": false}}',
+        encoding="utf-8",
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for tool in ("sed", "cut", "grep", "true", "python3"):
+        os.symlink(_which(tool), fake_bin / tool)
+    ssh_log = tmp_path / "ssh.log"
+    npm_log = tmp_path / "npm.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f'echo "$@" >> "{npm_log}"')
+    # smart fake ssh: log; drop remote spec; bash -s [args] runs with stdin,
+    # plain command strings run via sh -c
+    shim(
+        "ssh",
+        f'echo "$@" >> "{ssh_log}"\nshift\n'
+        'if [ "$1" = "bash" ]; then shift; exec /bin/bash "$@"; fi\n'
+        'exec /bin/sh -c "$1"',
+    )
+
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n"
+        # defaults, as they would be after interactive_config on the LOCAL side
+        "WORKSPACE_ENABLED=true\nWORKSPACE_MULTI_USER_MODE=true\n"
+        + _qwen_stack_functions()
+        + '\nmaybe_install_qwen_stack_remote "deploy-user@remote-host"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin), "HOME": str(home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    ssh_calls = ssh_log.read_text(encoding="utf-8")
+    # flags were read from the remote config ...
+    assert "bash -s" in ssh_calls
+    # ... the stack-probe ran ...
+    assert "command -v qwen-code-webui" in ssh_calls
+    # ... but the pinned install (bash -s -- <versions>) was never invoked
+    assert "-- 0.2.43" not in ssh_calls
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""

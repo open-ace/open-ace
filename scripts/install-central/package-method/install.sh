@@ -1798,6 +1798,33 @@ maybe_install_qwen_stack() {
 # Deploy-mode variant of maybe_install_qwen_stack() (see its docstring).
 maybe_install_qwen_stack_remote() {
     local remote="$1"
+    # Existing remote deployments may be API-only, and interactive_config()
+    # only reads the LOCAL config.json — for an interactively confirmed
+    # remote upgrade WORKSPACE_ENABLED/WORKSPACE_MULTI_USER_MODE would still
+    # hold their defaults. Load the flags from the remote config before
+    # deciding (PR #3386 review); a missing/unreadable config keeps the
+    # defaults (fresh install).
+    local flags
+    flags="$(ssh "$remote" bash -s <<'REMOTE_WS_FLAGS' 2>/dev/null
+python3 - <<'PY' 2>/dev/null || echo missing
+import json, os
+p = os.path.expanduser("~/.open-ace/config.json")
+if not os.path.exists(p):
+    print("missing")
+else:
+    try:
+        w = json.load(open(p)).get("workspace", {})
+    except Exception:
+        w = {}
+    print(str(w.get("enabled", "true")).lower(), str(w.get("multi_user_mode", "true")).lower())
+PY
+REMOTE_WS_FLAGS
+)"
+    if [ "$flags" != "missing" ] && [ -n "$flags" ]; then
+        WORKSPACE_ENABLED="${flags%% *}"
+        WORKSPACE_MULTI_USER_MODE="${flags##* }"
+        print_info "Remote config: WORKSPACE_ENABLED=$WORKSPACE_ENABLED WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE"
+    fi
     if [ "$WORKSPACE_ENABLED" != "true" ] \
         && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
         && ! ssh "$remote" "command -v qwen-code-webui >/dev/null 2>&1 || command -v qwen >/dev/null 2>&1"; then
