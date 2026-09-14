@@ -193,7 +193,9 @@ openssl rand -hex 32
 
 1. Immediately generate and set new key
 2. Revoke all active proxy tokens (if applicable)
-3. Rotate all encrypted credentials
+3. Rotate all encrypted credentials (SSO provider `client_secret` values can be
+   re-encrypted in bulk with `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`;
+   dry-run with `--verify` first)
 4. Audit access logs for suspicious activity
 5. Document incident and remediation steps
 
