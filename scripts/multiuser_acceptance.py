@@ -253,13 +253,26 @@ def dump_stack_logs(recorder: Recorder) -> None:
     # 34918312590: header printed, no per-user lines, no error, alice/carol/
     # dave all missing post-recreate)
     try:
+        probe = (
+            "import os, psycopg2\n"
+            "conn = psycopg2.connect(os.environ['DATABASE_URL'])\n"
+            "cur = conn.cursor()\n"
+            "cur.execute('SELECT username, system_account, is_active FROM users ORDER BY id')\n"
+            "print('DB ROWS:', cur.fetchall())\n"
+        )
         proc = compose_exec(
             SERVICE,
-            "cat /app/logs/open-ace-user-sync.log; echo ---PASSWD---; getent passwd",
-            timeout=30,
+            "cat /app/logs/open-ace-user-sync.log; "
+            "echo ---PASSWD---; getent passwd; "
+            "echo ---DBPROBE---; "
+            f"DATABASE_URL_PRESENT=${{DATABASE_URL:+yes}} python3 -c {json.dumps(probe)}",
+            timeout=60,
             check=False,
         )
-        (RECORD_DIR / "user-sync-forensics.txt").write_text(proc.stdout, encoding="utf-8")
+        (RECORD_DIR / "user-sync-forensics.txt").write_text(
+            proc.stdout + "\n---probe stderr---\n" + proc.stderr,
+            encoding="utf-8",
+        )
     except Exception as exc:  # noqa: BLE001 - best effort
         recorder.note(f"user-sync forensics dump failed: {exc}")
 
