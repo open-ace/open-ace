@@ -350,6 +350,7 @@ pip3 install -r requirements.txt
 
 # 3. Install CLI tool
 npm install -g @qwen-code/qwen-code@0.23.3
+#    (requires Node.js >= 22: engines.node of @qwen-code/qwen-code@0.23.3)
 
 # 4. Create the config file
 cat > config.json << 'EOF'

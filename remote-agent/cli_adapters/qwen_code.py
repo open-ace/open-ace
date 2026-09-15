@@ -36,6 +36,14 @@ class QwenCodeAdapter(BaseCLIAdapter):
         """Return the command to install qwen-code CLI."""
         return f"npm install -g {self.NPM_PACKAGE}@{self.PINNED_VERSION}"
 
+    def get_install_requirements_hint(self) -> str:
+        """Manual-recovery prerequisite hint (surfaced with install_command).
+
+        npm only warns EBADENGINE on an engines mismatch and still exits 0,
+        so the Node requirement must be stated explicitly, not implied.
+        """
+        return f"Node.js >= 22 is required by {self.NPM_PACKAGE}@{self.PINNED_VERSION}"
+
     def check_installed(self) -> bool:
         """Check if qwen-code CLI is installed."""
         return shutil.which(self.EXECUTABLE) is not None

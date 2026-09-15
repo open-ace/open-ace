@@ -2,6 +2,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -842,3 +843,89 @@ def test_agent_case_rejects_similar_version_0_23_30(tmp_path):
 
     assert result.returncode == 1
     assert "CASE_COMPLETED" not in result.stdout
+
+
+def _run_qwen_precheck(tmp_path, node_version: str | None, qwen_version: str | None):
+    """Execute terminal_menu.qwen_precheck() under a fake PATH."""
+    fake_bin = tmp_path / "tm-bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    if node_version is not None:
+        shim("node", f"echo '{node_version}'")
+    if qwen_version is not None:
+        shim("qwen", f"echo '{qwen_version}'")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    code = (
+        "import sys, json\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import terminal_menu\n"
+        "print(json.dumps(terminal_menu.qwen_precheck()))\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code, str(REPO_ROOT / "remote-agent")],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_menu_qwen_precheck_refuses_node20_without_qwen(tmp_path):
+    """Regression (PR #3386 review): a Claude/Codex-provisioned Node 20 agent
+    must NOT reach `npm install`/launch from the menu — npm exits 0 on a mere
+    EBADENGINE warning and would start an unsupported combination."""
+    import json
+
+    result = _run_qwen_precheck(tmp_path, node_version="v20.19.1", qwen_version=None)
+    ok, reason = json.loads(result.stdout)
+
+    assert ok is False
+    assert "Node" in reason
+
+
+def test_menu_qwen_precheck_refuses_old_qwen_on_path(tmp_path):
+    import json
+
+    result = _run_qwen_precheck(tmp_path, node_version="v22.22.3", qwen_version="0.15.10")
+    ok, reason = json.loads(result.stdout)
+
+    assert ok is False
+    assert "0.15.10" in reason
+
+
+def test_menu_qwen_precheck_rejects_similar_version(tmp_path):
+    import json
+
+    result = _run_qwen_precheck(tmp_path, node_version="v22.22.3", qwen_version="0.23.30")
+    ok, reason = json.loads(result.stdout)
+
+    assert ok is False
+
+
+def test_menu_qwen_precheck_accepts_pinned_pair(tmp_path):
+    import json
+
+    ok_installed = _run_qwen_precheck(tmp_path, "v22.22.3", "0.23.3")
+    ok_missing = _run_qwen_precheck(tmp_path, "v22.22.3", None)
+
+    assert json.loads(ok_installed.stdout) == [True, ""]
+    assert json.loads(ok_missing.stdout) == [True, ""]
+
+
+def test_menu_qwen_precheck_is_wired_into_select():
+    """Contract: handle_select routes the qwen entry through qwen_precheck
+    before either OS install/launch path."""
+    src = (REPO_ROOT / "remote-agent" / "terminal_menu.py").read_text(encoding="utf-8")
+    select_body = src[src.index("def handle_select") : src.index("def run_windows_menu")]
+    assert 'item["cli"] == "qwen"' in select_body
+    assert "qwen_precheck()" in select_body
+    # the gate must precede every install/launch path: the first use of
+    # install_cmd (Windows & POSIX installs) and of item["cmd"] (launches)
+    assert select_body.index("qwen_precheck()") < select_body.index('item["install_cmd"]')
+    assert select_body.index("qwen_precheck()") < select_body.index('item["cmd"]')

@@ -1357,6 +1357,11 @@ class ProcessExecutor:
             msg = (
                 f"CLI tool '{cli_tool}' (ZCode) not found on this machine.\n"
                 f"Please install it first by running: {adapter.get_install_command()}"
+                + (
+                    f" ({adapter.get_install_requirements_hint()})"
+                    if hasattr(adapter, "get_install_requirements_hint")
+                    else ""
+                )
             )
             logger.error(msg)
             return {"success": False, "error": msg}
