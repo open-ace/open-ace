@@ -4,11 +4,17 @@
 
 ## 概述
 
-Open-ACE 使用 Fernet 对称加密保护静态敏感数据：
+Open-ACE 使用 Fernet 对称加密保护静态敏感数据。同一密钥直接加密**全部 8 类存储**
+（权威完整清单见下文[密钥共享影响面](#密钥共享影响面)）：
 
 - 远程工作区的 API Key（`api_key_store` 表）
 - SMTP 密码（`smtp_settings` 表）
 - Model Gateway API Key（`model_gateway_config` 表）
+- SSO Provider 凭据（`sso_providers` 表）
+- 钉钉集成（`dingtalk_settings` 表）
+- 飞书集成（`feishu_settings` 表）
+- Webhook 配置（`webhook_settings` 表）
+- 通知偏好（`notification_preferences` 表）
 
 Proxy Token 使用 HMAC-SHA256 签名（非 Fernet）进行认证。
 
@@ -27,15 +33,16 @@ OPENACE_ENCRYPTION_KEY (环境变量，>= 32 字符)
          ▼
     Fernet 密钥 (44 字符)
          │
-         ├────────────────┬────────────────┐
-         ▼                ▼                ▼
-   API Key          SMTP 密码        Model Gateway
-   加密             加密              加密
-         │
-         │ 同一密钥用于 HMAC-SHA256
-         ▼
-   Proxy Token
-   签名
+               ├──────────────────────────────┐
+         ▼                              ▼
+   全部 8 类加密存储                 Proxy Token
+   （api_key_store / smtp_settings /   签名（HMAC-SHA256，
+    model_gateway_config /             非 Fernet）
+    sso_providers / dingtalk_settings /
+    feishu_settings / webhook_settings /
+    notification_preferences，
+    完整清单见"密钥共享影响面"）
+
 ```
 
 **密钥派生代码**：
@@ -106,7 +113,11 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
    NEW_KEY=$(openssl rand -hex 32)
    ```
 
-3. **保持环境变量仍为旧密钥，先做 pre-flight 干跑**
+3. **停止所有使用旧钥的读写者**（应用、scheduler/worker 等；数据库保持运行）。
+   轮换脚本以"扫描+写入同一事务 + 逐条 UPDATE 行数校验"防御并发写，但运行中的
+   服务若在整个轮换期间持续以旧钥写入，轮换后仍会残留旧钥密文——先停写者是规程要求。
+
+4. **保持环境变量仍为旧密钥，先做 pre-flight 干跑**
 
    ```bash
    python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY" --verify
@@ -114,7 +125,7 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
 
    pre-flight 用新钥做往返探针、并用旧钥校验全部存储可解密；任何一步失败都不写入。轮换期间环境变量必须保持**旧密钥**——提前切成新钥会导致旧密文无法解密、pre-flight 失败。
 
-4. **执行轮换（单事务，失败整体回滚）**
+5. **执行轮换（单事务，失败整体回滚；逐条 UPDATE 行数校验，并发修改触发整体回滚）**
 
    ```bash
    python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY"
@@ -123,7 +134,7 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
    脚本重加密上述清单中该密钥直接保护的全部存储（`v1k<id>:` 前缀的 registry
    密文绑定 `OPENACE_ENCRYPTION_KEYS` 数据钥，自动跳过），写出后用新钥复查全部存储。
 
-5. **切换环境变量到新密钥并重启服务**
+6. **切换环境变量到新密钥并统一重启全部服务**
 
    ```bash
    # Docker Compose: 编辑 .env 文件
@@ -132,9 +143,9 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
    docker-compose restart   # 或 sudo systemctl restart open-ace
    ```
 
-6. **验证功能**：测试 API Key、SMTP、Model Gateway、SSO 登录、钉钉/飞书/Webhook/通知；现有 Proxy Token 将失效（用户需重启会话）。
+7. **验证功能**：测试 API Key、SMTP、Model Gateway、SSO 登录、钉钉/飞书/Webhook/通知；现有 Proxy Token 将失效（用户需重启会话）。
 
-7. **安全清理**：验证后归档或删除数据库备份。
+8. **安全清理**：验证后归档或删除数据库备份。
 
 #### MultiFernet 支持（未来增强）
 

@@ -300,8 +300,9 @@ def _iter_repo_files(root: Path) -> list[Path]:
 
 
 def _logical_lines(text: str):
-    """Yield (lineno, line) with backslash continuations joined — a command
-    split across lines is still one command (PR #3386 R15 review)."""
+    """Yield (lineno, line) with shell backslash AND PowerShell backtick
+    continuations joined — a command split across lines is still one
+    command (PR #3386 R15/R16 reviews)."""
     pending = None
     pending_no = 0
     for no, raw in enumerate(text.splitlines(), 1):
@@ -310,7 +311,7 @@ def _logical_lines(text: str):
         else:
             line = raw
             pending_no = no
-        if line.endswith("\\"):
+        if line.endswith("\\") or line.endswith("`"):
             pending = line[:-1].rstrip() + " "
         else:
             yield pending_no, line
@@ -320,10 +321,13 @@ def _logical_lines(text: str):
 
 
 def _scan_unpinned_qwen_installs(files) -> list[str]:
-    """Every npm install (install/i/add alias) touching the qwen stack
-    packages must carry an explicit @version (digits or the pinned
-    ${..._VERSION} constants); @latest is rejected outright."""
-    npm_install = re.compile(r"npm\s+(?:install|i|add)\b")
+    """Every npm install (full alias set: i/in/ins/inst/insta/instal/install/
+    add, leading options allowed) touching the qwen stack packages must
+    carry an explicit @version (digits or the pinned ${..._VERSION}
+    constants); @latest is rejected outright."""
+    npm_install = re.compile(
+        r"npm\s+(?:-{1,2}[\w][\w=-]*\s+)*(?:install|instal|insta|inst|ins|in|i|add)\b"
+    )
     # A stack package token that is NOT immediately versioned: not followed
     # (before the next whitespace) by @<digits> or the pinned-variable forms.
     # Token boundaries: an occurrence embedded in a filesystem path
@@ -374,7 +378,14 @@ def test_unpinned_sweep_flags_continuations_and_aliases(tmp_path):
     bypass.write_text(
         "npm install -g \\\n  qwen-code-webui\n"
         "npm i -g qwen-code-webui\n"
-        "npm add -g @qwen-code/qwen-code\n",
+        "npm add -g @qwen-code/qwen-code\n"
+        "npm in -g qwen-code-webui\n"
+        "npm --silent install -g @qwen-code/qwen-code\n",
+        encoding="utf-8",
+    )
+    ps_bypass = tmp_path / "bypass.ps1"
+    ps_bypass.write_text(
+        "npm install -g `\n  qwen-code-webui\n",
         encoding="utf-8",
     )
     pinned = tmp_path / "pinned.sh"
@@ -385,14 +396,18 @@ def test_unpinned_sweep_flags_continuations_and_aliases(tmp_path):
         encoding="utf-8",
     )
 
-    violations = _scan_unpinned_qwen_installs([bypass, pinned])
+    violations = _scan_unpinned_qwen_installs([bypass, ps_bypass, pinned])
 
-    assert len(violations) == 3, violations
-    assert all("bypass.sh" in v for v in violations)
+    # 5 shell-form entries (continuation, i, add, in alias, leading option)
+    # + 1 PowerShell backtick continuation
+    assert len(violations) == 6, violations
+    assert all("bypass" in v for v in violations)
     joined = "\n".join(violations)
     assert "npm install -g qwen-code-webui" in joined  # continuation joined
     assert "npm i -g qwen-code-webui" in joined
     assert "npm add -g @qwen-code/qwen-code" in joined
+    assert "npm in -g qwen-code-webui" in joined
+    assert "npm --silent install -g @qwen-code/qwen-code" in joined
 
 
 def test_repo_file_enumeration_works_without_git(tmp_path):

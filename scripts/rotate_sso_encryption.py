@@ -216,18 +216,79 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
     # then write all updates in a single transaction. A per-row autocommit
     # would leave partially rotated stores on a mid-batch failure —
     # unrecoverable with a single key switch.
+    #
+    # PR #3386 R16 review: the scans AND the writes share ONE transaction —
+    # the read set is not a stale snapshot taken outside the lock window —
+    # and every UPDATE's affected-row count is validated (each planned
+    # update targets exactly one row; Fernet ciphertexts are unique per
+    # encryption, so a count != 1 means a concurrent writer touched a
+    # scanned row). The whole rotation rolls back on mismatch instead of
+    # silently skipping the value. Operationally the runbook still requires
+    # all old-key writers (app, scheduler, workers) to be stopped first;
+    # this is the in-script defense for the window where they are not.
     # Write plan entries: (sql, params, label)
     updates: list[tuple[str, tuple, str]] = []
     failed_stores: list[str] = []
 
-    for table, column in DIRECT_SECRET_COLUMNS:
-        rows = db.fetch_all(
-            f"SELECT {column} AS v FROM {table} " f"WHERE {column} IS NOT NULL AND {column} != ''"
-        )
-        for row in rows:
-            old_ct = row["v"]
-            label = f"{table}.{column}"
-            if _is_registry_format(old_ct):
+    def _fetch_dicts(conn, sql: str) -> list[dict]:
+        if db._is_postgresql:
+            from psycopg2.extras import RealDictCursor
+
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+        else:
+            cur = conn.cursor()
+        cur.execute(db._adapt_sql(sql))
+        rows = cur.fetchall()
+        if rows and isinstance(rows[0], dict):
+            return list(rows)
+        return [dict(row) for row in rows]
+
+    # db._adapt_sql (not the module-level adapt_sql) because placeholders
+    # must match THIS instance's backend — a temp sqlite db_url on a
+    # postgres-configured host is exactly this script's test/ops usage.
+    with db.connection() as conn:
+        for table, column in DIRECT_SECRET_COLUMNS:
+            rows = _fetch_dicts(
+                conn,
+                f"SELECT {column} AS v FROM {table} "
+                f"WHERE {column} IS NOT NULL AND {column} != ''",
+            )
+            for row in rows:
+                old_ct = row["v"]
+                label = f"{table}.{column}"
+                if _is_registry_format(old_ct):
+                    continue
+                try:
+                    plaintext = pm_old.decrypt(old_ct)
+                    if not plaintext:
+                        failed_stores.append(label)
+                        logger.error(f"{label}: empty decrypted value")
+                        continue
+                    new_ct = pm_new.encrypt(plaintext)
+                except Exception as e:
+                    failed_stores.append(label)
+                    logger.error(f"{label}: {e}")
+                    continue
+                # Match on the old ciphertext itself: PK-agnostic and
+                # backend-agnostic (Fernet ciphertexts are unique per
+                # row-value).
+                updates.append(
+                    (f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_ct, old_ct), label)
+                )
+
+        for row in _fetch_dicts(
+            conn, "SELECT name, config FROM sso_providers WHERE config IS NOT NULL"
+        ):
+            name = row["name"]
+            label = f"sso_providers/{name}"
+            try:
+                config = json.loads(row["config"])
+                old_ct = (config or {}).get("client_secret_encrypted", "")
+            except (json.JSONDecodeError, TypeError) as e:
+                failed_stores.append(label)
+                logger.error(f"{label}: config is not valid JSON: {e}")
+                continue
+            if not old_ct or _is_registry_format(old_ct):
                 continue
             try:
                 plaintext = pm_old.decrypt(old_ct)
@@ -235,64 +296,36 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
                     failed_stores.append(label)
                     logger.error(f"{label}: empty decrypted value")
                     continue
-                new_ct = pm_new.encrypt(plaintext)
+                config["client_secret_encrypted"] = pm_new.encrypt(plaintext)
             except Exception as e:
                 failed_stores.append(label)
                 logger.error(f"{label}: {e}")
                 continue
-            # Match on the old ciphertext itself: PK-agnostic and
-            # backend-agnostic (Fernet ciphertexts are unique per row-value).
             updates.append(
-                (f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_ct, old_ct), label)
+                (
+                    "UPDATE sso_providers SET config = ? WHERE name = ?",
+                    (json.dumps(config), name),
+                    label,
+                )
             )
 
-    for row in db.fetch_all("SELECT name, config FROM sso_providers WHERE config IS NOT NULL"):
-        name = row["name"]
-        label = f"sso_providers/{name}"
-        try:
-            config = json.loads(row["config"])
-            old_ct = (config or {}).get("client_secret_encrypted", "")
-        except (json.JSONDecodeError, TypeError) as e:
-            failed_stores.append(label)
-            logger.error(f"{label}: config is not valid JSON: {e}")
-            continue
-        if not old_ct or _is_registry_format(old_ct):
-            continue
-        try:
-            plaintext = pm_old.decrypt(old_ct)
-            if not plaintext:
-                failed_stores.append(label)
-                logger.error(f"{label}: empty decrypted value")
-                continue
-            config["client_secret_encrypted"] = pm_new.encrypt(plaintext)
-        except Exception as e:
-            failed_stores.append(label)
-            logger.error(f"{label}: {e}")
-            continue
-        updates.append(
-            (
-                "UPDATE sso_providers SET config = ? WHERE name = ?",
-                (json.dumps(config), name),
-                label,
-            )
-        )
+        if failed_stores:
+            logger.error("No rows written: every value must re-encrypt cleanly first")
+            return False, 0, failed_stores
 
-    if failed_stores:
-        logger.error("No rows written: every value must re-encrypt cleanly first")
-        return False, 0, failed_stores
-
-    try:
-        # db._adapt_sql (not the module-level adapt_sql) because placeholders
-        # must match THIS instance's backend — a temp sqlite db_url on a
-        # postgres-configured host is exactly this script's test/ops usage.
-        with db.connection() as conn:
+        try:
             cursor = conn.cursor()
-            for sql, params, _label in updates:
+            for sql, params, label in updates:
                 cursor.execute(db._adapt_sql(sql), params)
+                if cursor.rowcount != 1:
+                    raise RuntimeError(
+                        f"{label}: UPDATE affected {cursor.rowcount} rows (expected 1) — "
+                        "concurrent modification detected; rolling back the whole rotation"
+                    )
             conn.commit()
-    except Exception as e:
-        logger.error(f"Rotation write failed; transaction rolled back: {e}")
-        return False, 0, [label for _, _, label in updates]
+        except Exception as e:
+            logger.error(f"Rotation failed; transaction rolled back: {e}")
+            return False, 0, [label for _, _, label in updates]
 
     for _, _, label in updates:
         logger.info(f"Re-encrypted {label}")

@@ -1169,7 +1169,9 @@ def test_agent_installer_completes_qwen_gate_before_stopping_existing_agent():
     sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
 
     gate_pos = sh.index("Refusing to install an unsupported Node/CLI combination.")
-    stop_pos = sh.index("sudo systemctl stop open-ace-agent")
+    # the REAL stop site — not the uninstall instructions quoted in the
+    # different-server rejection text
+    stop_pos = sh.index("if systemctl is-active open-ace-agent")
     assert gate_pos < stop_pos, (
         "the qwen Node/CLI gate must run in the lossless pre-flight zone, "
         "before any existing agent service is stopped"
@@ -1183,7 +1185,7 @@ def _agent_cli_preflight_body() -> str:
     fn_start = sh.index("get_node_major() {")
     fn_end = sh.index("\n}", fn_start) + 2
     start = sh.index("# Step 1.6: CLI pre-flight")
-    end = sh.index("# Step 1.5: Check for existing agent installation")
+    end = sh.index('if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then\n    # Same server')
     return sh[fn_start:fn_end] + "\n\n" + sh[start:end]
 
 
@@ -1282,3 +1284,89 @@ def test_agent_preflight_nonroot_nosudo_uses_user_prefix(tmp_path):
     assert "--prefix" in log
     assert "@qwen-code/qwen-code@0.23.3" in log
     assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""
+
+
+def test_agent_installer_rejects_different_server_before_host_mutation():
+    """P2 (PR #3386 R16 review): the read-only existing-server conflict check
+    must run BEFORE the CLI pre-flight mutates the host. A different-server
+    run (explicit rejection — "Cannot proceed") used to npm-install the CLI
+    and even root-upgrade system Node first, changing the runtime shared
+    with the old agent the script then refuses to migrate."""
+    sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    rejection_pos = sh.index("Cannot proceed. Please uninstall the existing agent first")
+    preflight_pos = sh.index("# Step 1.6: CLI pre-flight")
+    assert rejection_pos < preflight_pos, (
+        "different-server rejection must precede the CLI pre-flight — a run "
+        "the script refuses must not have mutated Node/npm on the host"
+    )
+
+
+def _run_agent_different_server_preflight(tmp_path):
+    """Execute the read-only discovery + conflict gate + CLI pre-flight in
+    script order under a fake PATH, with an existing config pointing at a
+    DIFFERENT server. npm/sudo are recorders: the rejection path must never
+    reach them."""
+    sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    body = sh[sh.index("# Step 1.5: Check for existing agent installation") : sh.index("# Step 2")]
+    fn = sh[sh.index("get_node_major() {") :]
+    fn = fn[: fn.index("\n}\n") + 3]
+
+    fake_bin = tmp_path / "ds-bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("head", "tr", "sed", "cut", "grep"):
+        os.symlink(_which(tool), fake_bin / tool)
+    npm_log = tmp_path / "npm.log"
+    sudo_log = tmp_path / "sudo.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f'echo "$@" >> "{npm_log}"; exit 0')
+    shim("sudo", f'echo "$@" >> "{sudo_log}"; exit 0')
+    shim("node", "echo 'v20.19.1'")  # Node 20: would trigger upgrade if reached
+    shim("uname", "echo Linux")
+
+    install_dir = tmp_path / "agent"
+    install_dir.mkdir()
+    (install_dir / "config.json").write_text(
+        '{"server_url": "https://old.example"}', encoding="utf-8"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    harness = (
+        "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
+        'log_error() { echo "ERR: $*"; }\n'
+        + fn
+        + f'INSTALL_DIR="{install_dir}"\nSERVER_URL="https://new.example"\n'
+        f'PYTHON_PATH="{sys.executable}"\nQWEN_CLI_VERSION=0.23.3\n'
+        "INSTALL_CLI=qwen-code-cli\n"
+        'EXISTING_CONFIG_FOUND=false\nEXISTING_SERVER=""\nEXISTING_DIR=""\n'
+        'EXISTING_MACHINE_ID=""\nDEFAULT_DIR="$HOME/.open-ace-agent"\n'
+        'SYSTEMD_SERVICE_FILE="/nonexistent/open-ace-agent.service"\n'
+        + body
+        + '\necho "REACHED_END"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin), "HOME": str(home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, npm_log, sudo_log
+
+
+def test_agent_different_server_run_never_mutates_host(tmp_path):
+    """Execution-level: existing config → different server → the script
+    refuses migration WITHOUT any npm/sudo invocation (Node 20 present, so
+    an unordered pre-flight would have upgraded system Node)."""
+    result, npm_log, sudo_log = _run_agent_different_server_preflight(tmp_path)
+
+    assert result.returncode != 0
+    assert "Cannot proceed" in result.stdout or "Cannot proceed" in result.stderr
+    assert "REACHED_END" not in result.stdout
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+    assert not sudo_log.exists() or sudo_log.read_text(encoding="utf-8") == ""

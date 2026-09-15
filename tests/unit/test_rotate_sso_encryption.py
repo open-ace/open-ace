@@ -342,3 +342,84 @@ def test_key_management_docs_route_rotation_through_atomic_script_only():
         assert (
             "rotate_sso_encryption.py" in doc
         ), f"docs/{lang}/KEY_MANAGEMENT.md must point rotation at the atomic script"
+        # The OPENING overview must match the authoritative 8-store list (PR
+        # #3386 R16 review): a three-table summary up top misleads skim-readers
+        # about the blast radius long before the impact section corrects it.
+        head = doc[: doc.index("## 密钥共享影响面" if lang == "cn" else "## Key Sharing Impact")]
+        assert "sso_providers" in head and "webhook_settings" in head, (
+            f"docs/{lang}/KEY_MANAGEMENT.md: opening overview/diagram still "
+            "lists only the three legacy stores"
+        )
+
+
+def _insert_api_key(db_url: str, ciphertext: str, name: str) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(db_url.replace("sqlite:///", ""))
+    conn.execute(
+        "INSERT INTO api_key_store (encrypted_key, name) VALUES (?, ?)", (ciphertext, name)
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_rotate_rejects_rowcount_mismatch_from_concurrent_modification(tmp_path):
+    """P1 (PR #3386 R16 review): each planned UPDATE targets exactly one row
+    (Fernet ciphertexts are unique per encryption). An affected-row count !=
+    1 means a concurrent writer changed the row after the scan — the
+    rotation must roll back entirely instead of silently skipping it."""
+    db_url = _make_db(tmp_path)
+
+    # Two rows sharing one ciphertext: only possible via direct DB write
+    # (Fernet never duplicates) — models a raced/duplicated value; the
+    # UPDATE ... WHERE col = ? would affect 2 rows.
+    import sqlite3
+
+    conn = sqlite3.connect(db_url.replace("sqlite:///", ""))
+    ciphertext = conn.execute(
+        "SELECT encrypted_key FROM api_key_store WHERE name = 'primary'"
+    ).fetchone()[0]
+    conn.close()
+    _insert_api_key(db_url, ciphertext, "duplicate")
+
+    ok, count, failures = rotate_keys(db_url, NEW_KEY)
+
+    assert ok is False
+    assert count == 0
+    # everything still decrypts under the OLD key (full rollback)
+    assert postcheck_new_key(db_url, OLD_KEY) == []
+
+
+def test_rotate_picks_up_rows_written_between_preflight_and_rotation(tmp_path):
+    """P1 (PR #3386 R16 review): a row written by a straggler writer AFTER the
+    pre-flight probe but BEFORE the rotation transaction opens must be
+    included in the same atomic rotation — the scan re-runs inside the
+    write transaction, not from a stale snapshot."""
+    from app.utils.smtp_crypto import SMTPPasswordManager
+
+    db_url = _make_db(tmp_path)
+
+    pm_old = SMTPPasswordManager.for_legacy_rotation_key(OLD_KEY)
+    _insert_api_key(db_url, pm_old.encrypt("late-secret"), "late")
+
+    ok, count, failures = rotate_keys(db_url, NEW_KEY)
+
+    assert ok is True, failures
+    assert count >= 3  # seeded values + the late row
+    assert postcheck_new_key(db_url, NEW_KEY) == []
+
+
+def test_postcheck_detects_old_key_row_written_after_rotation(tmp_path):
+    """P1 (PR #3386 R16 review): a writer still on the old key that inserts
+    AFTER the rotation commits must be caught by the new-key post-check —
+    mixed-key data is reported, never silently accepted."""
+    from app.utils.smtp_crypto import SMTPPasswordManager
+
+    db_url = _make_db(tmp_path)
+    ok, count, _ = rotate_keys(db_url, NEW_KEY)
+    assert ok is True
+
+    pm_old = SMTPPasswordManager.for_legacy_rotation_key(OLD_KEY)
+    _insert_api_key(db_url, pm_old.encrypt("straggler-secret"), "straggler")
+
+    assert postcheck_new_key(db_url, NEW_KEY)  # non-empty = residual detected
