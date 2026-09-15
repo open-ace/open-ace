@@ -122,6 +122,28 @@ class TestGetUserProjectActiveSessions(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
+    @patch("app.repositories.database.get_db_connection")
+    def test_reads_real_dict_row_shape(self, mock_get_conn):
+        """#3403: PG connections wrap cursors with RealDictCursor — the old
+        positional result[0] raised KeyError there and the except swallowed
+        it into a permanent '0 sessions'. The dict shape must read by the
+        SELECT's column alias."""
+
+        class RealDictRow(dict):
+            """Stands in for psycopg2.extras.RealDictRow (a dict subclass)."""
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = RealDictRow(count=7)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_get_conn.return_value = mock_conn
+
+        result = get_user_project_active_sessions(1, 100)
+
+        self.assertEqual(result, 7)
+
 
 class TestAddUserToSharedGroup(unittest.TestCase):
     """Tests for add_user_to_shared_group function (existing)."""
