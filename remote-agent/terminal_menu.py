@@ -265,7 +265,7 @@ def handle_select(item: dict) -> None:
         os.execvp(get_login_shell_args()[0], get_login_shell_args())
         return
 
-    if item["cli"] == "qwen":
+    if item.get("cli") == "qwen":
         ok, reason = qwen_precheck()
         if not ok:
             show_message(f"{BOLD_RED}✗ {reason}{RESET}")
