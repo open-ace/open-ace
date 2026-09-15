@@ -432,12 +432,13 @@ class SchedulerWorker:
 
             logger.info("Syncing system users for Docker multi-user mode...")
 
-            # 查询所有有 system_account 的用户
+            # 查询所有有 system_account 的在役用户（Issue #3396: 同时取
+            # tenant_id 以便加入租户维度的共享内容组；同一 system_account
+            # 理论上跨多行时每行各 enroll 一次，幂等无害）。
             if not self._db:
                 logger.warning("Database not initialized, cannot sync system users")
                 return
 
-            # 查询所有有 system_account 的用户。
             # Review on #3390: 只同步在役用户（镜像 entrypoint 的分类逻辑）。
             # 停用/软删用户的 uid 由 entrypoint 的 nologin 占位账号保留；
             # 若此处不过滤，ensure_system_user 的 exists-path 会经
@@ -445,7 +446,7 @@ class SchedulerWorker:
             # scheduler 启动都悄悄撤销占位保护（多用户 compose 的 scheduler
             # 以 root 运行，usermod 会成功）。
             users = self._db.fetch_all(
-                "SELECT DISTINCT system_account FROM users "
+                "SELECT system_account, tenant_id FROM users "
                 "WHERE system_account IS NOT NULL AND system_account != '' "
                 "AND deleted_at IS NULL AND is_active = true"
             )
@@ -459,7 +460,7 @@ class SchedulerWorker:
                 system_account = user.get("system_account")
                 if system_account:
                     try:
-                        if ensure_system_user(system_account):
+                        if ensure_system_user(system_account, tenant_id=user.get("tenant_id")):
                             sync_count += 1
                             logger.info(f"System user synced: {system_account}")
                         else:

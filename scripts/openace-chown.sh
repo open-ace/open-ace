@@ -108,7 +108,74 @@ else
 fi
 
 # Validate path prefix
+# Issue #3396 review (finding 8): deployments with a custom WORKSPACE_BASE_DIR
+# (e.g. /data) were rejected here, so EVERY reclaim failed fail-soft forever.
+# The built-in defaults stay; an optional root-owned config may override the
+# prefix list (the Docker entrypoint writes it at boot from the configured
+# base dirs). Read late (after arg parsing) so a broken config cannot inject
+# into earlier logic, and only when readable and non-empty.
+#
+# PR #3402 review: this wrapper runs as ROOT via sudo, so the conf is DATA,
+# never sourced shell code. It previously sourced an ALLOWED_PREFIXES=(...)
+# assignment from the conf — anyone able to write /etc/openace could
+# execute arbitrary code as root, and since the file is generated
+# from WORKSPACE_BASE_DIR, a `"` or `$(...)` in the env became code. The
+# conf is now ONE PREFIX PER LINE and is admitted only after:
+#   * stat -c '%u %a': owner must be root (uid 0) and the mode must have
+#     NO group/world write bits (mode & 022 == 0) — else audit + fall back
+#     to the built-in prefixes;
+#   * every line must be an absolute path, not "/" itself (a "/" prefix
+#     disables this guard entirely), and contain only [A-Za-z0-9/._-].
 ALLOWED_PREFIXES=("/workspace/" "/home/")
+CONF_FILE="/etc/openace/openace-chown.conf"
+if [ -r "$CONF_FILE" ]; then
+    _conf_stat=$(stat -c '%u %a' "$CONF_FILE" 2>/dev/null || echo "")
+    _conf_uid="${_conf_stat%% *}"
+    _conf_mode="${_conf_stat##* }"
+    _conf_ok=true
+    if [ -z "$_conf_stat" ] || [ "$_conf_uid" != "0" ]; then
+        echo "ERROR: $CONF_FILE is not root-owned (stat: '$_conf_stat') — refusing to use it, built-in prefixes apply" >&2
+        log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} conf=${CONF_FILE} result=reject_conf_not_root_owned"
+        _conf_ok=false
+    elif [ $(( 8#${_conf_mode:-0} & 022 )) -ne 0 ]; then
+        echo "ERROR: $CONF_FILE is group/world-writable (mode ${_conf_mode}) — refusing to use it, built-in prefixes apply" >&2
+        log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} conf=${CONF_FILE} result=reject_conf_writable"
+        _conf_ok=false
+    fi
+    if [ "$_conf_ok" = true ]; then
+        _conf_prefixes=()
+        while IFS= read -r _line || [ -n "$_line" ]; do
+            case "$_line" in
+                '#'*|'') continue ;;
+            esac
+            case "$_line" in
+                /*) ;;
+                *)
+                    echo "WARNING: $CONF_FILE line '$_line' is not an absolute path — skipped" >&2
+                    continue ;;
+            esac
+            if [ "$_line" = "/" ]; then
+                echo "WARNING: $CONF_FILE line '$_line' is the filesystem root — skipped (it would disable the path guard)" >&2
+                continue
+            fi
+            case "$_line" in
+                *[!A-Za-z0-9/._-]*)
+                    echo "WARNING: $CONF_FILE line '$_line' has characters outside [A-Za-z0-9/._-] — skipped" >&2
+                    continue ;;
+            esac
+            _conf_prefixes+=("$_line")
+        done < "$CONF_FILE"
+        if [ ${#_conf_prefixes[@]} -gt 0 ]; then
+            ALLOWED_PREFIXES=("${_conf_prefixes[@]}")
+        fi
+    fi
+    unset _conf_stat _conf_uid _conf_mode _conf_ok _conf_prefixes _line
+fi
+if [ ${#ALLOWED_PREFIXES[@]} -eq 0 ]; then
+    echo "ERROR: $CONF_FILE set ALLOWED_PREFIXES to an empty list — refusing to allow everything" >&2
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=reject_empty_prefixes"
+    exit 2
+fi
 PATH_VALID=false
 for prefix in "${ALLOWED_PREFIXES[@]}"; do
     if [[ "$RESOLVED_PATH" == "$prefix"* ]]; then
@@ -118,7 +185,7 @@ for prefix in "${ALLOWED_PREFIXES[@]}"; do
 done
 
 if [ "$PATH_VALID" = false ]; then
-    echo "ERROR: Path '$RESOLVED_PATH' is outside allowed directories (/workspace/*, /home/*)" >&2
+    echo "ERROR: Path '$RESOLVED_PATH' is outside allowed directories (${ALLOWED_PREFIXES[*]})" >&2
     log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} resolved=${RESOLVED_PATH} recursive=${RECURSIVE} result=reject_path"
     exit 2
 fi

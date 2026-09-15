@@ -1372,6 +1372,25 @@ def item_d_shared_projects(sc: Scenario) -> None:
         response=body,
     )
 
+    # review round 3 (4004860481): the API layer is only half the story —
+    # cross-tenant and post-revocation access must ALSO be probed at the OS
+    # layer via the same channel item c uses to argue terminal equivalence.
+    # Since #3396 shared dirs are group-owned by the TENANT group
+    # openace-shared-<tenant_id> with 2770/660 (no others bits), and
+    # revocation reclaims the directory to the creator (chown -R + 0700/0600).
+    # Positive controls guard against over-tightening: bob (same tenant)
+    # writes while the project is shared; alice (creator) keeps her own
+    # project after the revocation reclaim.
+    proc = compose_exec(
+        SERVICE, f"touch {shared_path}/acc-bob-while-shared", user="bob", timeout=15, check=False
+    )
+    rec.check(
+        "d",
+        "OS layer: bob (same tenant) shell touch in shared project while shared",
+        proc.returncode == 0,
+        f"rc={proc.returncode} — tenant-group grant broken (member cannot write)",
+    )
+
     status, body, _ = http(
         "PUT",
         f"/api/projects/{project_id}",
@@ -1379,6 +1398,16 @@ def item_d_shared_projects(sc: Scenario) -> None:
         body={"is_shared": False},
     )
     rec.check("d", "alice revokes sharing", status == 200, f"status={status}", response=body)
+    # The reclaim is fail-soft: a 200 with permission_warning means the OS
+    # strip failed and the later EACCES probes would fail for the wrong
+    # diagnosis — assert the warning is absent so it fails HERE, at the API
+    # check, instead.
+    rec.check(
+        "d",
+        "revocation reclaimed OS permissions (no permission_warning)",
+        "permission_warning" not in (body or {}),
+        f"body={body}",
+    )
     status, body, _ = http(
         "GET", "/api/fs/browse", token=r.users["bob"]["token"], params={"path": shared_path}
     )
@@ -1391,16 +1420,13 @@ def item_d_shared_projects(sc: Scenario) -> None:
         response=body,
     )
 
-    # review round 3 (4004860481): the API layer is only half the story. The
-    # shared dirs are group openace-shared (a GLOBAL group — every tenant's
-    # account joins at creation) with 2775/664, so cross-tenant and
-    # post-revocation access must ALSO be probed at the OS layer via the same
-    # channel item c uses to argue terminal equivalence. Expected to FAIL on
-    # the current product — recorded honestly; the design fix (tenant-scoped
-    # shared groups / 2770 + revocation reclaim) is tracked as #3396.
-    # Both probe groups run after the revocation above — carol's access is
-    # group-membership-based and unaffected by the revocation flag either
-    # way, so the ordering is immaterial; labels name what each proves.
+    # Denial probes: carol is a member of the GLOBAL openace-shared group
+    # (namespace creation) but not of tenant-1's openace-shared-<t1>, so the
+    # 2770 project dir must EACCES her; bob loses group access when the
+    # revocation reclaims the dir to alice:alice 0700. Both probe groups run
+    # after the revocation above — carol's access is group-membership-based
+    # and unaffected by the revocation flag either way, so the ordering is
+    # immaterial; labels name what each proves.
     for label, account in (
         ("carol (other tenant) shell ls shared project -> EACCES", "carol"),
         ("carol (other tenant) shell touch in shared project -> EACCES", "carol"),
@@ -1413,8 +1439,20 @@ def item_d_shared_projects(sc: Scenario) -> None:
             "d",
             f"OS layer: {label}",
             proc.returncode != 0,
-            f"rc={proc.returncode} — global openace-shared group grants OS access "
-            "the API layer denies (#3396)",
+            f"rc={proc.returncode} — OS channel still open after revocation (#3396)",
+        )
+    # Creator retention: the reclaim must hand the directory to alice, not
+    # lock everyone out (a 0000/root reclaim would break her private work).
+    for label, cmd in (
+        ("alice shell ls her revoked project -> allowed", f"ls {shared_path}"),
+        ("alice shell touch in her revoked project -> allowed", f"touch {shared_path}/acc-alice"),
+    ):
+        proc = compose_exec(SERVICE, cmd, user="alice", timeout=15, check=False)
+        rec.check(
+            "d",
+            f"OS layer: {label}",
+            proc.returncode == 0,
+            f"rc={proc.returncode} — revocation reclaim broke the creator's own access",
         )
 
 

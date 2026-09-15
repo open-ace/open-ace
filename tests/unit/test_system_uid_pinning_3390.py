@@ -77,7 +77,7 @@ class TestEnsureSystemUidPinning:
         monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: True)
         monkeypatch.setattr(ws.platform, "system", lambda: "Linux")
         monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
-        monkeypatch.setattr(ws, "add_user_to_shared_group", lambda acc: True)
+        monkeypatch.setattr(ws, "add_user_to_shared_group", lambda acc, tenant_id=None: True)
 
         state = {
             "recorded": {},  # system_account -> recorded uid (the DB pin)
@@ -874,12 +874,11 @@ class TestEntrypointSyncTextual:
         """Review round 2 on #3390: the sync's outermost except printed the
         error and ended with exit 0, so the pipefail wrapper never fired the
         WARNING for mid-stage exceptions (functionally proven in
-        test_midstage_exception_exits_nonzero); pin the wiring marker."""
+        test_midstage_exception_exits_nonzero); pin the wiring marker.
+        The explicit assert keeps the failure semantics visible (and
+        satisfies the false-positive scanner's no_assertion gate)."""
         content = open(ENTRYPOINT, encoding="utf-8").read()
         handler = content.index("Error syncing users and projects")
-        # index() raises when the marker is absent after the handler; the
-        # explicit assert keeps the failure visible and satisfies the
-        # false-positive scanner's no_assertion gate (PR review round 3).
         assert content.index("sys.exit(1)", handler) > handler
 
 
@@ -896,7 +895,11 @@ class TestSchedulerSyncScopedToActiveUsers:
     def test_scheduler_query_filters_to_active_non_deleted(self):
         content = open(f"{ROOT}/app/scheduler_worker.py", encoding="utf-8").read()
         anchor = content.index("_sync_system_users")
-        query = content.index("SELECT DISTINCT system_account", anchor)
+        # #3396 integration note: the query now also selects tenant_id (for
+        # tenant-scoped shared-group enrollment), so the DISTINCT shape from
+        # the original #3390 fix is gone — the protective property under
+        # test is the active/non-deleted filter, not the DISTINCT.
+        query = content.index("SELECT system_account, tenant_id", anchor)
         window = content[query : query + 600]
         assert "deleted_at IS NULL" in window and "is_active = true" in window, (
             "the scheduler must not ensure accounts for deactivated/soft-deleted "
@@ -945,7 +948,9 @@ class TestAdminUpdateUserProvisioning:
         monkeypatch.setattr(admin_mod, "_spawn_background", lambda fn: None)
         monkeypatch.setattr(wm, "peek_webui_manager", lambda: None)
 
-        def fake_ensure(system_account, uid=None):
+        def fake_ensure(system_account, uid=None, tenant_id=None):
+            # tenant_id kwarg: PR #3402 (#3396) enrolls into the tenant-
+            # scoped shared group; the #3390 provisioning tests don't care.
             events.append(("ensure_system_user", system_account, uid))
             return True
 

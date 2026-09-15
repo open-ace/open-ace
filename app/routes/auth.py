@@ -134,7 +134,10 @@ def api_login():
             # Ensure workspace directory exists
             if provision_account:
                 try:
-                    ensure_user_workspace(provision_account)
+                    # Issue #3396: login re-enrolls the account in its
+                    # TENANT's shared-content group (plus the global
+                    # namespace-creation group).
+                    ensure_user_workspace(provision_account, tenant_id=user_data.get("tenant_id"))
                 except Exception as e:
                     logger.warning(f"Failed to ensure workspace for {provision_account}: {e}")
 

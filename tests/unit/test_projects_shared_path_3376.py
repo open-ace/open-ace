@@ -182,13 +182,20 @@ def test_shared_inside_open_shared_root_accepted(projects_app, workspace):
 
 @pytest.mark.regression
 def test_non_shared_project_not_subject_to_topology_rule(projects_app, workspace):
-    """非共享项目不放大任何人的根,维持既有任意绝对路径口径。"""
+    """非共享项目不放大任何人的根:不受共享侧拓扑规则(home 归属等)约束。
+
+    PR #3402 review (#3396) 之后私有注册不再是"任意绝对路径"口径——base
+    目录本身、<base>/shared 命名空间与跨租户重叠路径会被拒绝(见
+    TestPrivateRegistrationPathGuard);本用例改用一个普通私有路径钉住
+    "home 子树规则不适用于私有注册"这一仍在的语义。
+    """
     client = projects_app.test_client()
     with patch("app.routes.projects.project_repo") as repo:
         repo.get_project_by_path.return_value = None
+        repo.get_all_projects.return_value = []
         repo.create_project.return_value = 43
         repo.get_project_by_id.return_value = None
-        resp = _create(client, str(workspace), is_shared=False)
+        resp = _create(client, str(workspace / "alice" / "plain-private"), is_shared=False)
     assert resp.status_code in (200, 201, 404)
     assert repo.create_project.called
 
@@ -378,3 +385,105 @@ def test_create_side_accepts_exactly_what_read_side_accepts(projects_app, worksp
     assert shared_project_path_error(resolved, bases, homes, creator_roots=creator_roots) is None
     # Read side (creator-less) must agree for every create-side-accepted path.
     assert _shared_root_rejection_reason(resolved, home_dirs=homes) is None
+
+
+# --- PR #3402 review (#3396): private-registration path guard -------------
+#
+# The shared-path rules above all gate on ``if is_shared:`` — a PRIVATE
+# registration had no path validation at all, and the tenant-scoped
+# get_project_by_path never 409s across tenants. Any tenant's user could
+# register another tenant's shared project directory (or the namespace
+# root / a base dir) as a private project; the boot reclaim is hardened
+# against those rows, and the API now refuses them at registration.
+
+
+class TestPrivateRegistrationPathGuard:
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
+
+    @staticmethod
+    def _ns(**kw):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(**kw)
+
+    @classmethod
+    def _foreign_rows(cls, paths, tenant_id=2):
+        return [cls._ns(tenant_id=tenant_id, path=p, is_shared=True) for p in paths]
+
+    def test_private_path_of_foreign_tenant_project_rejected(self, projects_app, workspace):
+        """Paths OUTSIDE the namespace isolate the overlap rule itself (an
+        in-namespace private registration is rejected by the namespace rule
+        below regardless)."""
+        client = projects_app.test_client()
+        with patch(
+            "app.routes.projects.project_repo.get_all_projects",
+            return_value=self._foreign_rows([str(workspace / "t2-proj")]),
+        ):
+            resp = _create(client, str(workspace / "t2-proj"), is_shared=False)
+        assert resp.status_code == 400
+        assert "another tenant" in resp.get_json()["error"]
+
+    def test_private_path_inside_foreign_project_rejected(self, projects_app, workspace):
+        client = projects_app.test_client()
+        with patch(
+            "app.routes.projects.project_repo.get_all_projects",
+            return_value=self._foreign_rows([str(workspace / "t2-proj")]),
+        ):
+            resp = _create(client, str(workspace / "t2-proj" / "sub"), is_shared=False)
+        assert resp.status_code == 400
+
+    def test_private_path_containing_foreign_project_rejected(self, projects_app, workspace):
+        client = projects_app.test_client()
+        with patch(
+            "app.routes.projects.project_repo.get_all_projects",
+            return_value=self._foreign_rows([str(workspace / "t2-proj" / "sub")]),
+        ):
+            resp = _create(client, str(workspace / "t2-proj"), is_shared=False)
+        assert resp.status_code == 400
+
+    def test_private_row_on_foreign_shared_path_in_namespace_rejected(
+        self, projects_app, workspace
+    ):
+        """The literal takeover probe from the boot-reclaim review: tenant-2
+        registers tenant-1's live shared project path as a PRIVATE project.
+        In-namespace private registrations are refused outright (the sticky
+        group-writable root cannot host private content), which also closes
+        this row at the API layer."""
+        client = projects_app.test_client()
+        resp = _create(client, str(workspace / "shared" / "t1-proj"), is_shared=False)
+        assert resp.status_code == 400
+        assert "shared namespace" in resp.get_json()["error"]
+
+    def test_private_namespace_root_rejected(self, projects_app, workspace):
+        client = projects_app.test_client()
+        resp = _create(client, str(workspace / "shared"), is_shared=False)
+        assert resp.status_code == 400
+        assert "shared namespace" in resp.get_json()["error"]
+
+    def test_private_base_dir_rejected(self, projects_app, workspace):
+        client = projects_app.test_client()
+        resp = _create(client, str(workspace), is_shared=False)
+        assert resp.status_code == 400
+        assert "base directory" in resp.get_json()["error"]
+
+    def test_private_own_home_still_accepted(self, projects_app, workspace):
+        """Control: the guard narrows nothing for legitimate private
+        registrations — a same-tenant overlap is the 409's business (mocked
+        absent here), and the create proceeds."""
+        client = projects_app.test_client()
+        with (
+            patch(
+                "app.routes.projects.project_repo.get_all_projects",
+                return_value=self._foreign_rows([str(workspace / "t2-proj")], tenant_id=1),
+            ),
+            patch("app.routes.projects.project_repo.get_project_by_path", return_value=None),
+            patch("app.routes.projects.project_repo.create_project", return_value=77),
+            patch(
+                "app.routes.projects.project_repo.get_project_by_id",
+                return_value=self._ns(
+                    id=77, to_dict=lambda: {"id": 77, "path": str(workspace / "bob" / "priv")}
+                ),
+            ),
+        ):
+            resp = _create(client, str(workspace / "bob" / "priv"), is_shared=False)
+        assert resp.status_code in (200, 201, 404)

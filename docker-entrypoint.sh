@@ -1154,8 +1154,18 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # is not running as root with the explicit opt-in (see top-of-file guard).
     require_root_for_multi_user
 
-    # Issue #2730: Create shared project group
-    # All users are added to this group for shared project file system access
+    # Issue #2730 + #3396: shared-project groups.
+    # - openace-shared (GLOBAL): membership grants ONLY the right to create a
+    #   project directory inside the sticky <base>/shared namespace root
+    #   (root:openace-shared 3775). It is never the group-owner of project
+    #   content since #3396.
+    # - openace-shared-<tenant_id>: per-tenant CONTENT group — shared project
+    #   dirs are group-owned by it with 2770/660 (no others bits), so members
+    #   of OTHER tenants get EACCES at the OS layer even though they hold the
+    #   global membership for namespace creation.
+    # Enrollment of the DB users into BOTH groups happens in the DB-driven
+    # shared-group sync below (a /home-glob pass cannot know a directory's
+    # tenant). Tenant-less platform admins map to openace-shared-0.
     SHARED_GROUP="openace-shared"
     if ! getent group "$SHARED_GROUP" > /dev/null 2>&1; then
         groupadd -f "$SHARED_GROUP"
@@ -1163,14 +1173,6 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     else
         echo "  Shared project group already exists: $SHARED_GROUP"
     fi
-
-    # Add existing users in /home to the shared group
-    for user_dir in /home/*/; do
-        username=$(basename "$user_dir")
-        if id "$username" &>/dev/null; then
-            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
-        fi
-    done
 
     # Ensure workspace base directory exists
     # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
@@ -1212,16 +1214,73 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         # service on e.g. a root_squash NFS base dir.
         # chmod 3775 (review round 3, 4004874853): +sticky — rename(2) only
         # needs write+search on the parent, and openace-shared is a GLOBAL
-        # group (every tenant's account joins), so without the sticky bit any
-        # member could mv/replace another tenant's project directory. Sticky
-        # blocks non-owner renames at the root; sudo -u <user> mkdir for new
-        # projects and root-run setup_permissions_with_depth_limit are
-        # unaffected. Content-level cross-tenant access inside projects is
-        # the global-group design itself — tracked as #3396.
+        # group (every tenant's account joins, for namespace creation only),
+        # so without the sticky bit any member could mv/replace another
+        # tenant's project directory. Sticky blocks non-owner renames at the
+        # root; sudo -u <user> mkdir for new projects and root-run
+        # setup_permissions_with_depth_limit are unaffected. Content-level
+        # cross-tenant access inside projects is fenced by the per-tenant
+        # groups (openace-shared-<tenant>, 2770/660 — Issue #3396).
         if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3775 "$_base_dir/shared"; }; then
             echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
         fi
     done
+
+    # Issue #3396 review (finding 8): the openace-chown wrapper's built-in
+    # ALLOWED_PREFIXES only covers /workspace and /home — a deployment with a
+    # custom WORKSPACE_BASE_DIR (e.g. /data) had EVERY revocation reclaim
+    # rejected by the wrapper, fail-soft, forever. Write the operator-facing
+    # override config from the configured base dirs (plus /home) so the
+    # wrapper's path guard tracks this deployment's layout. Root-owned 0644;
+    # the wrapper keeps its built-in defaults when the file is absent.
+    # PR #3402 review: the conf is DATA, one prefix per line — never shell
+    # code. The previous generation wrote a sourced `ALLOWED_PREFIXES=(...)`
+    # assignment, so a `"` or `$(...)` inside WORKSPACE_BASE_DIR became code
+    # the root-run wrapper would execute; the wrapper now stat-validates the
+    # file (root-owned, not group/world-writable) and character-validates
+    # every line ([A-Za-z0-9/._-] only), and this writer applies the same
+    # character filter before emitting. The WRITE is part of the if-condition
+    # (where set -e does not apply): a read-only /etc/openace mount or an
+    # unwritable conf must degrade to the warning, never crash-loop the
+    # container — bash 5 aborts under set -e on a failed `{ ...; } > file`
+    # redirection (bash 3.2 does not, which is why the harness passed on
+    # macOS but failed on CI).
+    _chown_conf_dir="/etc/openace"
+    _chown_conf="$_chown_conf_dir/openace-chown.conf"
+    if mkdir -p "$_chown_conf_dir" 2>/dev/null && {
+        echo "# Generated by docker-entrypoint.sh at boot — do not edit while running."
+        echo "# Consumed by scripts/openace-chown.sh (allowed chown prefixes, one per line)."
+        _wb_raw="${WORKSPACE_BASE_DIR:-/workspace}"
+        IFS=',' read -r -a _wb_list <<< "$_wb_raw"
+        for _wb in "${_wb_list[@]}"; do
+            _wb="${_wb#"${_wb%%[![:space:]]*}"}"
+            _wb="${_wb%"${_wb##*[![:space:]]}"}"
+            [ -z "$_wb" ] && continue
+            case "$_wb" in
+                /*) ;;
+                *) _wb="/$_wb" ;;
+            esac
+            # strip ALL trailing slashes, then skip what is left empty: the
+            # old strip-then-compare-to-"/" never matched, so a "/" entry
+            # produced a "/" prefix that disables the wrapper's path guard
+            # entirely
+            while [ "$_wb" != "${_wb%/}" ]; do _wb="${_wb%/}"; done
+            [ -z "$_wb" ] && continue
+            # only filesystem-safe characters are ever emitted: the wrapper
+            # runs as root, and env-derived shell syntax must not reach it
+            # (defense in depth — the wrapper re-validates every line)
+            case "$_wb" in
+                *[!A-Za-z0-9/._-]*) echo "  WARNING: skipping unsafe WORKSPACE_BASE_DIR entry '$_wb' in openace-chown.conf" >&2; continue ;;
+            esac
+            printf '%s/\n' "$_wb"
+        done
+        printf '/home/\n'
+    } > "$_chown_conf"; then
+        chmod 644 "$_chown_conf" 2>/dev/null || true
+    else
+        echo "  WARNING: could not write $_chown_conf — openace-chown stays on built-in prefixes (/workspace, /home)"
+    fi
+    unset _wb _wb_raw _wb_list _chown_conf_dir _chown_conf
     unset _base_dir _workspace_base_dirs
 
     # Fix /home directory permissions (Issue #1249)
@@ -1665,25 +1724,369 @@ except Exception as e:
 " 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 
-    # Issue #3379 (review round 2, 4004368045): enroll users into the shared
-    # group AFTER the DB sync. On a recreated container /etc/passwd starts
-    # empty, so the pre-sync pass skipped everyone (id <user> failed) and the
-    # sync's useradd does not add supplementary groups — without this pass,
-    # already-logged-in users (sessions live in postgres and survive
-    # recreation) keep getting 403 on shared-project creation until they
-    # re-login. usermod is idempotent; failures are best-effort.
-    # Review on #3390: this glob pass also enrolls nologin PLACEHOLDER
-    # accounts (their /home/<user> dirs survive on the volume) — intentional
-    # and inert: a placeholder cannot authenticate (nologin shell, no
-    # password, tokens revoked at deactivation), so openace-shared membership
-    # grants nothing, and filtering them out here would add name-shape
-    # heuristics for no security gain.
-    for user_dir in /home/*/; do
-        username=$(basename "$user_dir")
-        if id "$username" &>/dev/null; then
-            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
-        fi
-    done
+    # ========================================================================
+    # Issue #3396: tenant-scoped shared-group sync (DB-driven).
+    # ========================================================================
+    # Replaces the two /home-glob usermod passes (#3389 rounds 2/3): a
+    # directory name cannot reveal its tenant, so enrollment is derived from
+    # the users table instead. For every ACTIVE user with an account:
+    #   - global openace-shared (namespace-root creation right), and
+    #   - openace-shared-<tenant_id> (tenant shared-content access).
+    # PR #3402 review: the sync is also AUTHORITATIVE for tenant-group
+    # MEMBERSHIP — every existing openace-shared-<t> group is converged onto
+    # the DB's exact member list (gpasswd -M / -d), so stale memberships
+    # (tenant moves, deactivations, deletes — whose removals used to run only
+    # in the request-handling container) cannot survive a restart of ANY
+    # container, the scheduler's included. The global openace-shared group is
+    # deliberately left alone (deactivated accounts keep namespace-root
+    # creation; no content access).
+    # It also RECONCILES shared project directories left on the legacy
+    # global group by pre-#3396 deployments: chgrp to the tenant group +
+    # 2770/660. The reconcile is skipped per project when the root already
+    # carries the tenant group AND mode (one stat per project on
+    # steady-state boots), and RECLAIMS directories of projects that are no
+    # longer active+shared (revocation whose reclaim failed fail-soft after
+    # the DB flip, soft-deleted shared projects) back to the creator:
+    # chown -R + dirs 0700 / files 0600.
+    # Quoted heredoc: the block is verbatim Python (no shell expansion) and
+    # is functionally tested by tests/unit/test_shared_namespace_provisioning_3379.py
+    # (extracted between the PY_SYNC_GROUPS_EOF markers).
+    # Review hardening (matches the #3390 user-sync pattern): the old plain
+    # `python3 - <<EOF ... | tee LOG || echo WARNING` pipeline masked a
+    # python-side death (tee returns 0; no pipefail file-wide) and the
+    # heredoc python's outermost handler caught every exception and exited
+    # 0 — so the WARNING could never fire. pipefail is now scoped to this
+    # one pipeline, -u unbuffers, and the python itself exits 1 when any
+    # enrollment/reconcile/reclaim step failed (per-row failures are still
+    # skipped past so one bad row cannot abort the rest) — the WARNING line
+    # is the loud signal that cross-tenant OS isolation may be degraded
+    # until the next restart; the entrypoint itself keeps booting.
+    if [ -n "$DATABASE_URL" ]; then
+    ( set -o pipefail; python3 -u - <<'PY_SYNC_GROUPS_EOF' 2>&1 | tee /app/logs/open-ace-shared-groups.log ) || echo "WARNING: shared-group sync failed - cross-tenant OS isolation may be degraded until restart; check /app/logs/open-ace-shared-groups.log"
+import os
+import subprocess
+import sys
+
+import psycopg2
+
+GLOBAL_GROUP = 'openace-shared'
+
+
+def tenant_group(tid):
+    # Mirrors app.utils.workspace.shared_tenant_group_name: NULL tenant
+    # (platform admins) maps to the pseudo-id 0; real tenant ids start at 1.
+    return f"openace-shared-{tid if tid is not None else 0}"
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def enroll(username, tid):
+    """Enroll one account in the global + tenant shared groups (idempotent).
+
+    Returns True when every membership is in place.
+    """
+    ok = True
+    for group in (GLOBAL_GROUP, tenant_group(tid)):
+        r = run(['groupadd', '-f', group])
+        if r.returncode != 0:
+            print(f'  WARNING: groupadd {group} failed: {r.stderr.strip()}')
+            ok = False
+            continue
+        r = run(['usermod', '-aG', group, username])
+        if r.returncode != 0:
+            print(f'  WARNING: usermod -aG {group} {username} failed: {r.stderr.strip()}')
+            ok = False
+    return ok
+
+
+def reconcile_shared(path, tid):
+    """Normalize one shared project dir to the tenant group (2770/660).
+
+    The fast path checks group AND mode: a dir chgrp'd correctly but left on
+    a wrong mode (e.g. legacy 2775) must still be normalized, not skipped.
+    Returns True when the dir ends up normalized.
+    """
+    group = tenant_group(tid)
+    r = run(['groupadd', '-f', group])
+    if r.returncode != 0:
+        print(f'  WARNING: groupadd {group} failed: {r.stderr.strip()}')
+        return False
+    stat = run(['stat', '-c', '%G %a', path])
+    if stat.returncode == 0:
+        parts = stat.stdout.strip().split()
+        if len(parts) == 2 and parts[0] == group and parts[1] == '2770':
+            return True  # already normalized (steady-state fast path)
+    print(f'  Reconciling shared project {path} -> group {group} (2770/660)')
+    ok = True
+    r = run(['chgrp', '-R', group, path])
+    if r.returncode != 0:
+        print(f'  WARNING: chgrp {group} {path} failed: {r.stderr.strip()}')
+        ok = False
+    # PR #3402 review: batch the chmod passes with `-exec ... {} +` (one
+    # chmod invocation per find BATCH, not one fork per entry — `{} ;`
+    # forked a chmod per file, so a node_modules-scale project could keep
+    # the pre-service-start reconcile running for tens of minutes and kill
+    # the container via healthcheck).
+    r = run(['find', path, '-type', 'd', '-exec', 'chmod', '2770', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 2770 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    r = run(['find', path, '-type', 'f', '-exec', 'chmod', '660', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 660 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    return ok
+
+
+def reclaim_revoked(path, owner):
+    """Re-apply the #3396 revocation reclaim for one no-longer-shared dir.
+
+    The app-side revoke runs fail-soft AFTER the DB flip, so a timeout or
+    crash leaves the dir group-accessible with is_shared already false —
+    the whole tenant would keep OS access to a now-private project forever.
+    Mirrors app.utils.workspace.revoke_shared_project_access: chown -R to
+    the creator, then dirs 0700 / files 0600 (ex-members get EACCES).
+    Returns True when the reclaim completed.
+    """
+    uid = run(['id', '-u', owner])
+    gid = run(['id', '-g', owner])
+    if uid.returncode != 0 or gid.returncode != 0:
+        print(f'  WARNING: cannot resolve owner {owner} for {path}: '
+              f'{(uid.stderr or gid.stderr).strip()}; not reclaimed')
+        return False
+    ownership = f'{uid.stdout.strip()}:{gid.stdout.strip()}'
+    print(f'  Reclaiming revoked shared project {path} -> owner {owner} (0700/0600)')
+    r = run(['chown', '-R', ownership, path])
+    if r.returncode != 0:
+        print(f'  WARNING: chown {ownership} {path} failed: {r.stderr.strip()}')
+        return False
+    ok = True
+    # batched `{} +` like the reconcile pass above (PR #3402 review: one
+    # fork per entry kept large reclaims in the pre-service-start window)
+    r = run(['find', path, '-type', 'd', '-exec', 'chmod', '0700', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 0700 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    r = run(['find', path, '-type', 'f', '-exec', 'chmod', '0600', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 0600 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    return ok
+
+
+failures = 0
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+
+    # Round-2 review N1: user_repo.delete_user soft-deletes by setting
+    # deleted_at ONLY (is_active stays true), so the enrollment must filter
+    # deleted_at IS NULL — same classification as the user-sync above — or
+    # every restart re-enrolls deleted users into openace-shared-<t>, silently
+    # undoing the delete-path group drop app/routes/admin.py performs.
+    # PR #3402 review: system_account ONLY — no `or username` fallback. An
+    # unmapped user's username may equal ANOTHER user's system_account
+    # (system_account validates format only, uniqueness is not checked
+    # against usernames), and the old fallback enrolled that OS account into
+    # this user's tenant group across the tenant boundary; username is no
+    # longer selected so the fallback cannot come back silently.
+    cur.execute(
+        'SELECT system_account, tenant_id FROM users '
+        'WHERE is_active = true AND deleted_at IS NULL'
+    )
+    # PR #3402 review: the sync must also REMOVE, not just add. Tenant moves,
+    # deactivations and deletes drop the old group with fail-soft `gpasswd -d`
+    # in the REQUEST-handling container only — the scheduler container's
+    # /etc/group (its autonomous agents run via openace-run-as against it)
+    # kept every stale membership forever, and a failed removal in the app
+    # container survived its restarts. The DB is therefore the authority:
+    # `desired` holds the exact member list per tenant group, and the pass
+    # below converges every existing openace-shared-<t> group onto it. The
+    # GLOBAL openace-shared group is deliberately NOT converged (deactivated
+    # accounts keep it — accepted residual: it grants namespace-root
+    # creation only, no content access).
+    desired = {}
+    for system_account, tid in cur.fetchall():
+        if not system_account:
+            continue
+        if not enroll(system_account, tid):
+            failures += 1
+        desired.setdefault(tenant_group(tid), set()).add(system_account)
+    print('Shared-group enrollment complete.')
+
+    getent = run(['getent', 'group'])
+    if getent.returncode != 0:
+        print(f'  WARNING: getent group failed: {getent.stderr.strip()} — '
+              'stale tenant-group memberships NOT reconciled this boot')
+        failures += 1
+    else:
+        for line in getent.stdout.splitlines():
+            name = line.split(':', 1)[0]
+            if not name.startswith(GLOBAL_GROUP + '-'):
+                continue  # foreign groups and the global group itself
+            if not name[len(GLOBAL_GROUP) + 1:].isdigit():
+                # round-5 N2: tenant group suffixes are numeric by
+                # construction — an operator-created lookalike such as
+                # openace-shared-backup must never be converged (its
+                # members would be stripped one by one).
+                continue
+            # round-5 N4: a desired member whose OS account is missing this
+            # boot (user-sync failure, #3399 shape) makes shadow-utils
+            # reject the WHOLE gpasswd -M call, silently keeping the group's
+            # stale list. Converge the present subset instead — the missing
+            # account's absence is already loud in the user-sync log.
+            members = sorted(
+                m for m in desired.get(name, ()) if run(['getent', 'passwd', m]).returncode == 0
+            )
+            if members:
+                r = run(['gpasswd', '-M', ','.join(members), name])
+                if r.returncode != 0:
+                    print(f'  WARNING: gpasswd -M {name} failed: {r.stderr.strip()}')
+                    failures += 1
+            elif line.count(':') >= 3 and line.split(':', 3)[3].strip():
+                # shadow-utils `gpasswd -M ""` is a NO-OP (it does not clear
+                # the list), so a group whose desired set is EMPTY — every
+                # member moved/deleted/deactivated — must have its current
+                # members removed one by one.
+                for member in line.split(':', 3)[3].split(','):
+                    member = member.strip()
+                    if not member:
+                        continue
+                    r = run(['gpasswd', '-d', member, name])
+                    if r.returncode != 0:
+                        print(f'  WARNING: gpasswd -d {member} {name} failed: {r.stderr.strip()}')
+                        failures += 1
+
+    bases = [b.strip().rstrip('/') for b in os.environ.get('WORKSPACE_BASE_DIR', '/workspace').split(',') if b.strip()]
+    cur.execute('SELECT path, tenant_id FROM projects WHERE is_active = true AND is_shared = true')
+    # active_shared_paths is collected BEFORE any filtering (PR #3402 review):
+    # the reclaim pass below must refuse to touch anything that IS, CONTAINS
+    # or LIES INSIDE any live shared project, of any tenant.
+    active_shared_paths = []
+    for path, tid in cur.fetchall():
+        if not path:
+            continue
+        active_shared_paths.append(path.rstrip('/'))
+        # Only reconcile paths inside the configured workspace base dirs —
+        # rows pointing elsewhere are not ours to touch.
+        if not any(path == b or path.startswith(b + '/') for b in bases):
+            continue
+        if os.path.isdir(path):
+            if os.path.islink(path):
+                # round-5 N1: a symlink row is never a legitimate shared
+                # project root (registrations realpath at creation). Every
+                # check here is string-based and stat/find/chgrp would
+                # follow the link onto its TARGET — refuse, loudly.
+                failures += 1
+                print(f'  WARNING: shared project path {path} is a symlink — '
+                      'not reconciled; investigate (possible tampering)')
+                continue
+            try:
+                if not reconcile_shared(path, tid):
+                    failures += 1
+            except Exception as e:  # noqa: BLE001 - one bad row must not abort the rest
+                failures += 1
+                print(f'  WARNING: reconcile failed for {path}: {e}')
+
+    # Issue #3396 review: RECLAIM pass. Projects that are NOT active+shared
+    # (revoked is_shared=false, soft-deleted is_active=false — soft delete
+    # flips is_active, projects has no deleted_at column) but whose dir is
+    # still group-owned by their tenant group are leftover shared-state on
+    # disk; the app-side revoke ran fail-soft after the DB flip, and
+    # soft-DELETE of a shared project never reclaims at all.
+    #
+    # PR #3402 review (takeover hardening): private project registration has
+    # NO path-ownership validation (app/routes/projects.py only validates
+    # `if is_shared:`), and get_project_by_path is tenant-scoped, so ANY
+    # tenant's user could register another tenant's shared dir — or the
+    # <base>/shared namespace root itself — as a private project and have
+    # this pass chown -R it to them at the next boot. A dir is therefore
+    # reclaimed ONLY when it is provably THIS row's own shared leftover:
+    #   * strictly INSIDE a workspace base dir, and never a base dir or a
+    #     <base>/shared namespace root (the container's own plumbing);
+    #   * not overlapping (equal to / containing / inside) ANY live shared
+    #     project of ANY tenant;
+    #   * on THIS row's tenant group (openace-shared-<row.tenant_id>) — the
+    #     only group that proves this tenant shared it;
+    #   * a legacy pre-#3396 leftover on the GLOBAL group is reclaimed only
+    #     at the exact first-level <base>/shared/<name> shape those
+    #     deployments laid out (anything else on the global group cannot be
+    #     distinguished from namespace plumbing — declared residual for an
+    #     administrator);
+    #   * the owner is the row's system_account ONLY (no username fallback —
+    #     see the enrollment note above).
+    # Steady-state cost stays one isdir + one stat per not-shared row.
+    namespace_roots = {b + '/shared' for b in bases}
+
+    def overlaps(a, b):
+        return a == b or a.startswith(b + '/') or b.startswith(a + '/')
+
+    def first_level_shared_child(p):
+        # direct child of a <base>/shared namespace root (no deeper '/')
+        return any(
+            p.startswith(ns + '/') and '/' not in p[len(ns) + 1:] for ns in namespace_roots
+        )
+
+    cur.execute(
+        'SELECT p.path, p.tenant_id, u.system_account FROM projects p '
+        'LEFT JOIN users u ON p.created_by = u.id '
+        'WHERE NOT (p.is_active = true AND p.is_shared = true)'
+    )
+    for path, tid, system_account in cur.fetchall():
+        path = (path or '').rstrip('/')
+        if not path:
+            continue
+        # strictly inside a base dir; never a base dir or a namespace root
+        if not any(path.startswith(b + '/') for b in bases) or path in namespace_roots:
+            continue
+        # round-5 N1: a symlink can never be this row's own leftover —
+        # registrations realpath, so a legit project dir is a real dir. All
+        # checks below are string-based and isdir/stat/chown -R follow the
+        # link: without this guard a same-tenant private row aliased via
+        # `ln -s <base>/shared/<live-project> <own-path>` passes every
+        # check, and chown -R (which dereferences its command-line operand)
+        # hands the LIVE project's root to the attacker.
+        if os.path.islink(path):
+            continue
+        # never reclaim a dir that is, contains, or lies inside a LIVE
+        # shared project (any tenant) — that is a takeover, not a leftover
+        if any(overlaps(path, live) for live in active_shared_paths):
+            continue
+        if not system_account:
+            continue
+        if not os.path.isdir(path):
+            continue
+        try:
+            stat = run(['stat', '-c', '%G', path])
+            if stat.returncode != 0:
+                continue
+            group = stat.stdout.strip()
+            if group == tenant_group(tid):
+                pass  # this row's own tenant group — provably its leftover
+            elif group == GLOBAL_GROUP and first_level_shared_child(path):
+                pass  # legacy pre-#3396 leftover at the canonical shape
+            else:
+                # another tenant's group, an unshaped legacy global-group dir,
+                # or a dir that was never group-shared / is already reclaimed
+                continue
+            if not reclaim_revoked(path, system_account):
+                failures += 1
+        except Exception as e:  # noqa: BLE001 - one bad row must not abort the rest
+            failures += 1
+            print(f'  WARNING: reclaim failed for {path}: {e}')
+
+    conn.close()
+    print('Shared-group sync completed.')
+    if failures:
+        print(f'Shared-group sync finished with {failures} failure(s).')
+        sys.exit(1)
+except Exception as e:
+    print(f'Error syncing shared groups: {e}')
+    sys.exit(1)
+PY_SYNC_GROUPS_EOF
+    fi
 
     # Configure sudoers for qwen-code-webui
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user
