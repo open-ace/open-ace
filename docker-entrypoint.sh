@@ -1468,13 +1468,13 @@ def sync_ssh_keys_secure(username):
 
     # Validate script exists and is executable
     if not os.path.isfile(ssh_sync_script):
-        _log_sync_failure(username, "script_missing",
-                          f"{ssh_sync_script} not found")
+        _log_sync_failure(username, \"script_missing\",
+                          f\"{ssh_sync_script} not found\")
         return 1
 
     if not os.access(ssh_sync_script, os.X_OK):
-        _log_sync_failure(username, "script_not_executable",
-                          f"{ssh_sync_script} not executable")
+        _log_sync_failure(username, \"script_not_executable\",
+                          f\"{ssh_sync_script} not executable\")
         return 1
 
     # Execute secure sync
@@ -1499,16 +1499,16 @@ def sync_ssh_keys_secure(username):
                 print(f'    {result.stdout.strip()}')
             return 0
         else:
-            _log_sync_failure(username, "script_failed", result.stderr.strip())
+            _log_sync_failure(username, \"script_failed\", result.stderr.strip())
             return 1
 
     except subprocess.TimeoutExpired:
-        _log_sync_failure(username, "script_timeout",
-                          f"Script execution exceeded {timeout_seconds} seconds")
+        _log_sync_failure(username, \"script_timeout\",
+                          f\"Script execution exceeded {timeout_seconds} seconds\")
         return 1
 
     except Exception as e:
-        _log_sync_failure(username, "script_exception", str(e))
+        _log_sync_failure(username, \"script_exception\", str(e))
         return 1
 
 
@@ -1522,77 +1522,77 @@ def _log_sync_failure(username, reason, details):
 
     # 1. Structured JSON log (machine-readable)
     log_entry = {
-        "timestamp": timestamp,
-        "event": "SSH_SYNC_FAILURE",
-        "user": username,
-        "reason": reason,
-        "details": details,
-        "severity": "ERROR",
-        "remediation": _get_remediation_hint(reason)
+        \"timestamp\": timestamp,
+        \"event\": \"SSH_SYNC_FAILURE\",
+        \"user\": username,
+        \"reason\": reason,
+        \"details\": details,
+        \"severity\": \"ERROR\",
+        \"remediation\": _get_remediation_hint(reason)
     }
 
     try:
-        log_file = "/var/log/openace/ssh-sync-failure.json"
+        log_file = \"/var/log/openace/ssh-sync-failure.json\"
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
-        with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        with open(log_file, \"a\") as f:
+            f.write(json.dumps(log_entry) + \"\n\")
     except Exception:
         # Fallback to stderr if file logging fails
         pass
 
     # 2. Human-readable warning file (for operators)
     try:
-        warning_file = "/var/log/openace/ssh-sync-failure.warning"
+        warning_file = \"/var/log/openace/ssh-sync-failure.warning\"
         os.makedirs(os.path.dirname(warning_file), exist_ok=True)
 
-        with open(warning_file, "w") as f:
-            f.write(f"[{timestamp}] SSH Sync Failure\n")
-            f.write(f"User: {username}\n")
-            f.write(f"Reason: {reason}\n")
-            f.write(f"Details: {details}\n")
+        with open(warning_file, \"w\") as f:
+            f.write(f\"[{timestamp}] SSH Sync Failure\n\")
+            f.write(f\"User: {username}\n\")
+            f.write(f\"Reason: {reason}\n\")
+            f.write(f\"Details: {details}\n\")
             remediation = _get_remediation_hint(reason)
-            f.write(f"\nRemediation:\n{remediation}\n")
+            f.write(f\"\nRemediation:\n{remediation}\n\")
     except Exception:
         # Fallback to stderr if warning file creation fails
         pass
 
     # 3. Console output
-    print(f"  ERROR: SSH key sync failed for {username}", file=sys.stderr)
-    print(f"  Reason: {reason}", file=sys.stderr)
-    print(f"  Details: {details}", file=sys.stderr)
-    print(f"  See /var/log/openace/ssh-sync-failure.warning for details", file=sys.stderr)
+    print(f\"  ERROR: SSH key sync failed for {username}\", file=sys.stderr)
+    print(f\"  Reason: {reason}\", file=sys.stderr)
+    print(f\"  Details: {details}\", file=sys.stderr)
+    print(f\"  See /var/log/openace/ssh-sync-failure.warning for details\", file=sys.stderr)
 
 
 def _get_remediation_hint(reason):
     \"\"\"Return remediation guidance based on failure reason\"\"\"
     hints = {
-        "script_missing": (
-            "Ensure /usr/local/bin/openace-ssh-sync is installed.\n"
-            "For Docker: ensure the script is COPYed in Dockerfile.\n"
-            "For package installation: ensure the package installs the script."
+        \"script_missing\": (
+            \"Ensure /usr/local/bin/openace-ssh-sync is installed.\n\"
+            \"For Docker: ensure the script is COPYed in Dockerfile.\n\"
+            \"For package installation: ensure the package installs the script.\"
         ),
-        "script_not_executable": (
-            "Run: chmod +x /usr/local/bin/openace-ssh-sync"
+        \"script_not_executable\": (
+            \"Run: chmod +x /usr/local/bin/openace-ssh-sync\"
         ),
-        "script_failed": (
-            "Check /var/log/openace/ssh-sync.log for details.\n"
-            "Common causes: permission errors, invalid whitelist config."
+        \"script_failed\": (
+            \"Check /var/log/openace/ssh-sync.log for details.\n\"
+            \"Common causes: permission errors, invalid whitelist config.\"
         ),
-        "script_timeout": (
-            "Script took too long. Check for:\n"
-            "- Large number of files in /root/.ssh\n"
-            "- Slow filesystem\n"
-            "- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS"
+        \"script_timeout\": (
+            \"Script took too long. Check for:\n\"
+            \"- Large number of files in /root/.ssh\n\"
+            \"- Slow filesystem\n\"
+            \"- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS\"
         ),
-        "script_exception": (
-            "Unexpected error. Check:\n"
-            "- Python version >= 3.10\n"
-            "- PyYAML package installed\n"
-            "- /var/log/openace/ directory writable"
+        \"script_exception\": (
+            \"Unexpected error. Check:\n\"
+            \"- Python version >= 3.10\n\"
+            \"- PyYAML package installed\n\"
+            \"- /var/log/openace/ directory writable\"
         )
     }
-    return hints.get(reason, "Check logs for details.")
+    return hints.get(reason, \"Check logs for details.\")
 
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
