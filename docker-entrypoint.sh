@@ -1926,7 +1926,20 @@ try:
             name = line.split(':', 1)[0]
             if not name.startswith(GLOBAL_GROUP + '-'):
                 continue  # foreign groups and the global group itself
-            members = sorted(desired.get(name, ()))
+            if not name[len(GLOBAL_GROUP) + 1:].isdigit():
+                # round-5 N2: tenant group suffixes are numeric by
+                # construction — an operator-created lookalike such as
+                # openace-shared-backup must never be converged (its
+                # members would be stripped one by one).
+                continue
+            # round-5 N4: a desired member whose OS account is missing this
+            # boot (user-sync failure, #3399 shape) makes shadow-utils
+            # reject the WHOLE gpasswd -M call, silently keeping the group's
+            # stale list. Converge the present subset instead — the missing
+            # account's absence is already loud in the user-sync log.
+            members = sorted(
+                m for m in desired.get(name, ()) if run(['getent', 'passwd', m]).returncode == 0
+            )
             if members:
                 r = run(['gpasswd', '-M', ','.join(members), name])
                 if r.returncode != 0:
@@ -1961,6 +1974,15 @@ try:
         if not any(path == b or path.startswith(b + '/') for b in bases):
             continue
         if os.path.isdir(path):
+            if os.path.islink(path):
+                # round-5 N1: a symlink row is never a legitimate shared
+                # project root (registrations realpath at creation). Every
+                # check here is string-based and stat/find/chgrp would
+                # follow the link onto its TARGET — refuse, loudly.
+                failures += 1
+                print(f'  WARNING: shared project path {path} is a symlink — '
+                      'not reconciled; investigate (possible tampering)')
+                continue
             try:
                 if not reconcile_shared(path, tid):
                     failures += 1
@@ -2018,6 +2040,15 @@ try:
             continue
         # strictly inside a base dir; never a base dir or a namespace root
         if not any(path.startswith(b + '/') for b in bases) or path in namespace_roots:
+            continue
+        # round-5 N1: a symlink can never be this row's own leftover —
+        # registrations realpath, so a legit project dir is a real dir. All
+        # checks below are string-based and isdir/stat/chown -R follow the
+        # link: without this guard a same-tenant private row aliased via
+        # `ln -s <base>/shared/<live-project> <own-path>` passes every
+        # check, and chown -R (which dereferences its command-line operand)
+        # hands the LIVE project's root to the attacker.
+        if os.path.islink(path):
             continue
         # never reclaim a dir that is, contains, or lies inside a LIVE
         # shared project (any tenant) — that is a takeover, not a leftover

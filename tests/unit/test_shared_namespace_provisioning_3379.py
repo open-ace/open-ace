@@ -24,6 +24,8 @@ and executed under stubbed ``psycopg2``/``subprocess`` modules, asserting the
 per-tenant enrollment and the legacy-directory reconcile command sequences.
 """
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -301,6 +303,8 @@ class TestTenantSharedGroupSync:
         existing_groups: dict[str, str | tuple[str, str]],
         reclaim_rows: list[tuple] | None = None,
         system_groups: dict[str, list[str]] | None = None,
+        links: dict[str, str] | None = None,
+        missing_accounts: set[str] | None = None,
     ) -> list[tuple]:
         """Execute the extracted block under stubs; returns recorded commands.
 
@@ -317,6 +321,12 @@ class TestTenantSharedGroupSync:
         *system_groups* feeds ``getent group``: existing OS groups mapped to
         their member lists (the membership-reconcile pass converges tenant
         groups onto the DB's desired list).
+
+        *links* creates symlinks (rel path -> absolute target) AFTER the
+        existing_groups placeholders are laid down (a placeholder the map
+        pre-created is replaced by the link) — for the round-5 N1
+        symlink-alias scenarios. *missing_accounts* makes ``getent passwd``
+        fail for those names (ghost OS accounts).
         """
         code = TestTenantSharedGroupSync._extract_sync_code()
         (tmp_path / "shared").mkdir(parents=True, exist_ok=True)
@@ -326,6 +336,14 @@ class TestTenantSharedGroupSync:
             abs_dir.mkdir(parents=True, exist_ok=True)
             group, mode = reported if isinstance(reported, tuple) else (reported, "2775")
             group_by_abs_path[str(abs_dir)] = (group, mode)
+        for rel, target in (links or {}).items():
+            link_path = tmp_path / rel
+            if link_path.is_symlink() or link_path.exists():
+                if link_path.is_dir() and not link_path.is_symlink():
+                    shutil.rmtree(link_path)
+                else:
+                    link_path.unlink()
+            os.symlink(target, link_path)
 
         calls: list[tuple] = []
         executed_sql: list[str] = []
@@ -341,6 +359,14 @@ class TestTenantSharedGroupSync:
                     returncode=0,
                     stdout="\n".join(lines) + ("\n" if lines else ""),
                     stderr="",
+                )
+            if cmd[:2] == ["getent", "passwd"]:
+                # the account-existence model for round-5 N4: everything
+                # resolves except the flagged ghosts
+                if cmd[2] in (missing_accounts or frozenset()):
+                    return SimpleNamespace(returncode=2, stdout="", stderr="")
+                return SimpleNamespace(
+                    returncode=0, stdout=f"{cmd[2]}:x:1042:1042::/:/bin/sh\n", stderr=""
                 )
             if cmd[:3] == ["stat", "-c", "%G %a"]:
                 reported = group_by_abs_path.get(cmd[3])
@@ -401,7 +427,12 @@ class TestTenantSharedGroupSync:
         import io
 
         with contextlib.redirect_stdout(io.StringIO()):
-            exec(compile(code, "<entrypoint-shared-group-sync>", "exec"), {"__name__": "sync"})
+            try:
+                exec(compile(code, "<entrypoint-shared-group-sync>", "exec"), {"__name__": "sync"})
+            except SystemExit as exc:
+                # the hardened sync exits 1 when any step failed — scenarios
+                # exercising a loud failure record it instead of crashing
+                calls.append(("__EXIT__", exc.code))
         calls.insert(0, ("__SQL__", *executed_sql))
         return calls
 
@@ -678,6 +709,106 @@ class TestTenantSharedGroupSync:
         assert not any(
             c[:1] == ("find",) and ("0700" in c or "0600" in c) for c in calls
         ), "the live shared dir must keep 2770/660, never be reclaimed"
+
+    def test_reclaim_never_follows_symlinks(self, monkeypatch, tmp_path):
+        """Round-5 N1: every reclaim check is string-based and isdir/stat/
+        chown -R follow symlinks, so a same-tenant private row aliased via
+        ``ln -s <base>/shared/<live-project> <own-innocent-path>`` passes
+        them all — and GNU chown dereferences its command-line operand,
+        handing the LIVE project's root to the attacker (who can then chmod
+        0700 and rename/delete it despite the sticky namespace root). A
+        symlink can never be this row's own leftover: registrations realpath
+        at creation."""
+        victim = str(tmp_path / "shared" / "live-proj")
+        alias = str(tmp_path / "mallory" / "innocent")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(victim, 1)],  # the target is a LIVE shared project
+            existing_groups={
+                "shared/live-proj": ("openace-shared-1", "2770"),
+                "mallory/innocent": "openace-shared-1",  # stat SUCCEEDS on the link
+            },
+            links={"mallory/innocent": victim},
+            reclaim_rows=[(alias, 1, "mallory-acct")],
+        )
+        assert not any(
+            c[:1] == ("chown",) and alias in c for c in calls
+        ), "a symlinked row must never be chown -R'd (chown dereferences the operand)"
+        assert not any(
+            c[:1] == ("chown",) and victim in c for c in calls
+        ), "the live project must not be reached through the alias"
+
+    def test_reconcile_refuses_symlinked_active_shared_row(self, monkeypatch, tmp_path):
+        """Round-5 N1 (reconcile side): an active-shared row whose path is a
+        symlink is tampering/anomaly, not a project dir — chgrp/chmod through
+        it would hit the link TARGET. Refused loudly (failure counter), the
+        boot still degrades to a WARNING."""
+        real = str(tmp_path / "real-target")
+        aliased = str(tmp_path / "aliased")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(aliased, 1)],
+            existing_groups={
+                "real-target": ("openace-shared-1", "2770"),
+                "aliased": ("openace-shared-1", "2775"),
+            },
+            links={"aliased": real},
+        )
+        assert not any(
+            c[:2] == ("chgrp", "-R") and aliased in c for c in calls
+        ), "a symlinked shared row must not be reconciled through the link"
+        assert not any(
+            c[:1] == ("find",) and aliased in c for c in calls
+        ), "no chmod pass may run through the aliased path"
+        assert ("__EXIT__", 1) in calls, "the refusal must be a LOUD failure, not a silent skip"
+
+    def test_converge_ignores_non_numeric_lookalike_groups(self, monkeypatch, tmp_path):
+        """Round-5 N2: tenant group suffixes are numeric by construction.
+        An operator-created lookalike (openace-shared-backup) matching the
+        bare name prefix must never be converged — its desired set is empty,
+        so the empty-set branch would strip its members one by one."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={
+                "openace-shared-1": ["alice-acct"],
+                "openace-shared-backup": ["ops-acct"],
+            },
+        )
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+        assert not any(
+            c[3] == "openace-shared-backup"
+            for c in calls
+            if c[:2] in (("gpasswd", "-M"), ("gpasswd", "-d"))
+        ), "lookalike operator groups must never be converged"
+
+    def test_converge_filters_members_missing_os_accounts(self, monkeypatch, tmp_path):
+        """Round-5 N4: shadow-utils rejects a whole ``gpasswd -M`` call whose
+        list contains an account missing from passwd, which silently kept the
+        group's STALE list every boot. The -M list converges only the
+        accounts that exist this boot; the ghost's absence is already loud in
+        the user-sync log."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1), ("ghost-acct", 1)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={"openace-shared-1": ["alice-acct"]},
+            missing_accounts={"ghost-acct"},
+        )
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+        assert not any(
+            c[:3] == ("gpasswd", "-M", "alice-acct,ghost-acct") for c in calls
+        ), "a missing OS account must not poison the whole -M call"
+        assert ("getent", "passwd", "ghost-acct") in calls, "the ghost was probed before filtering"
 
     def test_reclaim_pass_refuses_foreign_tenant_group_dir(self, monkeypatch, tmp_path):
         """PR #3402 review (takeover, general form): a private row whose dir
