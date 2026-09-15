@@ -4,6 +4,8 @@
 Executes the #3374 nine-item acceptance checklist against a REAL multi-user
 Compose deployment (production image, real useradd/sudo wrapper, real
 processes) and produces a reviewable acceptance record (JSON + Markdown).
+# diag(#3399): this no-op comment triggers the acceptance lane for the
+# exit-code/OOM diagnostics added to the entrypoint on this branch.
 
 Deliberately NOT a pytest module (#2457 lesson: real gevent hubs inside
 pytest crash xdist workers — and an acceptance run needs the whole stack,
