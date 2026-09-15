@@ -679,6 +679,7 @@ def _run_ps1_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
     harness = (
         "$prevErrorAction = $ErrorActionPreference\n"
         "$ErrorActionPreference = 'Continue'\n"
+        "$QwenCliVersion = '0.23.3'\n"
         "switch ('qwen-code-cli') {\n"
         # the extracted body already closes the qwen case block; the wrapper
         # opens the switch and closes it ONCE (an extra brace makes the whole
