@@ -1458,7 +1458,22 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
     ]
     active_uids = {}
     for name in active_accounts:
-        want = container_uid_of(name)
+        # tolerant probe: an active account MISSING after recreate is the
+        # finding itself (run 34917224776: the entrypoint user-sync printed
+        # its header but created zero users on the recreated container) —
+        # record it with evidence and keep auditing the rest
+        id_proc = compose_exec(SERVICE, f"id -u {name}", timeout=15, check=False)
+        if id_proc.returncode != 0:
+            rec.check(
+                "f",
+                f"post-recreate: active account {name} exists",
+                False,
+                f"id -u {name} rc={id_proc.returncode} — the entrypoint "
+                "user-sync created no users on the recreated container "
+                "(see user-sync-forensics.txt; product finding)",
+            )
+            continue
+        want = id_proc.stdout.strip()
         active_uids[want] = name
         for dir_path in (f"/home/{name}", f"/workspace/{name}"):
             got = compose_exec(
