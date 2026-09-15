@@ -141,10 +141,13 @@ def _lookup_uid_owner(uid: int) -> str | None:
 def get_recorded_system_uid(system_account: str) -> int | None:
     """Read the pinned OS uid for ``system_account`` from the users table.
 
-    Issue #3390: scoped like the partial unique index
-    ``idx_users_system_account`` (deleted_at IS NULL AND is_active = true) —
-    at most one row matches, and a DEACTIVATED row keeps its recorded pin
-    (that is exactly what the entrypoint's placeholder accounts restore).
+    Issue #3390: scoped to ACTIVE, non-deleted rows — the same predicate as
+    the (non-unique) partial index ``idx_users_system_account``; admin
+    creation routes keep active system_accounts unique in practice, but
+    nothing enforces it at the DB level, so multiple active rows sharing a
+    name would share the pin (they share the OS account). A DEACTIVATED row
+    keeps its recorded pin untouched — that is exactly what the entrypoint's
+    placeholder accounts restore.
     """
     try:
         from app.repositories.database import adapt_sql, get_db_connection
@@ -299,21 +302,6 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         logger.error(f"UID {uid} for {system_account} is reserved for system users, rejected")
         return False
 
-    # Issue #3390 collision guard: a pinned uid owned by a DIFFERENT account
-    # means re-creating this user would either fail (useradd refuses) or, if
-    # we "fixed" it by renumbering, silently move the boundary between two
-    # users' files. Fail loudly for an administrator instead — never renumber.
-    if uid is not None:
-        uid_owner = _lookup_uid_owner(uid)
-        if uid_owner is not None and uid_owner != system_account:
-            logger.error(
-                f"UID {uid} for system user {system_account} is already owned by "
-                f"'{uid_owner}' (recorded pin conflict, issue #3390); refusing to "
-                f"create/renumber — resolve the conflict manually "
-                f"(this account keeps a placeholder pin in the database)"
-            )
-            return False
-
     base_dir = get_workspace_base_dir()
 
     # 检查用户是否存在（id 命令不需要 sudo，任何用户都可以执行）
@@ -324,7 +312,12 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         # For an existing account the OS is the truth (its dirs are chowned
         # to the actual uid); a stale differing pin would be dangerous on the
         # NEXT recreation (it would try to useradd -u <stale>), so record the
-        # actual value and warn about the drift.
+        # actual value and warn about the drift. Note this path intentionally
+        # BYPASSES the create-path collision guard below: no useradd runs
+        # here, and a stale pin that happens to collide with another account
+        # is resolved BY this convergence, not blocked by it (review on
+        # #3390: blocking here wedged the account on a pin the OS no longer
+        # honors).
         actual_uid = _actual_uid_of(system_account)
         if actual_uid is not None:
             if recorded_uid is not None and recorded_uid != actual_uid:
@@ -348,6 +341,22 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
                 logger.warning(f"Failed to add {system_account} to shared group")
 
         return True
+
+    # Issue #3390 collision guard (CREATE path only — the account is missing):
+    # a pinned uid owned by a DIFFERENT account means re-creating this user
+    # would either fail (useradd refuses) or, if we "fixed" it by
+    # renumbering, silently move the boundary between two users' files. Fail
+    # loudly for an administrator instead — never renumber.
+    if uid is not None:
+        uid_owner = _lookup_uid_owner(uid)
+        if uid_owner is not None and uid_owner != system_account:
+            logger.error(
+                f"UID {uid} for system user {system_account} is already owned by "
+                f"'{uid_owner}' (recorded pin conflict, issue #3390); refusing to "
+                f"create/renumber — resolve the conflict manually "
+                f"(this account keeps a placeholder pin in the database)"
+            )
+            return False
 
     # 创建用户（通过 wrapper 或 sudo）
     # Issue #1855: 优先使用安全 wrapper，wrapper 内部做参数校验和审计日志

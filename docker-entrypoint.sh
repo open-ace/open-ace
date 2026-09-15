@@ -1244,10 +1244,18 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # user's uid is never inherited by an active account.
     if [ -n "$DATABASE_URL" ]; then
         echo "Syncing workspace users from database..."
-        python3 -c "
+        # Review on #3390: the plain `python3 -c ... | tee LOG || echo` pipeline
+        # masked python's exit status (tee returns 0; no pipefail file-wide) and
+        # piped stdout is block-buffered — a #3399-style boot-context death made
+        # all sync phases vanish silently with the WARNING never firing. The
+        # subshell scopes pipefail to this one pipeline, -u unbuffers, and the
+        # trailing || keeps set -e from crash-looping the service while making
+        # any sync failure (including the missing-account check below) loud.
+        ( set -o pipefail; python3 -u -c "
 import os
 import pwd
 import subprocess
+import sys
 import psycopg2
 
 workspace_base = os.environ.get('WORKSPACE_BASE_DIR', '/workspace')
@@ -1268,15 +1276,6 @@ def create_system_user(username, uid=None):
     the numeric ownership of the volume dirs) to a different account.
     Returns the account's actual uid (for record-back) or None on failure.
     \"\"\"
-    # Issue #3390 collision guard: a pinned uid owned by a DIFFERENT account
-    # means useradd would fail — or worse, renumbering would silently move
-    # the boundary between two users' files. Skip loudly for an admin; the
-    # pin stays recorded so the next sync retries with it.
-    if uid is not None:
-        owner = uid_owner(uid)
-        if owner is not None and owner != username:
-            print(f'  ERROR (issue #3390): recorded uid {uid} for {username} is already owned by {owner} — skipping account creation, resolve the conflict manually (not renumbering)')
-            return None
     # Check if user exists
     result = subprocess.run(['id', username], capture_output=True, text=True)
     if result.returncode == 0:
@@ -1292,6 +1291,18 @@ def create_system_user(username, uid=None):
             subprocess.run(['usermod', '-s', '/bin/bash', username], capture_output=True, text=True)
             print(f'  Upgraded placeholder account {username} to /bin/bash (reactivated user, #3390)')
     else:
+        # Issue #3390 collision guard (CREATE path only): a pinned uid owned
+        # by a DIFFERENT account means useradd would fail — or worse,
+        # renumbering would silently move the boundary between two users'
+        # files. Skip loudly for an admin; the pin stays recorded so the
+        # next sync retries with it. (When the account already exists above,
+        # the OS is the truth and the caller's drift branch converges the
+        # record instead — no useradd, nothing to collide.)
+        if uid is not None:
+            owner = uid_owner(uid)
+            if owner is not None and owner != username:
+                print(f'  ERROR (issue #3390): recorded uid {uid} for {username} is already owned by {owner} — skipping account creation, resolve the conflict manually (not renumbering)')
+                return None
         # Create user with home directory; -u pins the recorded uid (#3390)
         cmd = ['useradd', '-m', '-s', '/bin/bash']
         if uid is not None:
@@ -1589,6 +1600,23 @@ try:
     # not lose them (the connection is otherwise read-only until close).
     conn.commit()
 
+    # Review on #3390 (missing-actives verification): a collision skip, a
+    # useradd failure, or a mid-loop exception can each leave an ACTIVE user
+    # without an OS account — that user cannot log in to a workspace at all.
+    # Verify loudly and exit nonzero: the pipefail wrapper in the entrypoint
+    # turns this into the WARNING line (visible in container logs) without
+    # crash-looping the service. The pins above were already committed, so
+    # the next recreation retries from the recorded state.
+    missing_actives = []
+    for row_id, username, account, recorded_uid in active_rows:
+        try:
+            pwd.getpwnam(account)
+        except KeyError:
+            missing_actives.append(account)
+    if missing_actives:
+        print(f'  ERROR (issue #3390): active users WITHOUT an OS account after sync: {sorted(missing_actives)} — see the collision/failure lines above; resolve manually (project-dir sync skipped)')
+        sys.exit(1)
+
     # Sync project directories from database (Issue #1083)
     print('Syncing project directories...')
     cur.execute('SELECT path FROM projects WHERE is_active = true')
@@ -1621,7 +1649,7 @@ try:
     print('User and project sync completed.')
 except Exception as e:
     print(f'Error syncing users and projects: {e}')
-" 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
+" 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 
     # Issue #3379 (review round 2, 4004368045): enroll users into the shared
@@ -1631,6 +1659,12 @@ except Exception as e:
     # already-logged-in users (sessions live in postgres and survive
     # recreation) keep getting 403 on shared-project creation until they
     # re-login. usermod is idempotent; failures are best-effort.
+    # Review on #3390: this glob pass also enrolls nologin PLACEHOLDER
+    # accounts (their /home/<user> dirs survive on the volume) — intentional
+    # and inert: a placeholder cannot authenticate (nologin shell, no
+    # password, tokens revoked at deactivation), so openace-shared membership
+    # grants nothing, and filtering them out here would add name-shape
+    # heuristics for no security gain.
     for user_dir in /home/*/; do
         username=$(basename "$user_dir")
         if id "$username" &>/dev/null; then

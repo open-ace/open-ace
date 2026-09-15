@@ -20,10 +20,17 @@ users so a recorded uid can never be reassigned.
 Deliberately NO backfill: existing rows have no recorded uid (the value was
 never persisted anywhere), so guessing one would be worse than NULL. Rows
 keep NULL until their account is next created/re-synced, at which point the
-assigned uid is recorded and pinned from then on. Residual: one recreation
-after upgrading, a legacy DEACTIVATED user's dirs can still be inherited
-(they have no pin to restore); the exposure closes for every user whose
-account is provisioned after this lands — documented in the CHANGELOG.
+assigned uid is recorded and pinned from then on.
+
+Declared residual (NOT time-bounded — review on #3390): a legacy
+DEACTIVATED/soft-deleted user has no pin and is never re-synced, so their
+volume dirs stay on an orphan uid indefinitely, and any future UNPINNED
+useradd (a new account's first creation, before its record-back) can land
+on that number and inherit those directories numerically — once recorded,
+that assignment becomes the new user's pin. Known closure (follow-up, not
+implemented here): a first-boot volume scan (``stat -c %u`` over /home/* and
+the workspace base dirs) could adopt observed orphan uids as pins so they
+can never be handed out again.
 
 Revision ID: 20260911_002_add_users_system_uid
 Revises: 20260911_001_add_users_tokens_valid_after

@@ -467,7 +467,10 @@ def api_update_user(user_id):
         return jsonify({"error": "Invalid system_account name"}), 400
     if system_account:
         uid = data.get("system_uid")
-        ensure_system_user(system_account, uid=uid)
+        # Review on #3390: log failures like the create/restore call sites —
+        # a collision skip or useradd failure here used to vanish silently.
+        if not ensure_system_user(system_account, uid=uid):
+            logger.warning(f"Failed to create system user {system_account}, workspace may not work")
 
     # Handle tenant_id change
     if new_tenant_id is not None:

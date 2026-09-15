@@ -17,8 +17,11 @@ The fix (issue option 1 + placeholder accounts):
   reserve the recorded uid (issue option 2, cheap because the sync already
   knows the pin);
 - a pinned uid owned by a DIFFERENT account name fails LOUDLY (skip + warn)
-  — renumbering would silently move the file-ownership boundary between
-  two users, so it is an administrator action, never automation.
+  on the CREATE path — renumbering would silently move the file-ownership
+  boundary between two users, so it is an administrator action, never
+  automation. For an account that already exists, a stale pin is drift and
+  the record converges to the account's actual uid instead (review on
+  #3390).
 
 Coverage here:
 - app side: ``ensure_system_user`` records/pins/converges uids, refuses
@@ -180,6 +183,22 @@ class TestEnsureSystemUidPinning:
         assert state["record_calls"] == [("acealice", 1042)]
         assert "1001" in caplog.text
 
+    def test_existing_account_with_colliding_stale_pin_still_converges(self, pin_env, caplog):
+        """Review on #3390 NIT: the collision guard is CREATE-path only. For
+        an EXISTING account a stale pin owned by another account is drift —
+        blocking here (the guard's old position) wedged the account on a pin
+        the OS no longer honors; converging to the actual uid resolves it."""
+        state = pin_env
+        state["exists"].add("acealice")
+        state["recorded"]["acealice"] = 1001  # stale, and...
+        state["uid_owner"][1001] = "acedave"  # ...1001 now belongs to someone else
+        with caplog.at_level("WARNING"):
+            assert ws.ensure_system_user("acealice") is True
+        assert state["record_calls"] == [
+            ("acealice", 1042)
+        ], "exists-path must converge the record instead of failing"
+        assert "1042" in caplog.text
+
     def test_reactivated_placeholder_gets_login_shell_back(self, pin_env, monkeypatch):
         state = pin_env
         state["exists"].add("acebob")
@@ -261,11 +280,11 @@ class TestSystemUidSqlHelpers:
 
 
 def _extract_sync_python() -> str:
-    """Pull the embedded ``python3 -c "..."`` user-sync source from the
+    """Pull the embedded ``python3 -u -c "..."`` user-sync source from the
     entrypoint and undo the bash double-quote escaping (\" -> ")."""
     content = open(ENTRYPOINT, encoding="utf-8").read()
     anchor = content.index("Syncing workspace users from database...")
-    start = content.index('python3 -c "', anchor) + len('python3 -c "')
+    start = content.index('python3 -u -c "', anchor) + len('python3 -u -c "')
     end = content.index('" 2>&1 | tee /app/logs/open-ace-user-sync.log', start)
     py = content[start:end].replace('\\"', '"')
     compile(py, "entrypoint-user-sync", "exec")
@@ -309,11 +328,23 @@ class _FakeConn:
 
 
 class _FakePasswd:
-    """In-memory /etc/passwd: name -> (uid, shell), with reverse lookup."""
+    """In-memory /etc/passwd: name -> (uid, shell), with reverse lookup.
 
-    def __init__(self, accounts=None):
+    ``allocator`` picks the auto-uid strategy for useradd calls WITHOUT -u:
+    - "max" (default): next above the highest ever assigned — lenient, lets
+      phase-ordering bugs hide (an unpinned useradd never lands on a pin).
+    - "lowest": first free uid from 1000 — what shadow useradd actually does
+      on a fresh container, so a phase-3 useradd WOULD grab an unreserved
+      pin if the placeholder phase ran too late.
+    Note the fakes do NOT simulate useradd failing on an occupied uid (the
+    collision guard is expected to fire first); the tests assert useradd's
+    ARGUMENTS as the contract instead.
+    """
+
+    def __init__(self, accounts=None, allocator="max"):
         self.accounts = dict(accounts or {})  # name -> [uid, shell]
         self.next_uid = 1000
+        self.allocator = allocator
 
     def _add(self, name, uid, shell):
         self.accounts[name] = [uid, shell]
@@ -329,7 +360,15 @@ class _FakePasswd:
         raise KeyError(f"uid {uid} not found")
 
     def next_free_uid(self):
-        used = {uid for uid, _ in self.accounts.values()} | {0, 999}
+        # 0/999 system range; 1000 is the image's default `open-ace` user
+        # (uid 1000 per the Dockerfile), so normal allocation starts at 1001
+        # — matching what shadow useradd does inside the real container.
+        used = {uid for uid, _ in self.accounts.values()} | {0, 999, 1000}
+        if self.allocator == "lowest":
+            uid = 1000
+            while uid in used:
+                uid += 1
+            return uid
         uid = self.next_uid
         while uid in used:
             uid += 1
@@ -337,12 +376,14 @@ class _FakePasswd:
         return uid
 
 
-def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None):
+def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None, allocator="max"):
     """Execute the extracted entrypoint sync with fakes; returns the log of
-    useradd/usermod calls, the UPDATE statements, and captured stdout."""
-    fake_pwd = _FakePasswd(passwd_accounts)
+    useradd/usermod calls, the UPDATE statements, captured stdout, and the
+    block's exit code (nonzero when the missing-actives verification fires)."""
+    fake_pwd = _FakePasswd(passwd_accounts, allocator=allocator)
     user_cmds: list[tuple] = []
     conn_log = {"commits": 0, "updates": []}
+    exit_code = 0
 
     def fake_run(cmd, **kw):
         if cmd[0] == "id":
@@ -398,15 +439,20 @@ def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None):
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        exec(compile(_extract_sync_python(), "entrypoint-user-sync", "exec"), {})
+        try:
+            exec(compile(_extract_sync_python(), "entrypoint-user-sync", "exec"), {})
+        except SystemExit as exc:  # the block's missing-actives verification
+            exit_code = int(exc.code or 0)
     conn_log["commits"] = conn_holder["conn"].commits
-    assert conn_holder["conn"].closed
+    if exit_code == 0:
+        assert conn_holder["conn"].closed, "clean runs must reach conn.close()"
     return {
         "user_cmds": user_cmds,
         "updates": conn_log["updates"],
         "commits": conn_log["commits"],
         "stdout": buf.getvalue(),
         "passwd": fake_pwd,
+        "exit_code": exit_code,
     }
 
 
@@ -459,6 +505,25 @@ class TestEntrypointSyncFunctional:
         assert log["commits"] >= 1, "pins must be committed before project sync"
         # Final state: every uid from the volume era is owned by its own name.
         assert log["passwd"].accounts["acebob"][0] == 1003
+        assert log["exit_code"] == 0, "all active users got accounts — clean run"
+
+    def test_legacy_useradd_cannot_steal_a_pin_before_placeholder_phase(
+        self, monkeypatch, tmp_path
+    ):
+        """Review on #3390: the phase ORDER is load-bearing, and the default
+        fake allocator (max+1) cannot show it. With the realistic allocator
+        (first free uid from 1000, what shadow useradd does on a fresh
+        container), an unpinned phase-3 useradd WOULD land on bob's
+        unreserved 1003 if placeholders ran after legacy actives — inheriting
+        bob's dirs and recording the stolen uid as erin's pin."""
+        log = _run_sync(monkeypatch, tmp_path, RECREATE_ROWS, allocator="lowest")
+        assert log["exit_code"] == 0
+        # erin's auto-assign must skip every reserved pin...
+        assert (
+            log["passwd"].accounts["aceerin"][0] == 1006
+        ), "erin must get the first free uid OUTSIDE the pinned set"
+        # ...because bob's placeholder claimed 1003 before phase 3 ran.
+        assert log["passwd"].accounts["acebob"] == [1003, "/usr/sbin/nologin"]
 
     def test_placeholder_collision_skips_loudly_without_renumbering(self, monkeypatch, tmp_path):
         # uid 1003 already owned by an unrelated account -> no renumber, warn.
@@ -474,6 +539,10 @@ class TestEntrypointSyncFunctional:
         ), "colliding placeholder must be skipped, never renumbered"
         assert "acebob" in log["stdout"] and "acemallory" in log["stdout"]
         assert "not renumbering" in log["stdout"]
+        # bob is deactivated, so he is NOT in the missing-actives set — the
+        # sync still completes cleanly (exit 0) despite the skipped
+        # placeholder; the loud WARNING line above is his signal.
+        assert log["exit_code"] == 0
 
     def test_active_pin_collision_skips_and_keeps_pin(self, monkeypatch, tmp_path):
         rows = list(RECREATE_ROWS) + [(8, "acezoe", "acezoe", 1003, True, None)]
@@ -489,6 +558,11 @@ class TestEntrypointSyncFunctional:
             params[0] == 8 for _sql, params in log["updates"]
         ), "a skipped account must NOT get a wrong auto uid recorded"
         assert "acezoe" in log["stdout"]
+        # Review on #3390: an ACTIVE user left without an OS account must
+        # not be a silent failure — the block exits nonzero (the entrypoint's
+        # pipefail wrapper turns that into the WARNING line).
+        assert log["exit_code"] == 1
+        assert "WITHOUT an OS account" in log["stdout"] and "acezoe" in log["stdout"]
 
     def test_reactivated_placeholder_upgraded_to_bash(self, monkeypatch, tmp_path):
         # bob is ACTIVE again; the account exists as his old nologin placeholder.
@@ -503,6 +577,7 @@ class TestEntrypointSyncFunctional:
         assert ("usermod", "-s", "/bin/bash", "acebob") in log["user_cmds"]
         assert not any(c[0] == "useradd" and c[-1] == "acebob" for c in _useradds(log))
         assert log["passwd"].accounts["acebob"][0] == 1003, "pin preserved"
+        assert log["exit_code"] == 0
 
     def test_second_run_is_idempotent(self, monkeypatch, tmp_path):
         # DB state as the first run left it (every row pinned) + accounts in
@@ -545,4 +620,47 @@ class TestEntrypointSyncTextual:
         assert phase1 < phase2 < phase3, (
             "pins must be claimed before placeholders, placeholders before any "
             "auto-assigned useradd — otherwise a legacy useradd can steal a pin"
+        )
+
+    def test_sync_pipeline_does_not_mask_python_death(self):
+        """Review on #3390: plain `python3 -c ... | tee LOG || echo` masked
+        python's exit status (tee rc=0, no pipefail file-wide) and block-
+        buffered stdout — a #3399-style boot-context kill vanished silently.
+        The scoped subshell + pipefail + `python3 -u` makes death loud while
+        the trailing || keeps set -e from crash-looping the service."""
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        assert '( set -o pipefail; python3 -u -c "' in content
+        assert "open-ace-user-sync.log ) || echo" in content
+
+    def test_missing_actives_verification_exits_nonzero(self):
+        """Review on #3390: a collision skip or useradd failure leaving an
+        ACTIVE user without an OS account must abort the block loudly —
+        verified functionally in TestEntrypointSyncFunctional; this pins the
+        wiring markers (sys.exit after the missing-account check)."""
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        check = content.index("missing_actives")
+        content.index("sys.exit(1)", check)
+        assert (
+            content.index("conn.commit()") < check
+        ), "pins must be committed before the verification can exit"
+
+
+class TestSchedulerSyncScopedToActiveUsers:
+    """Review on #3390: the scheduler's account sync ran over ALL rows with a
+    system_account — including deactivated/soft-deleted ones — and since the
+    multi-user compose runs the scheduler as root, ensure_system_user's
+    exists-path (_ensure_login_shell) usermod -s /bin/bash'd the entrypoint's
+    nologin placeholders at every scheduler boot, silently revoking the uid
+    reservation. The query must mirror the entrypoint classification.
+    (Textual by necessity: SchedulerWorker drags in APScheduler/metrics
+    machinery that the scenario does not need.)"""
+
+    def test_scheduler_query_filters_to_active_non_deleted(self):
+        content = open(f"{ROOT}/app/scheduler_worker.py", encoding="utf-8").read()
+        anchor = content.index("_sync_system_users")
+        query = content.index("SELECT DISTINCT system_account", anchor)
+        window = content[query : query + 600]
+        assert "deleted_at IS NULL" in window and "is_active = true" in window, (
+            "the scheduler must not ensure accounts for deactivated/soft-deleted "
+            "users — it would strip their placeholder shells"
         )
