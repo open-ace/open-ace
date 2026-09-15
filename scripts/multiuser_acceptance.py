@@ -247,6 +247,21 @@ def dump_stack_logs(recorder: Recorder) -> None:
             (RECORD_DIR / name).write_text(proc.stdout, encoding="utf-8")
         except Exception as exc:  # noqa: BLE001 - best effort during failure handling
             recorder.note(f"{name} dump failed: {exc}")
+    # entrypoint user-sync forensics: the sync's own stdout/stderr is tee'd
+    # to /app/logs/open-ance-user-sync.log inside the container — compose logs
+    # alone cannot explain a sync that creates zero users (run 34917224776 /
+    # 34918312590: header printed, no per-user lines, no error, alice/carol/
+    # dave all missing post-recreate)
+    try:
+        proc = compose_exec(
+            SERVICE,
+            "cat /app/logs/open-ace-user-sync.log; echo ---PASSWD---; getent passwd",
+            timeout=30,
+            check=False,
+        )
+        (RECORD_DIR / "user-sync-forensics.txt").write_text(proc.stdout, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - best effort
+        recorder.note(f"user-sync forensics dump failed: {exc}")
 
 
 # ── config: two-phase generate-then-merge (review round 3, 6725) ─────────
