@@ -1,7 +1,11 @@
-"""Tests for shared project permissions (Issue #2730).
+"""Tests for shared project permissions (Issue #2730; tenant-scoped #3396).
 
 Tests for the workspace utility functions that manage shared project
-file system permissions in Docker multi-user mode.
+file system permissions in Docker multi-user mode. Since #3396 shared
+project CONTENT is group-owned by the per-tenant group
+``openace-shared-<tenant_id>`` with dirs 2770 / files 660 (no others
+bits); the global ``openace-shared`` group only grants namespace-root
+creation rights.
 """
 
 import os
@@ -15,10 +19,34 @@ from app.utils.workspace import (
     add_user_to_shared_group,
     ensure_shared_group,
     estimate_file_count_fast,
+    revoke_shared_project_access,
     setup_permissions_with_depth_limit,
     setup_shared_project_permissions,
+    shared_tenant_group_name,
     verify_setgid_support,
 )
+
+
+class TestSharedTenantGroupName:
+    """Issue #3396: tenant group naming."""
+
+    def test_tenant_id_suffix(self):
+        assert shared_tenant_group_name(1) == "openace-shared-1"
+        assert shared_tenant_group_name(42) == "openace-shared-42"
+
+    def test_null_tenant_maps_to_pseudo_zero(self):
+        assert shared_tenant_group_name(None) == "openace-shared-0"
+
+    def test_negative_tenant_rejected(self):
+        with pytest.raises(ValueError):
+            shared_tenant_group_name(-1)
+
+    def test_absurd_tenant_id_exceeding_linux_limit_rejected(self):
+        with pytest.raises(ValueError):
+            shared_tenant_group_name(10**17)
+
+    def test_name_fits_linux_group_limit_for_realistic_ids(self):
+        assert len(shared_tenant_group_name(10**15)) == 31
 
 
 class TestEnsureSharedGroup:
@@ -30,26 +58,35 @@ class TestEnsureSharedGroup:
         """Should skip group creation in non-Docker mode."""
         mock_docker_mode.return_value = False
 
-        result = ensure_shared_group()
+        result = ensure_shared_group(tenant_id=7)
 
         assert result is True
         mock_run.assert_not_called()
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("subprocess.run")
-    def test_creates_group_successfully(self, mock_run, mock_docker_mode):
-        """Should create group successfully in Docker mode."""
+    def test_creates_tenant_scoped_group(self, mock_run, mock_docker_mode):
+        """Issue #3396: creates openace-shared-<tenant_id>, not the global group."""
         mock_docker_mode.return_value = True
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-        result = ensure_shared_group()
+        result = ensure_shared_group(tenant_id=7)
 
         assert result is True
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         assert "groupadd" in args
         assert "-f" in args
-        assert SHARED_GROUP_NAME in args
+        assert "openace-shared-7" in args
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("subprocess.run")
+    def test_null_tenant_creates_pseudo_group(self, mock_run, mock_docker_mode):
+        mock_docker_mode.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        assert ensure_shared_group() is True
+        assert "openace-shared-0" in mock_run.call_args[0][0]
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("subprocess.run")
@@ -58,7 +95,7 @@ class TestEnsureSharedGroup:
         mock_docker_mode.return_value = True
         mock_run.return_value = MagicMock(returncode=1, stderr="groupadd failed")
 
-        result = ensure_shared_group()
+        result = ensure_shared_group(tenant_id=7)
 
         assert result is False
 
@@ -72,27 +109,25 @@ class TestAddUserToSharedGroup:
         """Should skip in non-Docker mode."""
         mock_docker_mode.return_value = False
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         assert result is True
         mock_run.assert_not_called()
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("subprocess.run")
-    def test_adds_user_successfully(self, mock_run, mock_docker_mode):
-        """Should add user to group successfully."""
+    def test_enrolls_into_global_and_tenant_groups(self, mock_run, mock_docker_mode):
+        """Issue #3396: BOTH groups — global (namespace creation) and the
+        tenant content group."""
         mock_docker_mode.return_value = True
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         assert result is True
-        mock_run.assert_called_once()
-        args = mock_run.call_args[0][0]
-        assert "usermod" in args
-        assert "-aG" in args
-        assert SHARED_GROUP_NAME in args
-        assert "testuser" in args
+        usermod_cmds = [c.args[0] for c in mock_run.call_args_list if c.args[0][0] == "usermod"]
+        assert ["usermod", "-aG", SHARED_GROUP_NAME, "testuser"] in usermod_cmds
+        assert ["usermod", "-aG", "openace-shared-7", "testuser"] in usermod_cmds
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("subprocess.run")
@@ -101,7 +136,7 @@ class TestAddUserToSharedGroup:
         mock_docker_mode.return_value = True
         mock_run.return_value = MagicMock(returncode=1, stderr="usermod failed")
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         assert result is False
 
@@ -114,7 +149,7 @@ class TestSetupSharedProjectPermissions:
         """Should skip in non-Docker mode."""
         mock_docker_mode.return_value = False
 
-        success, error = setup_shared_project_permissions("/some/path")
+        success, error = setup_shared_project_permissions("/some/path", tenant_id=7)
 
         assert success is True
         assert error == ""
@@ -153,10 +188,13 @@ class TestSetupSharedProjectPermissions:
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            success, error = setup_shared_project_permissions(tmpdir)
+            success, error = setup_shared_project_permissions(tmpdir, tenant_id=7)
 
             assert success is True
             assert error == ""
+            cmds = [c.args[0] for c in mock_run.call_args_list]
+            assert ["chown", ":openace-shared-7", tmpdir] in cmds
+            assert ["chmod", "2770", tmpdir] in cmds, "no others bits (cross-tenant EACCES)"
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("app.utils.workspace.ensure_shared_group")
@@ -166,7 +204,7 @@ class TestSetupSharedProjectPermissions:
         mock_ensure_group.return_value = False
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            success, error = setup_shared_project_permissions(tmpdir)
+            success, error = setup_shared_project_permissions(tmpdir, tenant_id=7)
 
             assert success is False
             assert "Failed to create shared group" in error
@@ -188,7 +226,7 @@ class TestSetupSharedProjectPermissions:
         mock_run.side_effect = run_side_effect
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            success, error = setup_shared_project_permissions(tmpdir)
+            success, error = setup_shared_project_permissions(tmpdir, tenant_id=7)
 
             assert success is False
             assert "chown failed" in error
@@ -203,14 +241,14 @@ class TestSetupSharedProjectPermissions:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "chmod" in cmd and "2775" in cmd:
+            if "chmod" in cmd and "2770" in cmd:
                 return MagicMock(returncode=1, stderr="chmod failed")
             return MagicMock(returncode=0, stderr="")
 
         mock_run.side_effect = run_side_effect
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            success, error = setup_shared_project_permissions(tmpdir)
+            success, error = setup_shared_project_permissions(tmpdir, tenant_id=7)
 
             assert success is False
             assert "chmod failed" in error
@@ -319,11 +357,153 @@ class TestSetupPermissionsWithDepthLimit:
                 tmpdir,
                 depth_limit=3,
                 timeout=30,
+                tenant_id=7,
             )
 
             assert success is True
             assert error == ""
             assert processed >= 0
+            cmds = [c.args[0] for c in mock_run.call_args_list]
+            assert ["chown", ":openace-shared-7", tmpdir] in cmds
+            assert ["chmod", "2770", tmpdir] in cmds
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace.ensure_shared_group")
+    @patch("subprocess.run")
+    @patch("subprocess.Popen")
+    def test_batch_chmod_modes_drop_others_bits(
+        self, mock_popen, mock_run, mock_ensure_group, mock_docker_mode
+    ):
+        """Issue #3396: recursive passes use 2770/660 — no others bits, or
+        cross-tenant accounts (global-group members) could read content."""
+        mock_docker_mode.return_value = True
+        mock_ensure_group.return_value = True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # find returns the root dir (d) / one file (f) so the batched
+            # xargs branches actually run
+            mock_run.side_effect = lambda cmd, **kw: MagicMock(
+                returncode=0,
+                stderr="",
+                stdout=f"{tmpdir}\n" if cmd[1] == tmpdir and cmd[2:3] == ["-type"] else "",
+            )
+            success, error, _ = setup_permissions_with_depth_limit(tmpdir, tenant_id=7)
+            assert success is True
+            popen_cmds = [c.args[0] for c in mock_popen.call_args_list]
+            assert ["xargs", "-0", "chmod", "2770"] in popen_cmds
+            assert ["xargs", "-0", "chmod", "660"] in popen_cmds
+            assert not any("2775" in cmd or "664" in cmd for cmd in popen_cmds)
+
+
+class TestRevokeSharedProjectAccess:
+    """Issue #3396: revocation reclaims OS-level access."""
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    def test_skip_non_docker_mode(self, mock_docker_mode):
+        mock_docker_mode.return_value = False
+        success, error = revoke_shared_project_access("/some/path", "alice")
+        assert success is True
+        assert error == ""
+
+    def test_missing_path_is_success(self):
+        """A path that never materialized has nothing to reclaim."""
+        with patch("app.utils.workspace._is_docker_multi_user_mode", return_value=True):
+            success, error = revoke_shared_project_access("/nonexistent/proj/12345", "alice")
+        assert success is True
+        assert error == ""
+
+    def test_missing_owner_is_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("app.utils.workspace._is_docker_multi_user_mode", return_value=True):
+                success, error = revoke_shared_project_access(tmpdir, "")
+        assert success is False
+        assert "Owner system account is required" in error
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace._is_wrapper_available")
+    @patch("app.utils.workspace.run_as_root_if_needed")
+    @patch("subprocess.run")
+    @patch("subprocess.Popen")
+    def test_reclaims_to_creator_private_permissions(
+        self, mock_popen, mock_run, mock_root, mock_wrapper, mock_docker_mode
+    ):
+        """chown -R creator + dirs 0700 / files 0600 — group members lose
+        access, the creator keeps it."""
+        mock_docker_mode.return_value = True
+        mock_wrapper.return_value = False
+        mock_root.return_value = MagicMock(returncode=0, stderr="")
+        id_results = {
+            ("id", "-u", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+            ("id", "-g", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # find -type d / -type f return one entry each so the batched
+            # xargs chmod branches run
+            mock_run.side_effect = lambda cmd, **kw: id_results.get(
+                tuple(cmd),
+                MagicMock(
+                    returncode=0,
+                    stderr="",
+                    stdout=f"{tmpdir}\n" if cmd[0] == "find" else "",
+                ),
+            )
+            success, error = revoke_shared_project_access(tmpdir, "alice")
+
+        assert success is True
+        assert error == ""
+        root_cmds = [c.args[0] for c in mock_root.call_args_list]
+        assert ["chown", "-R", "1500:1500", tmpdir] in root_cmds
+        popen_cmds = [c.args[0] for c in mock_popen.call_args_list]
+        assert ["xargs", "-0", "chmod", "0700"] in popen_cmds
+        assert ["xargs", "-0", "chmod", "0600"] in popen_cmds
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace._is_wrapper_available")
+    @patch("app.utils.workspace.run_as_root_if_needed")
+    @patch("subprocess.run")
+    def test_unresolvable_owner_fails_closed(
+        self, mock_run, mock_root, mock_wrapper, mock_docker_mode
+    ):
+        """If the creator account does not exist, say so instead of chowning
+        to garbage."""
+        mock_docker_mode.return_value = True
+        mock_wrapper.return_value = False
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="no such user")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            success, error = revoke_shared_project_access(tmpdir, "ghost")
+
+        assert success is False
+        assert "Cannot resolve owner" in error
+        mock_root.assert_not_called()
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace._is_wrapper_available")
+    @patch("app.utils.workspace.run_as_root_if_needed")
+    @patch("subprocess.run")
+    @patch("subprocess.Popen")
+    def test_uses_chown_wrapper_when_available(
+        self, mock_popen, mock_run, mock_root, mock_wrapper, mock_docker_mode
+    ):
+        mock_docker_mode.return_value = True
+        mock_wrapper.return_value = True
+        mock_root.return_value = MagicMock(returncode=0, stderr="")
+        id_results = {
+            ("id", "-u", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+            ("id", "-g", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+        }
+        mock_run.side_effect = lambda cmd, **kw: id_results.get(
+            tuple(cmd), MagicMock(returncode=0, stdout="", stderr="")
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            success, _ = revoke_shared_project_access(tmpdir, "alice")
+
+        assert success is True
+        first_cmd = mock_root.call_args_list[0].args[0]
+        assert first_cmd[0] == "/usr/local/bin/openace-chown"
+        assert first_cmd[1] == "-R"
 
 
 class TestVerifySetgidSupport:

@@ -20,8 +20,11 @@
 - **#3397（声明偏离）**：按 DEPLOYMENT.md 首装的多用户生产部署无法启动（空库被
   拒；仅迁移又拿不到默认 admin）。脚本用一次性容器 `alembic upgrade head &&
   init_db.py` 绕过，**属声明偏离**，见运行备注——产品修复后应还原为纯文档路径。
-- **#3396（OS 层共享隔离）**：共享目录为全局 `openace-shared` 组 2775/664——跨租户
-  与撤销后的 OS 层读写依然存在。d 项已加 OS 层探针，预期 FAIL，如实记录。
+- **#3396（已修，租户组隔离）**：共享目录曾为全局 `openace-shared` 组 2775/664，
+  跨租户与撤销后的 OS 层读写依然存在。现改为按租户组
+  `openace-shared-<tenant_id>` 2770/660（全局组仅保留命名空间根建目录权），
+  撤销时回收为创建者私有（chown -R + 0700/0600）。d 项 OS 层探针（含 bob/
+  carol 拒绝与 alice 保留的正反控制）预期 PASS。
 
 - 真实 Linux 主机（`linux` + `docker` CLI + compose v2；脚本启动时强制检查）。
 - 足够拉起 3 个 qwen-code-webui 实例的内存（每实例约数百 MB）。

@@ -27,18 +27,41 @@ __all__ = [
     "record_system_uid",
     "ensure_user_workspace",
     "SHARED_GROUP_NAME",
+    "SHARED_TENANT_GROUP_PREFIX",
+    "shared_tenant_group_name",
     "ensure_shared_group",
     "add_user_to_shared_group",
     "remove_user_from_shared_group",
     "setup_shared_project_permissions",
+    "revoke_shared_project_access",
     "estimate_file_count_fast",
     "setup_permissions_with_depth_limit",
     "verify_setgid_support",
     "get_user_project_active_sessions",
 ]
 
-# Shared project group name (Issue #2730)
+# ============================================================================
+# Shared-project OS groups (Issue #2730 origin, tenant-scoped since #3396)
+# ============================================================================
+# Two-tier model:
+#
+# - ``openace-shared`` (global, unchanged): membership ONLY grants the right
+#   to create a project directory inside the sticky shared-namespace root
+#   ``<base>/shared`` (root:openace-shared 3775, sticky bit from #3389). It
+#   is no longer the group-owner of any project CONTENT.
+#
+# - ``openace-shared-<tenant_id>`` (per tenant): group-owner of the tenant's
+#   shared project directories, mode 2770 (dirs) / 660 (files) — setgid kept
+#   for group inheritance, "others" bits DROPPED so accounts of other
+#   tenants (who are global-group members for namespace creation) get
+#   EACCES on the project content. Tenant-less users (platform admins,
+#   tenant_id NULL) map to ``openace-shared-0``; tenant ids start at 1 so
+#   the pseudo-id never collides.
 SHARED_GROUP_NAME = "openace-shared"
+SHARED_TENANT_GROUP_PREFIX = "openace-shared-"
+# Linux group names are capped at 31 chars ([a-z_][a-z0-9_-]*); the prefix is
+# 15 chars, leaving 16 digits of tenant-id headroom.
+_MAX_LINUX_GROUP_NAME_LEN = 31
 
 # Wrapper script paths (Issue #1855 + #2181)
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
@@ -321,7 +344,9 @@ def _ensure_login_shell(system_account: str) -> None:
         logger.warning(f"Could not restore login shell for {system_account}: {result.stderr}")
 
 
-def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
+def ensure_system_user(
+    system_account: str, uid: int | None = None, tenant_id: int | None = None
+) -> bool:
     """确保系统用户存在，创建工作目录。
 
     Behavior differs by deployment mode:
@@ -342,6 +367,9 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         system_account: 用户名（必须符合 Linux useradd 要求）
         uid: 可选 UID，必须 >= 1000（系统保留 UID < 1000）；缺省时使用
             数据库记录的 pinned UID（Issue #3390）。
+        tenant_id: 用户所属租户 ID。Issue #3396: 账号被加入「全局组
+            openace-shared（仅授予在 <base>/shared 命名空间根内建目录的
+            权限）+ 租户内容组 openace-shared-<tenant_id>」。
 
     Returns:
         True 如果用户存在或创建成功。
@@ -421,10 +449,13 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         # Still ensure workspace directories exist
         _ensure_workspace_dirs(system_account, base_dir)
 
-        # Issue #2730: Ensure user is in shared group for shared project access
+        # Issue #2730 + #3396: ensure group memberships (namespace-creation
+        # global group + tenant content group)
         if _is_docker_multi_user_mode():
-            if not add_user_to_shared_group(system_account):
-                logger.warning(f"Failed to add {system_account} to shared group")
+            if not add_user_to_shared_group(system_account, tenant_id=tenant_id):
+                logger.warning(
+                    f"Failed to add {system_account} to shared groups (tenant={tenant_id})"
+                )
 
         return True
 
@@ -488,10 +519,11 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         record_system_uid(system_account, actual_uid)
     _ensure_workspace_dirs(system_account, base_dir)
 
-    # Issue #2730: Add user to shared group for shared project access
+    # Issue #2730 + #3396: add user to shared groups (namespace-creation
+    # global group + tenant content group)
     if _is_docker_multi_user_mode():
-        if not add_user_to_shared_group(system_account):
-            logger.warning(f"Failed to add {system_account} to shared group")
+        if not add_user_to_shared_group(system_account, tenant_id=tenant_id):
+            logger.warning(f"Failed to add {system_account} to shared groups (tenant={tenant_id})")
 
     return True
 
@@ -565,7 +597,7 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                     logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
 
 
-def ensure_user_workspace(system_account: str) -> bool:
+def ensure_user_workspace(system_account: str, tenant_id: int | None = None) -> bool:
     """
     Ensure workspace directory exists for user login.
     Called during login to prepare workspace environment.
@@ -576,6 +608,7 @@ def ensure_user_workspace(system_account: str) -> bool:
 
     Args:
         system_account: Username for the system account.
+        tenant_id: Tenant ID for the tenant-scoped shared group (Issue #3396).
 
     Returns:
         True if workspace setup succeeded or was already ready.
@@ -583,7 +616,7 @@ def ensure_user_workspace(system_account: str) -> bool:
     if _is_docker_multi_user_mode():
         # Docker multi-user mode: ensure system user and workspace
         logger.info(f"Ensuring workspace for {system_account} in Docker multi-user mode")
-        return ensure_system_user(system_account)
+        return ensure_system_user(system_account, tenant_id=tenant_id)
     else:
         # Package single-user mode: only create .qwen in home directory
         # system_account may not match actual OS user, use current user's home
@@ -602,15 +635,60 @@ def ensure_user_workspace(system_account: str) -> bool:
 
 
 # ============================================================================
-# Shared Project Permission Management (Issue #2730)
+# Shared Project Permission Management (Issue #2730; tenant-scoped #3396)
 # ============================================================================
 
 
-def ensure_shared_group() -> bool:
-    """Ensure the shared project group exists.
+def shared_tenant_group_name(tenant_id: int | None) -> str:
+    """Name of the tenant-scoped shared-content group (Issue #3396).
 
-    Creates the 'openace-shared' group if it doesn't exist.
+    ``openace-shared-<tenant_id>``; a NULL tenant_id (platform admins) maps
+    to the pseudo-id 0 (real tenant ids start at 1, so no collision).
+
+    Raises:
+        ValueError: if the derived name cannot be a Linux group name
+            (too long — the 31-char ``groupadd`` limit — or a non-decimal
+            tenant id, which would be a caller bug).
+    """
+    suffix = 0 if tenant_id is None else int(tenant_id)
+    if suffix < 0:
+        raise ValueError(f"tenant_id must be non-negative, got {tenant_id!r}")
+    name = f"{SHARED_TENANT_GROUP_PREFIX}{suffix}"
+    if len(name) > _MAX_LINUX_GROUP_NAME_LEN:
+        raise ValueError(
+            f"tenant group name {name!r} exceeds the {_MAX_LINUX_GROUP_NAME_LEN}-char "
+            "Linux group-name limit"
+        )
+    return name
+
+
+def _ensure_linux_group(group_name: str) -> bool:
+    """Idempotently ensure a Linux group exists (``groupadd -f``)."""
+    result = subprocess.run(
+        ["groupadd", "-f", group_name],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(f"Failed to create group {group_name}: {result.stderr}")
+        return False
+    return True
+
+
+def ensure_shared_group(tenant_id: int | None = None) -> bool:
+    """Ensure the tenant-scoped shared-content group exists.
+
+    Issue #3396: shared project directories are group-owned by
+    ``openace-shared-<tenant_id>`` (NOT the global ``openace-shared``), so
+    only the tenant's members hold OS-level access to the content. The
+    global group survives solely as the shared-namespace-root creation
+    group (see the module-level group-model comment).
+
     Uses 'groupadd -f' to be idempotent and avoid race conditions.
+
+    Args:
+        tenant_id: Tenant whose content group to ensure. ``None`` (platform
+            admins) maps to the ``openace-shared-0`` pseudo-tenant.
 
     Returns:
         True if group exists or was created successfully.
@@ -618,57 +696,85 @@ def ensure_shared_group() -> bool:
     if not _is_docker_multi_user_mode():
         return True  # Skip in non-Docker mode
 
-    result = subprocess.run(
-        ["groupadd", "-f", SHARED_GROUP_NAME],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        logger.error(f"Failed to create shared group: {result.stderr}")
+    try:
+        group_name = shared_tenant_group_name(tenant_id)
+    except ValueError as e:
+        logger.error(f"Cannot derive shared group for tenant {tenant_id!r}: {e}")
         return False
 
-    logger.info(f"Shared group '{SHARED_GROUP_NAME}' ensured")
+    if not _ensure_linux_group(group_name):
+        return False
+
+    logger.info(f"Shared tenant group '{group_name}' ensured")
     return True
 
 
-def add_user_to_shared_group(system_account: str) -> bool:
-    """Add a user to the shared project group.
+def add_user_to_shared_group(system_account: str, tenant_id: int | None = None) -> bool:
+    """Enroll a user in BOTH shared-project groups (Issue #3396).
+
+    1. Global ``openace-shared`` — grants only the right to create a project
+       directory inside the sticky ``<base>/shared`` namespace root. Every
+       tenant's accounts need this; it confers no content access (project
+       dirs carry no others bits and are owned by tenant groups).
+    2. ``openace-shared-<tenant_id>`` — grants OS read/write on the TENANT's
+       shared project content (dirs 2770 / files 660).
 
     Uses 'usermod -aG' which is idempotent (safe to call multiple times).
 
     Args:
-        system_account: Username to add to the shared group.
+        system_account: Username to enroll.
+        tenant_id: Tenant whose content group to join. ``None`` maps to the
+            ``openace-shared-0`` pseudo-tenant (platform admins).
 
     Returns:
-        True if user was added or already in group.
+        True if the user was added (or already was) to both groups.
     """
     if not _is_docker_multi_user_mode():
         return True  # Skip in non-Docker mode
 
-    result = subprocess.run(
-        ["usermod", "-aG", SHARED_GROUP_NAME, system_account],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        logger.warning(f"Failed to add {system_account} to shared group: {result.stderr}")
+    try:
+        tenant_group = shared_tenant_group_name(tenant_id)
+    except ValueError as e:
+        logger.error(f"Cannot derive shared group for tenant {tenant_id!r}: {e}")
         return False
 
-    logger.info(f"User '{system_account}' added to shared group")
-    return True
+    ok = True
+    for group in (SHARED_GROUP_NAME, tenant_group):
+        if not _ensure_linux_group(group):
+            ok = False
+            continue
+        result = subprocess.run(
+            ["usermod", "-aG", group, system_account],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(f"Failed to add {system_account} to group {group}: {result.stderr}")
+            ok = False
+
+    if ok:
+        logger.info(
+            f"User '{system_account}' enrolled in shared groups "
+            f"({SHARED_GROUP_NAME} + {tenant_group})"
+        )
+    return ok
 
 
-def setup_shared_project_permissions(path: str) -> tuple[bool, str]:
+def setup_shared_project_permissions(path: str, tenant_id: int | None = None) -> tuple[bool, str]:
     """Set up shared project directory permissions.
 
-    Configures a directory for shared project access:
-    1. Ensures shared group exists
-    2. Sets group ownership to openace-shared
-    3. Sets permissions to 2775 (setgid + group rwx)
-    4. Recursively fixes existing subdirectories and files
+    Configures a directory for TENANT-scoped shared access (Issue #3396):
+    1. Ensures the tenant shared group exists (openace-shared-<tenant_id>)
+    2. Sets group ownership to the tenant group
+    3. Sets permissions to 2770 (setgid + group rwx, NO others bits —
+       cross-tenant accounts must get EACCES even though they are global
+       openace-shared members for namespace-root creation)
+    4. Recursively fixes existing subdirectories (2770) and files (660)
 
     Args:
         path: Absolute path to the project directory.
+        tenant_id: Tenant whose group owns the shared content. ``None``
+            maps to the ``openace-shared-0`` pseudo-tenant.
 
     Returns:
         Tuple of (success, error_message). error_message is empty on success.
@@ -689,22 +795,27 @@ def setup_shared_project_permissions(path: str) -> tuple[bool, str]:
         return (False, f"Path is not a directory: {path}")
 
     try:
-        # 1. Ensure shared group exists
-        if not ensure_shared_group():
-            return (False, "Failed to create shared group")
+        group_name = shared_tenant_group_name(tenant_id)
+    except ValueError as e:
+        return (False, str(e))
+
+    try:
+        # 1. Ensure the tenant shared group exists
+        if not ensure_shared_group(tenant_id):
+            return (False, f"Failed to create shared group for tenant {tenant_id!r}")
 
         # 2. Set group ownership
         result = subprocess.run(
-            ["chown", f":{SHARED_GROUP_NAME}", path],
+            ["chown", f":{group_name}", path],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
             return (False, f"chown failed: {result.stderr}")
 
-        # 3. Set permissions (setgid + 2775)
+        # 3. Set permissions (setgid + 2770, no others bits)
         result = subprocess.run(
-            ["chmod", "2775", path],
+            ["chmod", "2770", path],
             capture_output=True,
             text=True,
         )
@@ -714,19 +825,19 @@ def setup_shared_project_permissions(path: str) -> tuple[bool, str]:
         # 4. Recursively fix existing subdirectories and files
         # Use find to set permissions on existing content
         subprocess.run(
-            ["find", path, "-type", "d", "-exec", "chmod", "2775", "{}", ";"],
+            ["find", path, "-type", "d", "-exec", "chmod", "2770", "{}", ";"],
             capture_output=True,
             text=True,
             timeout=60,
         )
         subprocess.run(
-            ["find", path, "-type", "f", "-exec", "chmod", "664", "{}", ";"],
+            ["find", path, "-type", "f", "-exec", "chmod", "660", "{}", ";"],
             capture_output=True,
             text=True,
             timeout=60,
         )
 
-        logger.info(f"Shared project permissions set for: {path}")
+        logger.info(f"Shared project permissions set for: {path} (group {group_name})")
         return (True, "")
 
     except subprocess.TimeoutExpired:
@@ -803,6 +914,7 @@ def setup_permissions_with_depth_limit(
     progress_callback=None,
     user_id: int | None = None,
     project_id: int | None = None,
+    tenant_id: int | None = None,
 ) -> tuple[bool, str, int]:
     """Set permissions with optional recursion depth limit.
 
@@ -813,6 +925,12 @@ def setup_permissions_with_depth_limit(
     4. Has better timeout handling
     5. Records audit log for permission setup (Issue #2745)
 
+    Issue #3396: the project directory is group-owned by the TENANT-scoped
+    group ``openace-shared-<tenant_id>`` with dirs 2770 / files 660 (setgid
+    kept for group inheritance; others bits dropped so members of OTHER
+    tenants — who legitimately hold the global openace-shared membership for
+    namespace-root creation — get EACCES on this content).
+
     Args:
         path: Absolute path to the project directory.
         depth_limit: Maximum recursion depth (None = no limit).
@@ -820,6 +938,7 @@ def setup_permissions_with_depth_limit(
         progress_callback: Optional callback function(percent, processed, total).
         user_id: User ID who initiated the operation (for audit log).
         project_id: Project ID for audit log resource_id.
+        tenant_id: Tenant whose shared-content group owns the directory.
 
     Returns:
         Tuple of (success, error_message, files_processed).
@@ -832,23 +951,28 @@ def setup_permissions_with_depth_limit(
     if not path or not os.path.isabs(path) or not os.path.exists(path):
         return (False, "Invalid path", 0)
 
+    try:
+        group_name = shared_tenant_group_name(tenant_id)
+    except ValueError as e:
+        return (False, str(e), 0)
+
     operation_start_time = time.time()
     operation_start_datetime = datetime.now().isoformat()
 
     try:
-        # Ensure shared group
-        if not ensure_shared_group():
-            return (False, "Failed to create shared group", 0)
+        # Ensure the tenant shared group
+        if not ensure_shared_group(tenant_id):
+            return (False, f"Failed to create shared group for tenant {tenant_id!r}", 0)
 
-        # Set root directory permissions
+        # Set root directory permissions (setgid + 2770, no others bits)
         subprocess.run(
-            ["chown", f":{SHARED_GROUP_NAME}", path],
+            ["chown", f":{group_name}", path],
             capture_output=True,
             text=True,
             check=True,
         )
         subprocess.run(
-            ["chmod", "2775", path],
+            ["chmod", "2770", path],
             capture_output=True,
             text=True,
             check=True,
@@ -874,7 +998,7 @@ def setup_permissions_with_depth_limit(
             dirs = [d for d in dir_result.stdout.strip().split("\n") if d]
             # Batch process: use xargs to run chmod on multiple dirs at once
             chmod_process = subprocess.Popen(
-                ["xargs", "-0", "chmod", "2775"],
+                ["xargs", "-0", "chmod", "2770"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -900,7 +1024,7 @@ def setup_permissions_with_depth_limit(
             files = [f for f in file_result.stdout.strip().split("\n") if f]
             # Batch process files
             chmod_process = subprocess.Popen(
-                ["xargs", "-0", "chmod", "664"],
+                ["xargs", "-0", "chmod", "660"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -912,7 +1036,7 @@ def setup_permissions_with_depth_limit(
             if progress_callback:
                 progress_callback(100, files_processed, files_processed)
 
-        logger.info(f"Set permissions for {files_processed} items in {path}")
+        logger.info(f"Set permissions for {files_processed} items in {path} (group {group_name})")
 
         # Record audit log for successful permission setup (Issue #2745)
         _log_permission_audit(
@@ -1111,27 +1235,42 @@ def _log_permission_audit(
 
 
 # ============================================================================
-# Shared Project User Management (Issue #3275)
+# Shared Project User Management (Issue #3275; tenant-scoped #3396)
 # ============================================================================
 
 
-def remove_user_from_shared_group(system_account: str) -> bool:
-    """Remove a user from the shared project group.
+def remove_user_from_shared_group(system_account: str, tenant_id: int | None = None) -> bool:
+    """Remove a user from the TENANT-scoped shared-content group.
+
+    Issue #3396: only the tenant group is touched — the global
+    ``openace-shared`` membership (namespace-root creation right) stays,
+    matching the read-side model where shared projects are visible to a
+    whole tenant, not to per-project user rows. Callers use this when a
+    user LEAVES a tenant (admin tenant move) or is deactivated, not when a
+    single project's visible-user row is removed.
 
     Uses 'gpasswd -d' to remove user from the group.
     Idempotent: if user is not in the group, returns True.
 
     Args:
-        system_account: Username to remove from the shared group.
+        system_account: Username to remove from the group.
+        tenant_id: Tenant whose content group to leave. ``None`` maps to
+            the ``openace-shared-0`` pseudo-tenant.
 
     Returns:
-        True if user was removed or not in the group.
+        True if user was removed or not in group.
     """
     if not _is_docker_multi_user_mode():
         return True  # Skip in non-Docker mode
 
+    try:
+        group_name = shared_tenant_group_name(tenant_id)
+    except ValueError as e:
+        logger.error(f"Cannot derive shared group for tenant {tenant_id!r}: {e}")
+        return False
+
     result = subprocess.run(
-        ["gpasswd", "-d", system_account, SHARED_GROUP_NAME],
+        ["gpasswd", "-d", system_account, group_name],
         capture_output=True,
         text=True,
     )
@@ -1141,15 +1280,155 @@ def remove_user_from_shared_group(system_account: str) -> bool:
     # 3 - user not in group (treat as success for idempotency)
     # other - error
     if result.returncode == 3:
-        logger.info(f"User '{system_account}' not in group, already removed")
+        logger.info(f"User '{system_account}' not in group {group_name}, already removed")
         return True
 
     if result.returncode != 0:
-        logger.error(f"Failed to remove {system_account} from shared group: {result.stderr}")
+        logger.error(f"Failed to remove {system_account} from group {group_name}: {result.stderr}")
         return False
 
-    logger.info(f"User '{system_account}' removed from shared group")
+    logger.info(f"User '{system_account}' removed from shared group {group_name}")
     return True
+
+
+def revoke_shared_project_access(
+    path: str,
+    owner_system_account: str,
+    timeout: int = 60,
+    user_id: int | None = None,
+    project_id: int | None = None,
+) -> tuple[bool, str]:
+    """Reclaim OS-level access to a shared project on revocation (Issue #3396).
+
+    ``PUT /api/projects/<id> {is_shared: false}`` used to flip only the DB
+    flag: group-member accounts (including other tenants, pre-#3396) kept
+    OS read/write. The project becomes the creator's PRIVATE project:
+
+    1. ``chown -R <creator-uid>:<creator-gid>`` — drops the tenant-group
+       ownership (root-side via the openace-chown wrapper when available;
+       the wrapper validates /workspace|/home prefixes and uid/gid >= 1000).
+    2. ``chmod`` dirs 0700 / files 0600 — removes every group/other bit, so
+       ex-members get EACCES while the creator keeps full access.
+
+    Args:
+        path: Absolute path to the (revoked) project directory.
+        owner_system_account: Creator's OS account (becomes the owner).
+        timeout: Timeout in seconds for the batched chmod passes.
+        user_id: Initiating user ID (for the audit log).
+        project_id: Project ID (for the audit log).
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty on success.
+    """
+    import time
+
+    if not _is_docker_multi_user_mode():
+        return (True, "")
+
+    if not path or not os.path.isabs(path):
+        return (False, f"Invalid path: {path!r}")
+
+    if not os.path.exists(path):
+        # Nothing on disk to reclaim (e.g. create_dir was false and the dir
+        # was never materialized) — the DB flag is the whole revocation.
+        logger.info(f"Revoked shared project path does not exist, nothing to reclaim: {path}")
+        return (True, "")
+
+    if not os.path.isdir(path):
+        return (False, f"Path is not a directory: {path}")
+
+    if not owner_system_account:
+        return (False, "Owner system account is required to reclaim access")
+
+    operation_start_time = time.time()
+    operation_start_datetime = datetime.now().isoformat()
+
+    try:
+        # Resolve the creator's uid/gid (id needs no privileges)
+        uid_result = subprocess.run(
+            ["id", "-u", owner_system_account], capture_output=True, text=True
+        )
+        gid_result = subprocess.run(
+            ["id", "-g", owner_system_account], capture_output=True, text=True
+        )
+        if uid_result.returncode != 0 or gid_result.returncode != 0:
+            return (
+                False,
+                f"Cannot resolve owner account {owner_system_account}: "
+                f"{uid_result.stderr or gid_result.stderr}".strip(),
+            )
+        ownership = f"{uid_result.stdout.strip()}:{gid_result.stdout.strip()}"
+
+        # 1. Recursive chown to the creator (wrapper preferred — it
+        #    validates the path prefix and the uid/gid range; plain chown
+        #    fallback runs through run_as_root_if_needed either way).
+        if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
+            result = run_as_root_if_needed([OPENACE_CHOWN_WRAPPER, "-R", ownership, path])
+        else:
+            result = run_as_root_if_needed(["chown", "-R", ownership, path])
+        if result.returncode != 0:
+            return (False, f"chown failed: {result.stderr}")
+
+        # 2. Strip group/other bits: dirs 0700 / files 0600 (batched like
+        #    setup_permissions_with_depth_limit).
+        for kind, mode in (("d", "0700"), ("f", "0600")):
+            list_result = subprocess.run(
+                ["find", path, "-type", kind],
+                capture_output=True,
+                text=True,
+                timeout=timeout // 2,
+            )
+            if list_result.returncode != 0 or not list_result.stdout.strip():
+                continue
+            entries = [e for e in list_result.stdout.strip().split("\n") if e]
+            chmod_process = subprocess.Popen(
+                ["xargs", "-0", "chmod", mode],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            chmod_process.communicate(input="\0".join(entries), timeout=timeout // 2)
+
+        logger.info(f"Revoked shared project access on {path} (owner {owner_system_account})")
+
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=True,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+        )
+        return (True, "")
+
+    except subprocess.TimeoutExpired:
+        error_msg = f"Revocation timed out after {timeout}s"
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=False,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            error_message=error_msg,
+        )
+        return (False, error_msg)
+    except Exception as e:
+        error_msg = f"Unexpected error during revocation: {e}"
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=False,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            error_message=error_msg,
+        )
+        return (False, error_msg)
 
 
 def get_user_project_active_sessions(user_id: int, project_id: int) -> int:

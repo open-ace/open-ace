@@ -2121,7 +2121,7 @@ class WebUIManager:
                 pwd.getpwnam(system_account)
             except KeyError:
                 logger.info(f"User '{system_account}' not found, creating...")
-                if not self._ensure_system_user(system_account):
+                if not self._ensure_system_user(system_account, user_id=user_id):
                     raise ValueError(f"Failed to create system user: {system_account}")
 
         # Find webui executable or project path. Shares the successful-
@@ -2449,7 +2449,7 @@ class WebUIManager:
 
         return None, None
 
-    def _ensure_system_user(self, system_account: str) -> bool:
+    def _ensure_system_user(self, system_account: str, user_id: int | None = None) -> bool:
         """
         Ensure a system user exists for workspace operations.
         Creates the OS user if it doesn't exist.
@@ -2459,11 +2459,20 @@ class WebUIManager:
 
         Args:
             system_account: Username for the system account.
+            user_id: App user id — used to look up the TENANT for the
+                tenant-scoped shared group (Issue #3396).
 
         Returns:
             True if user exists or was created successfully.
         """
-        return _ensure_user_shared(system_account)
+        tenant_id = None
+        if user_id is not None:
+            try:
+                user_row = _webui_token_user(user_id) or {}
+                tenant_id = user_row.get("tenant_id")
+            except Exception as e:  # noqa: BLE001 - enrollment best effort
+                logger.warning(f"Failed to look up tenant for user {user_id}: {e}")
+        return _ensure_user_shared(system_account, tenant_id=tenant_id)
 
     def _stop_instance_internal(self, user_id: int):
         """

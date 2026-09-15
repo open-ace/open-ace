@@ -42,6 +42,7 @@ from app.utils.workspace import (
     _is_docker_multi_user_mode,
     estimate_file_count_fast,
     get_workspace_base_dirs,
+    revoke_shared_project_access,
     setup_permissions_with_depth_limit,
 )
 
@@ -371,6 +372,7 @@ def api_create_project():
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -489,6 +491,7 @@ def api_update_project(project_id):
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -520,11 +523,59 @@ def api_update_project(project_id):
         tenant_id=tenant_id,
     )
 
+    # Issue #3396: revocation (is_shared True -> False) must RECLAIM OS-level
+    # access, not only flip the DB flag — group-member accounts otherwise
+    # keep read/write through their shells/agents (the API layer's browse
+    # 400s never reach the OS channel). The project becomes the creator's
+    # private project: chown -R creator + dirs 0700 / files 0600. Runs after
+    # the DB flip (same ordering as the create path's permission setup) and
+    # is FAIL-SOFT: a reclaim failure is logged and surfaced as a warning in
+    # the response, but the revocation itself stands.
+    revoke_warning = None
+    if success and is_shared is False and project.is_shared:
+        if _is_docker_multi_user_mode():
+            owner_account = None
+            if project.created_by:
+                creator = user_repo.get_user_by_id(project.created_by)
+                if creator:
+                    owner_account = creator.get("system_account") or creator.get("username")
+            if not owner_account:
+                revoke_warning = (
+                    "Revocation recorded, but the OS-level permission reclaim was skipped: "
+                    "cannot determine the creator's system account"
+                )
+                logger.warning(
+                    "Shared-project revocation for %s could not resolve creator "
+                    "(created_by=%s) — OS access not reclaimed (#3396)",
+                    project.path,
+                    project.created_by,
+                )
+            else:
+                reclaim_ok, reclaim_error = revoke_shared_project_access(
+                    project.path,
+                    owner_account,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                if not reclaim_ok:
+                    revoke_warning = (
+                        f"Revocation recorded, but the OS-level permission reclaim failed: "
+                        f"{reclaim_error}"
+                    )
+                    logger.warning(
+                        "OS-level reclaim failed for revoked shared project %s: %s (#3396)",
+                        project.path,
+                        reclaim_error,
+                    )
+
     if success:
         project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
-        return jsonify({"success": True, "project": project.to_dict()})
+        response = {"success": True, "project": project.to_dict()}
+        if revoke_warning:
+            response["permission_warning"] = revoke_warning
+        return jsonify(response)
 
     return jsonify({"error": "Failed to update project"}), 500
 
@@ -694,10 +745,12 @@ def api_add_project_user(project_id):
     if not target_system_account:
         return jsonify({"error": "User has no system account, cannot manage file permissions"}), 400
 
-    # Add user to shared group (file system permission)
+    # Enroll the target user in the shared groups (file system permission).
+    # Issue #3396: enrollment is TENANT-scoped (global openace-shared for
+    # namespace-root creation + openace-shared-<tenant> for content access).
     from app.utils.workspace import add_user_to_shared_group
 
-    if not add_user_to_shared_group(target_system_account):
+    if not add_user_to_shared_group(target_system_account, tenant_id=target_tenant_id):
         return jsonify({"error": "Failed to add user to shared group"}), 500
 
     # Add user to project in database
@@ -763,19 +816,18 @@ def api_remove_project_user(project_id, target_user_id):
 
     active_sessions = get_user_project_active_sessions(target_user_id, project_id)
 
-    # Get target user's system_account
-    target_system_account = target_user.get("system_account")
-
     # Remove user from project in database
     if not project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id):
         return jsonify({"error": "Failed to remove user from project"}), 500
 
-    # Remove user from shared group (file system permission)
-    if target_system_account:
-        from app.utils.workspace import remove_user_from_shared_group
-
-        if not remove_user_from_shared_group(target_system_account):
-            logger.warning(f"Failed to remove {target_system_account} from shared group")
+    # Issue #3396: NO group revocation here. Shared projects are visible to
+    # the whole tenant on the read side (fs._allowed_roots_for_user uses the
+    # tenant's shared paths, not per-project user rows), so removing this
+    # row must not strip the user's tenant-wide OS access — that would
+    # recreate an API-vs-OS divergence in the opposite direction. Tenant
+    # group membership tracks TENANT membership (see the admin tenant-move
+    # and deactivation paths); full OS revocation of a project happens on
+    # the is_shared True->False flip (revoke_shared_project_access).
 
     # Record audit log
     _log_project_user_audit(
@@ -876,38 +928,44 @@ def api_batch_update_project_users(project_id):
             operation_errors.append(f"User {target_user_id} has no system account")
             continue
 
-        users_to_add.append({"user_id": target_user_id, "system_account": target_system_account})
+        users_to_add.append(
+            {
+                "user_id": target_user_id,
+                "system_account": target_system_account,
+                "tenant_id": target_tenant_id,
+            }
+        )
 
     # If validation errors, return before making any changes
     if operation_errors:
         return jsonify({"error": operation_errors[0], "errors": operation_errors}), 400
 
     # Phase 2: Execute all group operations
-    added_accounts: list[str] = []
-    removed_accounts: list[str] = []
+    added_accounts: list[dict] = []
 
-    # Add users to shared group
+    # Enroll added users in the tenant-scoped shared groups (Issue #3396)
     for user_info in users_to_add:
-        if not add_user_to_shared_group(user_info["system_account"]):
+        if not add_user_to_shared_group(
+            user_info["system_account"], tenant_id=user_info["tenant_id"]
+        ):
             # Rollback previous group additions
             for account in added_accounts:
-                remove_user_from_shared_group(account)
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
             return (
                 jsonify({"error": f"Failed to add user {user_info['user_id']} to shared group"}),
                 500,
             )
-        added_accounts.append(user_info["system_account"])
+        added_accounts.append(
+            {"system_account": user_info["system_account"], "tenant_id": user_info["tenant_id"]}
+        )
 
-    # Remove users from shared group
-    for target_user_id in to_remove:
-        target_user = user_repo.get_user_by_id(target_user_id)
-        if target_user:
-            target_system_account = target_user.get("system_account")
-            if target_system_account:
-                if not remove_user_from_shared_group(target_system_account):
-                    logger.warning(f"Failed to remove {target_system_account} from shared group")
-                else:
-                    removed_accounts.append(target_system_account)
+    # Removed users: Issue #3396 — NO tenant-group revocation here. The
+    # tenant group grants tenant-wide shared access that matches the read
+    # side (per-project user rows do not gate it); stripping it here would
+    # deny OS access the API still grants. Project-level OS revocation is
+    # the is_shared True->False flip's job.
 
     # Phase 3: Execute database operations in transaction
     try:
@@ -918,18 +976,16 @@ def api_batch_update_project_users(project_id):
         if "error" in result:
             # Rollback group operations
             for account in added_accounts:
-                remove_user_from_shared_group(account)
-            for account in removed_accounts:
-                add_user_to_shared_group(account)
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
             return jsonify({"error": result["error"]}), 500
 
     except Exception as e:
         logger.error(f"Database error during batch update: {e}")
         # Rollback group operations
         for account in added_accounts:
-            remove_user_from_shared_group(account)
-        for account in removed_accounts:
-            add_user_to_shared_group(account)
+            remove_user_from_shared_group(account["system_account"], tenant_id=account["tenant_id"])
         return jsonify({"error": "Database operation failed"}), 500
 
     # Record audit log
@@ -1092,6 +1148,7 @@ def api_fix_project_permissions(project_id):
             timeout=60,
             user_id=user_id,  # Issue #2745: Pass user_id for audit log
             project_id=project_id,  # Issue #2745: Pass project_id for audit log
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:

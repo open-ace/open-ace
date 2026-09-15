@@ -77,7 +77,7 @@ class TestEnsureSystemUidPinning:
         monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: True)
         monkeypatch.setattr(ws.platform, "system", lambda: "Linux")
         monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
-        monkeypatch.setattr(ws, "add_user_to_shared_group", lambda acc: True)
+        monkeypatch.setattr(ws, "add_user_to_shared_group", lambda acc, tenant_id=None: True)
 
         state = {
             "recorded": {},  # system_account -> recorded uid (the DB pin)
@@ -896,7 +896,11 @@ class TestSchedulerSyncScopedToActiveUsers:
     def test_scheduler_query_filters_to_active_non_deleted(self):
         content = open(f"{ROOT}/app/scheduler_worker.py", encoding="utf-8").read()
         anchor = content.index("_sync_system_users")
-        query = content.index("SELECT DISTINCT system_account", anchor)
+        # #3396 integration note: the query now also selects tenant_id (for
+        # tenant-scoped shared-group enrollment), so the DISTINCT shape from
+        # the original #3390 fix is gone — the protective property under
+        # test is the active/non-deleted filter, not the DISTINCT.
+        query = content.index("SELECT system_account, tenant_id", anchor)
         window = content[query : query + 600]
         assert "deleted_at IS NULL" in window and "is_active = true" in window, (
             "the scheduler must not ensure accounts for deactivated/soft-deleted "

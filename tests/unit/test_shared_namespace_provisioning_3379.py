@@ -1,5 +1,6 @@
 """
-Shared-namespace root provisioning in the Docker entrypoint (Issue #3379).
+Shared-namespace root provisioning in the Docker entrypoint (Issue #3379)
+and tenant-scoped shared-group sync (Issue #3396).
 
 The multi-user acceptance run exposed a fresh-deployment gap: nothing in the
 product created ``<base>/shared``, so ``POST /api/projects`` with
@@ -16,11 +17,19 @@ recording function stubs, then the executed command sequences are asserted
 per scenario. The app-side takeover guard lives in
 ``app/utils/workspace.py::_ensure_workspace_dirs`` and has its own tests in
 ``TestEnsureWorkspaceDirsSharedGuard`` below.
+
+The #3396 tenant-scoped shared-group sync (also in the entrypoint) is tested
+the same way: the quoted ``PY_SYNC_GROUPS_EOF`` heredoc is extracted verbatim
+and executed under stubbed ``psycopg2``/``subprocess`` modules, asserting the
+per-tenant enrollment and the legacy-directory reconcile command sequences.
 """
 
 import subprocess
+import sys
 import tempfile
+from collections import deque
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -137,15 +146,196 @@ class TestSharedNamespaceProvisioning:
         assert content.index("groupadd") < content.index('mkdir -p "$_base_dir/shared"')
 
 
-class TestPostSyncGroupEnrollment:
-    def test_enrollment_pass_exists_after_db_sync(self):
-        """Review round 2 (4004368045): on a recreated container the pre-sync
-        enrollment pass no-ops (empty /etc/passwd) and useradd adds no
-        supplementary groups — a second pass must run AFTER the DB sync."""
+class TestTenantSharedGroupSync:
+    """Issue #3396: the entrypoint's DB-driven tenant-group enrollment pass.
+
+    The block replaced the two /home-glob ``usermod`` passes (a directory
+    name cannot reveal its tenant): it is a quoted ``PY_SYNC_GROUPS_EOF``
+    heredoc executed after the main user sync, enrolling every ACTIVE DB
+    user into the global namespace group plus the tenant content group, and
+    reconciling legacy shared project dirs onto the tenant group. Tested
+    FUNCTIONALLY per the #3379 convention: extracted verbatim and run under
+    stubbed psycopg2/subprocess modules.
+    """
+
+    HEREDOC_TAG = "PY_SYNC_GROUPS_EOF"
+
+    @staticmethod
+    def _extract_sync_code() -> str:
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        start = content.index(f"<<'{TestTenantSharedGroupSync.HEREDOC_TAG}'")
+        body_start = content.index("\n", start) + 1
+        end = content.index(f"\n{TestTenantSharedGroupSync.HEREDOC_TAG}\n", body_start)
+        return content[body_start:end]
+
+    @staticmethod
+    def _run_sync(
+        monkeypatch,
+        tmp_path: Path,
+        *,
+        user_rows: list[tuple],
+        project_rows: list[tuple],
+        existing_groups: dict[str, str],
+    ) -> list[tuple]:
+        """Execute the extracted block under stubs; returns recorded commands.
+
+        *existing_groups* maps an existing project path to the group stat
+        would report for it (missing paths stat-fail, exercising the
+        reconcile's own groupadd path).
+        """
+        code = TestTenantSharedGroupSync._extract_sync_code()
+        (tmp_path / "shared").mkdir(parents=True, exist_ok=True)
+        group_by_abs_path = {}
+        for rel, group in existing_groups.items():
+            abs_dir = tmp_path / rel
+            abs_dir.mkdir(parents=True, exist_ok=True)
+            group_by_abs_path[str(abs_dir)] = group
+
+        calls: list[tuple] = []
+        executed_sql: list[str] = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(tuple(cmd))
+            if cmd[:3] == ["stat", "-c", "%G"]:
+                group = group_by_abs_path.get(cmd[3])
+                if group is None:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="no such file")
+                return SimpleNamespace(returncode=0, stdout=f"{group}\n", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        fake_subprocess = ModuleType("subprocess")
+        fake_subprocess.run = fake_run
+
+        responses = deque(
+            [
+                ("FROM users", user_rows),
+                ("FROM projects", project_rows),
+            ]
+        )
+
+        class _Cursor:
+            def execute(self, sql):
+                executed_sql.append(" ".join(sql.split()))
+                self._rows = responses.popleft()[1]
+
+            def fetchall(self):
+                return self._rows
+
+        class _Conn:
+            cursor = lambda self: _Cursor()  # noqa: E731
+            close = lambda self: None  # noqa: E731
+
+        fake_psycopg2 = ModuleType("psycopg2")
+        fake_psycopg2.connect = lambda _url: _Conn()
+
+        monkeypatch.setitem(sys.modules, "subprocess", fake_subprocess)
+        monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
+        monkeypatch.setenv("DATABASE_URL", "postgresql://stub")
+        monkeypatch.setenv("WORKSPACE_BASE_DIR", str(tmp_path))
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            exec(compile(code, "<entrypoint-shared-group-sync>", "exec"), {"__name__": "sync"})
+        calls.insert(0, ("__SQL__", *executed_sql))
+        return calls
+
+    def test_enrolls_each_user_into_global_and_tenant_groups(self, monkeypatch, tmp_path):
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[
+                ("alice-acct", "alice", 1),
+                ("bob-acct", "bob", 1),
+                ("carol-acct", "carol", 2),
+            ],
+            project_rows=[],
+            existing_groups={},
+        )
+        # tenant-1 members: global + openace-shared-1
+        assert ("usermod", "-aG", "openace-shared", "alice-acct") in calls
+        assert ("usermod", "-aG", "openace-shared-1", "alice-acct") in calls
+        assert ("usermod", "-aG", "openace-shared-1", "bob-acct") in calls
+        # tenant-2 member must NOT land in tenant-1's group
+        assert ("usermod", "-aG", "openace-shared-2", "carol-acct") in calls
+        assert ("usermod", "-aG", "openace-shared-1", "carol-acct") not in calls
+        # groups are created before use
+        assert calls.index(("groupadd", "-f", "openace-shared-1")) < calls.index(
+            ("usermod", "-aG", "openace-shared-1", "alice-acct")
+        )
+
+    def test_null_tenant_maps_to_pseudo_group_zero(self, monkeypatch, tmp_path):
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("admin-acct", "admin", None)],
+            project_rows=[],
+            existing_groups={},
+        )
+        assert ("usermod", "-aG", "openace-shared-0", "admin-acct") in calls
+
+    def test_username_fallback_when_system_account_missing(self, monkeypatch, tmp_path):
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[(None, "erin", 1)],
+            project_rows=[],
+            existing_groups={},
+        )
+        assert ("usermod", "-aG", "openace-shared-1", "erin") in calls
+
+    def test_reconciles_legacy_shared_dir_onto_tenant_group(self, monkeypatch, tmp_path):
+        legacy = str(tmp_path / "shared" / "team-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(legacy, 1)],
+            existing_groups={"shared/team-proj": "openace-shared"},  # pre-#3396 layout
+        )
+        assert ("chgrp", "-R", "openace-shared-1", legacy) in calls
+        assert ("find", legacy, "-type", "d", "-exec", "chmod", "2770", "{}", ";") in calls
+        assert ("find", legacy, "-type", "f", "-exec", "chmod", "660", "{}", ";") in calls
+
+    def test_reconcile_skipped_when_already_normalized(self, monkeypatch, tmp_path):
+        clean = str(tmp_path / "shared" / "team-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(clean, 1)],
+            existing_groups={"shared/team-proj": "openace-shared-1"},
+        )
+        assert not any(c[:1] == ("chgrp",) for c in calls), "steady-state boot must not re-chgrp"
+
+    def test_shared_rows_only_and_base_prefixed_paths_touched(self, monkeypatch, tmp_path):
+        sql = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={},
+        )[0]
+        projects_sql = sql[2]
+        assert "is_shared = true" in projects_sql, "private projects must never be reconciled"
+        assert "is_active = true" in projects_sql
+        # outside-base rows are skipped behaviorally below
+        outside = "/elsewhere/proj"
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(outside, 1)],
+            existing_groups={"shared/team-proj": "openace-shared"},
+        )
+        assert not any("stat" in c[:1] for c in calls), "outside-base paths must not be probed"
+
+    def test_block_runs_after_main_user_sync(self):
+        """Enrollment must follow the main DB user sync (the accounts it
+        usermods are created there); textual ordering by necessity."""
         content = ENTRYPOINT.read_text(encoding="utf-8")
         sync_end = content.index("open-ace-user-sync.log")
-        content.index('usermod -aG "$SHARED_GROUP"', sync_end)
-        assert "Syncing workspace users from database" in content[:sync_end]
+        content.index(f"<<'{self.HEREDOC_TAG}'", sync_end)
 
 
 class _FakeProc:

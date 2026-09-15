@@ -465,6 +465,19 @@ def api_update_user(user_id):
     system_account = data.get("system_account")
     if system_account and not validate_username(system_account):
         return jsonify({"error": "Invalid system_account name"}), 400
+    if system_account:
+        uid = data.get("system_uid")
+        # Review on #3390: log failures like the create/restore call sites —
+        # a collision skip or useradd failure here used to vanish silently.
+        # Issue #3396: enroll in the tenant-scoped shared group. When the
+        # request moves the user to another tenant, enroll for the TARGET
+        # tenant and drop the OLD tenant's group below (a stale membership
+        # would keep OS access to the old tenant's shared projects).
+        effective_tenant_id = (
+            new_tenant_id if new_tenant_id is not None else (current_user or {}).get("tenant_id")
+        )
+        if not ensure_system_user(system_account, uid=uid, tenant_id=effective_tenant_id):
+            logger.warning(f"Failed to create system user {system_account}, workspace may not work")
 
     # Handle tenant_id change
     if new_tenant_id is not None:
@@ -490,6 +503,21 @@ def api_update_user(user_id):
                 # Decrement old tenant count and increment new tenant count
                 tenant_service.decrement_user_count(current_tenant_id)
                 tenant_service.increment_user_count(new_tenant_id)
+                # Issue #3396: a tenant move must also drop the OLD tenant's
+                # shared-content group — otherwise the account keeps OS-level
+                # read/write on the old tenant's shared projects that the API
+                # layer no longer shows it. (A NULL old tenant maps to the
+                # sentinel 0 above, which is also the pseudo-tenant group id.)
+                if system_account:
+                    from app.utils.workspace import remove_user_from_shared_group
+
+                    if not remove_user_from_shared_group(
+                        system_account, tenant_id=current_tenant_id
+                    ):
+                        logger.warning(
+                            f"Failed to remove {system_account} from old tenant "
+                            f"{current_tenant_id} shared group"
+                        )
 
     # requested_is_active is a real boolean (or None) — parsed at the top of
     # the handler (R-3); it flows to the DB write and to the side-effect
@@ -506,28 +534,6 @@ def api_update_user(user_id):
     )
 
     if success:
-        # Review on #3390: provision AFTER the row write succeeds, and only
-        # for users who end up ACTIVE. Before, this ran BEFORE update_user
-        # and regardless of active state: (1) the uid write-back
-        # (record_system_uid) matches WHERE system_account = ?, but the NEW
-        # mapping was not in the row yet — the pin UPDATE hit 0 rows, and a
-        # container recreation before first login re-assigned the uid while
-        # /workspace/<account> kept the old owner; (2) editing a
-        # DEACTIVATED user hit the exists-path and _ensure_login_shell
-        # usermod'd the nologin placeholder back to /bin/bash — the very
-        # leak the scheduler fix in this PR removed. An inactive row with a
-        # NEW mapping gets no OS provisioning here (deliberate): its uid is
-        # handled by the entrypoint sync once activated, never before.
-        final_active = (
-            requested_is_active
-            if requested_is_active is not None
-            else bool(current_user and current_user.get("is_active"))
-        )
-        if system_account and final_active:
-            if not ensure_system_user(system_account, uid=data.get("system_uid")):
-                logger.warning(
-                    f"Failed to create system user {system_account}, workspace may not work"
-                )
         # Audit log for user update
         details: dict[str, Any] = {"action": "update"}
         if current_user:
@@ -569,6 +575,28 @@ def api_update_user(user_id):
                 # R-1/R-6/R-11: schedule the teardown off the request path;
                 # the audit records the scheduling outcome, truthfully.
                 details.update(_schedule_workspace_stop(user_id))
+                # Issue #3396: deactivation must also drop the tenant
+                # shared-content group at the OS layer — the user's shells/
+                # agents would otherwise keep read/write on the tenant's
+                # shared projects (the API layer already refuses them).
+                # Uses the user's EXISTING mapping (the deactivation body
+                # need not carry system_account). Fail-soft: group removal
+                # failure is logged, not fatal.
+                if current_user:
+                    deactivated_account = current_user.get("system_account") or current_user.get(
+                        "username"
+                    )
+                    if deactivated_account:
+                        from app.utils.workspace import remove_user_from_shared_group
+
+                        deactivated_tenant_id = current_user.get("tenant_id")
+                        if not remove_user_from_shared_group(
+                            deactivated_account, tenant_id=deactivated_tenant_id
+                        ):
+                            logger.warning(
+                                f"Failed to remove deactivated {deactivated_account} from "
+                                f"tenant {deactivated_tenant_id} shared group"
+                            )
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.USER_UPDATE,
@@ -650,6 +678,20 @@ def api_delete_user(user_id):
     # stopping. The teardown is therefore scheduled asynchronously (R-1) but
     # not optional.
     stop_details = _schedule_workspace_stop(user_id)
+
+    # Issue #3396: a deleted user must also lose the tenant shared-content
+    # group — their shells/agents would otherwise keep OS read/write on the
+    # tenant's shared projects. Fail-soft (restore re-enrolls via
+    # ensure_system_user on the restore path).
+    deleted_account = user.get("system_account") or username
+    if deleted_account:
+        from app.utils.workspace import remove_user_from_shared_group
+
+        if not remove_user_from_shared_group(deleted_account, tenant_id=tenant_id):
+            logger.warning(
+                f"Failed to remove deleted {deleted_account} from tenant "
+                f"{tenant_id} shared group"
+            )
 
     if success:
         # Issue #2755 P0-3/P0-4: Critical - decrement tenant user counter with proper error handling
@@ -867,7 +909,9 @@ def api_restore_user(user_id):
     # Auto-create system user for workspace if system_account is provided
     if system_account:
         uid = data.get("system_uid")
-        if ensure_system_user(system_account, uid=uid):
+        # Issue #3396: restore keeps the user's ORIGINAL tenant (tenant_id is
+        # never changed during restore) — re-enroll into that tenant's group.
+        if ensure_system_user(system_account, uid=uid, tenant_id=original_tenant_id):
             logger.info(f"System user {system_account} ready for workspace")
         else:
             logger.warning(f"Failed to create system user {system_account}, workspace may not work")

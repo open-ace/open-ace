@@ -1154,8 +1154,18 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # is not running as root with the explicit opt-in (see top-of-file guard).
     require_root_for_multi_user
 
-    # Issue #2730: Create shared project group
-    # All users are added to this group for shared project file system access
+    # Issue #2730 + #3396: shared-project groups.
+    # - openace-shared (GLOBAL): membership grants ONLY the right to create a
+    #   project directory inside the sticky <base>/shared namespace root
+    #   (root:openace-shared 3775). It is never the group-owner of project
+    #   content since #3396.
+    # - openace-shared-<tenant_id>: per-tenant CONTENT group — shared project
+    #   dirs are group-owned by it with 2770/660 (no others bits), so members
+    #   of OTHER tenants get EACCES at the OS layer even though they hold the
+    #   global membership for namespace creation.
+    # Enrollment of the DB users into BOTH groups happens in the DB-driven
+    # shared-group sync below (a /home-glob pass cannot know a directory's
+    # tenant). Tenant-less platform admins map to openace-shared-0.
     SHARED_GROUP="openace-shared"
     if ! getent group "$SHARED_GROUP" > /dev/null 2>&1; then
         groupadd -f "$SHARED_GROUP"
@@ -1163,14 +1173,6 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     else
         echo "  Shared project group already exists: $SHARED_GROUP"
     fi
-
-    # Add existing users in /home to the shared group
-    for user_dir in /home/*/; do
-        username=$(basename "$user_dir")
-        if id "$username" &>/dev/null; then
-            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
-        fi
-    done
 
     # Ensure workspace base directory exists
     # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
@@ -1212,12 +1214,13 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         # service on e.g. a root_squash NFS base dir.
         # chmod 3775 (review round 3, 4004874853): +sticky — rename(2) only
         # needs write+search on the parent, and openace-shared is a GLOBAL
-        # group (every tenant's account joins), so without the sticky bit any
-        # member could mv/replace another tenant's project directory. Sticky
-        # blocks non-owner renames at the root; sudo -u <user> mkdir for new
-        # projects and root-run setup_permissions_with_depth_limit are
-        # unaffected. Content-level cross-tenant access inside projects is
-        # the global-group design itself — tracked as #3396.
+        # group (every tenant's account joins, for namespace creation only),
+        # so without the sticky bit any member could mv/replace another
+        # tenant's project directory. Sticky blocks non-owner renames at the
+        # root; sudo -u <user> mkdir for new projects and root-run
+        # setup_permissions_with_depth_limit are unaffected. Content-level
+        # cross-tenant access inside projects is fenced by the per-tenant
+        # groups (openace-shared-<tenant>, 2770/660 — Issue #3396).
         if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3775 "$_base_dir/shared"; }; then
             echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
         fi
@@ -1665,25 +1668,100 @@ except Exception as e:
 " 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 
-    # Issue #3379 (review round 2, 4004368045): enroll users into the shared
-    # group AFTER the DB sync. On a recreated container /etc/passwd starts
-    # empty, so the pre-sync pass skipped everyone (id <user> failed) and the
-    # sync's useradd does not add supplementary groups — without this pass,
-    # already-logged-in users (sessions live in postgres and survive
-    # recreation) keep getting 403 on shared-project creation until they
-    # re-login. usermod is idempotent; failures are best-effort.
-    # Review on #3390: this glob pass also enrolls nologin PLACEHOLDER
-    # accounts (their /home/<user> dirs survive on the volume) — intentional
-    # and inert: a placeholder cannot authenticate (nologin shell, no
-    # password, tokens revoked at deactivation), so openace-shared membership
-    # grants nothing, and filtering them out here would add name-shape
-    # heuristics for no security gain.
-    for user_dir in /home/*/; do
-        username=$(basename "$user_dir")
-        if id "$username" &>/dev/null; then
-            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
-        fi
-    done
+    # ========================================================================
+    # Issue #3396: tenant-scoped shared-group sync (DB-driven).
+    # ========================================================================
+    # Replaces the two /home-glob usermod passes (#3389 rounds 2/3): a
+    # directory name cannot reveal its tenant, so enrollment is derived from
+    # the users table instead. For every ACTIVE user with an account:
+    #   - global openace-shared (namespace-root creation right), and
+    #   - openace-shared-<tenant_id> (tenant shared-content access).
+    # It also RECONCILES shared project directories left on the legacy
+    # global group by pre-#3396 deployments: chgrp to the tenant group +
+    # 2770/660. The reconcile is skipped per project when the root already
+    # carries the tenant group (one stat per project on steady-state boots).
+    # Quoted heredoc: the block is verbatim Python (no shell expansion) and
+    # is functionally tested by tests/unit/test_shared_namespace_provisioning_3379.py
+    # (extracted between the PY_SYNC_GROUPS_EOF markers). Failures degrade
+    # to a warning — a failed enrollment only means degraded cross-tenant
+    # OS isolation until the next restart, not a crash loop.
+    if [ -n "$DATABASE_URL" ]; then
+    python3 - <<'PY_SYNC_GROUPS_EOF' 2>&1 | tee /app/logs/open-ace-shared-groups.log || echo "WARNING: shared-group sync failed - cross-tenant OS isolation may be degraded until restart"
+import os
+import subprocess
+
+import psycopg2
+
+GLOBAL_GROUP = 'openace-shared'
+
+
+def tenant_group(tid):
+    # Mirrors app.utils.workspace.shared_tenant_group_name: NULL tenant
+    # (platform admins) maps to the pseudo-id 0; real tenant ids start at 1.
+    return f"openace-shared-{tid if tid is not None else 0}"
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def enroll(username, tid):
+    """Enroll one account in the global + tenant shared groups (idempotent)."""
+    for group in (GLOBAL_GROUP, tenant_group(tid)):
+        r = run(['groupadd', '-f', group])
+        if r.returncode != 0:
+            print(f'  WARNING: groupadd {group} failed: {r.stderr.strip()}')
+            continue
+        r = run(['usermod', '-aG', group, username])
+        if r.returncode != 0:
+            print(f'  WARNING: usermod -aG {group} {username} failed: {r.stderr.strip()}')
+
+
+def reconcile_shared(path, tid):
+    """Normalize one shared project dir to the tenant group (2770/660)."""
+    group = tenant_group(tid)
+    run(['groupadd', '-f', group])
+    stat = run(['stat', '-c', '%G', path])
+    if stat.returncode == 0 and stat.stdout.strip() == group:
+        return  # already normalized (steady-state fast path)
+    print(f'  Reconciling shared project {path} -> group {group} (2770/660)')
+    run(['chgrp', '-R', group, path])
+    run(['find', path, '-type', 'd', '-exec', 'chmod', '2770', '{}', ';'])
+    run(['find', path, '-type', 'f', '-exec', 'chmod', '660', '{}', ';'])
+
+
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+
+    cur.execute('SELECT system_account, username, tenant_id FROM users WHERE is_active = true')
+    for system_account, username, tid in cur.fetchall():
+        account = system_account or username
+        if account:
+            enroll(account, tid)
+    print('Shared-group enrollment complete.')
+
+    bases = [b.strip() for b in os.environ.get('WORKSPACE_BASE_DIR', '/workspace').split(',') if b.strip()]
+    cur.execute('SELECT path, tenant_id FROM projects WHERE is_active = true AND is_shared = true')
+    for path, tid in cur.fetchall():
+        if not path:
+            continue
+        # Only reconcile paths inside the configured workspace base dirs —
+        # rows pointing elsewhere are not ours to touch.
+        if not any(path == b or path.startswith(b + '/') for b in bases):
+            continue
+        if os.path.isdir(path):
+            try:
+                reconcile_shared(path, tid)
+            except Exception as e:  # noqa: BLE001 - one bad row must not abort the rest
+                print(f'  WARNING: reconcile failed for {path}: {e}')
+
+    conn.close()
+    print('Shared-group sync completed.')
+except Exception as e:
+    print(f'Error syncing shared groups: {e}')
+PY_SYNC_GROUPS_EOF
+    fi
 
     # Configure sudoers for qwen-code-webui
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user

@@ -24,10 +24,14 @@ assertions. The approved plan of record is
   honestly).
 - **#3394 (fixed, PR #3395)**: the frontend integrity check expected a
   `main.*.js` that vite never produced — production images crash-looped.
-- **#3396 (OS-layer shared isolation)**: shared dirs are group
-  openace-shared (GLOBAL — every tenant's account joins) 2775/664 —
-  cross-tenant and post-revocation OS-level access persists. Item (d) has
-  OS-layer probes, expected to FAIL, recorded honestly.
+- **#3396 (fixed, tenant-scoped groups)**: shared dirs used to be group
+  openace-shared (GLOBAL — every tenant's account joins) 2775/664, leaving
+  cross-tenant and post-revocation OS-level access open. Content is now
+  group-owned by per-tenant `openace-shared-<tenant_id>` with 2770/660 (the
+  global group keeps only the namespace-root creation right), and revocation
+  reclaims the directory to the creator (chown -R + 0700/0600). Item (d)'s
+  OS-layer probes (denials for bob/carol plus positive controls for alice)
+  are expected to PASS.
 - **#3397 (declared deviation)**: a fresh multi-user production deployment
   following DEPLOYMENT.md cannot start (empty DB refused; a bare migration
   leaves no default admin). The script works around it with a one-shot
