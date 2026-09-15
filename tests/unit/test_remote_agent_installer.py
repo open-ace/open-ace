@@ -923,7 +923,7 @@ def test_menu_qwen_precheck_is_wired_into_select():
     before either OS install/launch path."""
     src = (REPO_ROOT / "remote-agent" / "terminal_menu.py").read_text(encoding="utf-8")
     select_body = src[src.index("def handle_select") : src.index("def run_windows_menu")]
-    assert 'item["cli"] == "qwen"' in select_body
+    assert 'item.get("cli") == "qwen"' in select_body
     assert "qwen_precheck()" in select_body
     # the gate must precede every install/launch path: the first use of
     # install_cmd (Windows & POSIX installs) and of item["cmd"] (launches)
