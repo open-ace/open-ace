@@ -139,6 +139,16 @@ class BaseCLIAdapter(abc.ABC):
         """Return the executable name (e.g., 'qwen', 'claude')."""
         pass
 
+    def get_install_requirements_hint(self) -> str:
+        """Prerequisite hint surfaced alongside get_install_command().
+
+        Empty by default. Adapters whose install command has hard runtime
+        prerequisites the package manager itself does not enforce override
+        this — e.g. npm only warns EBADENGINE on an engines mismatch and
+        still exits 0, so the Node requirement must be stated explicitly.
+        """
+        return ""
+
     def get_settings_path(self) -> str | None:
         """Return the path to the CLI tool's settings.json, or None if not applicable."""
         return None

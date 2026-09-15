@@ -929,3 +929,110 @@ def test_menu_qwen_precheck_is_wired_into_select():
     # install_cmd (Windows & POSIX installs) and of item["cmd"] (launches)
     assert select_body.index("qwen_precheck()") < select_body.index('item["install_cmd"]')
     assert select_body.index("qwen_precheck()") < select_body.index('item["cmd"]')
+
+
+def test_menu_qwen_precheck_node_probe_timeout_fails_closed(monkeypatch):
+    """Regression (PR #3386 review): a hung 'node --version' must fail the
+    precheck with a reason instead of crashing the menu — TimeoutExpired is
+    not an OSError, so the old except clauses let it escape qwen_precheck()."""
+    terminal_menu = _import_terminal_menu()
+
+    def raise_timeout(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=10)
+
+    monkeypatch.setattr(terminal_menu.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(terminal_menu.subprocess, "run", raise_timeout)
+
+    ok, reason = terminal_menu.qwen_precheck()
+
+    assert ok is False
+    assert "timed out" in reason
+
+
+def test_menu_qwen_precheck_qwen_probe_timeout_fails_closed(monkeypatch):
+    """Regression (PR #3386 review): a hung/broken qwen wrapper answering
+    '--version' must be refused as unknown, never crash the menu and never
+    be launched."""
+    terminal_menu = _import_terminal_menu()
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "node":
+            return subprocess.CompletedProcess(cmd, 0, stdout="v22.22.3\n")
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=10)
+
+    monkeypatch.setattr(terminal_menu.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(terminal_menu.subprocess, "run", fake_run)
+
+    ok, reason = terminal_menu.qwen_precheck()
+
+    assert ok is False
+    assert "unknown" in reason
+    assert "Refusing" in reason
+
+
+def _import_terminal_menu():
+    if str(REPO_ROOT / "remote-agent") not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT / "remote-agent"))
+    import terminal_menu
+
+    return terminal_menu
+
+
+def _run_executor_missing_cli(tmp_path, cli_tool):
+    """Execute ProcessExecutor.start_session for a missing CLI under a
+    controlled PATH/HOME so no real tool can satisfy _find_executable()."""
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_bin = tmp_path / "ex-bin"  # empty: no node/qwen/zcode shadowing
+    fake_bin.mkdir()
+    env = dict(os.environ)
+    env["PATH"] = str(fake_bin)
+    env["HOME"] = str(home)
+    code = (
+        "import sys, json\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import executor\n"
+        "import cli_adapters.zcode as _zc\n"
+        # dev machines with the ZCode desktop app would pass check_installed
+        # via the bundled engine; force the missing-tool error path
+        "_zc._APP_ENGINE = '/nonexistent-zcode-engine'\n"
+        "ex = executor.ProcessExecutor(server_url='http://127.0.0.1:1')\n"
+        "r = ex.start_session('sess-probe', sys.argv[2], sys.argv[3], 'tok')\n"
+        "print(json.dumps(r))\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code, str(REPO_ROOT / "remote-agent"), str(tmp_path), cli_tool],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_executor_qwen_missing_error_includes_node_requirement(tmp_path):
+    """Regression (PR #3386 review): qwen-code-cli is NOT in _APPSERVER_TOOLS,
+    so the executable-missing error users actually see comes from the generic
+    branch — it must carry the Node >= 22 hint because npm exits 0 on a mere
+    EBADENGINE warning and manual recovery would otherwise reinstall onto an
+    unsupported Node."""
+    import json
+
+    result = _run_executor_missing_cli(tmp_path, "qwen-code-cli")
+    payload = json.loads(result.stdout)
+
+    assert payload["success"] is False
+    assert "npm install -g @qwen-code/qwen-code@0.23.3" in payload["error"]
+    assert "Node.js >= 22" in payload["error"]
+
+
+def test_executor_zcode_missing_error_has_no_hint_padding(tmp_path):
+    """The hint lives on BaseCLIAdapter (empty default); ZCode goes through
+    _start_zcode_session and must render cleanly without dangling ' ()'."""
+    import json
+
+    result = _run_executor_missing_cli(tmp_path, "zcode")
+    payload = json.loads(result.stdout)
+
+    assert payload["success"] is False
+    assert "not found on this machine" in payload["error"]
+    assert " ()" not in payload["error"]

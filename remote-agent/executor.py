@@ -1182,11 +1182,15 @@ class ProcessExecutor:
             adapter = get_adapter(cli_tool)
             display_name = adapter.get_display_name()
             install_cmd = adapter.get_install_command()
+            requirements_hint = adapter.get_install_requirements_hint()
 
-            # Build a helpful error message with installation instructions
+            # Build a helpful error message with installation instructions;
+            # adapters with unenforced prerequisites (qwen needs Node >= 22)
+            # append them so manual recovery does not rely on npm's exit code.
             msg = (
                 f"CLI tool '{cli_tool}' ({display_name}) not found on this machine.\n"
                 f"Please install it first by running: {install_cmd}"
+                + (f" ({requirements_hint})" if requirements_hint else "")
             )
 
             # Add Windows-specific hints if applicable
@@ -1354,14 +1358,11 @@ class ProcessExecutor:
         """
         adapter = ZCodeAdapter()
         if not adapter.check_installed():
+            requirements_hint = adapter.get_install_requirements_hint()
             msg = (
                 f"CLI tool '{cli_tool}' (ZCode) not found on this machine.\n"
                 f"Please install it first by running: {adapter.get_install_command()}"
-                + (
-                    f" ({adapter.get_install_requirements_hint()})"
-                    if hasattr(adapter, "get_install_requirements_hint")
-                    else ""
-                )
+                + (f" ({requirements_hint})" if requirements_hint else "")
             )
             logger.error(msg)
             return {"success": False, "error": msg}

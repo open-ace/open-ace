@@ -98,6 +98,15 @@ def qwen_precheck() -> tuple[bool, str]:
             ["node", "--version"], capture_output=True, text=True, timeout=10, check=False
         )
         major = int(out.stdout.strip().lstrip("v").split(".")[0])
+    except subprocess.TimeoutExpired:
+        # TimeoutExpired is not an OSError; a hung node/wrapper must fail the
+        # precheck instead of crashing the menu (PR #3386 review).
+        return (
+            False,
+            "Node.js >= 22 is required by qwen-code "
+            f"{QWEN_PINNED_VERSION}, but 'node --version' timed out "
+            "(possibly broken Node installation). Ask your admin to check it.",
+        )
     except (ValueError, IndexError, OSError):
         major = 0
     if major < 22:
@@ -114,7 +123,9 @@ def qwen_precheck() -> tuple[bool, str]:
             installed = (
                 out.stdout.strip().splitlines()[0].strip().lstrip("v") if out.stdout.strip() else ""
             )
-        except (IndexError, OSError):
+        except (IndexError, OSError, subprocess.TimeoutExpired):
+            # A hung/broken qwen wrapper reads as "unknown" below and is
+            # refused, never launched (fail closed).
             installed = ""
         if installed != QWEN_PINNED_VERSION:
             return (
