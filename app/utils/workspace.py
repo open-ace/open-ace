@@ -1174,7 +1174,14 @@ def get_user_project_active_sessions(user_id: int, project_id: int) -> int:
             cursor = conn.cursor()
             cursor.execute(query, (user_id, project_id))
             result = cursor.fetchone()
-            return int(result[0]) if result else 0
+            if not result:
+                return 0
+            # Dual row shape (#3403): PG connections wrap cursors with
+            # RealDictCursor, so positional result[0] raised KeyError there
+            # and the except swallowed it into a permanent "0 sessions".
+            # Same fix as get_recorded_system_uid (PR #3400).
+            value = result["count"] if isinstance(result, dict) else result[0]
+            return int(value)
 
     except Exception as e:
         logger.error(f"Failed to get active sessions: {e}")
