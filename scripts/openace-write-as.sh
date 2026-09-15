@@ -103,7 +103,7 @@ log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} res
 # the file and writes stdin to it; stdout is discarded so it doesn't echo
 # back. A temp file + atomic rename would be nicer for crash safety, but tee
 # matches the simplicity of the single-user file.save() path.
-if runuser -u "$TARGET_USER" -- tee "$RESOLVED_PATH" > /dev/null; then
+if /usr/sbin/runuser -u "$TARGET_USER" -- tee "$RESOLVED_PATH" > /dev/null; then
     log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} result=success"
     exit 0
 else
