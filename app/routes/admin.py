@@ -484,22 +484,13 @@ def api_update_user(user_id):
     #     on a remap+move that OLD account is the one holding the old-tenant
     #     membership (the body's new account was never enrolled there), and
     #     an explicit ""+move must still drop it.
+    # Round-3 review R1: the enroll itself runs only AFTER the tenant-move
+    # quota check passes and the DB write succeeds (bottom of the handler) —
+    # enrolling before the quota check left a quota-REJECTED move with a
+    # permanent grant on the target tenant's shared group.
     enroll_account = system_account
     if enroll_account is None and current_user:
         enroll_account = current_user.get("system_account")
-    if enroll_account:
-        uid = data.get("system_uid")
-        # Review on #3390: log failures like the create/restore call sites —
-        # a collision skip or useradd failure here used to vanish silently.
-        # Issue #3396: enroll in the tenant-scoped shared group. When the
-        # request moves the user to another tenant, enroll for the TARGET
-        # tenant and drop the OLD tenant's group below (a stale membership
-        # would keep OS access to the old tenant's shared projects).
-        effective_tenant_id = (
-            new_tenant_id if new_tenant_id is not None else (current_user or {}).get("tenant_id")
-        )
-        if not ensure_system_user(enroll_account, uid=uid, tenant_id=effective_tenant_id):
-            logger.warning(f"Failed to create system user {enroll_account}, workspace may not work")
 
     # Handle tenant_id change
     if new_tenant_id is not None:
@@ -558,6 +549,25 @@ def api_update_user(user_id):
     )
 
     if success:
+        # Round-3 review R1: enroll into the tenant-scoped shared group only
+        # now — after the quota check passed and the DB write succeeded. The
+        # previous placement (before the quota check) let a quota-REJECTED
+        # move leave a permanent grant on the target tenant's content group;
+        # running after a failed update_user has the same rationale. On a
+        # tenant move this enrolls for the TARGET tenant, matching the row
+        # just written; a failure here is logged, not fatal — the boot sync
+        # re-enrolls by the DB row, so the state self-heals on restart.
+        if enroll_account:
+            uid = data.get("system_uid")
+            effective_tenant_id = (
+                new_tenant_id
+                if new_tenant_id is not None
+                else (current_user or {}).get("tenant_id")
+            )
+            if not ensure_system_user(enroll_account, uid=uid, tenant_id=effective_tenant_id):
+                logger.warning(
+                    f"Failed to create system user {enroll_account}, workspace may not work"
+                )
         # Audit log for user update
         details: dict[str, Any] = {"action": "update"}
         if current_user:

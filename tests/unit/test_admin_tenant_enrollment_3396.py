@@ -236,14 +236,14 @@ class TestAdminTenantMoveGroupDrop:
         assert resp.status_code == 200, resp.get_json()
         assert mock_ensure.call_args.kwargs.get("tenant_id") == 3
 
-    def _move(self, admin_app, row, body):
+    def _move(self, admin_app, row, body, *, quota_ok=True):
         """PUT the body against /api/admin/users/9 with standard stubs;
         returns (response, repo, mock_ensure, mock_remove)."""
         repo = MagicMock()
         repo.get_user_by_id.return_value = dict(row)
         repo.update_user.return_value = True
         tenant_service = MagicMock()
-        tenant_service.can_add_user.return_value = True
+        tenant_service.can_add_user.return_value = quota_ok
         auth_stubs = _auth_stubs()
         for s in auth_stubs:
             s.start()
@@ -292,6 +292,43 @@ class TestAdminTenantMoveGroupDrop:
         # to enroll under.
         assert repo.update_user.call_args.kwargs.get("system_account") == ""
         mock_ensure.assert_not_called()
+
+    def test_quota_rejected_move_leaves_no_group_grant(self, admin_app):
+        """Round-3 review R1: a move rejected by the target tenant's quota
+        must leave NO trace — no enrollment into the target tenant's shared
+        group, no old-group drop, no DB write. The pre-R1 order enrolled
+        before the quota check, permanently granting a rejected request's
+        account OS read/write on the target tenant's shared projects."""
+        tenant_service = MagicMock()
+        tenant_service.can_add_user.return_value = False
+        tenant_service.get_tenant.return_value = MagicMock(quota=MagicMock(max_users=1))
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = dict(self.DB_ROW)
+        auth_stubs = _auth_stubs()
+        for s in auth_stubs:
+            s.start()
+        try:
+            with (
+                patch("app.routes.admin.user_repo", repo),
+                patch("app.services.tenant_service.TenantService", return_value=tenant_service),
+                _tenant_scope_stub(),
+                patch("app.routes.admin.ensure_system_user") as mock_ensure,
+                patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
+                patch("app.routes.admin.audit_logger"),
+            ):
+                resp = admin_app.test_client().put(
+                    "/api/admin/users/9",
+                    json={"tenant_id": 2},
+                    headers={"Authorization": "Bearer t"},
+                )
+        finally:
+            for s in auth_stubs:
+                s.stop()
+
+        assert resp.status_code == 400
+        mock_ensure.assert_not_called()
+        mock_remove.assert_not_called()
+        repo.update_user.assert_not_called()
 
     def test_remap_move_drops_OLD_account_not_the_new_one(self, admin_app):
         """Round-2 review N3b: remap + move in one request must drop the
