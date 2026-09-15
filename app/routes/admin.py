@@ -642,7 +642,18 @@ def api_update_user(user_id):
                     if deactivated_account:
                         from app.utils.workspace import remove_user_from_shared_group
 
-                        deactivated_tenant_id = current_user.get("tenant_id")
+                        # #3401: drop the group the DB row NOW names — on a
+                        # move+deactivate combo the row was just moved to the
+                        # TARGET tenant, and the enroll block above may have
+                        # registered the account there; dropping the PRE-WRITE
+                        # tenant left that target membership in place. For a
+                        # pure deactivation (no tenant_id in the body) this is
+                        # the unchanged row tenant — a behavior no-op.
+                        deactivated_tenant_id = (
+                            new_tenant_id
+                            if new_tenant_id is not None
+                            else current_user.get("tenant_id")
+                        )
                         if not remove_user_from_shared_group(
                             deactivated_account, tenant_id=deactivated_tenant_id
                         ):
