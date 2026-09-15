@@ -55,22 +55,27 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 
 两个包按**经验证的一对**固定版本分发（不追 `@latest`：安装脚本里的
 Node>=22 门与 adapter 启动参数只对 pin 过的组合验证过，而 npm 对
-engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**七处**（另有两类文档指引同步：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
-`scripts/install-central/*/README.md`），
+engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**八处**（另有三类文档指引同步：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
+`docs/{cn,en}/DEPLOYMENT.md`、`scripts/install-central/*/README.md`），
 `tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites`
-锁定它们必须一致——升级时改漏任何一处 CI 会以"各站点版本清单"报错。
+锁定它们必须一致，且全仓扫描不允许出现未带 `@版本号`（或指向上述常量的
+`${..._VERSION}` 变体）的 qwen 栈 npm install 条目——升级时改漏任何
+一处 CI 会以"各站点版本清单"报错。
 
 升级步骤：
 
-1. **改七处 pin**（同一 commit）：
-   - `Dockerfile`（`npm install -g qwen-code-webui@X @qwen-code/qwen-code@Y`）
+1. **改八处 pin**（同一 commit）：
+   - `Dockerfile`（webui/CLI 固定版本对写在同一条安装命令里）
    - `scripts/docker/webui-sandbox.Dockerfile`（同一对）
    - `scripts/install-central/package-method/install.sh`（`QWEBUI_VERSION` / `QWEN_CLI_VERSION`）
+   - `scripts/install-central/docker-method/install.sh`（宿主机多用户工作区栈，
+     同一对常量；非多用户部署不触碰宿主机栈）
    - `remote-agent/install.sh`（`QWEN_CLI_VERSION`）
    - `remote-agent/install.ps1`（`$QwenCliVersion`）
    - `remote-agent/terminal_menu.py`（`install_cmd`）
    - `remote-agent/cli_adapters/qwen_code.py`（`PINNED_VERSION`，`get_install_command` 修复路径）
    - 同步文档中的版本与 Node 要求：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
+     `docs/{cn,en}/DEPLOYMENT.md`（宿主机手工安装指引）、
      `scripts/install-central/{package-method,docker-method}/README.md`
 2. **兼容性验证**（对照新版本源码/产物逐项核实，参考 PR #3386 的先例）：
    - 会话存储布局 `~/.qwen/projects/<id>/chats/<sessionId>.jsonl` 是否不变

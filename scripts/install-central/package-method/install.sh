@@ -2692,8 +2692,8 @@ configure_sudoers() {
 
     if [ -z "$webui_path" ]; then
         print_warning "qwen-code-webui executable not found"
-        print_info "Please install qwen-code-webui first:"
-        print_info "  npm install -g qwen-code-webui"
+        print_info "Please install qwen-code-webui first (pinned pair, Node >= 22):"
+        print_info "  npm install -g qwen-code-webui@${QWEBUI_VERSION} @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
         print_info ""
         print_info "After installation, manually configure sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
@@ -6422,8 +6422,8 @@ show_help() {
     echo "  If DB_INSTALL_METHOD is 'binary' or 'docker', will install new PostgreSQL."
     echo ""
     echo "Multi-User Workspace Mode:"
-    echo "  Requires qwen-code-webui installed:"
-    echo "    npm install -g qwen-code-webui"
+    echo "  Requires qwen-code-webui installed (pinned pair, Node >= 22):"
+    echo "    npm install -g qwen-code-webui@${QWEBUI_VERSION} @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
     echo ""
     echo "  The installer will auto-configure sudoers for user switching."
     echo "  Each user needs a system account and ~/.qwen/ directory."

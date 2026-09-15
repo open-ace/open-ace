@@ -792,17 +792,19 @@ Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 
 ### qwen-code-webui 安装
 
-在以下位置之一安装 `qwen-code-webui`：
+在以下位置之一安装 `qwen-code-webui`（固定版本对，需要 Node >= 22——npm 对 engines 不匹配只警告仍返回成功）：
 
 ```bash
-# 方法一：npm 全局安装（推荐）
-npm install -g @ivycomputing/qwen-code-webui
+# 方法一：npm 全局安装固定版本（推荐，与部署脚本/Docker 镜像一致的已验证组合）
+npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3
 
 # 验证安装
 which qwen-code-webui
 # 应输出: /usr/local/bin/qwen-code-webui
 
-# 方法二：手动安装
+# 方法二：从源码构建（不推荐）
+# 上游 git tag 滞后于 npm 发布，clone HEAD 会得到未经本部署验证的版本，
+# 仅在你能自行验证版本组合时使用。
 git clone https://github.com/ivycomputing/qwen-code-webui.git
 cd qwen-code-webui
 npm install && npm run build

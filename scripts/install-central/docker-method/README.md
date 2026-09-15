@@ -140,13 +140,15 @@ docker compose up -d
 
 多用户模式为每个用户启动独立的 `qwen-code-webui` 进程，确保用户数据隔离。
 
-**Docker 容器已内置所需依赖**（Node.js 22、qwen-code-webui@0.2.43、@qwen-code/qwen-code@0.23.3），无需在宿主机额外安装。
+**容器内置依赖**（Node.js 22、qwen-code-webui@0.2.43、@qwen-code/qwen-code@0.23.3）：服务本身无需在宿主机手动安装任何依赖。
+
+> 多用户模式例外：每个用户的 `qwen-code-webui` 进程由容器内应用通过 sudoers wrapper 在**宿主机**跨用户启动，因此宿主机也需要同一对固定版本。安装脚本会在确认部署、且多用户模式启用后自动以固定版本安装并校验（Node >= 22 门控，非多用户部署不触碰宿主机 Node/npm）；无需手动安装。
 
 **相关环境变量：**
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `WORKSPACE_MULTI_USER_MODE` | 启用多用户模式 | false |
+| `WORKSPACE_MULTI_USER_MODE` | 启用多用户模式 | true |
 | `WORKSPACE_BASE_DIR` | 用户项目存储根目录，支持逗号分隔多个目录（如 `/workspace,/opt/projects`） | /workspace（Docker）/ 用户家目录（二进制，未设时） |
 | `WORKSPACE_PORT_RANGE_START` | 端口池起始端口 | 3100 |
 | `WORKSPACE_PORT_RANGE_END` | 端口池结束端口 | 3200 |

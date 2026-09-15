@@ -58,6 +58,13 @@ OPENCLAW_PORT="${OPENCLAW_PORT:-}"
 CLAUDE_ENABLED="${CLAUDE_ENABLED:-true}"
 QWEN_ENABLED="${QWEN_ENABLED:-true}"
 
+# Pinned qwen stack for the HOST side (multi-user workspace mode runs
+# qwen-code-webui on the host via the sudoers wrapper). Must stay in sync
+# with Dockerfile / package-method / remote-agent — the pin-consistency
+# contract test enforces this across every install site (PR #3386 review).
+QWEBUI_VERSION="0.2.43"
+QWEN_CLI_VERSION="0.23.3"
+
 # SSH configuration for remote host access (Issue #1122)
 SSH_ENABLED="${SSH_ENABLED:-no}"
 # SSH_MOUNT_SOURCE: Use current user's .ssh directory (not RUN_USER which is container user)
@@ -567,141 +574,121 @@ find_webui_executable() {
     return 1
 }
 
-# Install qwen-code-webui via npm
-install_qwen_code_webui() {
-    print_header "安装 qwen-code-webui"
-
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_error "npm 未安装"
-        print_info "请先安装 Node.js (包含 npm)"
-        return 1
-    fi
-
-    print_info "检测到 npm 版本: $(npm --version)"
-    print_info "正在安装 qwen-code-webui..."
-
-    # Install qwen-code-webui
-    if npm install -g qwen-code-webui 2>&1; then
-        print_success "qwen-code-webui 安装完成"
-
-        # Verify installation
-        if command -v qwen-code-webui &>/dev/null; then
-            local webui_path=$(which qwen-code-webui)
-            print_success "安装路径: $webui_path"
-            return 0
-        else
-            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
-            return 1
-        fi
-    else
-        print_error "qwen-code-webui 安装失败"
-        print_info "请手动安装: npm install -g qwen-code-webui"
-        return 1
-    fi
-}
-
-# Find qwen-code executable (note: npm package @qwen-code/qwen-code installs as 'qwen')
-find_qwen_code_executable() {
-    local candidates=(
-        "/usr/local/bin/qwen"
-        "/usr/bin/qwen"
-        "/opt/qwen-code/bin/qwen"
-    )
-
-    for candidate in "${candidates[@]}"; do
-        if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-
-    # Try to find in PATH
-    if command -v qwen &>/dev/null; then
-        which qwen
+# Host Node major version, 0 when node is absent (guarded: never aborts).
+node_major_version() {
+    if ! command -v node &>/dev/null; then
+        echo 0
         return 0
     fi
-
-    return 1
+    local version
+    version="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
+    echo "${version:-0}"
 }
 
-# Install qwen-code via npm
-install_qwen_code() {
-    print_header "安装 qwen-code"
-
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_error "npm 未安装"
-        print_info "请先安装 Node.js (包含 npm)"
-        return 1
-    fi
-
-    print_info "检测到 npm 版本: $(npm --version)"
-    print_info "正在安装 @qwen-code/qwen-code..."
-
-    # Install qwen-code (the official package name is @qwen-code/qwen-code, installs as 'qwen')
-    if npm install -g @qwen-code/qwen-code 2>&1; then
-        print_success "@qwen-code/qwen-code 安装完成"
-
-        # Verify installation (note: the executable is named 'qwen', not 'qwen-code')
-        if command -v qwen &>/dev/null; then
-            local qwen_path=$(which qwen)
-            print_success "安装路径: $qwen_path"
-            return 0
-        else
-            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
-            return 1
-        fi
-    else
-        print_error "@qwen-code/qwen-code 安装失败"
-        print_info "请手动安装: npm install -g @qwen-code/qwen-code"
-        return 1
-    fi
-}
-
-# Check and prompt for qwen-code installation
-check_qwen_code() {
-    local qwen_path=$(find_qwen_code_executable)
-    if [ -n "$qwen_path" ]; then
-        print_success "找到 qwen-code (qwen): $qwen_path"
+# Ensure Node >= 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION},
+# engines.node >=22; npm only warns EBADENGINE and still exits 0). Upgrades in
+# place via NodeSource when an older Node is present; fails explicitly when it
+# cannot reach 22.
+ensure_node_22() {
+    local major
+    major="$(node_major_version)"
+    if [ "$major" -ge 22 ]; then
         return 0
     fi
-
-    print_warning "未找到 qwen-code 可执行文件"
-    echo ""
-    echo "请选择:"
-    echo "  1) 协助安装 (通过 npm 自动安装)"
-    echo "  2) 手动安装 (稍后自行安装)"
-    echo ""
-
-    prompt_input "请选择" "1" qwen_choice
-
-    case "$qwen_choice" in
-        1)
-            install_qwen_code
-            if [ $? -eq 0 ]; then
-                return 0
-            else
-                print_info "安装失败，请手动安装后重新运行此脚本"
-                return 1
-            fi
-            ;;
-        2)
-            print_info "请手动安装 qwen-code:"
-            print_info "  npm install -g @qwen-code/qwen-code"
-            print_info ""
-            prompt_yesno "是否继续安装 Open ACE（稍后手动安装 qwen-code）?" "y" continue_without_qwen
-            if [ "$continue_without_qwen" != "yes" ]; then
-                return 1
-            fi
-            return 0
-            ;;
-        *)
-            print_error "无效选择"
-            return 1
-            ;;
-    esac
+    if [ "$major" -gt 0 ]; then
+        print_info "Node ${major} < 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION}); upgrading Node.js..."
+    else
+        print_info "Node.js not found; installing Node.js 22.x..."
+    fi
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root required to install/upgrade Node.js. Install Node >= 22 and re-run."
+        return 1
+    fi
+    if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        if command -v dnf &>/dev/null; then
+            dnf install -y nodejs
+        else
+            yum install -y nodejs
+        fi
+    elif command -v apt-get &>/dev/null; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        apt-get install -y nodejs
+    else
+        print_error "Cannot install/upgrade Node.js automatically on this system. Install Node >= 22 and re-run."
+        return 1
+    fi
+    major="$(node_major_version)"
+    if [ "$major" -lt 22 ]; then
+        print_error "Node upgrade did not reach >= 22 (found: ${major}). Refusing to continue."
+        return 1
+    fi
+    print_success "Node.js $(node --version) active"
+    return 0
 }
+
+# Single gated, pinned install path for the HOST qwen stack (multi-user
+# workspace mode): Node gate first, then explicit pinned versions, then
+# exact-match verification. Never installs an unpinned/latest version.
+install_qwen_stack() {
+    ensure_node_22 || return 1
+    if ! command -v npm &>/dev/null; then
+        print_error "npm not available after Node setup; cannot install the qwen stack."
+        return 1
+    fi
+    print_info "Installing qwen-code-webui@${QWEBUI_VERSION} + @qwen-code/qwen-code@${QWEN_CLI_VERSION}..."
+    if ! npm install -g "qwen-code-webui@${QWEBUI_VERSION}"; then
+        print_error "Failed to install qwen-code-webui@${QWEBUI_VERSION}"
+        return 1
+    fi
+    if ! npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}"; then
+        print_error "Failed to install @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
+        return 1
+    fi
+    if ! command -v qwen-code-webui &>/dev/null; then
+        print_error "qwen-code-webui not on PATH after install"
+        return 1
+    fi
+    # Exact-match verification (plain grep -q would also accept 0.23.30 /
+    # 10.23.3 / any surrounding text): normalize the first output line and
+    # compare as a whole string.
+    local installed_ver
+    installed_ver="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [ "${installed_ver#v}" != "${QWEN_CLI_VERSION}" ]; then
+        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: ${installed_ver:-none})"
+        return 1
+    fi
+    print_success "qwen stack ready: webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION}"
+    return 0
+}
+
+# Install the HOST qwen stack only where docker deployments actually use it:
+# multi-user workspace mode launches qwen-code-webui on the host (the
+# container app calls `sudo openace-webui-launch` through the sudoers rules
+# configured below). Runs AFTER the deploy/upgrade decision — never during
+# pre-config checks. API-only / sandboxed-workspace deployments (multi-user
+# off, no existing host stack) skip Node/npm entirely.
+maybe_install_qwen_stack_host() {
+    if [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
+        && ! command -v qwen-code-webui >/dev/null 2>&1 \
+        && ! command -v qwen >/dev/null 2>&1; then
+        print_info "Multi-user workspace disabled and no existing qwen stack found; skipping host qwen stack installation."
+        return 0
+    fi
+    if ! install_qwen_stack; then
+        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
+        print_error "Fix Node/npm and re-run."
+        exit 1
+    fi
+}
+
+# Host qwen stack installation is handled by install_qwen_stack() above —
+# one gated, pinned path for webui + CLI (PR #3386 review: this used to be
+# two separate unpinned `npm install -g` helpers that accepted any existing
+# binary via `command -v` only, letting Node 20 + EBADENGINE-exit-0 and stale
+# versions through).
 
 # Install the cross-user agent launcher wrapper (Issue #1395).
 # Docker 部署：宿主机执行 install.sh 期间把 scripts/openace-run-as.sh 拷贝到
@@ -830,57 +817,16 @@ configure_sudoers() {
         return 1
     fi
 
-    # Find webui executable
+    # Find webui executable — the pinned host stack must have been installed
+    # by maybe_install_qwen_stack_host() before sudoers configuration. No
+    # unpinned interactive install here (PR #3386 review): a missing binary
+    # now fails closed with the pinned manual recovery command.
     local webui_path=$(find_webui_executable)
     if [ -z "$webui_path" ]; then
-        print_warning "未找到 qwen-code-webui 可执行文件"
-        echo ""
-        echo "请选择:"
-        echo "  1) 协助安装 (通过 npm 自动安装)"
-        echo "  2) 手动安装 (稍后自行安装)"
-        echo ""
-
-        prompt_input "请选择" "1" webui_choice
-
-        case "$webui_choice" in
-            1)
-                install_qwen_code_webui
-                if [ $? -eq 0 ]; then
-                    # Re-check for webui path after installation
-                    webui_path=$(find_webui_executable)
-                    if [ -z "$webui_path" ]; then
-                        print_error "安装成功但仍未找到可执行文件"
-                        print_info "请检查 npm 全局路径是否在 PATH 中"
-                        return 1
-                    fi
-                    # Continue with sudoers configuration
-                else
-                    print_info "安装失败，请手动安装后重新运行此脚本"
-                    print_info "  npm install -g qwen-code-webui"
-                    return 1
-                fi
-                ;;
-            2)
-                print_info "请手动安装 qwen-code-webui:"
-                print_info "  npm install -g qwen-code-webui"
-                print_info ""
-                print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
-                print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-                print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
-
-                if [ "$NON_INTERACTIVE" = false ]; then
-                    prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
-                    if [ "$continue_without_sudoers" != "yes" ]; then
-                        return 1
-                    fi
-                fi
-                return 0
-                ;;
-            *)
-                print_error "无效选择"
-                return 1
-                ;;
-        esac
+        print_error "未找到 qwen-code-webui 可执行文件（多用户模式需要宿主机固定版本栈）"
+        print_info "请先安装并重跑安装脚本:"
+        print_info "  npm install -g qwen-code-webui@${QWEBUI_VERSION} @qwen-code/qwen-code@${QWEN_CLI_VERSION} (需要 Node >= 22)"
+        return 1
     fi
 
     print_success "找到 qwen-code-webui: $webui_path"
@@ -1525,7 +1471,11 @@ install_docker() {
 # Node.js Installation Functions
 # ============================================================================
 
-NODEJS_VERSION="${NODEJS_VERSION:-20}"
+# Version offered when the local image-build path auto-installs Node for the
+# frontend build (frontend/package.json has no engines constraint; Node 20 is
+# EOL since 2026-04, so offer 22). The qwen stack has its own hard gate in
+# ensure_node_22().
+NODEJS_VERSION="${NODEJS_VERSION:-22}"
 MIN_NODE_VERSION="${MIN_NODE_VERSION:-18}"
 
 # Check if Node.js and npm are installed with required version
@@ -2120,28 +2070,13 @@ check_prerequisites() {
     fi
     print_success "Docker daemon 运行中"
 
-    # Check Node.js (optional but recommended for multi-user mode and local build)
-    if ! check_nodejs; then
-        print_warning "Node.js 未安装"
-        print_info "Node.js 用于:"
-        print_info "  - 多用户模式: 安装 qwen-code-webui"
-        print_info "  - 本地构建镜像: 构建前端"
-        prompt_yesno "是否自动安装 Node.js?" "y" install_nodejs_confirm
-        if [ "$install_nodejs_confirm" = "yes" ]; then
-            install_nodejs
-        else
-            print_info "可稍后手动安装: https://nodejs.org/"
-        fi
-    fi
-
-    # Check qwen-code (optional, for workspace functionality)
-    # Only check if workspace is enabled or user wants to use it
-    print_info "检查 qwen-code..."
-    if ! check_qwen_code; then
-        print_warning "qwen-code 检查失败，但不影响基本部署"
-        print_info "如需使用 Workspace 功能，请确保安装 qwen-code"
-    fi
-
+    # Host Node.js / qwen stack: deliberately NOT checked or installed here.
+    # Pre-config checks used to offer an unpinned host install (default "1",
+    # so --non-interactive took it too) before the workspace mode and the
+    # deploy/upgrade decision were even known (PR #3386 review). The host
+    # stack is only consumed by multi-user workspace mode and is installed
+    # pinned AFTER confirmation in the multi-user sections below; local
+    # image builds check Node at their own point of use.
     # Check/load Docker image
     build_docker_image
 }
@@ -2804,6 +2739,9 @@ upgrade_deployment() {
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         print_info "更新 sudoers 配置..."
         stop_webui_systemd_service
+        # Upgrades must also bring an existing host stack to the pinned
+        # versions (fresh install runs the same gate after confirmation).
+        maybe_install_qwen_stack_host
         install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
         install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
         if ! install_git_gh_wrappers; then
@@ -4214,6 +4152,9 @@ fi
 if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
     # Stop existing qwen-code-webui systemd service first
     stop_webui_systemd_service
+    # Host qwen stack (pinned, Node >= 22 gated) BEFORE sudoers: the sudoers
+    # rules reference the host webui binary (fail-closed if missing).
+    maybe_install_qwen_stack_host
     install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
     install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
     if ! install_git_gh_wrappers; then
