@@ -323,22 +323,27 @@ class TestSystemUidSqlHelpers:
             "the active row's recording — it is what the placeholder restores"
         )
 
-    def test_recorded_pin_uids_scoped_and_excluding_self(self, sqlite_conn):
-        """Review on #3390 (⚪): the auto-assign exclusion set — active
-        non-deleted pins only, minus the caller's own row."""
+    def test_recorded_pin_uids_all_states_and_excluding_self(self, sqlite_conn):
+        """Review round 3 (PR #3400 🟠): the auto-assign exclusion set must
+        cover the pins of DEACTIVATED and soft-deleted rows too — those are
+        exactly the uids the entrypoint's nologin placeholders reserve (the
+        #3390 inheritance boundary), and a #3399-shaped sync failure leaves
+        precisely those accounts absent from /etc/passwd while the DB still
+        records their pins. Minus the caller's own row(s)."""
         sqlite_conn.execute(
             "INSERT INTO users (id, username, system_account, system_uid, is_active, deleted_at)"
             " VALUES (5, 'acedave', 'acedave', 1010, 1, NULL)"
         )
         sqlite_conn.commit()
-        # Active non-deleted pins: acebob's row (1009) + acedave (1010);
-        # acebob-1 (1003, deactivated) and acecarol (1004, soft-deleted) are
-        # out of scope; acealice's pin is NULL.
-        assert ws._recorded_pin_uids("acedave") == {1009}, "own row excluded"
-        assert ws._recorded_pin_uids("acebob") == {1010}, (
-            "exclusion is by system_account — acebob2's active row is the " "caller's own"
-        )
-        assert ws._recorded_pin_uids("stranger") == {1009, 1010}
+        # ALL recorded pins regardless of account state: 1009 (active row),
+        # 1003 (deactivated), 1004 (soft-deleted); NULL (acealice) never
+        # enters; the caller's own row (by system_account) is excluded.
+        assert ws._recorded_pin_uids("acedave") == {1009, 1003, 1004}
+        assert ws._recorded_pin_uids("acebob") == {
+            1004,
+            1010,
+        }, "exclusion is by system_account — BOTH acebob rows are the caller's own"
+        assert ws._recorded_pin_uids("stranger") == {1009, 1003, 1004, 1010}
 
 
 # ============================================================================
@@ -872,7 +877,10 @@ class TestEntrypointSyncTextual:
         test_midstage_exception_exits_nonzero); pin the wiring marker."""
         content = open(ENTRYPOINT, encoding="utf-8").read()
         handler = content.index("Error syncing users and projects")
-        content.index("sys.exit(1)", handler)
+        # index() raises when the marker is absent after the handler; the
+        # explicit assert keeps the failure visible and satisfies the
+        # false-positive scanner's no_assertion gate (PR review round 3).
+        assert content.index("sys.exit(1)", handler) > handler
 
 
 class TestSchedulerSyncScopedToActiveUsers:

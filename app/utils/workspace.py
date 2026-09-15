@@ -210,16 +210,24 @@ def record_system_uid(system_account: str, uid: int) -> bool:
 
 
 def _recorded_pin_uids(exclude_account: str) -> set[int] | None:
-    """All uids pinned in ACTIVE, non-deleted user rows (review on #3390 ⚪).
+    """ALL uids recorded in the users table, regardless of account state.
 
     The auto-assign path must treat these as taken even when NO OS account
     in the current container carries them — e.g. the boot sync failed
     (#3399) and the pinned accounts are exactly the ones missing from
     /etc/passwd, so a plain useradd could otherwise land on a recorded pin,
     numerically own that user's directories, and pin the stolen uid to the
-    new account. ``exclude_account`` drops the caller's own row (its pin,
-    if any, was already consumed as the explicit ``-u``). Returns None on
-    read failure so callers can fail soft.
+    new account. Review round 3 (PR #3400): the query deliberately has NO
+    is_active/deleted_at filter — a DEACTIVATED or soft-deleted user's pin
+    is precisely the uid the entrypoint's nologin placeholder reserves, and
+    the inheritance boundary it protects; #3399-shaped sync failures make
+    exactly those accounts absent from /etc/passwd, so they must be in the
+    exclusion set or a new account steals the reserved uid on the app side.
+    (get_recorded_system_uid stays active-scoped: it answers "which uid
+    should THIS account use", where a deactivated row's pin belongs to its
+    placeholder, not to a fresh assignment.) ``exclude_account`` drops the
+    caller's own row (its pin, if any, was already consumed as the explicit
+    ``-u``). Returns None on read failure so callers can fail soft.
     """
     try:
         from app.repositories.database import adapt_sql, get_db_connection
@@ -229,8 +237,7 @@ def _recorded_pin_uids(exclude_account: str) -> set[int] | None:
             cursor.execute(
                 adapt_sql(
                     "SELECT system_uid FROM users "
-                    "WHERE system_uid IS NOT NULL AND deleted_at IS NULL "
-                    "AND is_active = true AND system_account != ?"
+                    "WHERE system_uid IS NOT NULL AND system_account != ?"
                 ),
                 (exclude_account,),
             )
