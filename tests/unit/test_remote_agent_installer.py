@@ -111,7 +111,7 @@ def _strict_bash_probe(tmp_path, node_version: str | None):
     """
     fake_bin = tmp_path / "probe-bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut"):
+    for tool in ("sed", "cut", "grep", "head", "tr"):
         os.symlink(_which(tool), fake_bin / tool)
     if node_version is not None:
         (fake_bin / "node").write_text(f"#!/bin/sh\necho '{node_version}'\n", encoding="utf-8")
@@ -197,7 +197,7 @@ def _run_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "grep"):
+    for tool in ("sed", "cut", "grep", "head", "tr"):
         os.symlink(_which(tool), fake_bin / tool)
     npm_log = tmp_path / "npm.log"
 
@@ -287,7 +287,7 @@ def _run_remote_qwen_stack(
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "grep", "true"):
+    for tool in ("sed", "cut", "grep", "true", "head", "tr"):
         os.symlink(_which(tool), fake_bin / tool)
     npm_log = tmp_path / "npm.log"
     npm_prefix = tmp_path / ("npm-prefix-writable" if prefix_writable else "npm-prefix-ro")
@@ -463,7 +463,7 @@ def test_maybe_install_skips_for_api_only_deployment(tmp_path):
 def test_maybe_install_proceeds_when_workspace_enabled(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "grep"):
+    for tool in ("sed", "cut", "grep", "head", "tr"):
         os.symlink(_which(tool), fake_bin / tool)
     npm_log = tmp_path / "npm.log"
     npm_prefix = tmp_path / "prefix"
@@ -527,59 +527,67 @@ def _agent_qwen_case_body() -> str:
     return match.group(1)
 
 
-def _run_agent_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
+def _run_agent_qwen_case(tmp_path, npm_exit: int, qwen_version: str | None):
     fake_bin = tmp_path / "agent-bin"
     fake_bin.mkdir(parents=True)
+    for tool in ("head", "tr"):
+        os.symlink(_which(tool), fake_bin / tool)
+
+    npm_log = tmp_path / "agent-npm.log"
 
     def shim(name: str, body: str) -> None:
         (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
 
-    shim("npm", f"exit {npm_exit}")
+    shim("npm", f'echo "$@" >> "{npm_log}"; exit {npm_exit}')
     shim("node", "echo 'v22.22.3'")
-    if with_qwen:
-        shim("qwen", "echo '0.23.3'")
+    if qwen_version is not None:
+        shim("qwen", f"echo '{qwen_version}'")
 
     harness = (
         "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
         "log_error() { :; }\nget_node_major() { echo 22; }\n"
+        "QWEN_CLI_VERSION=0.23.3\n"
         "INSTALL_CLI=qwen-code-cli\n"
         'case "$INSTALL_CLI" in\n            qwen-code-cli)\n'
         + _agent_qwen_case_body()
         + "\n                ;;\nesac\n"
         "echo CASE_COMPLETED\n"
     )
-    return subprocess.run(
+    result = subprocess.run(
         ["/bin/bash", "-c", harness],
-        env={"PATH": str(fake_bin)},
+        env={"PATH": str(fake_bin), "NPM_LOG": str(npm_log)},
         text=True,
         capture_output=True,
         check=False,
     )
+    return result, npm_log
 
 
 def test_agent_installer_qwen_npm_failure_is_fatal(tmp_path):
     """PR #3386 review: npm failing for the requested qwen CLI must abort the
     install (the machine config declares cli_tool=qwen-code-cli), not warn
     and register an agent whose default CLI cannot start."""
-    result = _run_agent_qwen_case(tmp_path, npm_exit=1, with_qwen=True)
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=1, qwen_version="0.23.3")
 
     assert result.returncode == 1
     assert "CASE_COMPLETED" not in result.stdout
 
 
 def test_agent_installer_qwen_version_verification_is_fatal(tmp_path):
-    result = _run_agent_qwen_case(tmp_path, npm_exit=0, with_qwen=False)
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version=None)
 
     assert result.returncode == 1
     assert "CASE_COMPLETED" not in result.stdout
 
 
 def test_agent_installer_qwen_happy_path_completes(tmp_path):
-    result = _run_agent_qwen_case(tmp_path, npm_exit=0, with_qwen=True)
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version="0.23.3")
 
     assert result.returncode == 0
     assert "CASE_COMPLETED" in result.stdout
+    # the install must be PINNED, not @latest (PR #3386 review)
+    assert npm_log.read_text(encoding="utf-8").strip() == ("install -g @qwen-code/qwen-code@0.23.3")
 
 
 def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
@@ -596,7 +604,7 @@ def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
     )
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for tool in ("sed", "cut", "grep", "true", "python3"):
+    for tool in ("sed", "cut", "grep", "true", "python3", "head", "tr"):
         os.symlink(_which(tool), fake_bin / tool)
     ssh_log = tmp_path / "ssh.log"
     npm_log = tmp_path / "npm.log"
@@ -633,8 +641,9 @@ def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
 
     assert result.returncode == 0
     ssh_calls = ssh_log.read_text(encoding="utf-8")
-    # flags were read from the remote config ...
-    assert "bash -s" in ssh_calls
+    # flags were read from the remote config (python3 -c one-liner) ...
+    assert "python3 -c" in ssh_calls
+    assert "~/.open-ace/config.json" in ssh_calls
     # ... the stack-probe ran ...
     assert "command -v qwen-code-webui" in ssh_calls
     # ... but the pinned install (bash -s -- <versions>) was never invoked
@@ -731,3 +740,104 @@ def test_ps1_qwen_happy_path_completes(tmp_path):
 
     assert result.returncode == 0
     assert "CASE_COMPLETED" in result.stdout
+
+
+def test_local_upgrade_read_defaults_missing_keys_to_false(tmp_path):
+    """PR #3386 review: the LOCAL upgrade config read must follow the runtime
+    default (WorkspaceConfig false) for missing workspace keys — executed
+    against the exact python snippet shipped in the installer."""
+    script = (
+        REPO_ROOT / "scripts" / "install-central" / "package-method" / "install.sh"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"python3 -c \"import json; c=json\.load\(open\('\$config_file'\)\); "
+        r"print\(c\.get\('workspace', \{\}\)\.get\('enabled', '(\w+)'\)\)\"",
+        script,
+    )
+    assert match is not None, "local workspace read snippet not found"
+    default_value = match.group(1)
+    assert (
+        default_value == "false"
+    ), f"missing-key default is {default_value!r}, must mirror the runtime default 'false'"
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"database": {"url": "sqlite:///x.db"}}', encoding="utf-8")
+    snippet = (
+        f"import json; c=json.load(open('{cfg}')); "
+        "print(c.get('workspace', {}).get('enabled', 'false'))"
+    )
+    result = subprocess.run(["python3", "-c", snippet], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "false"
+
+
+def test_deploy_upgrade_key_missing_remote_config_skips_stack(tmp_path):
+    """Pre-workspace-era remote config (no workspace keys) + no qwen stack:
+    the remote UPGRADE must skip the stack gate (runtime default false)."""
+    home = tmp_path / "remote-home2"
+    (home / ".open-ace").mkdir(parents=True)
+    (home / ".open-ace" / "config.json").write_text(
+        '{"database": {"url": "sqlite://x.db"}}', encoding="utf-8"
+    )
+    result, npm_log, ssh_calls = _run_api_only_remote(tmp_path, home)
+
+    assert result.returncode == 0
+    assert "-- 0.2.43" not in ssh_calls
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+
+
+def _run_api_only_remote(tmp_path, home):
+    fake_bin = tmp_path / "bin2"
+    fake_bin.mkdir(parents=True)
+    for tool in ("sed", "cut", "grep", "true", "python3", "head", "tr"):
+        os.symlink(_which(tool), fake_bin / tool)
+    ssh_log = tmp_path / "ssh2.log"
+    npm_log = tmp_path / "npm2.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("npm", f'echo "$@" >> "{npm_log}"')
+    shim(
+        "ssh",
+        f'echo "$@" >> "{ssh_log}"\nshift\n'
+        'if [ "$1" = "bash" ]; then shift; exec /bin/bash "$@"; fi\n'
+        'exec /bin/sh -c "$1"',
+    )
+    harness = (
+        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
+        "print_error() { :; }\n"
+        "WORKSPACE_ENABLED=true\nWORKSPACE_MULTI_USER_MODE=true\n"
+        + _qwen_stack_functions()
+        + '\nmaybe_install_qwen_stack_remote "u@h"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin), "HOME": str(home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, npm_log, ssh_log.read_text(encoding="utf-8")
+
+
+def test_local_stack_rejects_similar_version_0_23_30(tmp_path):
+    """Exact-match verification: 0.23.30 must NOT satisfy a 0.23.3 pin."""
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version="0.23.30")
+
+    assert result.returncode == 1
+
+
+def test_remote_stack_rejects_similar_version_0_23_30(tmp_path):
+    result, npm_log = _run_remote_qwen_stack(
+        tmp_path, node_version="v22.22.3", qwen_version="0.23.30"
+    )
+
+    assert result.returncode == 1
+
+
+def test_agent_case_rejects_similar_version_0_23_30(tmp_path):
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version="0.23.30")
+
+    assert result.returncode == 1
+    assert "CASE_COMPLETED" not in result.stdout

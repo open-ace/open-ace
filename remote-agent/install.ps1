@@ -212,6 +212,13 @@ if (Test-Path "$InstallDir\requirements.txt") {
     Write-Host "[WARN] requirements.txt not found, skipping" -ForegroundColor Yellow
 }
 
+# Pinned qwen-code CLI version: keep in sync with the control plane's
+# Dockerfile pair (webui 0.2.43 + cli 0.23.3). The Node >= 22 gate and the
+# adapter flags are validated against THIS version; @latest would drift the
+# agent onto unvalidated engines/CLI changes while npm still exits 0 on a
+# mere EBADENGINE warning (PR #3386 review).
+$QwenCliVersion = "0.23.3"
+
 # Step 5: Optionally install CLI tool
 if ($InstallCli) {
     Write-Host "[INFO] Installing CLI tool: $InstallCli..." -ForegroundColor Cyan
@@ -231,7 +238,7 @@ if ($InstallCli) {
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 } else {
-                npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
+                npm install -g "@qwen-code/qwen-code@$QwenCliVersion" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                     # Propagate npm failure (PR #3386 review): the config
                     # declares cli_tool=qwen-code-cli, so a soft warn would
@@ -250,9 +257,10 @@ if ($InstallCli) {
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 }
-                $qwenVersion = & qwen --version 2>$null
-                if ($LASTEXITCODE -ne 0 -or -not $qwenVersion) {
-                    Write-Host "[ERROR] qwen-code-cli installed but 'qwen --version' verification failed." -ForegroundColor Red
+                $qwenVersion = (& qwen --version 2>$null | Select-Object -First 1)
+                if ($LASTEXITCODE -ne 0 -or -not $qwenVersion -or "$qwenVersion".Trim() -ne $QwenCliVersion) {
+                    # Exact-match verification: 0.23.30 etc. must fail
+                    Write-Host "[ERROR] qwen-code-cli version mismatch: expected $QwenCliVersion, got '$qwenVersion'" -ForegroundColor Red
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 }

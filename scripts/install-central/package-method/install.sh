@@ -1761,8 +1761,13 @@ install_qwen_stack() {
         print_error "qwen-code-webui not on PATH after install"
         return 1
     fi
-    if ! qwen --version 2>/dev/null | grep -q "${QWEN_CLI_VERSION}"; then
-        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: $(qwen --version 2>/dev/null || echo none))"
+    # Exact-match verification (plain grep -q would also accept 0.23.30 /
+    # 10.23.3 / any surrounding text — PR #3386 review): normalize the first
+    # output line and compare as a whole string.
+    local installed_ver
+    installed_ver="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [ "${installed_ver#v}" != "${QWEN_CLI_VERSION}" ]; then
+        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: ${installed_ver:-none})"
         return 1
     fi
     print_success "qwen stack ready: webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION}"
@@ -1804,22 +1809,17 @@ maybe_install_qwen_stack_remote() {
     # hold their defaults. Load the flags from the remote config before
     # deciding (PR #3386 review); a missing/unreadable config keeps the
     # defaults (fresh install).
+    # One-liner over ssh (single-quoted remote command, python uses only
+    # double quotes): macOS bash 3.2 fails to parse a heredoc inside $( )
+    # command substitution when the script arrives via `bash -c`, which is
+    # exactly how the installer tests execute these functions.
+    # Semantics: whole config absent (fresh install) -> "missing" (keep this
+    # deployment's params); existing config -> per-key values with the
+    # RUNTIME defaults (WorkspaceConfig false) for missing keys, so
+    # pre-workspace API-only deployments are not forced onto the qwen stack
+    # (PR #3386 review). An unreadable config also falls back to "missing".
     local flags
-    flags="$(ssh "$remote" bash -s <<'REMOTE_WS_FLAGS' 2>/dev/null
-python3 - <<'PY' 2>/dev/null || echo missing
-import json, os
-p = os.path.expanduser("~/.open-ace/config.json")
-if not os.path.exists(p):
-    print("missing")
-else:
-    try:
-        w = json.load(open(p)).get("workspace", {})
-    except Exception:
-        w = {}
-    print(str(w.get("enabled", "true")).lower(), str(w.get("multi_user_mode", "true")).lower())
-PY
-REMOTE_WS_FLAGS
-)"
+    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False)).lower())"' 2>/dev/null || echo missing)"
     if [ "$flags" != "missing" ] && [ -n "$flags" ]; then
         WORKSPACE_ENABLED="${flags%% *}"
         WORKSPACE_MULTI_USER_MODE="${flags##* }"
@@ -1905,7 +1905,8 @@ fi
 "${NPM_CMD[@]}" install -g "qwen-code-webui@${WEBUI_VER}"
 "${NPM_CMD[@]}" install -g "@qwen-code/qwen-code@${CLI_VER}"
 command -v qwen-code-webui >/dev/null 2>&1 || { echo "ERROR: qwen-code-webui not on PATH after install" >&2; exit 1; }
-qwen --version 2>/dev/null | grep -q "${CLI_VER}" || { echo "ERROR: qwen CLI version mismatch on remote (expected ${CLI_VER}, got $(qwen --version 2>/dev/null || echo none))" >&2; exit 1; }
+INSTALLED_VER="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+[ "${INSTALLED_VER#v}" = "${CLI_VER}" ] || { echo "ERROR: qwen CLI version mismatch on remote (expected ${CLI_VER}, got ${INSTALLED_VER:-none})" >&2; exit 1; }
 echo "REMOTE_QWEN_STACK_OK"
 REMOTE_QWEN_SCRIPT
     then
@@ -3856,9 +3857,12 @@ detect_and_load_local_upgrade() {
         # Preserve config path for database configuration reuse
         EXISTING_CONFIG_PATH="$config_file"
 
-        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting)
-        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting).
+        # Python prints True/False (capitalized), but shell expects true/false (lowercase).
+        # Missing keys follow the RUNTIME default (WorkspaceConfig: false) —
+        # a pre-workspace-era API-only deployment must not suddenly require
+        # the qwen stack (PR #3386 review).
+        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [ -n "$enabled" ]; then
             WORKSPACE_ENABLED="$enabled"
             print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
@@ -3866,7 +3870,7 @@ detect_and_load_local_upgrade() {
 
         # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
         # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [ -n "$multi_user" ]; then
             WORKSPACE_MULTI_USER_MODE="$multi_user"
             print_info "Read WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE from existing config"

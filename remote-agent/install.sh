@@ -50,6 +50,12 @@ get_node_major() {
 SERVER_URL=""
 REGISTRATION_TOKEN=""
 MACHINE_NAME=$(hostname)
+# Pinned qwen-code CLI version: keep in sync with the control plane's
+# Dockerfile pair (webui 0.2.43 + cli 0.23.3). The Node >= 22 gate and the
+# adapter flags are validated against THIS version; @latest would drift the
+# agent onto unvalidated engines/CLI changes while npm still exits 0 on a
+# mere EBADENGINE warning (PR #3386 review).
+QWEN_CLI_VERSION="0.23.3"
 INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"
 AGENT_VERSION="1.0.0"
@@ -501,7 +507,7 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     log_warn "Failed to install Homebrew. Please install Node.js manually:"
                     log_warn "  1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
                     log_warn "  2. Install Node.js: brew install node"
-                    log_warn "  3. Install CLI: npm install -g @qwen-code/qwen-code@latest"
+                    log_warn "  3. Install CLI: npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
                 fi
             fi
         elif [ -f /etc/os-release ]; then
@@ -554,13 +560,13 @@ if [[ -n "$INSTALL_CLI" ]]; then
                 *)
                     log_warn "Unsupported OS: $ID. Cannot auto-install Node.js."
                     log_warn "Please install Node.js manually and then run:"
-                    log_warn "  npm install -g @qwen-code/qwen-code@latest"
+                    log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
                     ;;
             esac
         else
             log_warn "Cannot detect OS. Cannot auto-install Node.js."
             log_warn "Please install Node.js manually and then run:"
-            log_warn "  npm install -g @qwen-code/qwen-code@latest"
+            log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
         fi
     fi
 
@@ -584,16 +590,18 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     # below declares cli_tool=qwen-code-cli, so a soft warn
                     # here would register an agent whose default CLI can
                     # never start.
-                    if ! npm install -g @qwen-code/qwen-code@latest; then
+                    if ! npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}"; then
                         log_error "Failed to install qwen-code-cli."
                         log_error "Fix npm/network/permissions and re-run; refusing to register a machine whose default CLI cannot run."
                         exit 1
                     fi
-                    if ! qwen --version >/dev/null 2>&1; then
-                        log_error "qwen-code-cli installed but 'qwen --version' verification failed."
+                    # Exact-match verification (0.23.30 etc. must fail)
+                    installed_qwen_ver="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+                    if [ "${installed_qwen_ver#v}" != "${QWEN_CLI_VERSION}" ]; then
+                        log_error "qwen-code-cli version mismatch: expected ${QWEN_CLI_VERSION}, got ${installed_qwen_ver:-none}"
                         exit 1
                     fi
-                    log_success "qwen-code-cli installed ($(qwen --version 2>/dev/null || echo unknown))"
+                    log_success "qwen-code-cli installed (${installed_qwen_ver})"
                 fi
                 ;;
             claude-code)
@@ -613,7 +621,7 @@ if [[ -n "$INSTALL_CLI" ]]; then
         fi
         log_warn "npm still not available after attempting Node.js installation."
         log_warn "Please install Node.js manually and then run:"
-        log_warn "  npm install -g @qwen-code/qwen-code@latest"
+        log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
     fi
 fi
 
