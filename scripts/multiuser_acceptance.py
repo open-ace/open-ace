@@ -253,12 +253,14 @@ def dump_stack_logs(recorder: Recorder) -> None:
     # 34918312590: header printed, no per-user lines, no error, alice/carol/
     # dave all missing post-recreate)
     try:
+        # single line: python -c needs real newlines, and the quote chain
+        # (python str -> json.dumps -> sh -c) flattens them — semicolons only
         probe = (
-            "import os, psycopg2\n"
-            "conn = psycopg2.connect(os.environ['DATABASE_URL'])\n"
-            "cur = conn.cursor()\n"
-            "cur.execute('SELECT username, system_account, is_active FROM users ORDER BY id')\n"
-            "print('DB ROWS:', cur.fetchall())\n"
+            "import os, psycopg2; "
+            "conn = psycopg2.connect(os.environ['DATABASE_URL']); "
+            "cur = conn.cursor(); "
+            "cur.execute('SELECT username, system_account, is_active FROM users ORDER BY id'); "
+            "print('DB ROWS:', cur.fetchall())"
         )
         proc = compose_exec(
             SERVICE,
