@@ -1371,16 +1371,27 @@ def revoke_shared_project_access(
 
         # 2. Strip group/other bits: dirs 0700 / files 0600 (batched like
         #    setup_permissions_with_depth_limit).
+        # Review on #3396 (finding 7): the timeout must be a BUDGET across
+        # all four subprocesses (2 find + 2 xargs-chmod) — each pass used to
+        # get timeout//2, so a slow project could take 2x the declared
+        # timeout before the overall TimeoutExpired fired. Deadline-based:
+        # each pass gets whatever remains of the budget (at least 1s).
+        # The xargs chmod's return code is checked — a partial strip (xargs
+        # dies mid-batch) used to report success, leaving ex-members with
+        # access to whatever entries survived the failed pass.
+        deadline = operation_start_time + timeout
         for kind, mode in (("d", "0700"), ("f", "0600")):
+            remaining = max(1, int(deadline - time.time()))
             list_result = subprocess.run(
                 ["find", path, "-type", kind],
                 capture_output=True,
                 text=True,
-                timeout=timeout // 2,
+                timeout=remaining,
             )
             if list_result.returncode != 0 or not list_result.stdout.strip():
                 continue
             entries = [e for e in list_result.stdout.strip().split("\n") if e]
+            remaining = max(1, int(deadline - time.time()))
             chmod_process = subprocess.Popen(
                 ["xargs", "-0", "chmod", mode],
                 stdin=subprocess.PIPE,
@@ -1388,7 +1399,20 @@ def revoke_shared_project_access(
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            chmod_process.communicate(input="\0".join(entries), timeout=timeout // 2)
+            try:
+                _, chmod_stderr = chmod_process.communicate(
+                    input="\0".join(entries), timeout=remaining
+                )
+            except subprocess.TimeoutExpired:
+                chmod_process.kill()
+                chmod_process.communicate()
+                raise
+            if chmod_process.returncode != 0:
+                return (
+                    False,
+                    f"chmod {mode} pass failed with rc={chmod_process.returncode}: "
+                    f"{(chmod_stderr or '').strip()}",
+                )
 
         logger.info(f"Revoked shared project access on {path} (owner {owner_system_account})")
 

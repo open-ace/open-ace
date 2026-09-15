@@ -32,6 +32,14 @@ assertions. The approved plan of record is
   reclaims the directory to the creator (chown -R + 0700/0600). Item (d)'s
   OS-layer probes (denials for bob/carol plus positive controls for alice)
   are expected to PASS.
+  - **The `openace-shared-0` pseudo-tenant (#3396 semantics)**: shared
+    projects of NULL-tenant (platform admin) users use group
+    `openace-shared-0`. It is a real OS-level pseudo-tenant, not a
+    placeholder: platform admins share shared-project content among
+    themselves through that group. The read side
+    (`_allowed_roots_for_user` in `fs.py`) hides NULL-tenant shared roots
+    from tenant users, so this sharing is OS-group-only among platform
+    admins. Real tenant ids start at 1, so the pseudo-id 0 never collides.
 - **#3397 (declared deviation)**: a fresh multi-user production deployment
   following DEPLOYMENT.md cannot start (empty DB refused; a bare migration
   leaves no default admin). The script works around it with a one-shot

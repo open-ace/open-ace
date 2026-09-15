@@ -1398,6 +1398,16 @@ def item_d_shared_projects(sc: Scenario) -> None:
         body={"is_shared": False},
     )
     rec.check("d", "alice revokes sharing", status == 200, f"status={status}", response=body)
+    # The reclaim is fail-soft: a 200 with permission_warning means the OS
+    # strip failed and the later EACCES probes would fail for the wrong
+    # diagnosis — assert the warning is absent so it fails HERE, at the API
+    # check, instead.
+    rec.check(
+        "d",
+        "revocation reclaimed OS permissions (no permission_warning)",
+        "permission_warning" not in (body or {}),
+        f"body={body}",
+    )
     status, body, _ = http(
         "GET", "/api/fs/browse", token=r.users["bob"]["token"], params={"path": shared_path}
     )

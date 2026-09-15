@@ -25,6 +25,12 @@
   `openace-shared-<tenant_id>` 2770/660（全局组仅保留命名空间根建目录权），
   撤销时回收为创建者私有（chown -R + 0700/0600）。d 项 OS 层探针（含 bob/
   carol 拒绝与 alice 保留的正反控制）预期 PASS。
+  - **伪租户 `openace-shared-0`（#3396 语义）**：NULL 租户（平台管理员）的共享
+    项目使用组 `openace-shared-0`——它是一个真实的 OS 层伪租户组，不是占位符：
+    平台管理员之间经该组互享共享项目内容。租户用户的读侧
+    （`fs.py` 的 `_allowed_roots_for_user`）不向租户用户展示 NULL 租户的共享根，
+    因此这类共享只存在于 OS 组层（平台管理员之间）；真实租户 id 从 1 开始，
+    不会与 0 冲突。
 
 - 真实 Linux 主机（`linux` + `docker` CLI + compose v2；脚本启动时强制检查）。
 - 足够拉起 3 个 qwen-code-webui 实例的内存（每实例约数百 MB）。

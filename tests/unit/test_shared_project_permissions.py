@@ -448,6 +448,9 @@ class TestRevokeSharedProjectAccess:
                     stdout=f"{tmpdir}\n" if cmd[0] == "find" else "",
                 ),
             )
+            mock_popen.return_value = MagicMock(
+                returncode=0, communicate=MagicMock(return_value=("", ""))
+            )
             success, error = revoke_shared_project_access(tmpdir, "alice")
 
         assert success is True
@@ -457,6 +460,43 @@ class TestRevokeSharedProjectAccess:
         popen_cmds = [c.args[0] for c in mock_popen.call_args_list]
         assert ["xargs", "-0", "chmod", "0700"] in popen_cmds
         assert ["xargs", "-0", "chmod", "0600"] in popen_cmds
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace._is_wrapper_available")
+    @patch("app.utils.workspace.run_as_root_if_needed")
+    @patch("subprocess.run")
+    @patch("subprocess.Popen")
+    def test_partial_chmod_strip_reports_failure(
+        self, mock_popen, mock_run, mock_root, mock_wrapper, mock_docker_mode
+    ):
+        """Review on #3396 (finding 7): the xargs chmod's return code used to
+        be ignored — a partial strip (xargs dies mid-batch) reported success
+        while ex-members kept access to the surviving entries."""
+        mock_docker_mode.return_value = True
+        mock_wrapper.return_value = False
+        mock_root.return_value = MagicMock(returncode=0, stderr="")
+        id_results = {
+            ("id", "-u", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+            ("id", "-g", "alice"): MagicMock(returncode=0, stdout="1500\n", stderr=""),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_run.side_effect = lambda cmd, **kw: id_results.get(
+                tuple(cmd),
+                MagicMock(
+                    returncode=0,
+                    stderr="",
+                    stdout=f"{tmpdir}\n" if cmd[0] == "find" else "",
+                ),
+            )
+            mock_popen.return_value = MagicMock(
+                returncode=123, communicate=MagicMock(return_value=("", "chmod: No such file"))
+            )
+            success, error = revoke_shared_project_access(tmpdir, "alice")
+
+        assert success is False
+        assert "rc=123" in error
+        assert "chmod: No such file" in error
 
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     @patch("app.utils.workspace._is_wrapper_available")
@@ -584,3 +624,66 @@ class TestPermissionTaskAPIEndpoints:
         from app.routes import projects
 
         assert hasattr(projects, "api_cancel_permission_task")
+
+
+class TestSubmitTaskTenantPayload:
+    """Issue #3396 review (finding 5): the async permission path must carry
+    the project's tenant so a future processor chgrps to
+    openace-shared-<tenant_id> instead of the openace-shared-0 pseudo-tenant.
+
+    The queue table has no consumer and no dedicated column, so tenant_id
+    rides in the checkpoint_data JSON payload slot at submit time."""
+
+    def _submit(self, monkeypatch, tmp_path, tenant_id):
+        from app.services.permission_task_service import get_permission_task_service
+
+        service = get_permission_task_service()
+        monkeypatch.setattr(service, "check_queue_saturation", lambda db: (False, 0))
+        monkeypatch.setattr(service, "check_existing_task", lambda db, pid: None)
+        monkeypatch.setattr(
+            "app.services.permission_task_service.estimate_file_count_fast",
+            lambda path: 5000,
+        )
+
+        insert_params: dict = {}
+
+        class _Result:
+            @staticmethod
+            def scalar():
+                return 0
+
+        class _Db:
+            def execute(self, stmt, params=None):
+                sql = str(stmt)
+                if "INSERT INTO permission_tasks" in sql:
+                    insert_params.update(params or {})
+                return _Result()
+
+            def commit(self):
+                return None
+
+            def rollback(self):
+                return None
+
+        success, error_msg, task_info = service.submit_task(
+            _Db(),
+            project_id=101,
+            user_id=7,
+            path=str(tmp_path / "big-proj"),
+            tenant_id=tenant_id,
+        )
+        return success, error_msg, task_info, insert_params
+
+    def test_tenant_id_persisted_in_checkpoint_payload(self, monkeypatch, tmp_path):
+        import json
+
+        success, error_msg, task_info, params = self._submit(monkeypatch, tmp_path, tenant_id=3)
+        assert success, error_msg
+        assert json.loads(params["checkpoint_data"]) == {"tenant_id": 3}
+        assert task_info["tenant_id"] == 3
+
+    def test_absent_tenant_leaves_checkpoint_null(self, monkeypatch, tmp_path):
+        success, error_msg, task_info, params = self._submit(monkeypatch, tmp_path, tenant_id=None)
+        assert success, error_msg
+        assert params["checkpoint_data"] is None
+        assert task_info["tenant_id"] is None

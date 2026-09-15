@@ -400,6 +400,7 @@ def api_create_project():
                     user_id=user_id,
                     path=path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if success and task_info:
@@ -510,6 +511,7 @@ def api_update_project(project_id):
                     user_id=user_id,
                     path=project.path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if not success:
@@ -1125,6 +1127,7 @@ def api_fix_project_permissions(project_id):
             path=project.path,
             priority=PERMISSION_PRIORITY_MANUAL_FIX,  # Higher priority for manual fix
             depth_limit=depth_limit,
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:
