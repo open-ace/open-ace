@@ -175,32 +175,49 @@ class TestTenantSharedGroupSync:
         *,
         user_rows: list[tuple],
         project_rows: list[tuple],
-        existing_groups: dict[str, str],
+        existing_groups: dict[str, str | tuple[str, str]],
+        reclaim_rows: list[tuple] | None = None,
     ) -> list[tuple]:
         """Execute the extracted block under stubs; returns recorded commands.
 
-        *existing_groups* maps an existing project path to the group stat
-        would report for it (missing paths stat-fail, exercising the
-        reconcile's own groupadd path).
+        *existing_groups* maps an existing project path to what ``stat``
+        would report for it — either a bare group name (mode reported as
+        2775, i.e. WRONG, so the reconcile's group+mode fast path does not
+        skip) or a ``(group, mode)`` tuple for exact control (missing paths
+        stat-fail, exercising the reconcile's own groupadd path).
+
+        *reclaim_rows* feeds the third query (the no-longer-shared RECLAIM
+        pass); defaults to none.
         """
         code = TestTenantSharedGroupSync._extract_sync_code()
         (tmp_path / "shared").mkdir(parents=True, exist_ok=True)
-        group_by_abs_path = {}
-        for rel, group in existing_groups.items():
+        group_by_abs_path: dict[str, tuple[str, str]] = {}
+        for rel, reported in existing_groups.items():
             abs_dir = tmp_path / rel
             abs_dir.mkdir(parents=True, exist_ok=True)
-            group_by_abs_path[str(abs_dir)] = group
+            group, mode = reported if isinstance(reported, tuple) else (reported, "2775")
+            group_by_abs_path[str(abs_dir)] = (group, mode)
 
         calls: list[tuple] = []
         executed_sql: list[str] = []
 
         def fake_run(cmd, **_kwargs):
             calls.append(tuple(cmd))
-            if cmd[:3] == ["stat", "-c", "%G"]:
-                group = group_by_abs_path.get(cmd[3])
-                if group is None:
+            if cmd[:3] == ["stat", "-c", "%G %a"]:
+                reported = group_by_abs_path.get(cmd[3])
+                if reported is None:
                     return SimpleNamespace(returncode=1, stdout="", stderr="no such file")
-                return SimpleNamespace(returncode=0, stdout=f"{group}\n", stderr="")
+                return SimpleNamespace(
+                    returncode=0, stdout=f"{reported[0]} {reported[1]}\n", stderr=""
+                )
+            if cmd[:2] == ["stat", "-c"]:
+                # reclaim-pass probe (group only)
+                reported = group_by_abs_path.get(cmd[3])
+                if reported is None:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="no such file")
+                return SimpleNamespace(returncode=0, stdout=f"{reported[0]}\n", stderr="")
+            if cmd[:2] == ["id", "-u"] or cmd[:2] == ["id", "-g"]:
+                return SimpleNamespace(returncode=0, stdout="1042\n", stderr="")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         fake_subprocess = ModuleType("subprocess")
@@ -209,14 +226,23 @@ class TestTenantSharedGroupSync:
         responses = deque(
             [
                 ("FROM users", user_rows),
-                ("FROM projects", project_rows),
+                ("FROM projects WHERE", project_rows),
+                ("FROM projects p", reclaim_rows or []),
             ]
         )
 
         class _Cursor:
             def execute(self, sql):
                 executed_sql.append(" ".join(sql.split()))
-                self._rows = responses.popleft()[1]
+                normalized = " ".join(sql.split())
+                # Match the queued response by SQL fragment: the sync runs
+                # three queries (enrollment, reconcile, reclaim) whose FROM
+                # clauses are textually distinct.
+                for frag, rows in responses:
+                    if frag in normalized:
+                        self._rows = rows
+                        return
+                self._rows = []
 
             def fetchall(self):
                 return self._rows
@@ -304,9 +330,37 @@ class TestTenantSharedGroupSync:
             tmp_path,
             user_rows=[],
             project_rows=[(clean, 1)],
-            existing_groups={"shared/team-proj": "openace-shared-1"},
+            existing_groups={"shared/team-proj": ("openace-shared-1", "2770")},
         )
         assert not any(c[:1] == ("chgrp",) for c in calls), "steady-state boot must not re-chgrp"
+        assert not any(
+            c[:1] == ("find",) and "2770" in c for c in calls
+        ), "steady-state boot must not re-chmod"
+
+    def test_reconcile_reruns_when_mode_wrong_despite_correct_group(self, monkeypatch, tmp_path):
+        """Review on #3396: the fast path used to check the group alone, so a
+        dir chgrp'd correctly but left on a wrong mode (e.g. legacy 2775)
+        was skipped forever and never normalized to 2770."""
+        drifted = str(tmp_path / "shared" / "team-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(drifted, 1)],
+            existing_groups={"shared/team-proj": ("openace-shared-1", "2775")},
+        )
+        assert (
+            "find",
+            drifted,
+            "-type",
+            "d",
+            "-exec",
+            "chmod",
+            "2770",
+            "{}",
+            ";",
+        ) in calls, "wrong mode must be normalized even when the group already matches"
+        assert ("find", drifted, "-type", "f", "-exec", "chmod", "660", "{}", ";") in calls
 
     def test_shared_rows_only_and_base_prefixed_paths_touched(self, monkeypatch, tmp_path):
         sql = self._run_sync(
@@ -330,12 +384,123 @@ class TestTenantSharedGroupSync:
         )
         assert not any("stat" in c[:1] for c in calls), "outside-base paths must not be probed"
 
+    def test_reclaim_pass_reclaims_not_shared_dir_with_tenant_group(self, monkeypatch, tmp_path):
+        """Review on #3396 (finding 4): revocation runs fail-soft AFTER the DB
+        flip, so a timeout/crash leaves the dir 2770 on openace-shared-<t>
+        with is_shared=false forever. The boot sync must re-run the reclaim:
+        chown -R to the creator + dirs 0700 / files 0600."""
+        revoked = str(tmp_path / "shared" / "team-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={"shared/team-proj": "openace-shared-1"},
+            reclaim_rows=[(revoked, "alice-acct", "alice")],
+        )
+        assert ("chown", "-R", "1042:1042", revoked) in calls
+        assert ("find", revoked, "-type", "d", "-exec", "chmod", "0700", "{}", ";") in calls
+        assert ("find", revoked, "-type", "f", "-exec", "chmod", "0600", "{}", ";") in calls
+
+    def test_reclaim_pass_uses_legacy_global_group_owner_too(self, monkeypatch, tmp_path):
+        """A pre-#3396 dir still on the legacy global group with a revoked row
+        must also be reclaimed (same leftover-shared-state class)."""
+        revoked = str(tmp_path / "shared" / "legacy-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={"shared/legacy-proj": "openace-shared"},
+            reclaim_rows=[(revoked, "bob-acct", "bob")],
+        )
+        assert ("chown", "-R", "1042:1042", revoked) in calls
+
+    def test_reclaim_pass_never_touches_active_shared_dirs(self, monkeypatch, tmp_path):
+        """The reclaim query must select only NOT(active AND shared) rows; an
+        active shared project's dir is normalized by the reconcile pass with
+        2770/660 and must NEVER receive a 0700/0600 reclaim."""
+        active = str(tmp_path / "shared" / "live-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(active, 1)],
+            existing_groups={"shared/live-proj": ("openace-shared-1", "2770")},
+            reclaim_rows=[],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls), "active shared dirs must not be chowned"
+        assert not any(
+            "0700" in c or "0600" in c for c in calls if c[:1] == ("find",)
+        ), "active shared dirs must keep 2770/660, never be reclaimed to 0700/0600"
+
+    def test_reclaim_pass_skips_dirs_not_owned_by_shared_groups(self, monkeypatch, tmp_path):
+        """A not-shared row whose dir is on some unrelated group was either
+        already reclaimed by the app-side revoke or never group-shared —
+        the boot pass must not chown it."""
+        private = str(tmp_path / "shared" / "already-private")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={"shared/already-private": "alice-acct"},
+            reclaim_rows=[(private, "alice-acct", "alice")],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls)
+
+    def test_reclaim_pass_reclaims_soft_deleted_shared_row(self, monkeypatch, tmp_path):
+        """Soft delete of a shared project (is_active=false; projects has no
+        deleted_at column) never reclaims at request time — the boot pass
+        must do it."""
+        deleted = str(tmp_path / "shared" / "gone-proj")
+        result = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={"shared/gone-proj": "openace-shared-2"},
+            reclaim_rows=[(deleted, "carol-acct", "carol")],
+        )
+        reclaim_sql = " ".join(result[0][3].split())
+        assert reclaim_sql == (
+            "SELECT p.path, u.system_account, u.username FROM projects p "
+            "LEFT JOIN users u ON p.created_by = u.id "
+            "WHERE NOT (p.is_active = true AND p.is_shared = true)"
+        ), (
+            "the reclaim query is pinned verbatim: the harness routes rows by SQL "
+            "text and cannot execute SQL, so any predicate drift (e.g. an extra "
+            "AND false, or dropping the NOT) must fail HERE rather than silently "
+            "select the wrong rows at boot"
+        )
+        assert ("chown", "-R", "1042:1042", deleted) in result
+        assert ("find", deleted, "-type", "d", "-exec", "chmod", "0700", "{}", ";") in result
+
     def test_block_runs_after_main_user_sync(self):
         """Enrollment must follow the main DB user sync (the accounts it
         usermods are created there); textual ordering by necessity."""
         content = ENTRYPOINT.read_text(encoding="utf-8")
         sync_end = content.index("open-ace-user-sync.log")
         content.index(f"<<'{self.HEREDOC_TAG}'", sync_end)
+
+    def test_sync_pipeline_hardened_like_user_sync(self):
+        """Review on #3396 (finding 1): the old plain `python3 - <<EOF ...
+        | tee LOG || echo WARNING` pipeline could never fire the WARNING —
+        tee's rc=0 masked python's death (no pipefail) and the heredoc's
+        outermost except exited 0 on every error. The invocation must match
+        the #3390 user-sync hardening: scoped pipefail subshell, -u, and a
+        python that exits 1 on failure paths."""
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        start = content.index(f"<<'{self.HEREDOC_TAG}'")
+        line_start = content.rindex("\n", 0, start) + 1
+        line = content[line_start : content.index("\n", start)]
+        assert line.lstrip().startswith(
+            "( set -o pipefail; python3 -u - <<'"
+        ), "the group-sync must run in a pipefail subshell with unbuffered python"
+        assert "2>&1 | tee /app/logs/open-ace-shared-groups.log )" in line
+        assert '|| echo "WARNING' in line, "a nonzero python exit must surface as the WARNING line"
+        code = self._extract_sync_code()
+        assert "sys.exit(1)" in code, "the sync python must exit nonzero on failure paths"
 
 
 class _FakeProc:

@@ -108,7 +108,23 @@ else
 fi
 
 # Validate path prefix
+# Issue #3396 review (finding 8): deployments with a custom WORKSPACE_BASE_DIR
+# (e.g. /data) were rejected here, so EVERY reclaim failed fail-soft forever.
+# The built-in defaults stay; an optional root-owned config may override the
+# array (the Docker entrypoint writes it at boot from the configured base
+# dirs). Sourced late (after arg parsing) so a broken config cannot inject
+# into earlier logic, and only when readable and non-empty.
 ALLOWED_PREFIXES=("/workspace/" "/home/")
+CONF_FILE="/etc/openace/openace-chown.conf"
+if [ -r "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090 # conf is operator/entrypoint-controlled
+    . "$CONF_FILE"
+fi
+if [ ${#ALLOWED_PREFIXES[@]} -eq 0 ]; then
+    echo "ERROR: $CONF_FILE set ALLOWED_PREFIXES to an empty array — refusing to allow everything" >&2
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=reject_empty_prefixes"
+    exit 2
+fi
 PATH_VALID=false
 for prefix in "${ALLOWED_PREFIXES[@]}"; do
     if [[ "$RESOLVED_PATH" == "$prefix"* ]]; then
@@ -118,7 +134,7 @@ for prefix in "${ALLOWED_PREFIXES[@]}"; do
 done
 
 if [ "$PATH_VALID" = false ]; then
-    echo "ERROR: Path '$RESOLVED_PATH' is outside allowed directories (/workspace/*, /home/*)" >&2
+    echo "ERROR: Path '$RESOLVED_PATH' is outside allowed directories (${ALLOWED_PREFIXES[*]})" >&2
     log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} resolved=${RESOLVED_PATH} recursive=${RECURSIVE} result=reject_path"
     exit 2
 fi

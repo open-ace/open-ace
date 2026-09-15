@@ -9,6 +9,7 @@ a failure surfaces as ``permission_warning`` in the 200 response, the
 revocation itself stands.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -201,3 +202,69 @@ def test_share_setup_uses_tenant_group(projects_app, tmp_path):
 
     assert resp.status_code == 200
     assert mock_setup.call_args.kwargs.get("tenant_id") == 1
+
+
+class TestChownWrapperConfigurablePrefixes:
+    """Issue #3396 review (finding 8): ALLOWED_PREFIXES was hardcoded to
+    /workspace + /home, so a deployment with a custom WORKSPACE_BASE_DIR
+    (e.g. /data) had every reclaim rejected by the wrapper — fail-soft,
+    forever. The wrapper must source an optional conf that may redefine the
+    array, and the entrypoint must write that conf at boot from the
+    configured base dirs. Textual tests per the entrypoint-test convention
+    (the wrapper itself needs root to execute)."""
+
+    WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "openace-chown.sh"
+    ENTRYPOINT = Path(__file__).resolve().parents[2] / "docker-entrypoint.sh"
+
+    def test_wrapper_sources_optional_conf_over_defaults(self):
+        content = self.WRAPPER.read_text(encoding="utf-8")
+        assert (
+            'ALLOWED_PREFIXES=("/workspace/" "/home/")' in content
+        ), "built-in defaults must be kept for conf-less environments"
+        conf_line = '. "$CONF_FILE"'
+        assert 'CONF_FILE="/etc/openace/openace-chown.conf"' in content
+        assert conf_line in content, "a readable conf must be sourced"
+        # the empty-array guard: an operator conf must not silently allow all
+        assert "${#ALLOWED_PREFIXES[@]} -eq 0" in content
+
+    def test_entrypoint_writes_conf_from_workspace_base_dirs(self):
+        content = self.ENTRYPOINT.read_text(encoding="utf-8")
+        assert "openace-chown.conf" in content, "entrypoint must write the conf at boot"
+        # derived from WORKSPACE_BASE_DIR (comma list, trimmed, slash-normalized)
+        assert "WORKSPACE_BASE_DIR:-/workspace" in content
+        assert '"/home/"' in content
+
+    def test_generated_conf_shape(self, tmp_path):
+        """Run the entrypoint's generation snippet standalone and check the
+        emitted conf is a valid bash array assignment the wrapper can
+        source."""
+        content = self.ENTRYPOINT.read_text(encoding="utf-8")
+        start = content.index('_chown_conf="$_chown_conf_dir/openace-chown.conf"')
+        # extract just the generation block between { and } > "$_chown_conf"
+        block_start = content.index("{\n", start)
+        block_end = content.index('} > "$_chown_conf"', block_start)
+        gen_block = content[block_start + 2 : block_end]
+        script = f"""
+            _chown_conf="$(mktemp)"
+            WORKSPACE_BASE_DIR=" /data ,/srv/ws "
+            {{ {gen_block} }} > "$_chown_conf"
+            cat "$_chown_conf"
+        """
+        import subprocess
+
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        # simulate the wrapper consuming it
+        check = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'ALLOWED_PREFIXES=("/workspace/" "/home/"); '
+                + proc.stdout.strip()
+                + '; echo "${ALLOWED_PREFIXES[*]}"',
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert check.returncode == 0, check.stderr
+        assert check.stdout.strip() == "/data/ /srv/ws/ /home/"
