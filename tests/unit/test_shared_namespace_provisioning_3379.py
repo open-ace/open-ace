@@ -384,6 +384,27 @@ class TestTenantSharedGroupSync:
         )
         assert not any("stat" in c[:1] for c in calls), "outside-base paths must not be probed"
 
+    def test_enrollment_sql_excludes_soft_deleted_users(self, monkeypatch, tmp_path):
+        """Round-2 review N1: user_repo.delete_user soft-deletes by setting
+        deleted_at ONLY (is_active stays true), so the enrollment query must
+        filter deleted_at IS NULL — the same classification the user-sync
+        above uses. Without it every restart re-enrolls deleted users into
+        openace-shared-<t>, silently undoing the delete-path group drop
+        app/routes/admin.py performs. The harness queues rows by SQL fragment
+        (it cannot evaluate SQL), so the predicate is pinned verbatim like
+        the reclaim SQL below."""
+        sql = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={},
+        )[0]
+        assert sql[1] == (
+            "SELECT system_account, username, tenant_id FROM users "
+            "WHERE is_active = true AND deleted_at IS NULL"
+        ), "soft-deleted users must never be re-enrolled at boot"
+
     def test_reclaim_pass_reclaims_not_shared_dir_with_tenant_group(self, monkeypatch, tmp_path):
         """Review on #3396 (finding 4): revocation runs fail-soft AFTER the DB
         flip, so a timeout/crash leaves the dir 2770 on openace-shared-<t>

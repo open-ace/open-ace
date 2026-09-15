@@ -471,15 +471,23 @@ def api_update_user(user_id):
         return jsonify({"error": "Invalid system_account name"}), 400
     # Issue #3396 review: a minimal tenant move ({"tenant_id": N} with NO
     # system_account field) must still run the enroll/drop bookkeeping below
-    # — derive the DB row's account exactly like the deactivation path does,
-    # otherwise the move silently skips BOTH the new-tenant enrollment and
+    # — otherwise the move silently skips BOTH the new-tenant enrollment and
     # the old-tenant group drop, and the account keeps OS read/write on the
-    # OLD tenant's shared projects forever. Only an absent/None field
-    # derives; an explicit "" keeps its "clear the mapping" meaning for the
-    # DB write below.
-    if system_account is None and current_user:
-        system_account = current_user.get("system_account") or current_user.get("username")
-    if system_account:
+    # OLD tenant's shared projects forever.
+    # Round-2 review N2/N3: the bookkeeping uses its OWN locals and never
+    # leaks back into system_account, which keeps its raw body semantics for
+    # the DB write below (None = unchanged, "" = clear the mapping):
+    #   * enroll_account: the body's account, else the DB row's. NO username
+    #     fallback — provisioning system_account=username for a mapping-less
+    #     row would recreate the auto-backfill multi-user mode removed.
+    #   * the old-group drop below always targets the PRE-WRITE row account:
+    #     on a remap+move that OLD account is the one holding the old-tenant
+    #     membership (the body's new account was never enrolled there), and
+    #     an explicit ""+move must still drop it.
+    enroll_account = system_account
+    if enroll_account is None and current_user:
+        enroll_account = current_user.get("system_account")
+    if enroll_account:
         uid = data.get("system_uid")
         # Review on #3390: log failures like the create/restore call sites —
         # a collision skip or useradd failure here used to vanish silently.
@@ -490,8 +498,8 @@ def api_update_user(user_id):
         effective_tenant_id = (
             new_tenant_id if new_tenant_id is not None else (current_user or {}).get("tenant_id")
         )
-        if not ensure_system_user(system_account, uid=uid, tenant_id=effective_tenant_id):
-            logger.warning(f"Failed to create system user {system_account}, workspace may not work")
+        if not ensure_system_user(enroll_account, uid=uid, tenant_id=effective_tenant_id):
+            logger.warning(f"Failed to create system user {enroll_account}, workspace may not work")
 
     # Handle tenant_id change
     if new_tenant_id is not None:
@@ -522,14 +530,16 @@ def api_update_user(user_id):
                 # read/write on the old tenant's shared projects that the API
                 # layer no longer shows it. (A NULL old tenant maps to the
                 # sentinel 0 above, which is also the pseudo-tenant group id.)
-                if system_account:
+                # Round-2 review N3: drop the PRE-WRITE row account — it is
+                # the one holding the old-tenant membership, not the body's
+                # remap target (never enrolled there) and not "" (clear).
+                old_account = (current_user or {}).get("system_account")
+                if old_account:
                     from app.utils.workspace import remove_user_from_shared_group
 
-                    if not remove_user_from_shared_group(
-                        system_account, tenant_id=current_tenant_id
-                    ):
+                    if not remove_user_from_shared_group(old_account, tenant_id=current_tenant_id):
                         logger.warning(
-                            f"Failed to remove {system_account} from old tenant "
+                            f"Failed to remove {old_account} from old tenant "
                             f"{current_tenant_id} shared group"
                         )
 

@@ -1850,7 +1850,15 @@ try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
 
-    cur.execute('SELECT system_account, username, tenant_id FROM users WHERE is_active = true')
+    # Round-2 review N1: user_repo.delete_user soft-deletes by setting
+    # deleted_at ONLY (is_active stays true), so the enrollment must filter
+    # deleted_at IS NULL — same classification as the user-sync above — or
+    # every restart re-enrolls deleted users into openace-shared-<t>, silently
+    # undoing the delete-path group drop app/routes/admin.py performs.
+    cur.execute(
+        'SELECT system_account, username, tenant_id FROM users '
+        'WHERE is_active = true AND deleted_at IS NULL'
+    )
     for system_account, username, tid in cur.fetchall():
         account = system_account or username
         if account:
@@ -1881,6 +1889,10 @@ try:
     # still group-owned by openace-shared / openace-shared-<t> are leftover
     # shared-state on disk; the app-side revoke ran fail-soft after the DB
     # flip, and soft-DELETE of a shared project never reclaims at all.
+    # Round-2 review N4: this matches every private project (there is no
+    # "historically shared" flag to narrow on), so steady-state cost is one
+    # isdir + one stat per project per boot — linear and cheap; rows that
+    # were never group-shared exit at the stat check below.
     cur.execute(
         'SELECT p.path, u.system_account, u.username FROM projects p '
         'LEFT JOIN users u ON p.created_by = u.id '

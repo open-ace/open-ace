@@ -201,8 +201,10 @@ class TestAdminTenantMoveGroupDrop:
         assert resp.status_code == 200, resp.get_json()
         mock_remove.assert_called_once_with("mover-acct", tenant_id=1)
         mock_ensure.assert_called_once_with("mover-acct", uid=None, tenant_id=2)
-        # the DB write still carries the same account mapping (no rename)
-        assert repo.update_user.call_args.kwargs.get("system_account") == "mover-acct"
+        # Round-2 review N2: the derivation must NOT leak into the DB write —
+        # the body omitted system_account, so update_user gets None
+        # (unchanged) rather than a backfilled account.
+        assert repo.update_user.call_args.kwargs.get("system_account") is None
 
     def test_minimal_move_enrolls_target_tenant_not_pseudo_zero(self, admin_app):
         repo = MagicMock()
@@ -233,3 +235,73 @@ class TestAdminTenantMoveGroupDrop:
 
         assert resp.status_code == 200, resp.get_json()
         assert mock_ensure.call_args.kwargs.get("tenant_id") == 3
+
+    def _move(self, admin_app, row, body):
+        """PUT the body against /api/admin/users/9 with standard stubs;
+        returns (response, repo, mock_ensure, mock_remove)."""
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = dict(row)
+        repo.update_user.return_value = True
+        tenant_service = MagicMock()
+        tenant_service.can_add_user.return_value = True
+        auth_stubs = _auth_stubs()
+        for s in auth_stubs:
+            s.start()
+        try:
+            with (
+                patch("app.routes.admin.user_repo", repo),
+                patch("app.services.tenant_service.TenantService", return_value=tenant_service),
+                _tenant_scope_stub(),
+                patch("app.routes.admin.ensure_system_user") as mock_ensure,
+                patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
+                patch("app.routes.admin.audit_logger"),
+            ):
+                resp = admin_app.test_client().put(
+                    "/api/admin/users/9",
+                    json=body,
+                    headers={"Authorization": "Bearer t"},
+                )
+        finally:
+            for s in auth_stubs:
+                s.stop()
+        return resp, repo, mock_ensure, mock_remove
+
+    def test_move_on_mapping_less_user_never_backfills_username(self, admin_app):
+        """Round-2 review N2: a minimal move on a row with system_account
+        NULL must not provision username as an OS account nor write a
+        system_account mapping back — multi-user mode removed that
+        auto-backfill convention."""
+        row = dict(self.DB_ROW, system_account=None)
+        resp, repo, mock_ensure, mock_remove = self._move(admin_app, row, {"tenant_id": 2})
+        assert resp.status_code == 200, resp.get_json()
+        mock_ensure.assert_not_called()
+        mock_remove.assert_not_called()
+        assert repo.update_user.call_args.kwargs.get("system_account") is None
+
+    def test_clear_mapping_move_still_drops_old_tenant_group(self, admin_app):
+        """Round-2 review N3a: an explicit "" (clear-the-mapping) combined
+        with a tenant move must still drop the OLD account from the old
+        tenant's group — clearing the mapping does not un-share the files
+        the old account can still reach."""
+        resp, repo, mock_ensure, mock_remove = self._move(
+            admin_app, dict(self.DB_ROW), {"system_account": "", "tenant_id": 2}
+        )
+        assert resp.status_code == 200, resp.get_json()
+        mock_remove.assert_called_once_with("mover-acct", tenant_id=1)
+        # "" is honored for the DB write (clear), and there is nothing left
+        # to enroll under.
+        assert repo.update_user.call_args.kwargs.get("system_account") == ""
+        mock_ensure.assert_not_called()
+
+    def test_remap_move_drops_OLD_account_not_the_new_one(self, admin_app):
+        """Round-2 review N3b: remap + move in one request must drop the
+        PRE-WRITE row account from the old tenant's group — the body's new
+        account was never a member there — while enrolling the new account
+        for the target tenant."""
+        resp, repo, mock_ensure, mock_remove = self._move(
+            admin_app, dict(self.DB_ROW), {"system_account": "new-acct", "tenant_id": 2}
+        )
+        assert resp.status_code == 200, resp.get_json()
+        mock_remove.assert_called_once_with("mover-acct", tenant_id=1)
+        mock_ensure.assert_called_once_with("new-acct", uid=None, tenant_id=2)
+        assert repo.update_user.call_args.kwargs.get("system_account") == "new-acct"
