@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -235,6 +236,76 @@ def compose_down_volumes() -> None:
     compose("down", "-v", "--remove-orphans", timeout=300)
 
 
+# Start anchors for the entrypoint's user-sync python block, tried in order:
+# the post-#3400 pipefail shape first, then the legacy plain invocation. Both
+# shapes end at the same '" 2>&1 | tee' anchor.
+_SYNC_PY_ANCHORS = (
+    '( set -o pipefail; python3 -u -c "',
+    'python3 -c "',
+)
+
+
+def _extract_sync_python(entrypoint: str) -> str:
+    """Verbatim user-sync python from an entrypoint text, tolerant of BOTH
+    invocation shapes (review finding: hard-coded anchors broke with #3400's
+    pipefail rewrite — precisely when the forensics is most needed).
+
+    The block lives inside a double-quoted shell string: unescape what bash
+    would — '\\\\' FIRST (a later rule must not eat the backslash of an
+    earlier one), then \\", \\$, \\` — so the extracted python compiles."""
+    sync_at = entrypoint.index("Syncing workspace users")
+    for anchor in _SYNC_PY_ANCHORS:
+        try:
+            py_start = entrypoint.index(anchor, sync_at)
+        except ValueError:
+            continue
+        py_start = entrypoint.index("\n", py_start) + 1
+        py_end = entrypoint.index('" 2>&1 | tee', py_start)
+        sync_py = entrypoint[py_start:py_end]
+        for esc, raw in (("\\\\", "\\"), ("\\$", "$"), ("\\`", "`"), ('\\"', '"')):
+            sync_py = sync_py.replace(esc, raw)
+        return sync_py
+    raise ValueError(
+        "no known user-sync python anchor after 'Syncing workspace users' "
+        f"(tried: {' or '.join(_SYNC_PY_ANCHORS)})"
+    )
+
+
+def _entrypoint_text_for_sync_rerun() -> str:
+    """The entrypoint text to extract the sync python from — the CONTAINER'S
+    OWN copy via compose cp when fetchable (fidelity: the file that actually
+    ran, not whatever the repo checkout happens to contain), else the repo
+    checkout (best effort — the container may already be gone)."""
+    docker = shutil.which("docker") or "docker"
+    local = RECORD_DIR / "container-docker-entrypoint.sh"
+    try:
+        RECORD_DIR.mkdir(parents=True, exist_ok=True)
+        local.unlink(missing_ok=True)  # never reuse a stale copy from an earlier run
+        proc = run(
+            [
+                docker,
+                "compose",
+                "-p",
+                MULTI_USER_PROJECT,
+                "-f",
+                COMPOSE_FILES[0],
+                "-f",
+                COMPOSE_FILES[1],
+                "cp",
+                f"{SERVICE}:/usr/local/bin/docker-entrypoint.sh",
+                str(local),
+            ],
+            cwd=REPO_ROOT,
+            timeout=60,
+            check=False,
+        )
+        if proc.returncode == 0 and local.stat().st_size:
+            return local.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 - fall back to the repo checkout below
+        pass
+    return (REPO_ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
+
+
 def dump_stack_logs(recorder: Recorder) -> None:
     """On failure, keep compose logs inside the record directory (CI
     artifact). Both projects are dumped — item h runs its own single-user
@@ -248,13 +319,19 @@ def dump_stack_logs(recorder: Recorder) -> None:
         except Exception as exc:  # noqa: BLE001 - best effort during failure handling
             recorder.note(f"{name} dump failed: {exc}")
     # entrypoint user-sync forensics: the sync's own stdout/stderr is tee'd
-    # to /app/logs/open-ance-user-sync.log inside the container — compose logs
+    # to /app/logs/open-ace-user-sync.log inside the container — compose logs
     # alone cannot explain a sync that creates zero users (run 34917224776 /
     # 34918312590: header printed, no per-user lines, no error, alice/carol/
     # dave all missing post-recreate)
+    forensics_path = RECORD_DIR / "user-sync-forensics.txt"
+    # parts 1+2: sync log cat + getent passwd + DB probe. Written to the file
+    # IMMEDIATELY (review finding): part 3 below extracts the sync python via
+    # entrypoint anchors that DRIFT as the entrypoint evolves (#3400 rewrote
+    # the invocation) — an anchor miss must never discard evidence already in
+    # hand, which is exactly when the forensics is most needed.
     try:
         # single line: python -c needs real newlines, and the quote chain
-        # (python str -> json.dumps -> sh -c) flattens them — semicolons only
+        # (python str -> sh -c) flattens them — semicolons only
         probe = (
             "import os, psycopg2; "
             "conn = psycopg2.connect(os.environ['DATABASE_URL']); "
@@ -267,57 +344,55 @@ def dump_stack_logs(recorder: Recorder) -> None:
             "cat /app/logs/open-ace-user-sync.log; "
             "echo ---PASSWD---; getent passwd; "
             "echo ---DBPROBE---; "
-            f"DATABASE_URL_PRESENT=${{DATABASE_URL:+yes}} python3 -c {json.dumps(probe)}",
+            # presence ONLY — never the value itself (secret hygiene)
+            'echo "DATABASE_URL_PRESENT=${DATABASE_URL:+yes}"; ' f"python3 -c {shlex.quote(probe)}",
             timeout=60,
             check=False,
         )
-        # part 3: rerun the ENTRYPOINT'S OWN sync python verbatim inside the
-        # recreated container (extracted from the repo's docker-entrypoint.sh,
-        # copied in via compose cp) — separates "the sync code fails in this
-        # container" from "the entrypoint context never reaches/runs it"
-        entrypoint = (REPO_ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
-        py_start = entrypoint.index('python3 -c "\n', entrypoint.index("Syncing workspace users"))
-        py_start = entrypoint.index("\n", py_start) + 1
-        py_end = entrypoint.index('" 2>&1 | tee', py_start)
-        sync_py = entrypoint[py_start:py_end]
-        # the block lives inside a double-quoted shell string: unescape what
-        # bash would (\", \$, \`) so the extracted python compiles as-is
-        for esc, raw in (("\\$", "$"), ("\\`", "`"), ('\\"', '"')):
-            sync_py = sync_py.replace(esc, raw)
+        forensics_path.write_text(
+            proc.stdout + "\n---probe stderr---\n" + proc.stderr, encoding="utf-8"
+        )
+    except Exception as exc:  # noqa: BLE001 - best effort during failure handling
+        recorder.note(f"user-sync forensics parts 1+2 (log/passwd/DB probe) failed: {exc}")
+        return
+    # part 3: rerun the ENTRYPOINT'S OWN sync python verbatim inside the
+    # recreated container (copied in via compose cp) — separates "the sync
+    # code fails in this container" from "the entrypoint context never
+    # reaches/runs it". Its OWN try: on any failure (anchor drift, cp, rerun)
+    # a short skip note is APPENDED — parts 1+2 stay in the file.
+    try:
+        entrypoint = _entrypoint_text_for_sync_rerun()
+        sync_py = _extract_sync_python(entrypoint)
         probe_path = RECORD_DIR / "sync-rerun.py"
         probe_path.write_text(sync_py, encoding="utf-8")
-        rerun = ""
-        try:
-            docker = shutil.which("docker")
-            run(
-                [
-                    docker,
-                    "compose",
-                    "-p",
-                    MULTI_USER_PROJECT,
-                    "-f",
-                    COMPOSE_FILES[0],
-                    "-f",
-                    COMPOSE_FILES[1],
-                    "cp",
-                    str(probe_path),
-                    f"{SERVICE}:/tmp/sync-rerun.py",
-                ],
-                cwd=REPO_ROOT,
-                timeout=60,
-                check=False,
-            )
-            rerun = compose_exec(
-                SERVICE, "python3 /tmp/sync-rerun.py; echo RERUN_RC=$?", timeout=120, check=False
-            ).stdout
-        except Exception as exc:  # noqa: BLE001 - best effort
-            rerun = f"rerun failed: {exc}"
-        (RECORD_DIR / "user-sync-forensics.txt").write_text(
-            proc.stdout + "\n---probe stderr---\n" + proc.stderr + "\n---sync rerun---\n" + rerun,
-            encoding="utf-8",
+        docker = shutil.which("docker") or "docker"
+        run(
+            [
+                docker,
+                "compose",
+                "-p",
+                MULTI_USER_PROJECT,
+                "-f",
+                COMPOSE_FILES[0],
+                "-f",
+                COMPOSE_FILES[1],
+                "cp",
+                str(probe_path),
+                f"{SERVICE}:/tmp/sync-rerun.py",
+            ],
+            cwd=REPO_ROOT,
+            timeout=60,
+            check=False,
         )
-    except Exception as exc:  # noqa: BLE001 - best effort
-        recorder.note(f"user-sync forensics dump failed: {exc}")
+        rerun = compose_exec(
+            SERVICE, "python3 /tmp/sync-rerun.py; echo RERUN_RC=$?", timeout=120, check=False
+        ).stdout
+        with forensics_path.open("a", encoding="utf-8") as fh:
+            fh.write("\n---sync rerun---\n" + rerun)
+    except Exception as exc:  # noqa: BLE001 - best effort; parts 1+2 already saved
+        with forensics_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n---sync rerun---\npart-3 skipped: {exc}\n")
+        recorder.note(f"user-sync forensics part 3 (sync rerun) skipped: {exc}")
 
 
 # ── config: two-phase generate-then-merge (review round 3, 6725) ─────────
@@ -682,7 +757,7 @@ def psql(sql: str) -> subprocess.CompletedProcess:
     in the handbook instead)."""
     return compose_exec(
         "postgres",
-        f"psql -U ace -d ace -v ON_ERROR_STOP=1 -c {json.dumps(sql)}",
+        f"psql -U ace -d ace -v ON_ERROR_STOP=1 -c {shlex.quote(sql)}",
         timeout=60,
     )
 
@@ -993,13 +1068,18 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
     # review 7374: on the sudo-launch path the proxy token reaches the webui
     # ONLY as the inlined OPENAI_API_KEY (popen_env=None — the parent env has
     # no OPENACE_PROXY_TOKEN for sudo env_keep to preserve). Read it there.
-    try:
-        envs = {name: webui_env_of(ports[name], name) for name in ("alice", "bob")}
-    except AcceptanceError as exc:
-        # a webui that exits right after launch is a FINDING (recorded), not a
-        # reason to abort the checklist — the remaining items still run
-        rec.check("a", "webui environments readable", False, str(exc)[:300])
-        return
+    # Each user's env is probed in its OWN try (review finding): the previous
+    # single dict-comprehension dropped the OTHER user's would-be rows when
+    # one read failed, and the early return skipped the homes-listing
+    # evidence below. A webui that exits right after launch is a FINDING
+    # (recorded), not a reason to abort the checklist — the remaining items
+    # still run.
+    envs: dict[str, dict[str, str]] = {}
+    for name in ("alice", "bob"):
+        try:
+            envs[name] = webui_env_of(ports[name], name)
+        except (AcceptanceError, subprocess.TimeoutExpired) as exc:
+            rec.check("a", f"{name} webui environment readable", False, str(exc)[:300])
     for name, env in envs.items():
         rec.check(
             "a",
@@ -1014,15 +1094,16 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
             not dynamic_leak,
             f"leaked={dynamic_leak}",
         )
-    rec.check(
-        "a",
-        "alice/bob proxy tokens differ",
-        bool(envs["alice"].get("OPENAI_API_KEY"))
-        and envs["alice"]["OPENAI_API_KEY"] != envs["bob"].get("OPENAI_API_KEY"),
-    )
+    if len(envs) == 2:
+        rec.check(
+            "a",
+            "alice/bob proxy tokens differ",
+            bool(envs["alice"].get("OPENAI_API_KEY"))
+            and envs["alice"]["OPENAI_API_KEY"] != envs["bob"].get("OPENAI_API_KEY"),
+        )
     # app-side note (7374): OPENACE_PROXY_TOKEN is NOT exported on the sudo
     # path — recorded, not asserted (would be a product change, follow-up)
-    if all("OPENACE_PROXY_TOKEN" not in envs[name] for name in ("alice", "bob")):
+    if envs and all("OPENACE_PROXY_TOKEN" not in env for env in envs.values()):
         recorder_note = (
             "OPENACE_PROXY_TOKEN absent from webui env (sudo-launch inlines only the "
             "known key set); the proxy token reaches the webui as OPENAI_API_KEY"
@@ -1030,6 +1111,7 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
         rec.note(recorder_note)
     # History roots are per-account by construction (0700 homes); record the
     # materialized layout for the manual browser-side screenshot review.
+    # Recorded on EVERY path — an env-read failure above must not drop it.
     listing = compose_exec(SERVICE, "ls -la /home/alice /home/bob", timeout=15).stdout
     rec.check(
         "a",
@@ -1407,16 +1489,24 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
         "GET", "/api/workspace/user-url", token=bob["token"]
     )[1].get("token")
     # review 7374: the proxy token reaches the webui as OPENAI_API_KEY
-    # (sudo-launch inlines the known key set only)
-    bob_proxy_token = webui_env_of(bob_port, "bob").get("OPENAI_API_KEY", "")
-    # F2/7374: a missing proxy token must FAIL the record, not silently skip
-    # the llm-proxy revocation assertion below
-    rec.check(
-        "f",
-        "bob proxy token captured pre-deactivation",
-        bool(bob_proxy_token),
-        "no OPENAI_API_KEY proxy token in bob's webui env — uid-filtered process match failed?",
-    )
+    # (sudo-launch inlines the known key set only). Tolerant read, same shape
+    # as item a: an unreadable env is a recorded FAIL for THIS assertion — the
+    # token-dependent llm-proxy revocation sub-assertion below is skipped,
+    # and the item (and g/h/i after it) continue instead of aborting the run.
+    try:
+        bob_proxy_token = webui_env_of(bob_port, "bob").get("OPENAI_API_KEY", "")
+    except (AcceptanceError, subprocess.TimeoutExpired) as exc:
+        bob_proxy_token = ""
+        rec.check("f", "bob proxy token captured pre-deactivation", False, str(exc)[:300])
+    else:
+        # F2/7374: a missing proxy token must FAIL the record, not silently skip
+        # the llm-proxy revocation assertion below
+        rec.check(
+            "f",
+            "bob proxy token captured pre-deactivation",
+            bool(bob_proxy_token),
+            "no OPENAI_API_KEY proxy token in bob's webui env — uid-filtered process match failed?",
+        )
 
     # deactivation (PR-A): sessions revoked, URL token refused, workspace
     # stopped asynchronously, proxy token torn down
