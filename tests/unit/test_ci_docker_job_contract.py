@@ -137,3 +137,80 @@ def test_docker_sandbox_blocks_the_pr_gate():
     assert '"SANDBOX"' in gate_step.get(
         "run", ""
     ), "gate must validate the sandbox result as required"
+
+
+def test_qwen_stack_pins_are_consistent_across_all_sites():
+    """Upgrade guard (PR #3386): the webui/CLI pair is pinned at FIVE sites
+    (two Dockerfiles, package install.sh, remote-agent install.sh/.ps1).
+    An upgrade that misses any site ships mixed versions. This contract
+    fails with the per-site inventory the moment the pins disagree, so an
+    upgrade is one commit that touches every site CI points at.
+    """
+    repo = REPO_ROOT
+    webui_sites = {
+        "Dockerfile": (repo / "Dockerfile").read_text(encoding="utf-8"),
+        "scripts/docker/webui-sandbox.Dockerfile": (
+            repo / "scripts" / "docker" / "webui-sandbox.Dockerfile"
+        ).read_text(encoding="utf-8"),
+    }
+    cli_sites = dict(webui_sites)
+    cli_sites.update(
+        {
+            "scripts/install-central/package-method/install.sh": (
+                repo / "scripts" / "install-central" / "package-method" / "install.sh"
+            ).read_text(encoding="utf-8"),
+            "remote-agent/install.sh": (repo / "remote-agent" / "install.sh").read_text(
+                encoding="utf-8"
+            ),
+            "remote-agent/install.ps1": (repo / "remote-agent" / "install.ps1").read_text(
+                encoding="utf-8"
+            ),
+        }
+    )
+
+    def pins(sites, pattern):
+        found = {}
+        for name, text in sites.items():
+            match = re.search(pattern, text, re.MULTILINE)
+            assert match is not None, f"{name}: pin not found via {pattern!r}"
+            found[name] = match.group(1)
+        return found
+
+    webui = pins(
+        webui_sites,
+        r"npm install -g(?: --prefix /usr)? qwen-code-webui@([0-9.]+)",
+    )
+    webui["scripts/install-central/package-method/install.sh (QWEBUI_VERSION)"] = pins(
+        {
+            "scripts/install-central/package-method/install.sh": cli_sites[
+                "scripts/install-central/package-method/install.sh"
+            ]
+        },
+        r'^QWEBUI_VERSION="([0-9.]+)"',
+    )["scripts/install-central/package-method/install.sh"]
+
+    cli = {}
+    for name in ("Dockerfile", "scripts/docker/webui-sandbox.Dockerfile"):
+        cli[name] = pins(
+            {name: cli_sites[name]},
+            r"@qwen-code/qwen-code@([0-9.]+)",
+        )[name]
+    cli["scripts/install-central/package-method/install.sh (QWEN_CLI_VERSION)"] = pins(
+        {
+            "scripts/install-central/package-method/install.sh": cli_sites[
+                "scripts/install-central/package-method/install.sh"
+            ]
+        },
+        r'^QWEN_CLI_VERSION="([0-9.]+)"',
+    )["scripts/install-central/package-method/install.sh"]
+    cli["remote-agent/install.sh (QWEN_CLI_VERSION)"] = pins(
+        {"remote-agent/install.sh": cli_sites["remote-agent/install.sh"]},
+        r'^QWEN_CLI_VERSION="([0-9.]+)"',
+    )["remote-agent/install.sh"]
+    cli["remote-agent/install.ps1 ($QwenCliVersion)"] = pins(
+        {"remote-agent/install.ps1": cli_sites["remote-agent/install.ps1"]},
+        r"^\$QwenCliVersion = \"([0-9.]+)\"",
+    )["remote-agent/install.ps1"]
+
+    assert len(set(webui.values())) == 1, f"webui pins disagree: {webui}"
+    assert len(set(cli.values())) == 1, f"CLI pins disagree: {cli}"

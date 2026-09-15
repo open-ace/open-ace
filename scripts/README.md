@@ -50,3 +50,38 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 2. 长期运维入口优先挂到 `manage.py` 子命令，而不是新增顶层文件。
 3. 确需新增顶层脚本时：自带 docstring 说明用途与调用方；若是 CI 门禁，
    同步登记 `ci/suites.json`；若是安全/应急工具，在 `docs/` 对应文档留引用。
+
+## 升级 qwen 栈（qwen-code-webui + @qwen-code/qwen-code）runbook
+
+两个包按**经验证的一对**固定版本分发（不追 `@latest`：安装脚本里的
+Node>=22 门与 adapter 启动参数只对 pin 过的组合验证过，而 npm 对
+engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**五处**，
+`tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites`
+锁定它们必须一致——升级时改漏任何一处 CI 会以"各站点版本清单"报错。
+
+升级步骤：
+
+1. **改五处 pin**（同一 commit）：
+   - `Dockerfile`（`npm install -g qwen-code-webui@X @qwen-code/qwen-code@Y`）
+   - `scripts/docker/webui-sandbox.Dockerfile`（同一对）
+   - `scripts/install-central/package-method/install.sh`（`QWEBUI_VERSION` / `QWEN_CLI_VERSION`）
+   - `remote-agent/install.sh`（`QWEN_CLI_VERSION`）
+   - `remote-agent/install.ps1`（`$QwenCliVersion`）
+2. **兼容性验证**（对照新版本源码/产物逐项核实，参考 PR #3386 的先例）：
+   - 会话存储布局 `~/.qwen/projects/<id>/chats/<sessionId>.jsonl` 是否不变
+     （`fetch_qwen.py` 与 webui histories 依赖）
+   - remote-agent 使用的 6 个 flag：`--auth-type openai`、
+     `--input-format/--output-format stream-json`、`--channel=SDK`、
+     `--resume`、`--approval-mode`（含取值枚举——0.15→0.20 期间曾新增
+     `auto`，`suggest` 从来不是合法值）
+   - `OPENAI_API_KEY`/`OPENAI_BASE_URL` 代理约定
+   - `engines.node`：若提高，同步所有 Node 版本门（镜像 NodeSource、
+     安装脚本 `ensure_node_22`/版本门、CI 契约）
+   - webui dist 行为：此前 5 个 bundle patch 对应的上游修复
+     （histories/navparams/permission/vscode-folder/local-permission）
+     是否仍然存在
+   - 沙箱基础镜像账户布局（node 官方镜像 uid/gid 1000）
+3. **同步测试期望**：`tests/unit/test_remote_agent_installer.py` 的固定
+   版本断言、`test_qwen_adapter_approval_mode.py` 的合法枚举。
+4. **CI 兜底**：`docker-sandbox` job 每个 PR 构建沙箱镜像（PR Gate
+   required）；`docker` job 在 main push 构建完整生产镜像。
