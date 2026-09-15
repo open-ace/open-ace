@@ -35,7 +35,7 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 - `open-ace.service`、`openace-scheduler.service` — systemd 单元
 - sudoers 家族：`generate-sudoers.sh`、`upgrade-sudoers-security.sh`、`openace-{cat,chown,mkdir,rm,restore-sudoers,useradd,write-as,webui-launch}.sh`、`openace-{gh,git}.py`
 - 发布：`release.sh`、`gen_requirements_lock.sh`、`generate_changelog.py`
-- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
+- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`（仅覆盖 3 个旧存储，**不得**用作密钥轮换——轮换走 `rotate_sso_encryption.py` 全存储原子路径）、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
 
 ### 4. 应急工具（低频但关键，勿当死代码清理）
 
@@ -55,8 +55,10 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 
 两个包按**经验证的一对**固定版本分发（不追 `@latest`：安装脚本里的
 Node>=22 门与 adapter 启动参数只对 pin 过的组合验证过，而 npm 对
-engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**八处**（另有三类文档指引同步：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
-`docs/{cn,en}/DEPLOYMENT.md`、`scripts/install-central/*/README.md`），
+engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**七处**（另有三类文档指引同步：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
+`docs/{cn,en}/DEPLOYMENT.md`、`scripts/install-central/*/README.md`；
+docker-method 不设宿主机 pin——其 qwen 栈完全由镜像内 `Dockerfile` 的
+pin 提供），
 `tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites`
 锁定它们必须一致，且全仓扫描不允许出现未带 `@版本号`（或指向上述常量的
 `${..._VERSION}` 变体）的 qwen 栈 npm install 条目——升级时改漏任何
@@ -64,12 +66,11 @@ engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**八处**�
 
 升级步骤：
 
-1. **改八处 pin**（同一 commit）：
-   - `Dockerfile`（webui/CLI 固定版本对写在同一条安装命令里）
+1. **改七处 pin**（同一 commit）：
+   - `Dockerfile`（webui/CLI 固定版本对写在同一条安装命令里；同时覆盖
+     docker-method 部署的镜像内栈）
    - `scripts/docker/webui-sandbox.Dockerfile`（同一对）
    - `scripts/install-central/package-method/install.sh`（`QWEBUI_VERSION` / `QWEN_CLI_VERSION`）
-   - `scripts/install-central/docker-method/install.sh`（宿主机多用户工作区栈，
-     同一对常量；非多用户部署不触碰宿主机栈）
    - `remote-agent/install.sh`（`QWEN_CLI_VERSION`）
    - `remote-agent/install.ps1`（`$QwenCliVersion`）
    - `remote-agent/terminal_menu.py`（`install_cmd`）

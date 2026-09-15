@@ -185,22 +185,36 @@ def _qwen_stack_functions() -> str:
     ).read_text(encoding="utf-8")
     start = script.index("QWEBUI_VERSION=")
     end = script.index("create_webui_symlinks() {")
-    return script[start:end]
+    # find_webui_executable lives after the marker; include it verbatim — the
+    # webui verification must resolve with the same resolver the runtime uses
+    fn = script[script.index("find_webui_executable() {") :]
+    fn = fn[: fn.index("\n}\n") + 3]
+    return script[start:end] + "\n" + fn
 
 
-def _run_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None):
+def _run_qwen_stack(
+    tmp_path,
+    node_version: str | None,
+    qwen_version: str | None,
+    *,
+    webui_version: str | None = "0.2.43",
+    shadow_webui_version: str | None = None,
+):
     """Execute install_qwen_stack() from the installer under a fake PATH.
 
-    npm is a recorder; node/qwen/qwen-code-webui are shims. No dnf/yum/apt on
-    PATH, so a Node upgrade can never succeed in the sandbox — exactly the
-    "npm present, Node 20, webui missing" host the PR #3386 review found
-    bypassing the gate.
+    npm is a recorder that models a real install: installing either pinned
+    package rewrites the version the corresponding shim reports, so a stale
+    CLI/webui is upgraded by the pinned install — unless a shadowing binary
+    (e.g. an old /usr/local/bin entry ahead of npm's prefix) keeps serving
+    the old version, which the exact-match verification must catch. No
+    dnf/yum/apt on PATH, so a Node upgrade can never succeed in the sandbox.
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "grep", "head", "tr"):
+    for tool in ("sed", "cut", "grep", "head", "tr", "cat"):
         os.symlink(_which(tool), fake_bin / tool)
     npm_log = tmp_path / "npm.log"
+    webui_ver_file = tmp_path / "webui.ver"
 
     def shim(name: str, body: str) -> None:
         (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
@@ -208,10 +222,27 @@ def _run_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None
 
     if node_version is not None:
         shim("node", f"echo '{node_version}'")
-    shim("npm", f'echo "$@" >> "{npm_log}"')
+    shim(
+        "npm",
+        f'echo "$@" >> "{npm_log}"\n'
+        f'case "$*" in *"qwen-code-webui@"*) echo "$@" | sed "s/.*qwen-code-webui@//" > "{webui_ver_file}";; esac\n',
+    )
     if qwen_version is not None:
         shim("qwen", f"echo '{qwen_version}'")
-    shim("qwen-code-webui", "exit 0")
+    if webui_version is not None:
+        webui_ver_file.write_text(webui_version, encoding="utf-8")
+        shim("qwen-code-webui", f'cat "{webui_ver_file}"')
+    if shadow_webui_version is not None:
+        # A stale binary at a find_webui_executable candidate location
+        # (checked BEFORE PATH): npm's install rewrites the PATH-side
+        # version file, but the shadow keeps serving its old version.
+        shadow_ver_file = tmp_path / "shadow.ver"
+        shadow_ver_file.write_text(shadow_webui_version, encoding="utf-8")
+        local_bin = tmp_path / ".local" / "bin"
+        local_bin.mkdir(parents=True, exist_ok=True)
+        shadow = local_bin / "qwen-code-webui"
+        shadow.write_text(f'#!/bin/sh\ncat "{shadow_ver_file}"\n', encoding="utf-8")
+        shadow.chmod(0o755)
 
     harness = (
         "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
@@ -220,7 +251,7 @@ def _run_qwen_stack(tmp_path, node_version: str | None, qwen_version: str | None
     return (
         subprocess.run(
             ["/bin/bash", "-c", harness],
-            env={"PATH": str(fake_bin), "NPM_LOG": str(npm_log)},
+            env={"PATH": str(fake_bin), "HOME": str(tmp_path), "NPM_LOG": str(npm_log)},
             text=True,
             capture_output=True,
             check=False,
@@ -258,6 +289,22 @@ def test_qwen_stack_verifies_installed_cli_version(tmp_path):
     assert result.returncode == 1
 
 
+def test_qwen_stack_verifies_webui_version_at_selected_executable(tmp_path):
+    """P2 (PR #3386 R15 review): the version contract is the webui+CLI PAIR.
+    A stale qwen-code-webui at a resolver candidate location (checked before
+    PATH) keeps serving its old version even after npm installs the pinned
+    pair elsewhere — presence + CLI-only verification used to print
+    "webui@0.2.43 ready" while the runtime would launch the old webui."""
+    result, npm_log = _run_qwen_stack(
+        tmp_path,
+        node_version="v22.22.3",
+        qwen_version="0.23.3",
+        shadow_webui_version="0.2.40",
+    )
+
+    assert result.returncode == 1
+
+
 def test_package_installer_runs_gated_stack_before_fresh_and_upgrade_split():
     """Contract: the gated pinned install runs for BOTH fresh installs and
     upgrades (existing old webui/CLI must also reach the pinned versions)."""
@@ -269,163 +316,77 @@ def test_package_installer_runs_gated_stack_before_fresh_and_upgrade_split():
     assert gate_pos < split_pos
 
 
-def _qwen_stack_functions_docker() -> str:
-    """Extract the pinned host-stack functions verbatim from the docker-method
-    installer for sandboxed execution tests."""
-    script = (REPO_ROOT / "scripts" / "install-central" / "docker-method" / "install.sh").read_text(
-        encoding="utf-8"
-    )
-    constants = re.search(r'QWEBUI_VERSION="[0-9.]+"\nQWEN_CLI_VERSION="[0-9.]+"', script)
-    assert constants is not None, "docker-method installer lost its pin constants"
-    start = script.index("# Host Node major version")
-    end = script.index("# Host qwen stack installation is handled by")
-    return constants.group(0) + "\n\n" + script[start:end]
+_DOCKER_HOST_STACK_REMNANTS = (
+    "maybe_install_qwen_stack_host",
+    "install_qwen_stack(",
+    "ensure_node_22(",
+    'QWEBUI_VERSION="',
+    "configure_sudoers()",
+    "find_webui_executable",
+    "stop_webui_systemd_service()",
+    "install_run_as_wrapper()",
+    "install_fetch_wrapper()",
+    "install_git_gh_wrappers()",
+)
 
 
-def _run_docker_host_stack(
-    tmp_path,
-    *,
-    multi_user: str = "true",
-    node_version: str | None = "v22.22.3",
-    qwen_version: str | None = None,
-    webui_on_path: bool = True,
-):
-    """Execute maybe_install_qwen_stack_host() from the docker-method installer
-    under a fake PATH.
-
-    npm is a recorder that models a real install: installing
-    @qwen-code/qwen-code@X rewrites the version the `qwen` shim reports, so
-    an existing stale CLI gets upgraded by the pinned install (and the
-    exact-match verification observes it), exactly like a real host.
-    """
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir(parents=True)
-    for tool in ("sed", "cut", "head", "tr", "cat"):
-        os.symlink(_which(tool), fake_bin / tool)
-    npm_log = tmp_path / "npm.log"
-    qwen_ver_file = tmp_path / "qwen.ver"
-    if qwen_version is not None:
-        qwen_ver_file.write_text(qwen_version, encoding="utf-8")
-
-    def shim(name: str, body: str) -> None:
-        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
-        (fake_bin / name).chmod(0o755)
-
-    if node_version is not None:
-        shim("node", f"echo '{node_version}'")
-    shim(
-        "npm",
-        f'echo "$@" >> "{npm_log}"\ncase "$*" in *"@qwen-code/qwen-code@"*) echo "$*" | sed \'s/.*@qwen-code\\/qwen-code@//\' > "{qwen_ver_file}";; esac\n',
-    )
-    if qwen_version is not None:
-        shim("qwen", f'cat "{qwen_ver_file}"')
-    if webui_on_path:
-        shim("qwen-code-webui", "exit 0")
-
-    harness = (
-        "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
-        "print_error() { :; }\n"
-        f'WORKSPACE_MULTI_USER_MODE="{multi_user}"\n'
-        + _qwen_stack_functions_docker()
-        + "\nmaybe_install_qwen_stack_host\n"
-    )
-    return (
-        subprocess.run(
-            ["/bin/bash", "-c", harness],
-            env={"PATH": str(fake_bin)},
-            text=True,
-            capture_output=True,
-            check=False,
-        ),
-        npm_log,
-    )
-
-
-def test_docker_host_stack_installs_pinned_under_multi_user_mode(tmp_path):
-    """Regression (PR #3386 review): the docker-method installer used to run
-    two UNPINNED `npm install -g` helpers (interactive default "1", so
-    --non-interactive took it too) BEFORE the workspace mode or the deploy
-    confirmation was even known. Multi-user mode must install the pinned pair."""
-    result, npm_log = _run_docker_host_stack(tmp_path, multi_user="true", qwen_version="0.23.3")
-
-    assert result.returncode == 0
-    assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
-    ]
-
-
-def test_docker_host_stack_skips_when_multi_user_disabled_and_no_stack(tmp_path):
-    """API-only / sandboxed-workspace docker deployments (multi-user off, no
-    existing host stack) must not touch Node/npm on the host at all."""
-    result, npm_log = _run_docker_host_stack(
-        tmp_path,
-        multi_user="false",
-        node_version=None,
-        qwen_version=None,
-        webui_on_path=False,
-    )
-
-    assert result.returncode == 0
-    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
-
-
-def test_docker_host_stack_gates_node20_before_any_npm_install(tmp_path):
-    """Node 20 + npm present must never reach npm install (EBADENGINE warns
-    and exits 0 — the exact blind spot the unpinned helpers fell into)."""
-    result, npm_log = _run_docker_host_stack(
-        tmp_path, multi_user="true", node_version="v20.19.1", qwen_version="0.23.3"
-    )
-
-    assert result.returncode == 1
-    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
-
-
-def test_docker_host_stack_upgrades_existing_stale_cli(tmp_path):
-    """A stale host CLI (0.15.10) is reinstalled to the pinned version and
-    the exact-match verification observes the upgrade — `command -v`-only
-    acceptance of any existing binary is gone."""
-    result, npm_log = _run_docker_host_stack(tmp_path, multi_user="true", qwen_version="0.15.10")
-
-    assert result.returncode == 0
-    assert (tmp_path / "qwen.ver").read_text(encoding="utf-8").strip() == "0.23.3"
-
-
-def test_docker_host_stack_wiring_contract():
-    """Contract (PR #3386 review): the gated install runs only inside the
-    multi-user sections (fresh install + upgrade), BEFORE configure_sudoers;
-    check_prerequisites no longer offers unpinned host installs pre-config
-    (the old check_qwen_code / Node-offer blocks are gone entirely)."""
+def test_docker_method_installs_no_host_qwen_stack_or_sudoers():
+    """Architecture contract (PR #3386 R15 review): the docker deployment runs
+    the qwen stack and the multi-user sudoers ENTIRELY inside the image —
+    Dockerfile installs the pinned pair, docker-entrypoint.sh generates the
+    in-container sudoers against image-bundled wrappers, and the generated
+    compose mounts only config/logs/home (never host /usr/local/bin or
+    /etc/sudoers.d). Anything host-side the installer installs or authorizes
+    is dead weight that can root-upgrade the host Node, stop host services,
+    or (in the upgrade path) exit 1 after the old containers are already torn
+    down. R14 conditionally installed a pinned host stack here on the wrong
+    premise that the container app launches host webui binaries — it cannot:
+    they are not mounted."""
     script = (REPO_ROOT / "scripts" / "install-central" / "docker-method" / "install.sh").read_text(
         encoding="utf-8"
     )
 
-    assert "check_qwen_code" not in script
-    assert "install_qwen_code_webui" not in script
-    prereq_body = script[
-        script.index("check_prerequisites() {") : script.index("build_docker_image() {")
-    ]
-    # pre-config must take no stack action: no Node-offer, no gated install,
-    # no npm — the decision-relevant actions live in the multi-user sections
-    assert "install_nodejs" not in prereq_body
-    assert "maybe_install_qwen_stack_host" not in prereq_body
-    assert "npm install" not in prereq_body
-    assert "check_qwen_code" not in prereq_body
+    remnants = [token for token in _DOCKER_HOST_STACK_REMNANTS if token in script]
+    assert not remnants, (
+        "docker-method must not install or authorize a host qwen stack/sudoers "
+        "(image + entrypoint own the runtime stack); found: " + ", ".join(remnants)
+    )
 
-    # the gated install runs in BOTH multi-user sections (fresh install and
-    # upgrade), before configure_sudoers — anchored on main-flow markers, not
-    # the function-definition comment that shares its wording
-    fresh_pos = script.index("# Stop existing qwen-code-webui systemd service first")
-    upgrade_pos = script.index('print_info "更新 sudoers 配置..."')
-    for pos in (fresh_pos, upgrade_pos):
-        block = script[pos : pos + 1500]
-        gate = block.index("maybe_install_qwen_stack_host")
-        assert gate < block.index("configure_sudoers")
-    # fail-closed sudoers: no unpinned interactive install inside it
-    sudoers_body = script[
-        script.index("configure_sudoers() {") : script.index("install_run_as_wrapper() {")
+
+def test_docker_method_upgrade_teardown_has_no_failing_stack_gate():
+    """P1 (PR #3386 R15 review): no failing gate may run after the upgrade
+    path starts tearing the old deployment down (stop/rm containers, re-tag
+    the candidate image, rewrite compose/.env) — a NodeSource/npm/registry
+    failure there leaves the service down with no rollback. Encodes the
+    principle: every npm invocation inside upgrade_deployment must sit in
+    the lossless pre-flight zone BEFORE the first container teardown action
+    (the frontend build's failure branch already `return 1`s there with the
+    old service untouched)."""
+    script = (REPO_ROOT / "scripts" / "install-central" / "docker-method" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+    body = script[
+        script.index("upgrade_deployment() {") : script.index(
+            "# Check for existing PostgreSQL data volume"
+        )
     ]
-    assert "prompt_input" not in sudoers_body
+
+    first_teardown = min(
+        body.index(marker)
+        for marker in ('docker stop "$old_container"', "docker compose down")
+        if marker in body
+    )
+    for token in ("npm install", "npm ci", "npm i "):
+        pos = 0
+        while True:
+            pos = body.find(token, pos)
+            if pos == -1:
+                break
+            assert pos < first_teardown, (
+                f"upgrade_deployment runs {token!r} after container teardown — "
+                "a failure there strands the deployment half-upgraded"
+            )
+            pos += len(token)
 
 
 def _run_remote_qwen_stack(
@@ -462,6 +423,7 @@ def _run_remote_qwen_stack(
     if node_version is not None:
         shim("node", f"echo '{node_version}'")
     shim("id", f"echo '{uid}'")
+    shim("uname", "echo Linux")
     # npm: 'config get prefix' answers the prefix; installs are recorded
     shim(
         "npm",
@@ -640,7 +602,7 @@ def test_maybe_install_proceeds_when_workspace_enabled(tmp_path):
         f'echo "$@" >> "{npm_log}"',
     )
     shim("qwen", "echo '0.23.3'")
-    shim("qwen-code-webui", "exit 0")
+    shim("qwen-code-webui", "echo '0.2.43'")
 
     harness = (
         "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
@@ -1195,3 +1157,128 @@ def test_executor_zcode_missing_error_has_no_hint_padding(tmp_path):
     assert payload["success"] is False
     assert "not found on this machine" in payload["error"]
     assert " ()" not in payload["error"]
+
+
+def test_agent_installer_completes_qwen_gate_before_stopping_existing_agent():
+    """P1 (PR #3386 R15 review): the Node>=22 gate, pinned npm install and
+    exact-version verification must ALL complete before the upgrade flow
+    stops the systemd service and kills the running agent — an exit 1 after
+    that (NodeSource/npm network failure, permissions, PATH shadow) leaves
+    the existing agent offline with no rollback path. Position contract:
+    the hard gate physically precedes the stop block."""
+    sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    gate_pos = sh.index("Refusing to install an unsupported Node/CLI combination.")
+    stop_pos = sh.index("sudo systemctl stop open-ace-agent")
+    assert gate_pos < stop_pos, (
+        "the qwen Node/CLI gate must run in the lossless pre-flight zone, "
+        "before any existing agent service is stopped"
+    )
+
+
+def _agent_cli_preflight_body() -> str:
+    """Extract the CLI pre-flight block verbatim from remote-agent/install.sh
+    (plus its own get_node_major definition) for sandboxed execution."""
+    sh = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    fn_start = sh.index("get_node_major() {")
+    fn_end = sh.index("\n}", fn_start) + 2
+    start = sh.index("# Step 1.6: CLI pre-flight")
+    end = sh.index("# Step 1.5: Check for existing agent installation")
+    return sh[fn_start:fn_end] + "\n\n" + sh[start:end]
+
+
+def _run_agent_cli_preflight(
+    tmp_path,
+    *,
+    uid: str,
+    with_sudo: bool,
+    node_version: str | None,
+    qwen_version: str | None = "0.23.3",
+):
+    """Execute the CLI pre-flight with a chosen privilege landscape.
+
+    systemctl/pgrep are recorders: the pre-flight must NEVER reach them (the
+    stop of an existing agent happens only after this block completes)."""
+    fake_bin = tmp_path / "preflight-bin"
+    fake_bin.mkdir(parents=True)
+    for tool in ("head", "tr", "sed", "cut"):
+        os.symlink(_which(tool), fake_bin / tool)
+    npm_log = tmp_path / "npm.log"
+    sudo_log = tmp_path / "sudo.log"
+    service_log = tmp_path / "systemctl.log"
+
+    def shim(name: str, body: str) -> None:
+        (fake_bin / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    shim("id", f"echo '{uid}'")
+    shim("uname", "echo Linux")
+    if with_sudo:
+        shim("sudo", f'echo "$@" >> "{sudo_log}"\nexit 0')
+    if node_version is not None:
+        shim("node", f"echo '{node_version}'")
+    shim("npm", f'echo "$@" >> "{npm_log}"; exit 0')
+    if qwen_version is not None:
+        shim("qwen", f"echo '{qwen_version}'")
+    shim("systemctl", f'echo "$@" >> "{service_log}"; exit 0')
+
+    harness = (
+        "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
+        'log_error() { echo "ERR: $*"; }\n'
+        "QWEN_CLI_VERSION=0.23.3\n"
+        "INSTALL_CLI=qwen-code-cli\n"
+        + _agent_cli_preflight_body()
+        + '\necho "PREFLIGHT_COMPLETED"\n'
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    result = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={"PATH": str(fake_bin), "HOME": str(home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, npm_log, sudo_log, service_log
+
+
+def test_agent_preflight_nonroot_nosudo_node20_never_touches_npm_or_service(tmp_path):
+    """P1 (PR #3386 R15 review): the common Node 20 upgrade path — non-root,
+    no passwordless sudo — must fail in the LOSSLESS pre-flight: no npm
+    invocation, no systemctl call (the running agent is untouched)."""
+    result, npm_log, sudo_log, service_log = _run_agent_cli_preflight(
+        tmp_path, uid="1000", with_sudo=False, node_version="v20.19.1"
+    )
+
+    assert result.returncode == 1
+    assert "No existing agent was touched" in result.stdout
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+    assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""
+
+
+def test_agent_preflight_nonroot_with_sudo_installs_via_sudo(tmp_path):
+    """Non-root with passwordless sudo: the pinned npm install escalates via
+    sudo (system npm prefix is root-owned)."""
+    result, npm_log, sudo_log, service_log = _run_agent_cli_preflight(
+        tmp_path, uid="1000", with_sudo=True, node_version="v22.22.3"
+    )
+
+    assert result.returncode == 0
+    assert "PREFLIGHT_COMPLETED" in result.stdout
+    assert "npm install -g @qwen-code/qwen-code@0.23.3" in sudo_log.read_text(encoding="utf-8")
+    assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
+    assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""
+
+
+def test_agent_preflight_nonroot_nosudo_uses_user_prefix(tmp_path):
+    """Non-root without sudo on an already-sufficient Node: the CLI installs
+    into a user-level npm prefix instead of failing on the root-owned one."""
+    result, npm_log, sudo_log, service_log = _run_agent_cli_preflight(
+        tmp_path, uid="1000", with_sudo=False, node_version="v22.22.3"
+    )
+
+    assert result.returncode == 0
+    log = npm_log.read_text(encoding="utf-8")
+    assert "--prefix" in log
+    assert "@qwen-code/qwen-code@0.23.3" in log
+    assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""

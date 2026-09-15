@@ -51,30 +51,36 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
 
 ## 密钥共享影响面
 
-同一密钥用于：
+同一密钥（`OPENACE_ENCRYPTION_KEY`，SHA-256 派生 Fernet 密钥）直接加密以下存储：
 
 1. **API Key 加密** - `api_key_store.encrypted_key`
 2. **SMTP 密码加密** - `smtp_settings.encrypted_password`
 3. **Model Gateway 加密** - `model_gateway_config.encrypted_api_key`
-4. **Proxy Token 签名** - 远程代理认证的 HMAC-SHA256 签名
+4. **SSO Provider 配置** - `sso_providers`（JSON 内嵌第三方凭据）
+5. **钉钉集成** - `dingtalk_settings`
+6. **飞书集成** - `feishu_settings`
+7. **Webhook 配置** - `webhook_settings`
+8. **通知偏好** - `notification_preferences`
+
+同一密钥还用于 **Proxy Token 的 HMAC-SHA256 签名**（远程代理认证）。
 
 **影响**：
 
-- 密钥轮换需要重新加密三个数据存储
+- 密钥轮换必须**一次性重新加密上述全部存储**——只轮换其中一部分，切换密钥后其余存储的凭据将无法解密（这正是 `scripts/rotate_sso_encryption.py` 单事务全存储轮换的设计动机）
 - 使用旧密钥签名的活跃 Proxy Token 轮换后验证失败
-- 密钥泄露影响四个安全域
+- 密钥泄露影响上述全部安全域
 
 ## 密钥轮换
 
-### 当前限制
+### 轮换能力与边界
 
-- **单密钥 Fernet**：不支持 MultiFernet 多密钥解密
-- **轮换需停机**：无法在不重启服务的情况下轮换密钥
-- **手动流程**：无自动化密钥轮换机制
+- **原子全存储轮换**：`scripts/rotate_sso_encryption.py` 在单事务内重加密该密钥保护的**全部**存储，任一步失败整体回滚；`--verify` 提供无写入的 pre-flight 干跑
+- **单密钥 Fernet**：不支持 MultiFernet 多密钥解密（见下方"MultiFernet 支持（未来增强）"）
+- **切换需重启**：环境变量换成新密钥后需重启服务生效
 
 ### 轮换方法
 
-#### 方法 A：停机轮换（推荐用于小规模部署）
+#### 全存储原子轮换（`rotate_sso_encryption.py`）
 
 **前提条件**：
 
@@ -94,64 +100,43 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
    cp app.db app_backup_$(date +%Y%m%d).db
    ```
 
-2. **导出加密数据**
+2. **生成新密钥（暂不启用）**
 
    ```bash
-   python scripts/export_encrypted_data.py --output encrypted_data_backup.json
+   NEW_KEY=$(openssl rand -hex 32)
    ```
 
-   导出内容：
-   - `api_key_store.encrypted_key` → 明文 API Key
-   - `smtp_settings.encrypted_password` → 明文 SMTP 密码
-   - `model_gateway_config.encrypted_api_key` → 明文 Gateway Key
-
-3. **生成并设置新密钥**
+3. **保持环境变量仍为旧密钥，先做 pre-flight 干跑**
 
    ```bash
-   # 生成新的 32 字节密钥
-   NEW_KEY=$(openssl rand -hex 32)
-   echo "新密钥: $NEW_KEY"
+   python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY" --verify
+   ```
 
-   # 更新环境变量
+   pre-flight 用新钥做往返探针、并用旧钥校验全部存储可解密；任何一步失败都不写入。轮换期间环境变量必须保持**旧密钥**——提前切成新钥会导致旧密文无法解密、pre-flight 失败。
+
+4. **执行轮换（单事务，失败整体回滚）**
+
+   ```bash
+   python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY"
+   ```
+
+   脚本重加密上述清单中该密钥直接保护的全部存储（`v1k<id>:` 前缀的 registry
+   密文绑定 `OPENACE_ENCRYPTION_KEYS` 数据钥，自动跳过），写出后用新钥复查全部存储。
+
+5. **切换环境变量到新密钥并重启服务**
+
+   ```bash
    # Docker Compose: 编辑 .env 文件
    # Kubernetes: 更新 Secret
    # Systemd: 编辑 /etc/open-ace/environment
+   docker-compose restart   # 或 sudo systemctl restart open-ace
    ```
 
-4. **重启服务**
+6. **验证功能**：测试 API Key、SMTP、Model Gateway、SSO 登录、钉钉/飞书/Webhook/通知；现有 Proxy Token 将失效（用户需重启会话）。
 
-   ```bash
-   # Docker Compose
-   docker-compose restart
+7. **安全清理**：验证后归档或删除数据库备份。
 
-   # Systemd
-   sudo systemctl restart open-ace
-   ```
-
-5. **重加密并导入数据**
-
-   ```bash
-   python scripts/import_encrypted_data.py --input encrypted_data_backup.json
-   ```
-
-6. **验证功能**
-
-   - 测试 API Key 存储和读取
-   - 测试 SMTP 邮件发送
-   - 测试 Model Gateway 调用
-   - 注意：现有 Proxy Token 将失效（用户需重启会话）
-
-7. **安全清理**
-
-   ```bash
-   # 验证后删除明文备份
-   rm encrypted_data_backup.json
-
-   # 可选：归档加密数据库备份
-   gzip openace_backup_*.sql
-   ```
-
-#### 方法 B：MultiFernet 支持（未来增强）
+#### MultiFernet 支持（未来增强）
 
 **需求**：
 

@@ -310,3 +310,35 @@ def test_same_key_noop_rotation_is_refused(tmp_path):
 
     # nothing was rewritten
     assert _dump(db_url) == before
+
+
+def test_key_management_docs_route_rotation_through_atomic_script_only():
+    """P1 (PR #3386 R15 review): export_encrypted_data.py /
+    import_encrypted_data.py cover only api_key_store / smtp_settings /
+    model_gateway_config. A 'Recommended' rotation Method A built on them
+    leaves sso_providers, dingtalk/feishu/webhook settings and
+    notification_preferences encrypted under the OLD key — undecryptable
+    after the env switch. Both language docs must route rotation through
+    the atomic full-store script and must not describe the key as
+    protecting 'three data stores'."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    for lang in ("cn", "en"):
+        doc = (repo_root / "docs" / lang / "KEY_MANAGEMENT.md").read_text(encoding="utf-8")
+        assert "export_encrypted_data.py" not in doc, (
+            f"docs/{lang}/KEY_MANAGEMENT.md still recommends the 3-store "
+            "export/import flow — 5 more stores would brick on the key switch"
+        )
+        assert "import_encrypted_data.py" not in doc, (
+            f"docs/{lang}/KEY_MANAGEMENT.md: import flow is not a valid "
+            "rotation path for the full store set"
+        )
+        for stale in ("三个数据存储", "three data stores"):
+            assert stale not in doc, (
+                f"docs/{lang}/KEY_MANAGEMENT.md: overview still claims the key "
+                "protects only three data stores"
+            )
+        assert (
+            "rotate_sso_encryption.py" in doc
+        ), f"docs/{lang}/KEY_MANAGEMENT.md must point rotation at the atomic script"

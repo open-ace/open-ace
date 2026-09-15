@@ -140,14 +140,15 @@ def test_docker_sandbox_blocks_the_pr_gate():
 
 
 def test_qwen_stack_pins_are_consistent_across_all_sites():
-    """Upgrade guard (PR #3386): the webui/CLI pair is pinned at EIGHT sites
-    (two Dockerfiles, package install.sh, docker-method install.sh,
-    remote-agent install.sh/.ps1, terminal_menu.py install_cmd +
-    QWEN_PINNED_VERSION, cli_adapters/qwen_code.py) plus the cn/en
-    DEPLOYMENT.md manual-install guides. An upgrade that misses any site
-    ships mixed versions. This contract fails with the per-site inventory
-    the moment the pins disagree, so an upgrade is one commit that touches
-    every site CI points at.
+    """Upgrade guard (PR #3386): the webui/CLI pair is pinned at SEVEN sites
+    (two Dockerfiles, package install.sh, remote-agent install.sh/.ps1,
+    terminal_menu.py install_cmd + QWEN_PINNED_VERSION,
+    cli_adapters/qwen_code.py) plus the cn/en DEPLOYMENT.md manual-install
+    guides. The docker-method installer pins nothing on the host by design:
+    its qwen stack is the image-pinned pair (R15 review). An upgrade that
+    misses any site ships mixed versions. This contract fails with the
+    per-site inventory the moment the pins disagree, so an upgrade is one
+    commit that touches every site CI points at.
     """
     repo = REPO_ROOT
     webui_sites = {
@@ -161,9 +162,6 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         {
             "scripts/install-central/package-method/install.sh": (
                 repo / "scripts" / "install-central" / "package-method" / "install.sh"
-            ).read_text(encoding="utf-8"),
-            "scripts/install-central/docker-method/install.sh": (
-                repo / "scripts" / "install-central" / "docker-method" / "install.sh"
             ).read_text(encoding="utf-8"),
             "remote-agent/install.sh": (repo / "remote-agent" / "install.sh").read_text(
                 encoding="utf-8"
@@ -194,14 +192,6 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         },
         r'^QWEBUI_VERSION="([0-9.]+)"',
     )["scripts/install-central/package-method/install.sh"]
-    webui["scripts/install-central/docker-method/install.sh (QWEBUI_VERSION)"] = pins(
-        {
-            "scripts/install-central/docker-method/install.sh": cli_sites[
-                "scripts/install-central/docker-method/install.sh"
-            ]
-        },
-        r'^QWEBUI_VERSION="([0-9.]+)"',
-    )["scripts/install-central/docker-method/install.sh"]
     webui["docs/cn/DEPLOYMENT.md"] = pins(
         {
             "docs/cn/DEPLOYMENT.md": (repo / "docs" / "cn" / "DEPLOYMENT.md").read_text(
@@ -237,14 +227,6 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         {"remote-agent/install.sh": cli_sites["remote-agent/install.sh"]},
         r'^QWEN_CLI_VERSION="([0-9.]+)"',
     )["remote-agent/install.sh"]
-    cli["scripts/install-central/docker-method/install.sh (QWEN_CLI_VERSION)"] = pins(
-        {
-            "scripts/install-central/docker-method/install.sh": cli_sites[
-                "scripts/install-central/docker-method/install.sh"
-            ]
-        },
-        r'^QWEN_CLI_VERSION="([0-9.]+)"',
-    )["scripts/install-central/docker-method/install.sh"]
     for doc in ("cn", "en"):
         cli[f"docs/{doc}/DEPLOYMENT.md"] = pins(
             {
@@ -287,48 +269,144 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
     assert len(set(cli.values())) == 1, f"CLI pins disagree: {cli}"
 
 
+_SCAN_SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    "build",
+    "dist",
+    ".worktrees",
+    ".claude",
+    ".venv",
+    "venv",
+}
+
+
+def _iter_repo_files(root: Path) -> list[Path]:
+    """git ls-files when available; otherwise a deterministic tree walk so
+    the sweep also runs from `git archive` snapshots / source tarballs that
+    carry no .git (PR #3386 R15 review: the git-only form exited 128 there)."""
+    import subprocess as sp
+
+    try:
+        out = sp.run(["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True)
+        return [root / rel for rel in out.stdout.splitlines() if rel]
+    except (sp.CalledProcessError, OSError):
+        return sorted(
+            path
+            for path in root.rglob("*")
+            if path.is_file() and not (_SCAN_SKIP_DIRS & set(path.parts))
+        )
+
+
+def _logical_lines(text: str):
+    """Yield (lineno, line) with backslash continuations joined — a command
+    split across lines is still one command (PR #3386 R15 review)."""
+    pending = None
+    pending_no = 0
+    for no, raw in enumerate(text.splitlines(), 1):
+        if pending is not None:
+            line = pending + raw.lstrip()
+        else:
+            line = raw
+            pending_no = no
+        if line.endswith("\\"):
+            pending = line[:-1].rstrip() + " "
+        else:
+            yield pending_no, line
+            pending = None
+    if pending is not None:
+        yield pending_no, pending
+
+
+def _scan_unpinned_qwen_installs(files) -> list[str]:
+    """Every npm install (install/i/add alias) touching the qwen stack
+    packages must carry an explicit @version (digits or the pinned
+    ${..._VERSION} constants); @latest is rejected outright."""
+    npm_install = re.compile(r"npm\s+(?:install|i|add)\b")
+    # A stack package token that is NOT immediately versioned: not followed
+    # (before the next whitespace) by @<digits> or the pinned-variable forms.
+    # Token boundaries: an occurrence embedded in a filesystem path
+    # (/usr/bin/qwen-code-webui, .../node_modules/@qwen-code/qwen-code/cli.js)
+    # is not a package spec; a bare token on an install line is.
+    unpinned = re.compile(
+        r"(?<![/\w.-])(qwen-code-webui|@qwen-code/qwen-code)(?![\w/.-])(?!\S*?@[0-9${])"
+    )
+    latest = re.compile(r"(qwen-code-webui|@qwen-code/qwen-code)@latest")
+
+    violations = []
+    for path in files:
+        if path.resolve() == Path(__file__).resolve():
+            continue  # this test's own regex sources
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # binary or unreadable — nothing installable there
+        for lineno, line in _logical_lines(text):
+            if not npm_install.search(line):
+                continue
+            if latest.search(line):
+                violations.append(f"{path}:{lineno} @latest entry: {line.strip()}")
+            elif unpinned.search(line):
+                violations.append(f"{path}:{lineno} unpinned entry: {line.strip()}")
+    return violations
+
+
 def test_no_unpinned_qwen_stack_install_entries_anywhere():
     """Upgrade guard (PR #3386 review): every `npm install` line touching the
     qwen stack packages — in scripts, docs, or tests — must carry an explicit
     @version (literal digits or the pinned ${..._VERSION} constants). Bare or
     @latest entries are exactly how the docker-method installer and the
     DEPLOYMENT.md guides kept installing unvalidated mixed stacks after the
-    pair was pinned everywhere else.
-    """
-    import subprocess as sp
-
-    tracked = sp.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
-
-    npm_install = re.compile(r"npm\s+install")
-    # A stack package token that is NOT immediately versioned: not followed
-    # (before the next whitespace) by @<digits> or the pinned-variable forms.
-    unpinned = re.compile(r"(qwen-code-webui|@qwen-code/qwen-code)(?!\S*?@[0-9${])")
-    latest = re.compile(r"(qwen-code-webui|@qwen-code/qwen-code)@latest")
-
-    violations = []
-    for rel in tracked:
-        path = REPO_ROOT / rel
-        # This test's own regex sources mention the tokens outside install
-        # commands; every other file is swept, tests included.
-        if path.resolve() == Path(__file__).resolve():
-            continue
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue  # binary or unreadable — nothing installable there
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if not npm_install.search(line):
-                continue
-            if latest.search(line):
-                violations.append(f"{rel}:{lineno} @latest entry: {line.strip()}")
-            elif unpinned.search(line):
-                violations.append(f"{rel}:{lineno} unpinned entry: {line.strip()}")
+    pair was pinned everywhere else."""
+    violations = _scan_unpinned_qwen_installs(_iter_repo_files(REPO_ROOT))
 
     assert not violations, (
         "qwen stack npm install entries must be pinned "
         "(qwen-code-webui@X @qwen-code/qwen-code@Y):\n" + "\n".join(violations)
     )
+
+
+def test_unpinned_sweep_flags_continuations_and_aliases(tmp_path):
+    """Negative tests from the PR #3386 R15 review: line continuations and
+    npm's i/add aliases must not bypass the sweep."""
+    bypass = tmp_path / "bypass.sh"
+    bypass.write_text(
+        "npm install -g \\\n  qwen-code-webui\n"
+        "npm i -g qwen-code-webui\n"
+        "npm add -g @qwen-code/qwen-code\n",
+        encoding="utf-8",
+    )
+    pinned = tmp_path / "pinned.sh"
+    pinned.write_text(
+        "npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3\n"
+        'npm i -g "qwen-code-webui@${QWEBUI_VERSION}"\n'
+        "npm add -g @qwen-code/qwen-code@0.23.3 \\\n  --unsafe-perm\n",
+        encoding="utf-8",
+    )
+
+    violations = _scan_unpinned_qwen_installs([bypass, pinned])
+
+    assert len(violations) == 3, violations
+    assert all("bypass.sh" in v for v in violations)
+    joined = "\n".join(violations)
+    assert "npm install -g qwen-code-webui" in joined  # continuation joined
+    assert "npm i -g qwen-code-webui" in joined
+    assert "npm add -g @qwen-code/qwen-code" in joined
+
+
+def test_repo_file_enumeration_works_without_git(tmp_path):
+    """`git archive` snapshots carry no .git; the sweep must still enumerate
+    the tree (PR #3386 R15 review: git ls-files exited 128 there)."""
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "sub" / "b.txt").write_text("x", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("x", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "c.js").write_text("x", encoding="utf-8")
+
+    files = _iter_repo_files(tmp_path)
+
+    names = {f.relative_to(tmp_path).as_posix() for f in files}
+    assert names == {"a.txt", "sub/b.txt"}

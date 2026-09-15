@@ -1761,6 +1761,27 @@ install_qwen_stack() {
         print_error "qwen-code-webui not on PATH after install"
         return 1
     fi
+    # Verify the webui that will actually be LAUNCHED (PR #3386 R15 review):
+    # the version contract is the webui+CLI pair, but a stale binary at a
+    # candidate location can shadow the fresh npm install (e.g. npm updates
+    # /usr/bin while an old /usr/local/bin entry wins resolution). Resolve
+    # with the same resolver the runtime/sudoers config uses and require an
+    # exact version match there — never trust presence alone.
+    local webui_exe webui_ver
+    webui_exe="$(find_webui_executable 2>/dev/null)"
+    if [ -z "$webui_exe" ]; then
+        webui_exe="$(command -v qwen-code-webui)"
+    fi
+    if [ -z "$webui_exe" ]; then
+        print_error "qwen-code-webui executable not found after install"
+        return 1
+    fi
+    webui_ver="$("$webui_exe" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [ "${webui_ver#v}" != "${QWEBUI_VERSION}" ]; then
+        print_error "qwen-code-webui version verification failed at ${webui_exe}"
+        print_error "expected ${QWEBUI_VERSION}, got: ${webui_ver:-none} — a stale binary is shadowing the npm install; remove it or fix PATH order."
+        return 1
+    fi
     # Exact-match verification (plain grep -q would also accept 0.23.30 /
     # 10.23.3 / any surrounding text — PR #3386 review): normalize the first
     # output line and compare as a whole string.
@@ -2028,9 +2049,10 @@ find_webui_executable() {
         fi
     done
 
-    # Try to find in PATH
+    # Try to find in PATH (command -v: POSIX builtin — `which` is absent on
+    # minimal hosts and would silently yield an empty-but-successful resolve)
     if command -v qwen-code-webui &>/dev/null; then
-        which qwen-code-webui
+        command -v qwen-code-webui
         return 0
     fi
 

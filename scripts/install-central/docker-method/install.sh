@@ -58,13 +58,6 @@ OPENCLAW_PORT="${OPENCLAW_PORT:-}"
 CLAUDE_ENABLED="${CLAUDE_ENABLED:-true}"
 QWEN_ENABLED="${QWEN_ENABLED:-true}"
 
-# Pinned qwen stack for the HOST side (multi-user workspace mode runs
-# qwen-code-webui on the host via the sudoers wrapper). Must stay in sync
-# with Dockerfile / package-method / remote-agent — the pin-consistency
-# contract test enforces this across every install site (PR #3386 review).
-QWEBUI_VERSION="0.2.43"
-QWEN_CLI_VERSION="0.23.3"
-
 # SSH configuration for remote host access (Issue #1122)
 SSH_ENABLED="${SSH_ENABLED:-no}"
 # SSH_MOUNT_SOURCE: Use current user's .ssh directory (not RUN_USER which is container user)
@@ -498,483 +491,18 @@ check_existing_ssh_config() {
 }
 
 # ============================================================================
-# Multi-User Workspace Sudo Configuration
+# Multi-User Workspace: in-container execution (no host-side setup)
 # ============================================================================
-
-# Stop and disable qwen-code-webui systemd service if it exists
-# Open ACE will manage qwen-code-webui instances in multi-user mode
-stop_webui_systemd_service() {
-    local os_type=$(detect_os)
-
-    # Skip on macOS (no systemd)
-    if [[ "$os_type" == "macos" ]]; then
-        return 0
-    fi
-
-    # Check if systemd is available
-    if ! command -v systemctl &>/dev/null; then
-        return 0
-    fi
-
-    # Check if qwen-code-webui service exists
-    local service_name="qwen-code-webui"
-    # List all service unit files and check if our service exists
-    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${service_name}.service"; then
-        print_warning "检测到已存在的 qwen-code-webui systemd 服务"
-        print_info "多用户模式下，Open ACE 会自动管理 qwen-code-webui 实例"
-        print_info "停止并禁用独立运行的 qwen-code-webui 服务..."
-
-        # Stop the service
-        if systemctl is-active --quiet "${service_name}.service" 2>/dev/null; then
-            systemctl stop "${service_name}.service"
-            if [ $? -eq 0 ]; then
-                print_success "已停止 ${service_name} 服务"
-            else
-                print_warning "停止 ${service_name} 服务失败"
-            fi
-        fi
-
-        # Disable the service
-        if systemctl is-enabled --quiet "${service_name}.service" 2>/dev/null; then
-            systemctl disable "${service_name}.service"
-            if [ $? -eq 0 ]; then
-                print_success "已禁用 ${service_name} 服务"
-            else
-                print_warning "禁用 ${service_name} 服务失败"
-            fi
-        fi
-
-        print_info "Open ACE 将在需要时自动启动 qwen-code-webui 实例"
-    fi
-
-    return 0
-}
-
-# Find qwen-code-webui executable
-find_webui_executable() {
-    local candidates=(
-        "/usr/local/bin/qwen-code-webui"
-        "/usr/bin/qwen-code-webui"
-        "/opt/qwen-code-webui/bin/qwen-code-webui"
-    )
-
-    for candidate in "${candidates[@]}"; do
-        if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-
-    # Try to find in PATH
-    if command -v qwen-code-webui &>/dev/null; then
-        which qwen-code-webui
-        return 0
-    fi
-
-    return 1
-}
-
-# Host Node major version, 0 when node is absent (guarded: never aborts).
-node_major_version() {
-    if ! command -v node &>/dev/null; then
-        echo 0
-        return 0
-    fi
-    local version
-    version="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
-    echo "${version:-0}"
-}
-
-# Ensure Node >= 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION},
-# engines.node >=22; npm only warns EBADENGINE and still exits 0). Upgrades in
-# place via NodeSource when an older Node is present; fails explicitly when it
-# cannot reach 22.
-ensure_node_22() {
-    local major
-    major="$(node_major_version)"
-    if [ "$major" -ge 22 ]; then
-        return 0
-    fi
-    if [ "$major" -gt 0 ]; then
-        print_info "Node ${major} < 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION}); upgrading Node.js..."
-    else
-        print_info "Node.js not found; installing Node.js 22.x..."
-    fi
-    if [ "$EUID" -ne 0 ]; then
-        print_error "Root required to install/upgrade Node.js. Install Node >= 22 and re-run."
-        return 1
-    fi
-    if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - \
-            || { print_error "NodeSource setup failed."; return 1; }
-        if command -v dnf &>/dev/null; then
-            dnf install -y nodejs
-        else
-            yum install -y nodejs
-        fi
-    elif command -v apt-get &>/dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-            || { print_error "NodeSource setup failed."; return 1; }
-        apt-get install -y nodejs
-    else
-        print_error "Cannot install/upgrade Node.js automatically on this system. Install Node >= 22 and re-run."
-        return 1
-    fi
-    major="$(node_major_version)"
-    if [ "$major" -lt 22 ]; then
-        print_error "Node upgrade did not reach >= 22 (found: ${major}). Refusing to continue."
-        return 1
-    fi
-    print_success "Node.js $(node --version) active"
-    return 0
-}
-
-# Single gated, pinned install path for the HOST qwen stack (multi-user
-# workspace mode): Node gate first, then explicit pinned versions, then
-# exact-match verification. Never installs an unpinned/latest version.
-install_qwen_stack() {
-    ensure_node_22 || return 1
-    if ! command -v npm &>/dev/null; then
-        print_error "npm not available after Node setup; cannot install the qwen stack."
-        return 1
-    fi
-    print_info "Installing qwen-code-webui@${QWEBUI_VERSION} + @qwen-code/qwen-code@${QWEN_CLI_VERSION}..."
-    if ! npm install -g "qwen-code-webui@${QWEBUI_VERSION}"; then
-        print_error "Failed to install qwen-code-webui@${QWEBUI_VERSION}"
-        return 1
-    fi
-    if ! npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}"; then
-        print_error "Failed to install @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
-        return 1
-    fi
-    if ! command -v qwen-code-webui &>/dev/null; then
-        print_error "qwen-code-webui not on PATH after install"
-        return 1
-    fi
-    # Exact-match verification (plain grep -q would also accept 0.23.30 /
-    # 10.23.3 / any surrounding text): normalize the first output line and
-    # compare as a whole string.
-    local installed_ver
-    installed_ver="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
-    if [ "${installed_ver#v}" != "${QWEN_CLI_VERSION}" ]; then
-        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: ${installed_ver:-none})"
-        return 1
-    fi
-    print_success "qwen stack ready: webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION}"
-    return 0
-}
-
-# Install the HOST qwen stack only where docker deployments actually use it:
-# multi-user workspace mode launches qwen-code-webui on the host (the
-# container app calls `sudo openace-webui-launch` through the sudoers rules
-# configured below). Runs AFTER the deploy/upgrade decision — never during
-# pre-config checks. API-only / sandboxed-workspace deployments (multi-user
-# off, no existing host stack) skip Node/npm entirely.
-maybe_install_qwen_stack_host() {
-    if [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
-        && ! command -v qwen-code-webui >/dev/null 2>&1 \
-        && ! command -v qwen >/dev/null 2>&1; then
-        print_info "Multi-user workspace disabled and no existing qwen stack found; skipping host qwen stack installation."
-        return 0
-    fi
-    if ! install_qwen_stack; then
-        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
-        print_error "Fix Node/npm and re-run."
-        exit 1
-    fi
-}
-
-# Host qwen stack installation is handled by install_qwen_stack() above —
-# one gated, pinned path for webui + CLI (PR #3386 review: this used to be
-# two separate unpinned `npm install -g` helpers that accepted any existing
-# binary via `command -v` only, letting Node 20 + EBADENGINE-exit-0 and stale
-# versions through).
-
-# Install the cross-user agent launcher wrapper (Issue #1395).
-# Docker 部署：宿主机执行 install.sh 期间把 scripts/openace-run-as.sh 拷贝到
-# /usr/local/bin/openace-run-as（容器内 bind-mount 或镜像 COPY 都依赖它存在）。
-# 必须在 configure_sudoers 之前调用，sudoers wrapper 规则按 `-x` 探测。
-install_run_as_wrapper() {
-    local src="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}/scripts/openace-run-as.sh"
-    local dst="/usr/local/bin/openace-run-as"
-
-    # Resolve repo-relative source (install.sh lives in scripts/install-central/docker-method/)
-    if [ ! -f "$src" ]; then
-        local alt_src="$(dirname "$(dirname "$(readlink -f "$0")")")/../../scripts/openace-run-as.sh"
-        alt_src="$(readlink -f "$alt_src" 2>/dev/null || echo "$alt_src")"
-        if [ -f "$alt_src" ]; then
-            src="$alt_src"
-        fi
-    fi
-    if [ ! -f "$src" ]; then
-        print_warning "未找到 openace-run-as.sh（搜索 $src），跳过 wrapper 安装"
-        return 1
-    fi
-    if ! cp "$src" "$dst" 2>/dev/null; then
-        print_warning "拷贝 openace-run-as.sh 到 $dst 失败（需要 root？）"
-        return 1
-    fi
-    chown root:root "$dst" 2>/dev/null || true
-    chmod 755 "$dst"
-
-    # Issue #2018: install the launch validator (account pin + path confinement)
-    # consumed by openace-run-as --isolated, plus the root:root 0644 constraint
-    # conf. The wrapper fail-closes without them, so a host that bind-mounts
-    # /usr/local/bin (or /etc/openace) into the container must provision both
-    # alongside the wrapper. Validator source lives next to the wrapper.
-    local validate_src
-    validate_src="$(dirname "$src")/openace-validate-launch"
-    local validate_dst="/usr/local/libexec/openace-validate-launch"
-    if [ -f "$validate_src" ]; then
-        install -d -o root -g root -m 755 "$(dirname "$validate_dst")" 2>/dev/null || true
-        install -o root -g root -m 755 "$validate_src" "$validate_dst" 2>/dev/null \
-            || print_warning "安装 openace-validate-launch 到 $validate_dst 失败"
-    else
-        print_warning "未找到 openace-validate-launch（与 $src 同目录），跳过 validator 安装"
-    fi
-    local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
-    install -d -o root -g root -m 755 /etc/openace 2>/dev/null || true
-    cat > /etc/openace/agent-launcher.conf 2>/dev/null <<CONF_EOF || print_warning "写入 agent-launcher.conf 失败"
-# Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0644 — the openace service account can read but not edit this file.
-OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
-ALLOWED_WORKSPACE_ROOTS="/home /workspace"
-CONF_EOF
-    chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
-    chmod 0644 /etc/openace/agent-launcher.conf 2>/dev/null || true
-    print_success "已安装 run-as wrapper 到 $dst"
-    return 0
-}
-
-# Install the privileged data fetch wrapper (Issue #3145).
-# This wrapper is required when FETCH_USE_SUDO=true in multi-user systemd deployments.
-# It allows the scheduler to run fetch scripts with root privileges to read
-# user home directories, then drops privileges to write to the database.
-install_fetch_wrapper() {
-    local src="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}/scripts/openace-fetch-wrapper"
-    local dst="/usr/local/bin/openace-fetch-wrapper"
-
-    # Resolve repo-relative source (install.sh lives in scripts/install-central/docker-method/)
-    if [ ! -f "$src" ]; then
-        local alt_src="$(dirname "$(dirname "$(readlink -f "$0")")")/../../scripts/openace-fetch-wrapper"
-        alt_src="$(readlink -f "$alt_src" 2>/dev/null || echo "$alt_src")"
-        if [ -f "$alt_src" ]; then
-            src="$alt_src"
-        fi
-    fi
-    if [ ! -f "$src" ]; then
-        print_warning "未找到 openace-fetch-wrapper（搜索 $src），跳过 wrapper 安装"
-        return 1
-    fi
-    if ! cp "$src" "$dst" 2>/dev/null; then
-        print_warning "拷贝 openace-fetch-wrapper 到 $dst 失败（需要 root？）"
-        return 1
-    fi
-    chown root:root "$dst" 2>/dev/null || true
-    chmod 755 "$dst"
-
-    # Create audit log directory
-    install -d -o root -g root -m 755 /var/log/openace 2>/dev/null || true
-
-    print_success "已安装 fetch wrapper 到 $dst"
-    return 0
-}
-
-install_git_gh_wrappers() {
-    local script_dir
-    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local source_dir
-    source_dir=$(cd "$script_dir/../../.." && pwd)
-    local config_src_dir="$source_dir/config/openace"
-
-    if [ ! -f "$source_dir/scripts/openace-git.py" ] || [ ! -f "$source_dir/scripts/openace-gh.py" ]; then
-        print_warning "未找到 openace git/gh wrappers（搜索 $source_dir/scripts），跳过安装"
-        return 1
-    fi
-    if [ ! -f "$config_src_dir/git-wrapper.json" ] || [ ! -f "$config_src_dir/gh-wrapper.json" ]; then
-        print_warning "未找到 openace git/gh wrapper 配置（搜索 $config_src_dir），跳过安装"
-        return 1
-    fi
-
-    install -o root -g root -m 0755 "$source_dir/scripts/openace-git.py" /usr/local/bin/openace-git || return 1
-    install -o root -g root -m 0755 "$source_dir/scripts/openace-gh.py" /usr/local/bin/openace-gh || return 1
-    install -d -o root -g root -m 0755 /etc/openace || return 1
-    install -o root -g root -m 0644 "$config_src_dir/git-wrapper.json" /etc/openace/git-wrapper.json || return 1
-    install -o root -g root -m 0644 "$config_src_dir/gh-wrapper.json" /etc/openace/gh-wrapper.json || return 1
-
-    print_success "已安装 openace git/gh wrappers 和配置"
-    return 0
-}
-
-# Configure sudoers for multi-user workspace mode
-configure_sudoers() {
-    print_header "配置 Sudo 权限"
-
-    # Check if running as root
-    if [ "$(id -u)" -ne 0 ]; then
-        print_error "需要 root 权限来配置 sudoers"
-        print_info "请使用 sudo 运行安装脚本"
-        return 1
-    fi
-
-    # Find webui executable — the pinned host stack must have been installed
-    # by maybe_install_qwen_stack_host() before sudoers configuration. No
-    # unpinned interactive install here (PR #3386 review): a missing binary
-    # now fails closed with the pinned manual recovery command.
-    local webui_path=$(find_webui_executable)
-    if [ -z "$webui_path" ]; then
-        print_error "未找到 qwen-code-webui 可执行文件（多用户模式需要宿主机固定版本栈）"
-        print_info "请先安装并重跑安装脚本:"
-        print_info "  npm install -g qwen-code-webui@${QWEBUI_VERSION} @qwen-code/qwen-code@${QWEN_CLI_VERSION} (需要 Node >= 22)"
-        return 1
-    fi
-
-    print_success "找到 qwen-code-webui: $webui_path"
-
-    # Create sudoers file
-    local sudoers_file="/etc/sudoers.d/open-ace-webui"
-    # NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
-    # 【安全加固 Issue #2181】删除高风险通配规则，改用安全 wrapper
-
-    # Run-as wrapper for cross-user agent launch (Issue #1395, PR #1467)
-    local wrapper_path="/usr/local/bin/openace-run-as"
-    local wrapper_rule=""
-    if [ -x "$wrapper_path" ]; then
-        wrapper_rule="$RUN_USER ALL=(root) NOPASSWD: $wrapper_path --isolated *"
-    fi
-
-    # Security wrappers (Issue #2181)
-    local security_wrapper_rules=""
-    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm; do
-        local wrapper_bin="/usr/local/bin/${wrapper}"
-        if [ -x "$wrapper_bin" ]; then
-            security_wrapper_rules="${security_wrapper_rules}
-$RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
-        fi
-    done
-
-    local sudoers_content="# Open ACE WebUI - Multi-user mode sudo configuration
-# Generated by install.sh on $(date '+%Y-%m-%d %H:%M:%S')
-# Allows the service account to run qwen-code-webui as other users
-# 【安全加固 Issue #2181】删除高风险通配规则
-
-# git/gh cross-user operations are validated by root-owned wrappers (#2650).
-Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
-Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
-
-# Fetch wrapper for privileged data collection (Issue #3145).
-# Required for multi-user systemd deployments with FETCH_USE_SUDO=true.
-Cmnd_Alias FETCH_WRAPPER = /usr/local/bin/openace-fetch-wrapper *
-
-# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
-
-# 跨用户 mkdir：github_ops 创建 verifier worktree 时执行 sudo -u <account> mkdir ...
-Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
-
-# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
-# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
-# Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
-$RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *
-
-# 低风险工具和 autonomous git/gh wrappers
-$RUN_USER ALL=(ALL) NOPASSWD: OPENACE_UTILS
-$RUN_USER ALL=(ALL) NOPASSWD: GIT_SAFE
-$RUN_USER ALL=(ALL) NOPASSWD: GH_SAFE
-$RUN_USER ALL=(ALL) NOPASSWD: FETCH_WRAPPER
-$RUN_USER ALL=(ALL) NOPASSWD: MKDIR_SAFE
-
-# 【Issue #2181】安全 wrapper 规则（替代原 cat/chown/useradd/rm 通配）
-${security_wrapper_rules}
-
-# Run-as wrapper for cross-user agent launch (Issue #1395, PR #1467)
-# 【Issue #2181】所有 AI CLI 必须通过此 wrapper 启动
-${wrapper_rule}
-
-# Preserve environment variables for sudo env_keep passing
-# 【安全加固 Issue #2181】清理敏感变量
-# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
-# env_keep 主要用于 WebUI 启动，移除敏感凭据
-# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不通过 env_keep，
-# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-# PATH 移除（Issue #2650）：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
-Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
-Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
-Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-"
-
-    # Check if sudoers file already exists
-    if [ -f "$sudoers_file" ]; then
-        # 【修复 PR #1467 评论】旧逻辑只看 webui_path 命中就 return，导致已有部署
-        # 升级时不会补齐本 PR 新增的 CLI / run-as wrapper 规则。改为校验关键
-        # 标记是否齐备。任一缺失即重写。
-        local needs_update=false
-        if ! grep -E '^Cmnd_Alias[[:space:]]+GIT_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-git[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
-           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GIT_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if ! grep -E '^Cmnd_Alias[[:space:]]+GH_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-gh[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
-           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GH_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if [ -n "$wrapper_rule" ] && ! grep -qF 'openace-run-as --isolated *' "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if ! grep -q "secure_path.*usr/local/bin" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if [ "$needs_update" = false ]; then
-            print_success "Sudoers 规则已是最新"
-            return 0
-        fi
-        print_info "更新现有 sudoers 文件（补齐 git/gh wrappers/CLI/wrapper 规则）..."
-    fi
-
-    # Back up the existing sudoers file before overwriting so a visudo
-    # failure restores the last-known-good state rather than deleting the
-    # file and leaving the service with no sudoers at all.
-    local sudoers_backup=""
-    if [ -f "$sudoers_file" ]; then
-        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
-        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
-            print_info "已备份现有 sudoers 到 $sudoers_backup"
-        else
-            sudoers_backup=""
-        fi
-    fi
-
-    # Write sudoers file
-    echo "$sudoers_content" > "$sudoers_file"
-    chmod 440 "$sudoers_file"
-
-    # Validate sudoers syntax
-    if visudo -c -f "$sudoers_file" &>/dev/null; then
-        local legacy_sudoers_file="/etc/sudoers.d/openace-run-as"
-        if [ -f "$legacy_sudoers_file" ] && grep -qF "$wrapper_path" "$legacy_sudoers_file"; then
-            mv "$legacy_sudoers_file" "${legacy_sudoers_file}.disabled.$(date +%s)"
-            print_warning "已禁用旧版宽泛 autonomous-agent sudoers 规则"
-        fi
-        print_success "Sudoers 配置成功: $sudoers_file"
-        print_info "服务账号 '$RUN_USER' 可以执行:"
-        print_info "  sudo -u <username> $webui_path --port <port>"
-    else
-        print_error "Sudoers 语法错误，回滚..."
-        # Restore the pre-write backup if we have one (keeps the service
-        # functional on a botched rewrite). Only rm if there was no prior
-        # file (fresh install where a bad file is worse than none).
-        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
-            cp -p "$sudoers_backup" "$sudoers_file"
-            chmod 440 "$sudoers_file"
-            print_warning "已从 $sudoers_backup 恢复上一个 sudoers（服务继续可用）"
-        else
-            rm -f "$sudoers_file"
-        fi
-        return 1
-    fi
-
-    return 0
-}
+# The container runs the whole qwen stack itself: Dockerfile installs the
+# pinned qwen-code-webui/@qwen-code/qwen-code pair inside the image, and
+# docker-entrypoint.sh generates the IN-CONTAINER sudoers against the
+# image-bundled wrappers (/usr/local/bin/openace-*) at startup. The compose
+# file generated by this script mounts only config/logs/home — never any
+# host-side executables or host sudo rules — so a host-side stack install
+# or host sudoers would be dead weight (PR #3386 R15 review: it could even
+# root-upgrade host Node or abort an upgrade after the old containers were
+# already torn down). Host-side stack/sudoers helpers were removed; package
+# deployments (systemd) keep their own copies in package-method/install.sh.
 
 show_help() {
     echo "Open ACE - Quick Install Script"
@@ -1473,8 +1001,8 @@ install_docker() {
 
 # Version offered when the local image-build path auto-installs Node for the
 # frontend build (frontend/package.json has no engines constraint; Node 20 is
-# EOL since 2026-04, so offer 22). The qwen stack has its own hard gate in
-# ensure_node_22().
+# EOL since 2026-04, so offer 22). The qwen stack runs inside the image at
+# its own pinned Node 22 — no host-side stack gate exists in this script.
 NODEJS_VERSION="${NODEJS_VERSION:-22}"
 MIN_NODE_VERSION="${MIN_NODE_VERSION:-18}"
 
@@ -2735,24 +2263,10 @@ upgrade_deployment() {
     fi
     print_success "持久化目录创建完成"
 
-    # Update sudoers if multi-user mode is enabled
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        print_info "更新 sudoers 配置..."
-        stop_webui_systemd_service
-        # Upgrades must also bring an existing host stack to the pinned
-        # versions (fresh install runs the same gate after confirmation).
-        maybe_install_qwen_stack_host
-        install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
-        install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
-        if ! install_git_gh_wrappers; then
-            print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
-        else
-            configure_sudoers
-            if [ $? -ne 0 ]; then
-                print_warning "Sudoers 配置失败，但继续升级"
-            fi
-        fi
-    fi
+    # Multi-user workspace execution is entirely in-container (image-pinned
+    # stack + entrypoint-generated sudoers); the upgrade needs no host-side
+    # stack/sudoers step and therefore no failure exit after teardown
+    # (PR #3386 R15 review).
 
     # Grant sequence permissions to DB_USER if needed
     # PostgreSQL sequences have independent owners (pg_class.relowner).
@@ -4148,25 +3662,12 @@ if [ "$NON_INTERACTIVE" = false ]; then
     fi
 fi
 
-# Configure sudoers for multi-user workspace mode
-if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-    # Stop existing qwen-code-webui systemd service first
-    stop_webui_systemd_service
-    # Host qwen stack (pinned, Node >= 22 gated) BEFORE sudoers: the sudoers
-    # rules reference the host webui binary (fail-closed if missing).
-    maybe_install_qwen_stack_host
-    install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
-    install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
-    if ! install_git_gh_wrappers; then
-        print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
-        exit 1
-    fi
-    configure_sudoers
-    if [ $? -ne 0 ]; then
-        print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"
-        print_info "请手动配置后重试，或使用单用户模式"
-    fi
-fi
+# Multi-user workspace execution is entirely in-container: the image carries
+# the pinned qwen stack and docker-entrypoint.sh generates the in-container
+# sudoers at startup. No host-side stack install or host sudoers here — the
+# container cannot use them (nothing host-side is mounted), and a host-side
+# gate could abort after confirmation for no runtime benefit (PR #3386 R15
+# review).
 
 # Execute deployment
 # Check for existing config files and warn user before deployment
