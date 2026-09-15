@@ -388,7 +388,11 @@ def api_create_user():
         # Auto-create system user for workspace if system_account is provided
         if system_account:
             uid = data.get("system_uid")  # Optional: specific UID
-            if ensure_system_user(system_account, uid=uid):
+            # Issue #3396 review: pass the target tenant so the account
+            # enrolls into openace-shared-<tenant_id>; without it the
+            # default None maps to the openace-shared-0 pseudo-tenant and
+            # the membership would have to be repaired by hand.
+            if ensure_system_user(system_account, uid=uid, tenant_id=tenant_id):
                 logger.info(f"System user {system_account} ready for workspace")
             else:
                 logger.warning(
@@ -465,6 +469,16 @@ def api_update_user(user_id):
     system_account = data.get("system_account")
     if system_account and not validate_username(system_account):
         return jsonify({"error": "Invalid system_account name"}), 400
+    # Issue #3396 review: a minimal tenant move ({"tenant_id": N} with NO
+    # system_account field) must still run the enroll/drop bookkeeping below
+    # — derive the DB row's account exactly like the deactivation path does,
+    # otherwise the move silently skips BOTH the new-tenant enrollment and
+    # the old-tenant group drop, and the account keeps OS read/write on the
+    # OLD tenant's shared projects forever. Only an absent/None field
+    # derives; an explicit "" keeps its "clear the mapping" meaning for the
+    # DB write below.
+    if system_account is None and current_user:
+        system_account = current_user.get("system_account") or current_user.get("username")
     if system_account:
         uid = data.get("system_uid")
         # Review on #3390: log failures like the create/restore call sites —
