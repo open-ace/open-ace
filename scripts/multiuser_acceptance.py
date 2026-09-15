@@ -701,28 +701,35 @@ def listening_ports_in_range(low: int, high: int) -> list[int]:
     )
 
 
-_ENV_DUMP_TEMPLATE = (
-    "for d in /proc/[0-9]*; do "
-    "cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null) || continue; "
-    'case "$cmd" in *"--port PORTARG"*) '
-    "uid=$(awk '/^Uid:/{print $2}' $d/status 2>/dev/null); "
-    "[ \"$uid\" = \"UIDARG\" ] && { tr '\\0' '\\n' < $d/environ 2>/dev/null && exit 0; } ;; "
-    "esac; done; exit 1"
-)
+# One container exec: find the webui's SUDO PARENT and parse its inline
+# KEY=VALUE args. Both the first main-push run (tr exit 2) and the PR-#3398
+# run made the real cause explicit: /proc/<pid>/environ of a non-child
+# process is Permission-denied for container root on GitHub runners
+# (yama/seccomp) — environ was never readable there. The launch shape
+# inlines the injected env as ARGUMENTS to the sudo wrapper
+# (webui_manager: "inline KEY=VALUE args are visible in /proc/<pid>/cmdline
+# to other processes" — deliberately so, the values are proxy tokens), and
+# /proc/*/cmdline is world-readable. The sudo parent is identified by the
+# openace-webui-launch arg + the --port N pair; retries ride on top in case
+# the launch is still forking.
+_ENV_DUMP_TEMPLATE = """for d in /proc/[0-9]*; do
+  args=$(tr '\\0' '\\n' < $d/cmdline 2>/dev/null) || continue
+  case "$args" in *openace-webui-launch*) ;; *) continue ;; esac
+  printf '%s\\n' "$args" | awk -v p='PORTARG' 'prev=="--port"&&$0==p{f=1}{prev=$0}END{exit f?0:1}' || continue
+  printf '%s\\n' "$args" | grep -E '^[A-Za-z_][A-Za-z0-9_]*='
+  exit 0
+done
+exit 1"""
 
 
 def webui_env_of(port: int, account: str, *, attempts: int = 5) -> dict[str, str]:
-    """Full environment of the webui process on *port* (root can read any
-    /proc/<pid>/environ; the values are injected proxy tokens). Matched by
-    uid: the sudo parent's environ is the Flask app's inherited env and
-    carries no proxy token (review F2).
+    """The injected environment of the webui launched for *port*, read from
+    the sudo parent's inline KEY=VALUE cmdline args (see the template's
+    comment for why /proc environ is not usable on CI runners).
 
-    Find-and-dump run in ONE container exec (scan-then-read TOCTOU: the
-    first main-push run, 34870593285, lost the pid between the /proc scan
-    and the environ read), retried — a webui that keeps exiting raises so
+    Retried — a launch still forking raises after `attempts` tries so
     callers can record the failure instead of silently skipping."""
-    uid = container_uid_of(account)
-    script = _ENV_DUMP_TEMPLATE.replace("PORTARG", str(port)).replace("UIDARG", uid)
+    script = _ENV_DUMP_TEMPLATE.replace("PORTARG", str(port))
     last = ""
     for _attempt in range(attempts):
         out = compose_exec(SERVICE, script, timeout=20, check=False)
@@ -736,9 +743,9 @@ def webui_env_of(port: int, account: str, *, attempts: int = 5) -> dict[str, str
         last = f"rc={out.returncode} out={out.stdout[:80]!r} err={out.stderr.strip()[:120]!r}"
         time.sleep(2)
     raise AcceptanceError(
-        f"webui process for port {port} (account {account}, uid {uid}) not readable "
-        f"after {attempts} attempts — it may have exited right after launch "
-        f"(check compose-logs for an early webui crash); last: {last}"
+        f"webui launch env for port {port} (account {account}) not readable "
+        f"after {attempts} attempts — the sudo wrapper with inline KEY=VALUE "
+        f"args was not found in /proc (instance may not be running); last: {last}"
     )
 
 
