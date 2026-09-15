@@ -2449,11 +2449,13 @@ CREATE TABLE users (
     auto_mapping_enabled boolean DEFAULT true,
     tenant_version integer DEFAULT 1 NOT NULL,
     tokens_valid_after timestamp without time zone,
+    system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role)::text = 'tenant_admin'::text) AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK (((role)::text = ANY ((ARRAY['platform_admin'::character varying, 'tenant_admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
 COMMENT ON COLUMN users.tokens_valid_after IS 'UTC timestamp; WebUI URL tokens minted before it are invalid. Stamped on deactivation/soft-delete, never cleared on reactivation/restore (Issue #3379 R-5).';
+COMMENT ON COLUMN users.system_uid IS 'Pinned OS uid for the account''s system user; passed to useradd -u on (re)creation so uids survive container recreation and a deactivated user''s uid is never reassigned (Issue #3390).';
 CREATE SEQUENCE users_id_seq
     AS integer
     START WITH 1

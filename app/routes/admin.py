@@ -465,9 +465,6 @@ def api_update_user(user_id):
     system_account = data.get("system_account")
     if system_account and not validate_username(system_account):
         return jsonify({"error": "Invalid system_account name"}), 400
-    if system_account:
-        uid = data.get("system_uid")
-        ensure_system_user(system_account, uid=uid)
 
     # Handle tenant_id change
     if new_tenant_id is not None:
@@ -509,6 +506,28 @@ def api_update_user(user_id):
     )
 
     if success:
+        # Review on #3390: provision AFTER the row write succeeds, and only
+        # for users who end up ACTIVE. Before, this ran BEFORE update_user
+        # and regardless of active state: (1) the uid write-back
+        # (record_system_uid) matches WHERE system_account = ?, but the NEW
+        # mapping was not in the row yet — the pin UPDATE hit 0 rows, and a
+        # container recreation before first login re-assigned the uid while
+        # /workspace/<account> kept the old owner; (2) editing a
+        # DEACTIVATED user hit the exists-path and _ensure_login_shell
+        # usermod'd the nologin placeholder back to /bin/bash — the very
+        # leak the scheduler fix in this PR removed. An inactive row with a
+        # NEW mapping gets no OS provisioning here (deliberate): its uid is
+        # handled by the entrypoint sync once activated, never before.
+        final_active = (
+            requested_is_active
+            if requested_is_active is not None
+            else bool(current_user and current_user.get("is_active"))
+        )
+        if system_account and final_active:
+            if not ensure_system_user(system_account, uid=data.get("system_uid")):
+                logger.warning(
+                    f"Failed to create system user {system_account}, workspace may not work"
+                )
         # Audit log for user update
         details: dict[str, Any] = {"action": "update"}
         if current_user:

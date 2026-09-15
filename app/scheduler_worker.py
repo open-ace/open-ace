@@ -437,8 +437,17 @@ class SchedulerWorker:
                 logger.warning("Database not initialized, cannot sync system users")
                 return
 
+            # 查询所有有 system_account 的用户。
+            # Review on #3390: 只同步在役用户（镜像 entrypoint 的分类逻辑）。
+            # 停用/软删用户的 uid 由 entrypoint 的 nologin 占位账号保留；
+            # 若此处不过滤，ensure_system_user 的 exists-path 会经
+            # _ensure_login_shell 把占位账号 usermod 回 /bin/bash —— 每次
+            # scheduler 启动都悄悄撤销占位保护（多用户 compose 的 scheduler
+            # 以 root 运行，usermod 会成功）。
             users = self._db.fetch_all(
-                "SELECT DISTINCT system_account FROM users WHERE system_account IS NOT NULL AND system_account != ''"
+                "SELECT DISTINCT system_account FROM users "
+                "WHERE system_account IS NOT NULL AND system_account != '' "
+                "AND deleted_at IS NULL AND is_active = true"
             )
 
             if not users:

@@ -1592,6 +1592,7 @@ CREATE TABLE users (
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
  tokens_valid_after TIMESTAMP,
+ system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );

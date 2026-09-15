@@ -1237,32 +1237,83 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     fi
 
     # Sync workspace users from database to container
-    # This creates OS users for each database user with system_account
+    # This creates OS users for each database user with system_account.
+    # Issue #3390: accounts are pinned to their recorded users.system_uid
+    # (useradd -u) and deactivated users get nologin placeholder accounts,
+    # so uids are stable across container recreation and a deactivated
+    # user's uid is never inherited by an active account.
     if [ -n "$DATABASE_URL" ]; then
         echo "Syncing workspace users from database..."
-        python3 -c "
+        # Review on #3390: the plain `python3 -c ... | tee LOG || echo` pipeline
+        # masked python's exit status (tee returns 0; no pipefail file-wide) and
+        # piped stdout is block-buffered — a #3399-style boot-context death made
+        # all sync phases vanish silently with the WARNING never firing. The
+        # subshell scopes pipefail to this one pipeline, -u unbuffers, and the
+        # trailing || keeps set -e from crash-looping the service while making
+        # any sync failure (including the missing-account check below) loud.
+        ( set -o pipefail; python3 -u -c "
 import os
+import pwd
 import subprocess
+import sys
 import psycopg2
 
 workspace_base = os.environ.get('WORKSPACE_BASE_DIR', '/workspace')
 
-def create_system_user(username):
-    \"\"\"Create a system user and workspace directory if they don't exist.\"\"\"
+def uid_owner(uid):
+    \"\"\"Issue #3390: account NAME currently owning uid, or None if unassigned.\"\"\"
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
+
+def create_system_user(username, uid=None):
+    \"\"\"Create a system user and workspace directory if they don't exist.
+
+    Issue #3390 (uid pinning): uid is the recorded users.system_uid pin;
+    useradd -u keeps the account on the same numeric uid across container
+    recreations, so a fresh /etc/passwd can never hand this uid (and with it
+    the numeric ownership of the volume dirs) to a different account.
+    Returns the account's actual uid (for record-back) or None on failure.
+    \"\"\"
     # Check if user exists
     result = subprocess.run(['id', username], capture_output=True, text=True)
     if result.returncode == 0:
         print(f'  User {username} already exists')
+        # Issue #3390: an account that exists as a DEACTIVATED user's
+        # placeholder (nologin) must be upgraded back to a login shell when
+        # its own user is active again (reactivation across a recreate).
+        try:
+            shell = pwd.getpwnam(username).pw_shell
+        except KeyError:
+            shell = None
+        if shell == '/usr/sbin/nologin':
+            subprocess.run(['usermod', '-s', '/bin/bash', username], capture_output=True, text=True)
+            print(f'  Upgraded placeholder account {username} to /bin/bash (reactivated user, #3390)')
     else:
-        # Create user with home directory
-        result = subprocess.run(
-            ['useradd', '-m', '-s', '/bin/bash', username],
-            capture_output=True, text=True
-        )
+        # Issue #3390 collision guard (CREATE path only): a pinned uid owned
+        # by a DIFFERENT account means useradd would fail — or worse,
+        # renumbering would silently move the boundary between two users'
+        # files. Skip loudly for an admin; the pin stays recorded so the
+        # next sync retries with it. (When the account already exists above,
+        # the OS is the truth and the caller's drift branch converges the
+        # record instead — no useradd, nothing to collide.)
+        if uid is not None:
+            owner = uid_owner(uid)
+            if owner is not None and owner != username:
+                print(f'  ERROR (issue #3390): recorded uid {uid} for {username} is already owned by {owner} — skipping account creation, resolve the conflict manually (not renumbering)')
+                return None
+        # Create user with home directory; -u pins the recorded uid (#3390)
+        cmd = ['useradd', '-m', '-s', '/bin/bash']
+        if uid is not None:
+            cmd.extend(['-u', str(uid)])
+        cmd.append(username)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f'  Created user: {username}')
+            print(f'  Created user: {username}' + (f' (uid {uid})' if uid else ''))
         else:
             print(f'  Failed to create user {username}: {result.stderr}')
+            return None
 
     # Create workspace directory for user (always attempt if user exists or was just created)
     user_workspace = os.path.join(workspace_base, username)
@@ -1290,6 +1341,41 @@ def create_system_user(username):
     # Sync SSH keys if mounted (Issue #1122)
     # 【安全加固 Issue #2182 + #2328】使用独立的 Python 脚本实现安全同步（fail-closed）
     sync_ssh_keys_secure(username)
+
+    try:
+        return pwd.getpwnam(username).pw_uid
+    except KeyError:
+        return None
+
+def create_placeholder_user(username, uid):
+    \"\"\"Issue #3390: placeholder account for a deactivated/soft-deleted user.
+
+    A fresh container re-useradds only what this sync creates; without a
+    placeholder, useradd's sequential uid assignment hands this user's old
+    uid (and so the numeric ownership of their 0700 /home/<user> and
+    /workspace/<user>) to whichever active account lands on the number.
+    The placeholder is a nologin shell that only reserves the uid — home
+    dirs and workspaces are NOT created, chowned, or ssh-synced (the
+    volume dirs already carry this numeric owner; stat -c %U reports the
+    placeholder name from then on).
+    \"\"\"
+    result = subprocess.run(['id', username], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f'  Placeholder user {username} already exists (recorded uid {uid})')
+        return
+    owner = uid_owner(uid)
+    if owner is not None and owner != username:
+        # Name conflict with a live account (admin reused the account name)
+        # or a duplicate recorded pin — either way an admin decision, never
+        # renumber. The deactivated user's dirs stay on the orphan uid
+        # (owner UNKNOWN), which the isolation checks treat as safe.
+        print(f'  WARNING (issue #3390): recorded uid {uid} for deactivated user {username} is owned by {owner} — placeholder skipped, not renumbering')
+        return
+    result = subprocess.run(['useradd', '-u', str(uid), '-s', '/usr/sbin/nologin', username], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f'  Created placeholder user: {username} (uid {uid}, nologin)')
+    else:
+        print(f'  Failed to create placeholder user {username}: {result.stderr}')
 
 
 def sync_ssh_keys_secure(username):
@@ -1453,21 +1539,89 @@ try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
 
-    # Get all users with system_account or username
-    cur.execute('SELECT username, system_account FROM users WHERE is_active = true')
+    # Get all users with system_account or username.
+    # Issue #3390: pull the recorded uid pin (users.system_uid) alongside the
+    # account so re-creation lands on the same numeric uid, and ALSO include
+    # deactivated/soft-deleted users that still have a pin — their placeholder
+    # accounts (below) keep that uid from being reassigned to an active
+    # account. ORDER BY id keeps the sync deterministic across recreations.
+    cur.execute(
+        'SELECT id, username, system_account, system_uid, is_active, deleted_at '
+        'FROM users '
+        'WHERE (deleted_at IS NULL AND is_active = true) OR system_uid IS NOT NULL '
+        'ORDER BY id'
+    )
     rows = cur.fetchall()
 
-    # Build a mapping of username -> system_account for owner lookup
-    user_mapping = {}
-    for username, system_account in rows:
+    # Classify (#3390): active rows get real accounts; every other row with a
+    # recorded pin gets a nologin placeholder so the uid is never inherited.
+    active_rows = []
+    placeholder_rows = []
+    for row_id, username, system_account, system_uid, is_active, deleted_at in rows:
         account = system_account or username
-        if account:
-            user_mapping[username] = account
-            create_system_user(account)
+        if not account:
+            continue
+        if deleted_at is None and is_active:
+            active_rows.append((row_id, username, account, system_uid))
+        elif system_uid is not None:
+            placeholder_rows.append((account, system_uid))
+
+    # Build a mapping of username -> system_account for owner lookup
+    user_mapping = {username: account for row_id, username, account, uid in active_rows}
+
+    # Issue #3390 ordering — pinned claims before any auto-assigned useradd:
+    #   1. active users WITH a recorded pin (deterministic uids, and the
+    #      account name wins any collision with a deactivated row),
+    #   2. placeholder accounts reserving deactivated users' uids,
+    #   3. active users WITHOUT a pin — useradd auto-assigns from the
+    #      remaining free uids (it can no longer land on a reserved pin),
+    #      and the assigned uid is recorded back so phase 1 covers them on
+    #      every future recreation.
+    for row_id, username, account, recorded_uid in active_rows:
+        if recorded_uid is None:
+            continue
+        actual_uid = create_system_user(account, uid=recorded_uid)
+        if actual_uid is not None and actual_uid != recorded_uid:
+            cur.execute('UPDATE users SET system_uid = %s WHERE id = %s', (actual_uid, row_id))
+            print(f'  Updated recorded uid for {account}: {recorded_uid} -> {actual_uid} (#3390 drift)')
+
+    for account, uid in placeholder_rows:
+        create_placeholder_user(account, uid)
+
+    for row_id, username, account, recorded_uid in active_rows:
+        if recorded_uid is not None:
+            continue
+        actual_uid = create_system_user(account)
+        if actual_uid is not None:
+            cur.execute('UPDATE users SET system_uid = %s WHERE id = %s', (actual_uid, row_id))
+            print(f'  Recorded uid {actual_uid} for {account} (#3390 pin bootstrap)')
+
+    # Persist the pins before the project-dir pass — a failure there must
+    # not lose them (the connection is otherwise read-only until close).
+    conn.commit()
+
+    # Review on #3390 (missing-actives verification): a collision skip, a
+    # useradd failure, or a mid-loop exception can each leave an ACTIVE user
+    # without an OS account — that user cannot log in to a workspace at all.
+    # Verify loudly and exit nonzero: the pipefail wrapper in the entrypoint
+    # turns this into the WARNING line (visible in container logs) without
+    # crash-looping the service. Review round 2: the exit happens only AFTER
+    # the project-dir pass below — that section already tolerates missing
+    # owners per-project (Warning + skip), so one failed account must not
+    # block every other user's project directories on every boot. The pins
+    # above were already committed, so the next recreation retries from the
+    # recorded state.
+    missing_actives = []
+    for row_id, username, account, recorded_uid in active_rows:
+        try:
+            pwd.getpwnam(account)
+        except KeyError:
+            missing_actives.append(account)
+    if missing_actives:
+        print(f'  ERROR (issue #3390): active users WITHOUT an OS account after sync: {sorted(missing_actives)} — see the collision/failure lines above; resolve manually')
 
     # Sync project directories from database (Issue #1083)
     print('Syncing project directories...')
-    import pwd
     cur.execute('SELECT path FROM projects WHERE is_active = true')
     project_rows = cur.fetchall()
 
@@ -1495,10 +1649,20 @@ try:
                 print(f'  Project directory exists: {path}')
 
     conn.close()
+    if missing_actives:
+        # exit nonzero only AFTER the project-dir pass (review on #3390:
+        # one failed account must not block everyone's project sync) —
+        # the pipefail wrapper turns this into the WARNING line.
+        sys.exit(1)
     print('User and project sync completed.')
 except Exception as e:
     print(f'Error syncing users and projects: {e}')
-" 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
+    # nonzero, or the pipefail wrapper never fires the WARNING (#3399-style
+    # silent death: a mid-stage exception — UPDATE failure, connection drop,
+    # makedirs PermissionError on root_squash NFS — used to end as exit 0,
+    # skipping conn.commit() and the missing-actives verification).
+    sys.exit(1)
+" 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 
     # Issue #3379 (review round 2, 4004368045): enroll users into the shared
@@ -1508,6 +1672,12 @@ except Exception as e:
     # already-logged-in users (sessions live in postgres and survive
     # recreation) keep getting 403 on shared-project creation until they
     # re-login. usermod is idempotent; failures are best-effort.
+    # Review on #3390: this glob pass also enrolls nologin PLACEHOLDER
+    # accounts (their /home/<user> dirs survive on the volume) — intentional
+    # and inert: a placeholder cannot authenticate (nologin shell, no
+    # password, tokens revoked at deactivation), so openace-shared membership
+    # grants nothing, and filtering them out here would add name-shape
+    # heuristics for no security gain.
     for user_dir in /home/*/; do
         username=$(basename "$user_dir")
         if id "$username" &>/dev/null; then
