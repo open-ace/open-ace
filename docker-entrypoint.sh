@@ -1721,7 +1721,7 @@ except Exception as e:
     # makedirs PermissionError on root_squash NFS — used to end as exit 0,
     # skipping conn.commit() and the missing-actives verification).
     sys.exit(1)
-" 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
+" 2>&1 | tee /app/logs/open-ace-user-sync.log ) || { _sync_rc=$?; echo "WARNING: User sync failed (exit=$_sync_rc) - check /app/logs/open-ace-user-sync.log for details"; echo "#3399 diagnostics: exit=$_sync_rc (137=SIGKILL/OOM 139=SIGSEGV 141=SIGPIPE 143=SIGTERM 1=python-exit-1)"; grep -H . /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.stat 2>/dev/null | grep -E "memory.events|oom|max_usage_in_bytes" || true; unset _sync_rc; }
     fi
 
     # ========================================================================
