@@ -701,21 +701,45 @@ def listening_ports_in_range(low: int, high: int) -> list[int]:
     )
 
 
-def webui_env_of(port: int, account: str) -> dict[str, str]:
+_ENV_DUMP_TEMPLATE = (
+    "for d in /proc/[0-9]*; do "
+    "cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null) || continue; "
+    'case "$cmd" in *"--port PORTARG"*) '
+    "uid=$(awk '/^Uid:/{print $2}' $d/status 2>/dev/null); "
+    "[ \"$uid\" = \"UIDARG\" ] && { tr '\\0' '\\n' < $d/environ 2>/dev/null && exit 0; } ;; "
+    "esac; done; exit 1"
+)
+
+
+def webui_env_of(port: int, account: str, *, attempts: int = 5) -> dict[str, str]:
     """Full environment of the webui process on *port* (root can read any
     /proc/<pid>/environ; the values are injected proxy tokens). Matched by
     uid: the sudo parent's environ is the Flask app's inherited env and
-    carries no proxy token (review F2)."""
-    proc = find_webui_process(port, account)
-    if not proc:
-        raise AcceptanceError(f"no webui process found for port {port}")
-    out = compose_exec(SERVICE, f"tr '\\0' '\\n' < /proc/{proc['pid']}/environ", timeout=15)
-    env: dict[str, str] = {}
-    for line in out.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            env[key] = value
-    return env
+    carries no proxy token (review F2).
+
+    Find-and-dump run in ONE container exec (scan-then-read TOCTOU: the
+    first main-push run, 34870593285, lost the pid between the /proc scan
+    and the environ read), retried — a webui that keeps exiting raises so
+    callers can record the failure instead of silently skipping."""
+    uid = container_uid_of(account)
+    script = _ENV_DUMP_TEMPLATE.replace("PORTARG", str(port)).replace("UIDARG", uid)
+    last = ""
+    for _attempt in range(attempts):
+        out = compose_exec(SERVICE, script, timeout=20, check=False)
+        if out.returncode == 0 and out.stdout.strip():
+            env: dict[str, str] = {}
+            for line in out.stdout.splitlines():
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    env[key] = value
+            return env
+        last = f"rc={out.returncode} out={out.stdout[:80]!r} err={out.stderr.strip()[:120]!r}"
+        time.sleep(2)
+    raise AcceptanceError(
+        f"webui process for port {port} (account {account}, uid {uid}) not readable "
+        f"after {attempts} attempts — it may have exited right after launch "
+        f"(check compose-logs for an early webui crash); last: {last}"
+    )
 
 
 # ── scenario ─────────────────────────────────────────────────────────────
@@ -891,7 +915,13 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
     # review 7374: on the sudo-launch path the proxy token reaches the webui
     # ONLY as the inlined OPENAI_API_KEY (popen_env=None — the parent env has
     # no OPENACE_PROXY_TOKEN for sudo env_keep to preserve). Read it there.
-    envs = {name: webui_env_of(ports[name], name) for name in ("alice", "bob")}
+    try:
+        envs = {name: webui_env_of(ports[name], name) for name in ("alice", "bob")}
+    except AcceptanceError as exc:
+        # a webui that exits right after launch is a FINDING (recorded), not a
+        # reason to abort the checklist — the remaining items still run
+        rec.check("a", "webui environments readable", False, str(exc)[:300])
+        return
     for name, env in envs.items():
         rec.check(
             "a",
