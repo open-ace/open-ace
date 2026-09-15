@@ -23,6 +23,8 @@ __all__ = [
     "get_workspace_base_dirs",
     "run_as_root_if_needed",
     "ensure_system_user",
+    "get_recorded_system_uid",
+    "record_system_uid",
     "ensure_user_workspace",
     "SHARED_GROUP_NAME",
     "ensure_shared_group",
@@ -119,6 +121,117 @@ def _is_docker_multi_user_mode() -> bool:
     return is_docker_workspace and is_root
 
 
+def _lookup_uid_owner(uid: int) -> str | None:
+    """Return the account NAME currently owning ``uid`` (None if unassigned).
+
+    Issue #3390: reverse NSS lookup used by the uid-collision guard. Kept as
+    a tiny separate function so tests can stub the passwd database without
+    faking subprocess plumbing. Uses the ``pwd`` module (same NSS source as
+    ``id``/``getent`` in a container); imported lazily because the module
+    does not exist on Windows.
+    """
+    import pwd
+
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
+
+
+def get_recorded_system_uid(system_account: str) -> int | None:
+    """Read the pinned OS uid for ``system_account`` from the users table.
+
+    Issue #3390: scoped like the partial unique index
+    ``idx_users_system_account`` (deleted_at IS NULL AND is_active = true) —
+    at most one row matches, and a DEACTIVATED row keeps its recorded pin
+    (that is exactly what the entrypoint's placeholder accounts restore).
+    """
+    try:
+        from app.repositories.database import adapt_sql, get_db_connection
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "SELECT system_uid FROM users "
+                    "WHERE system_account = ? AND deleted_at IS NULL AND is_active = true"
+                ),
+                (system_account,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            value = row[0]
+            return int(value) if value is not None else None
+    except Exception as e:
+        # Read failure must not block account creation — an unpinned useradd
+        # is the pre-#3390 behavior, strictly no worse. The entrypoint sync
+        # records the assigned uid afterwards, closing the gap next recreate.
+        logger.warning(f"Could not read recorded system_uid for {system_account}: {e}")
+        return None
+
+
+def record_system_uid(system_account: str, uid: int) -> bool:
+    """Persist the OS uid assigned to ``system_account`` back to its user row.
+
+    Issue #3390: the pin is what makes uids stable across container
+    recreation. Same scoping as ``get_recorded_system_uid`` (active,
+    non-deleted rows only). Failures are logged, never raised — a missed
+    record degrades to the legacy unpinned behavior until the next sync.
+    """
+    try:
+        from app.repositories.database import adapt_sql, get_db_connection
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "UPDATE users SET system_uid = ? "
+                    "WHERE system_account = ? AND deleted_at IS NULL AND is_active = true"
+                ),
+                (uid, system_account),
+            )
+            conn.commit()
+            return bool(cursor.rowcount > 0)
+    except Exception as e:
+        logger.warning(f"Could not record system_uid {uid} for {system_account}: {e}")
+        return False
+
+
+def _actual_uid_of(system_account: str) -> int | None:
+    """Read the account's current numeric uid via ``id -u`` (None on failure)."""
+    result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _ensure_login_shell(system_account: str) -> None:
+    """Issue #3390: upgrade a placeholder (nologin) account back to bash.
+
+    On container recreation the entrypoint keeps nologin placeholder accounts
+    for deactivated users; when such a user is REACTIVATED, their existing
+    account (phase 1 re-creates it with the pinned uid, but the account may
+    already exist from the placeholder pass) must get a real login shell
+    back. Best-effort: failures are logged, never raised.
+    """
+    import pwd
+
+    try:
+        if pwd.getpwnam(system_account).pw_shell != "/usr/sbin/nologin":
+            return
+    except KeyError:
+        return
+    result = run_as_root_if_needed(["usermod", "-s", "/bin/bash", system_account])
+    if result.returncode == 0:
+        logger.info(f"Upgraded placeholder account {system_account} to /bin/bash (#3390)")
+    else:
+        logger.warning(f"Could not restore login shell for {system_account}: {result.stderr}")
+
+
 def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     """确保系统用户存在，创建工作目录。
 
@@ -129,9 +242,17 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     此函数用于 Package 版 multi-user mode，当服务以非 root 用户运行时，
     通过 sudo 执行 useradd 和 chown 命令。
 
+    Issue #3390 (uid pinning): when ``uid`` is not given explicitly, the
+    pinned uid recorded in ``users.system_uid`` is used, and whatever uid
+    the account ends up with is recorded back so it survives container
+    recreation. A pinned/explicit uid already owned by a DIFFERENT account
+    name fails loudly (logged error) instead of silently renumbering —
+    renumbering would hand the other account's files to this user.
+
     Args:
         system_account: 用户名（必须符合 Linux useradd 要求）
-        uid: 可选 UID，必须 >= 1000（系统保留 UID < 1000）
+        uid: 可选 UID，必须 >= 1000（系统保留 UID < 1000）；缺省时使用
+            数据库记录的 pinned UID（Issue #3390）。
 
     Returns:
         True 如果用户存在或创建成功。
@@ -164,10 +285,34 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         logger.debug(f"Skipping system user creation on macOS for: {system_account}")
         return True
 
-    # uid 安全验证：禁止创建系统保留 UID (< 1000)
+    # Issue #3390: no explicit uid -> fall back to the recorded pin. The pin
+    # is also the value compared against on the exists-path below.
+    recorded_uid = get_recorded_system_uid(system_account)
+    if uid is None:
+        uid = recorded_uid
+
+    # Same reserved-range rule for the recorded pin: pins are only ever
+    # written from useradd-assigned uids (>= 1000), so a lower value means a
+    # tampered/corrupted row — refuse rather than create a system-range
+    # account or silently ignore the pin.
     if uid is not None and uid < 1000:
-        logger.error(f"UID {uid} is reserved for system users, rejected")
+        logger.error(f"UID {uid} for {system_account} is reserved for system users, rejected")
         return False
+
+    # Issue #3390 collision guard: a pinned uid owned by a DIFFERENT account
+    # means re-creating this user would either fail (useradd refuses) or, if
+    # we "fixed" it by renumbering, silently move the boundary between two
+    # users' files. Fail loudly for an administrator instead — never renumber.
+    if uid is not None:
+        uid_owner = _lookup_uid_owner(uid)
+        if uid_owner is not None and uid_owner != system_account:
+            logger.error(
+                f"UID {uid} for system user {system_account} is already owned by "
+                f"'{uid_owner}' (recorded pin conflict, issue #3390); refusing to "
+                f"create/renumber — resolve the conflict manually "
+                f"(this account keeps a placeholder pin in the database)"
+            )
+            return False
 
     base_dir = get_workspace_base_dir()
 
@@ -175,6 +320,25 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     result = subprocess.run(["id", system_account], capture_output=True, text=True)
     if result.returncode == 0:
         logger.info(f"System user {system_account} already exists")
+        # Issue #3390: converge the recorded pin to the account's actual uid.
+        # For an existing account the OS is the truth (its dirs are chowned
+        # to the actual uid); a stale differing pin would be dangerous on the
+        # NEXT recreation (it would try to useradd -u <stale>), so record the
+        # actual value and warn about the drift.
+        actual_uid = _actual_uid_of(system_account)
+        if actual_uid is not None:
+            if recorded_uid is not None and recorded_uid != actual_uid:
+                logger.warning(
+                    f"System user {system_account} exists with uid {actual_uid} but the "
+                    f"recorded pin is {recorded_uid}; updating the record to {actual_uid} "
+                    f"(issue #3390 drift)"
+                )
+            if actual_uid != recorded_uid:
+                record_system_uid(system_account, actual_uid)
+        # Issue #3390: a placeholder (nologin) account must be upgraded back
+        # to a login shell when its user is active and reaches this path
+        # (reactivation across a container recreation).
+        _ensure_login_shell(system_account)
         # Still ensure workspace directories exist
         _ensure_workspace_dirs(system_account, base_dir)
 
@@ -188,6 +352,7 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     # 创建用户（通过 wrapper 或 sudo）
     # Issue #1855: 优先使用安全 wrapper，wrapper 内部做参数校验和审计日志
     # Issue #2894: wrapper 脚本需要 root 权限（锁文件、系统用户创建等）
+    # Issue #3390: -u <uid> pins the account to its recorded uid.
     if _is_wrapper_available(OPENACE_USERADD_WRAPPER):
         cmd = [OPENACE_USERADD_WRAPPER, system_account]
         if uid is not None:
@@ -211,6 +376,11 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         return False
 
     logger.info(f"System user {system_account} created successfully")
+    # Issue #3390: persist the assigned uid (explicit or auto-picked) so the
+    # next container recreation pins this account to the same uid.
+    actual_uid = _actual_uid_of(system_account)
+    if actual_uid is not None:
+        record_system_uid(system_account, actual_uid)
     _ensure_workspace_dirs(system_account, base_dir)
 
     # Issue #2730: Add user to shared group for shared project access
