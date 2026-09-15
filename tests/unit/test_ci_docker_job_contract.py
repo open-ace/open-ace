@@ -320,38 +320,74 @@ def _logical_lines(text: str):
         yield pending_no, pending
 
 
-def _scan_unpinned_qwen_installs(files) -> list[str]:
-    """Every npm install (full alias set: i/in/ins/inst/insta/instal/install/
-    add, leading options allowed) touching the qwen stack packages must
-    carry an explicit @version (digits or the pinned ${..._VERSION}
-    constants); @latest is rejected outright."""
-    npm_install = re.compile(
-        r"npm\s+(?:-{1,2}[\w][\w=-]*\s+)*(?:install|instal|insta|inst|ins|in|i|add)\b"
-    )
-    # A stack package token that is NOT immediately versioned: not followed
-    # (before the next whitespace) by @<digits> or the pinned-variable forms.
-    # Token boundaries: an occurrence embedded in a filesystem path
-    # (/usr/bin/qwen-code-webui, .../node_modules/@qwen-code/qwen-code/cli.js)
-    # is not a package spec; a bare token on an install line is.
-    unpinned = re.compile(
-        r"(?<![/\w.-])(qwen-code-webui|@qwen-code/qwen-code)(?![\w/.-])(?!\S*?@[0-9${])"
-    )
-    latest = re.compile(r"(qwen-code-webui|@qwen-code/qwen-code)@latest")
+_NPM_TOKENS = {"npm", "npm.cmd", "npm.exe"}
+# npm's official install aliases INCLUDING the historical isnt* typo
+# aliases npm resolves to Install (verified against npm 11.x).
+_INSTALL_ALIASES = {
+    "install",
+    "instal",
+    "insta",
+    "inst",
+    "ins",
+    "in",
+    "i",
+    "isntall",
+    "isntal",
+    "isnta",
+    "isnt",
+    "add",
+}
+# The ONLY variable version-suffixes accepted as pinned. Their literal
+# assignments are locked by the pin-consistency contract test; any other
+# ${VAR} (e.g. ${LATEST}) is treated as unpinned (PR #3386 R17 review).
+# ($QwenCliVersion: the PowerShell brace-less flavor, its literal
+# assignment is locked by the pin-consistency contract test)
+_ALLOWED_VERSION_VARS = {"${QWEBUI_VERSION}", "${QWEN_CLI_VERSION}", "$QwenCliVersion"}
+_PKG_RE = re.compile(r"^(qwen-code-webui|@qwen-code/qwen-code)(.*)$")
+_TOKEN_STRIP = "\\\"'(),;`"
 
+
+def _token_is_pinned_pkg(token: str) -> bool | None:
+    """Classify one whitespace token: True = pinned package spec, False =
+    unpinned, None = not a package spec (bare/binary/path context)."""
+    m = _PKG_RE.match(token.strip(_TOKEN_STRIP))
+    if not m:
+        return None
+    rest = m.group(2)
+    if not rest:
+        return False  # bare package name
+    if not rest.startswith("@"):
+        return None  # e.g. .../qwen-code-webui/cli.js path context
+    suffix = rest[1:].rstrip(_TOKEN_STRIP)
+    if suffix in _ALLOWED_VERSION_VARS:
+        return True
+    return re.fullmatch(r"[0-9]+(\.[0-9]+)*", suffix) is not None
+
+
+def _scan_unpinned_qwen_installs(files) -> list[str]:
+    """Fail-closed npm-command coverage: a line counts as a qwen-stack
+    install entry when it contains an npm(.cmd/.exe) token followed
+    anywhere later by an install alias (options with separate values cannot
+    hide the subcommand). Every package occurrence on such a line must then
+    be `pkg@<digits>` or `pkg@${QWEBUI_VERSION}/${QWEN_CLI_VERSION}`
+    exactly — any other suffix (including @latest and other variables) is
+    a violation."""
     violations = []
     for path in files:
         if path.resolve() == Path(__file__).resolve():
-            continue  # this test's own regex sources
+            continue  # this test's own regex/sample sources
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue  # binary or unreadable — nothing installable there
         for lineno, line in _logical_lines(text):
-            if not npm_install.search(line):
+            cleaned = [t.strip(_TOKEN_STRIP) for t in line.split()]
+            npm_positions = [i for i, t in enumerate(cleaned) if t in _NPM_TOKENS]
+            if not npm_positions:
                 continue
-            if latest.search(line):
-                violations.append(f"{path}:{lineno} @latest entry: {line.strip()}")
-            elif unpinned.search(line):
+            if not any(t in _INSTALL_ALIASES for i in npm_positions for t in cleaned[i + 1 :]):
+                continue
+            if any(_token_is_pinned_pkg(t) is False for t in cleaned):
                 violations.append(f"{path}:{lineno} unpinned entry: {line.strip()}")
     return violations
 
@@ -380,7 +416,11 @@ def test_unpinned_sweep_flags_continuations_and_aliases(tmp_path):
         "npm i -g qwen-code-webui\n"
         "npm add -g @qwen-code/qwen-code\n"
         "npm in -g qwen-code-webui\n"
-        "npm --silent install -g @qwen-code/qwen-code\n",
+        "npm --silent install -g @qwen-code/qwen-code\n"
+        "npm isntall -g qwen-code-webui\n"
+        "npm --prefix /opt/cache install -g qwen-code-webui\n"
+        "LATEST=latest; npm install -g qwen-code-webui@${LATEST}\n"
+        "npm.cmd install -g @qwen-code/qwen-code\n",
         encoding="utf-8",
     )
     ps_bypass = tmp_path / "bypass.ps1"
@@ -398,16 +438,24 @@ def test_unpinned_sweep_flags_continuations_and_aliases(tmp_path):
 
     violations = _scan_unpinned_qwen_installs([bypass, ps_bypass, pinned])
 
-    # 5 shell-form entries (continuation, i, add, in alias, leading option)
-    # + 1 PowerShell backtick continuation
-    assert len(violations) == 6, violations
+    # 9 shell-form entries (continuation, i, add, in/isntall aliases,
+    # valueless and value-carrying leading options, non-allowlisted
+    # ${VAR}, npm.cmd shim) + 1 PowerShell backtick continuation
+    assert len(violations) == 10, violations
     assert all("bypass" in v for v in violations)
     joined = "\n".join(violations)
-    assert "npm install -g qwen-code-webui" in joined  # continuation joined
-    assert "npm i -g qwen-code-webui" in joined
-    assert "npm add -g @qwen-code/qwen-code" in joined
-    assert "npm in -g qwen-code-webui" in joined
-    assert "npm --silent install -g @qwen-code/qwen-code" in joined
+    for needle in (
+        "npm install -g qwen-code-webui",  # continuation joined
+        "npm i -g qwen-code-webui",
+        "npm add -g @qwen-code/qwen-code",
+        "npm in -g qwen-code-webui",
+        "npm --silent install -g @qwen-code/qwen-code",
+        "npm isntall -g qwen-code-webui",
+        "npm --prefix /opt/cache install -g qwen-code-webui",
+        "npm install -g qwen-code-webui@${LATEST}",
+        "npm.cmd install -g @qwen-code/qwen-code",
+    ):
+        assert needle in joined, needle
 
 
 def test_repo_file_enumeration_works_without_git(tmp_path):

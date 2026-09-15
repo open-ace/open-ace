@@ -302,6 +302,12 @@ if [[ "$EXISTING_CONFIG_FOUND" == true && "$EXISTING_SERVER" != "$NEW_URL" ]]; t
     log_error "  rm -rf ${EXISTING_DIR}"
     log_error ""
     log_error "Then re-run the install command for the new server."
+
+    # Exit IMMEDIATELY (PR #3386 R17 review): without this the run fell
+    # through to the CLI pre-flight and then treated the different-server
+    # install as a same-server upgrade — stopping the old agent and
+    # overwriting its config after already refusing the migration.
+    exit 1
 fi
 
 # Step 1.6: CLI pre-flight (PR #3386 R15 review)

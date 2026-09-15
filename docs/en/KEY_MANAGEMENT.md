@@ -124,11 +124,13 @@ authentication).
    ```
 
 3. **Stop every reader/writer that uses the old key** (app, scheduler/
-   workers; the database itself stays up). The rotation script defends
-   against concurrent writes via one scan+write transaction with per-UPDATE
-   row-count validation, but a service that keeps encrypting with the old
-   key throughout the rotation leaves old-key ciphertext behind — stopping
-   the writers first is the operational requirement.
+   workers; the database itself stays up). This is a PRECONDITION of the
+   script's safety, not an option: the script takes no table locks; each
+   UPDATE is only optimistic on the value it scanned (a concurrent
+   MODIFICATION of a scanned row → 0/2 affected rows → full rollback), but
+   rows INSERTED after a table's scan are invisible inside the transaction,
+   and the post-check can only REPORT committed mixed-key data, never roll
+   it back — old-key ciphertext WILL remain if writers stay up.
 
 4. **Keep the environment on the OLD key and run the pre-flight dry run**
 

@@ -217,15 +217,18 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
     # would leave partially rotated stores on a mid-batch failure —
     # unrecoverable with a single key switch.
     #
-    # PR #3386 R16 review: the scans AND the writes share ONE transaction —
-    # the read set is not a stale snapshot taken outside the lock window —
-    # and every UPDATE's affected-row count is validated (each planned
-    # update targets exactly one row; Fernet ciphertexts are unique per
-    # encryption, so a count != 1 means a concurrent writer touched a
-    # scanned row). The whole rotation rolls back on mismatch instead of
-    # silently skipping the value. Operationally the runbook still requires
-    # all old-key writers (app, scheduler, workers) to be stopped first;
-    # this is the in-script defense for the window where they are not.
+    # PR #3386 R16/R17 review: scans and writes share ONE transaction and
+    # every UPDATE is OPTIMISTIC on the value it scanned (WHERE <old value>,
+    # rowcount must be exactly 1 — Fernet ciphertexts are unique per
+    # encryption), so a concurrent MODIFICATION of a scanned row becomes a
+    # mismatch and rolls the whole rotation back instead of silently
+    # overwriting it. This is NOT a lock: with no table locks and default
+    # READ COMMITTED snapshots, rows INSERTED after a table's scan are not
+    # seen, and postcheck can only REPORT mixed-key data after the fact —
+    # it cannot un-commit it. Script safety for a live deployment therefore
+    # RESTS ON the documented procedure: stop every old-key reader/writer
+    # (app, scheduler, workers) before rotating; the checks here are the
+    # detection layer, not the isolation layer.
     # Write plan entries: (sql, params, label)
     updates: list[tuple[str, tuple, str]] = []
     failed_stores: list[str] = []
@@ -303,8 +306,13 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
                 continue
             updates.append(
                 (
-                    "UPDATE sso_providers SET config = ? WHERE name = ?",
-                    (json.dumps(config), name),
+                    # Optimistic on the ORIGINAL config text: a concurrent
+                    # config change makes this affect 0 rows and the
+                    # rowcount guard below rolls the whole rotation back,
+                    # instead of silently overwriting with the stale
+                    # snapshot (PR #3386 R17 review).
+                    "UPDATE sso_providers SET config = ? WHERE name = ? AND config = ?",
+                    (json.dumps(config), name, row["config"]),
                     label,
                 )
             )

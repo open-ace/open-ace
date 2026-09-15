@@ -1325,7 +1325,12 @@ def _run_agent_different_server_preflight(tmp_path):
 
     shim("npm", f'echo "$@" >> "{npm_log}"; exit 0')
     shim("sudo", f'echo "$@" >> "{sudo_log}"; exit 0')
-    shim("node", "echo 'v20.19.1'")  # Node 20: would trigger upgrade if reached
+    # Node 22 + a PATH qwen at the pinned version: the CLI pre-flight would
+    # SUCCEED if reached — the conflict gate itself must exit before it
+    # (PR #3386 R17 review: a Node-20 shim masked the missing exit with an
+    # unrelated later failure)
+    shim("node", "echo 'v22.22.3'")
+    shim("qwen", "echo '0.23.3'")
     shim("uname", "echo Linux")
 
     install_dir = tmp_path / "agent"
@@ -1367,6 +1372,10 @@ def test_agent_different_server_run_never_mutates_host(tmp_path):
 
     assert result.returncode != 0
     assert "Cannot proceed" in result.stdout or "Cannot proceed" in result.stderr
+    # the gate exits IMMEDIATELY: nothing after it may run
     assert "REACHED_END" not in result.stdout
+    assert "Same server detected" not in result.stdout  # never misread as upgrade
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
     assert not sudo_log.exists() or sudo_log.read_text(encoding="utf-8") == ""
+    # the old agent's install directory is untouched
+    assert ((tmp_path / "agent" / "config.json").read_text(encoding="utf-8")).startswith("{")

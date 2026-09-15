@@ -391,10 +391,13 @@ def test_rotate_rejects_rowcount_mismatch_from_concurrent_modification(tmp_path)
 
 
 def test_rotate_picks_up_rows_written_between_preflight_and_rotation(tmp_path):
-    """P1 (PR #3386 R16 review): a row written by a straggler writer AFTER the
-    pre-flight probe but BEFORE the rotation transaction opens must be
-    included in the same atomic rotation — the scan re-runs inside the
-    write transaction, not from a stale snapshot."""
+    """PR #3386 R16/R17 review: the scan happens at rotation time (inside
+    rotate_keys), not cached from any earlier pre-flight probe — rows that
+    exist when the rotation starts are included in the same atomic pass.
+    NOTE: this is NOT a concurrency guarantee — rows inserted after a
+    table's scan inside the transaction are still invisible (READ COMMITTED
+    statement snapshots, no table locks); live-deployment safety rests on
+    the documented stop-writers procedure."""
     from app.utils.smtp_crypto import SMTPPasswordManager
 
     db_url = _make_db(tmp_path)
@@ -410,9 +413,11 @@ def test_rotate_picks_up_rows_written_between_preflight_and_rotation(tmp_path):
 
 
 def test_postcheck_detects_old_key_row_written_after_rotation(tmp_path):
-    """P1 (PR #3386 R16 review): a writer still on the old key that inserts
-    AFTER the rotation commits must be caught by the new-key post-check —
-    mixed-key data is reported, never silently accepted."""
+    """PR #3386 R16/R17 review: a writer still on the old key that inserts
+    AFTER the rotation commits is REPORTED by the new-key post-check —
+    mixed-key data is surfaced, never silently accepted. Detection only:
+    postcheck cannot roll back committed data, which is exactly why the
+    runbook requires writers to be stopped before rotating."""
     from app.utils.smtp_crypto import SMTPPasswordManager
 
     db_url = _make_db(tmp_path)
@@ -423,3 +428,19 @@ def test_postcheck_detects_old_key_row_written_after_rotation(tmp_path):
     _insert_api_key(db_url, pm_old.encrypt("straggler-secret"), "straggler")
 
     assert postcheck_new_key(db_url, NEW_KEY)  # non-empty = residual detected
+
+
+def test_sso_update_is_optimistic_on_the_original_config():
+    """P2 (PR #3386 R16/R17 review): the sso_providers UPDATE must compare
+    the ORIGINAL config in its WHERE clause (not just the name — rowcount
+    would stay 1 and silently overwrite a concurrent config change with the
+    stale snapshot). Together with the rowcount==1 guard this turns a
+    concurrent modification into a full rollback."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "rotate_sso_encryption.py").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "UPDATE sso_providers SET config = ? WHERE name = ? AND config = ?" in src
+    ), "sso_providers UPDATE must be optimistic on the original config text"
