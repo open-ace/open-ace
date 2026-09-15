@@ -271,8 +271,49 @@ def dump_stack_logs(recorder: Recorder) -> None:
             timeout=60,
             check=False,
         )
+        # part 3: rerun the ENTRYPOINT'S OWN sync python verbatim inside the
+        # recreated container (extracted from the repo's docker-entrypoint.sh,
+        # copied in via compose cp) — separates "the sync code fails in this
+        # container" from "the entrypoint context never reaches/runs it"
+        entrypoint = (REPO_ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
+        py_start = entrypoint.index('python3 -c "\n', entrypoint.index("Syncing workspace users"))
+        py_start = entrypoint.index("\n", py_start) + 1
+        py_end = entrypoint.index('" 2>&1 | tee', py_start)
+        sync_py = entrypoint[py_start:py_end]
+        # the block lives inside a double-quoted shell string: unescape what
+        # bash would (\", \$, \`) so the extracted python compiles as-is
+        for esc, raw in (("\\$", "$"), ("\\`", "`"), ('\\"', '"')):
+            sync_py = sync_py.replace(esc, raw)
+        probe_path = RECORD_DIR / "sync-rerun.py"
+        probe_path.write_text(sync_py, encoding="utf-8")
+        rerun = ""
+        try:
+            docker = shutil.which("docker")
+            run(
+                [
+                    docker,
+                    "compose",
+                    "-p",
+                    MULTI_USER_PROJECT,
+                    "-f",
+                    COMPOSE_FILES[0],
+                    "-f",
+                    COMPOSE_FILES[1],
+                    "cp",
+                    str(probe_path),
+                    f"{SERVICE}:/tmp/sync-rerun.py",
+                ],
+                cwd=REPO_ROOT,
+                timeout=60,
+                check=False,
+            )
+            rerun = compose_exec(
+                SERVICE, "python3 /tmp/sync-rerun.py; echo RERUN_RC=$?", timeout=120, check=False
+            ).stdout
+        except Exception as exc:  # noqa: BLE001 - best effort
+            rerun = f"rerun failed: {exc}"
         (RECORD_DIR / "user-sync-forensics.txt").write_text(
-            proc.stdout + "\n---probe stderr---\n" + proc.stderr,
+            proc.stdout + "\n---probe stderr---\n" + proc.stderr + "\n---sync rerun---\n" + rerun,
             encoding="utf-8",
         )
     except Exception as exc:  # noqa: BLE001 - best effort
