@@ -464,6 +464,20 @@ GET /api/trend
 - `end` - 结束日期（默认：今天）
 - `host` - 按主机名筛选（可选）
 
+**返回格式：**
+返回趋势数据点数组，每个数据点包含以下字段：
+- `date` - 日期字符串（YYYY-MM-DD 格式）
+- `tool` - 工具名称（如 "claude"、"qwen"）
+- `tokens` - 使用的 token 总数
+
+**返回示例：**
+```json
+[
+  {"date": "2026-08-31", "tool": "claude", "tokens": 10000},
+  {"date": "2026-08-31", "tool": "qwen", "tokens": 5000}
+]
+```
+
 ---
 
 ## 消息 API (`/api`)
