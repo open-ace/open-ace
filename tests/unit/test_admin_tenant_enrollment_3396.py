@@ -17,7 +17,7 @@ Route-level tests (admin blueprint under a stubbed auth layer), following
 the test_project_revocation_reclaim_3396.py convention.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from flask import Flask
@@ -401,3 +401,55 @@ class TestDeactivatedUserNoReenroll:
         resp, mock_ensure, _mock_remove = self._put(admin_app, dict(self.ROW), {"is_active": True})
         assert resp.status_code == 200, resp.get_json()
         mock_ensure.assert_called_once_with("sleeper-acct", uid=None, tenant_id=4)
+
+    def test_move_and_deactivate_drops_POST_write_tenant(self, admin_app):
+        """#3401: a single request that moves the user AND deactivates her
+        must drop the group the DB row NOW names (the TARGET tenant). The
+        pre-#3401 code dropped the PRE-WRITE tenant, so the account kept the
+        target tenant's content group until a later admin touch re-ran the
+        remediation."""
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = dict(self.ROW, is_active=True, tenant_id=1)
+        repo.update_user.return_value = True
+        tenant_service = MagicMock()
+        tenant_service.can_add_user.return_value = True
+        auth_stubs = _auth_stubs()
+        for s_ in auth_stubs:
+            s_.start()
+        try:
+            with (
+                patch("app.routes.admin.user_repo", repo),
+                patch("app.services.tenant_service.TenantService", return_value=tenant_service),
+                _tenant_scope_stub(),
+                patch("app.routes.admin.ensure_system_user") as mock_ensure,
+                patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
+                patch("app.routes.admin.audit_logger"),
+            ):
+                resp = admin_app.test_client().put(
+                    "/api/admin/users/11",
+                    json={"tenant_id": 2, "is_active": False},
+                    headers={"Authorization": "Bearer t"},
+                )
+        finally:
+            for s_ in auth_stubs:
+                s_.stop()
+
+        assert resp.status_code == 200, resp.get_json()
+        mock_ensure.assert_not_called(), "final state is inactive — no enroll"
+        # BOTH drops are correct and required: the move branch drops the
+        # PRE-WRITE tenant's membership (it existed while the user was
+        # active there), the deactivation branch drops the POST-write
+        # tenant the row now names.
+        assert mock_remove.call_count == 2
+        assert mock_remove.call_args_list[0] == call("sleeper-acct", tenant_id=1)
+        assert mock_remove.call_args_list[1] == call("sleeper-acct", tenant_id=2)
+
+    def test_pure_deactivation_still_drops_own_tenant(self, admin_app):
+        """#3401 behavior no-op edge: without tenant_id in the body the
+        post-write tenant IS the row's tenant — unchanged semantics."""
+        resp, mock_ensure, mock_remove = self._put(
+            admin_app, dict(self.ROW, is_active=True), {"is_active": False}
+        )
+        assert resp.status_code == 200, resp.get_json()
+        mock_ensure.assert_not_called()
+        mock_remove.assert_called_once_with("sleeper-acct", tenant_id=4)
