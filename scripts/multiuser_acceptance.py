@@ -236,6 +236,17 @@ def compose_down_volumes() -> None:
     compose("down", "-v", "--remove-orphans", timeout=300)
 
 
+def compose_cp(src: str, dst: str, *, timeout: int = 60) -> subprocess.CompletedProcess:
+    """`docker compose cp` for the multi-user stack, ALWAYS via compose() so
+    the project pin and the FULL COMPOSE_FILES list live in one place (review
+    round 4, 4013713715): the two former hand-built cp call sites hardcoded
+    COMPOSE_FILES[0]/[1] and would have run against a DIFFERENT stack than
+    every other compose call the moment COMPOSE_FILES grows a third overlay.
+    rc handling stays with the caller: both cp directions here treat a
+    non-zero rc as data (repo-checkout fallback / skip note), never silence."""
+    return compose("cp", src, dst, timeout=timeout, check=False)
+
+
 # Start anchors for the entrypoint's user-sync python block, tried in order:
 # the post-#3400 pipefail shape first, then the legacy plain invocation. Both
 # shapes end at the same '" 2>&1 | tee' anchor.
@@ -276,32 +287,26 @@ def _entrypoint_text_for_sync_rerun() -> str:
     OWN copy via compose cp when fetchable (fidelity: the file that actually
     ran, not whatever the repo checkout happens to contain), else the repo
     checkout (best effort — the container may already be gone)."""
-    docker = shutil.which("docker") or "docker"
     local = RECORD_DIR / "container-docker-entrypoint.sh"
     try:
         RECORD_DIR.mkdir(parents=True, exist_ok=True)
         local.unlink(missing_ok=True)  # never reuse a stale copy from an earlier run
-        proc = run(
-            [
-                docker,
-                "compose",
-                "-p",
-                MULTI_USER_PROJECT,
-                "-f",
-                COMPOSE_FILES[0],
-                "-f",
-                COMPOSE_FILES[1],
-                "cp",
-                f"{SERVICE}:/usr/local/bin/docker-entrypoint.sh",
-                str(local),
-            ],
-            cwd=REPO_ROOT,
-            timeout=60,
-            check=False,
-        )
+        proc = compose_cp(f"{SERVICE}:/usr/local/bin/docker-entrypoint.sh", str(local))
         if proc.returncode == 0 and local.stat().st_size:
             return local.read_text(encoding="utf-8")
     except Exception:  # noqa: BLE001 - fall back to the repo checkout below
+        pass
+    # the fallback leaves a trace in the forensics file (review 4013713715):
+    # on CI the image is built from this same checkout so both texts match,
+    # but a manual run against another IMAGE_NAME must be able to tell from
+    # the record WHICH entrypoint text the extraction fell back to.
+    try:
+        with (RECORD_DIR / "user-sync-forensics.txt").open("a", encoding="utf-8") as fh:
+            fh.write(
+                "\n---entrypoint source---\nfallback: repo checkout "
+                f"{REPO_ROOT / 'docker-entrypoint.sh'} (container copy not fetchable)\n"
+            )
+    except Exception:  # noqa: BLE001 - a trace failure must not break the fallback
         pass
     return (REPO_ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
 
@@ -365,27 +370,27 @@ def dump_stack_logs(recorder: Recorder) -> None:
         sync_py = _extract_sync_python(entrypoint)
         probe_path = RECORD_DIR / "sync-rerun.py"
         probe_path.write_text(sync_py, encoding="utf-8")
-        docker = shutil.which("docker") or "docker"
-        run(
-            [
-                docker,
-                "compose",
-                "-p",
-                MULTI_USER_PROJECT,
-                "-f",
-                COMPOSE_FILES[0],
-                "-f",
-                COMPOSE_FILES[1],
-                "cp",
-                str(probe_path),
-                f"{SERVICE}:/tmp/sync-rerun.py",
-            ],
-            cwd=REPO_ROOT,
-            timeout=60,
-            check=False,
-        )
+        if KEEP_STACK:
+            # review 4013713265: the rerun useradds, chown -Rs homes/project
+            # dirs and UPDATEs users.system_uid — on a stack kept for manual
+            # review it would erase the very failure state being kept (e.g.
+            # #3399's missing accounts). The EXTRACTION above stays: it is
+            # read-only and leaves the exact sync python in the record dir
+            # for a deliberate manual replay.
+            with forensics_path.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    "\n---sync rerun---\npart-3 skipped: ACCEPTANCE_KEEP_STACK=1 "
+                    "(stack kept for manual debugging; rerun mutates users/dirs)\n"
+                )
+            recorder.note("user-sync forensics part 3 skipped: rerun would mutate the kept stack")
+            return
+        cp = compose_cp(str(probe_path), f"{SERVICE}:/tmp/sync-rerun.py")
+        if cp.returncode != 0:
+            raise AcceptanceError(f"compose cp sync-rerun.py failed: {cp.stderr.strip()[:200]}")
+        # 2>&1 like the boot-time `2>&1 | tee`: a traceback or the sync's own
+        # stderr lines (e.g. "ERROR: SSH key sync failed") ARE the evidence
         rerun = compose_exec(
-            SERVICE, "python3 /tmp/sync-rerun.py; echo RERUN_RC=$?", timeout=120, check=False
+            SERVICE, "python3 /tmp/sync-rerun.py 2>&1; echo RERUN_RC=$?", timeout=120, check=False
         ).stdout
         with forensics_path.open("a", encoding="utf-8") as fh:
             fh.write("\n---sync rerun---\n" + rerun)
@@ -856,12 +861,17 @@ def listening_ports_in_range(low: int, high: int) -> list[int]:
 # (webui_manager: "inline KEY=VALUE args are visible in /proc/<pid>/cmdline
 # to other processes" — deliberately so, the values are proxy tokens), and
 # /proc/*/cmdline is world-readable. The sudo parent is identified by the
-# openace-webui-launch arg + the --port N pair; retries ride on top in case
-# the launch is still forking.
+# openace-webui-launch arg plus BOTH the --port N pair AND the adjacent
+# `-u <account>` (review round 4, 4013714130): item f reads bob's proxy
+# token with no independent uid backstop — if the port were served by
+# ANOTHER account's instance (the instance-crossover the acceptance exists
+# to catch), a port-only match would hand over that account's token and the
+# failure would be misattributed to PR-A revocation. Retries ride on top in
+# case the launch is still forking.
 _ENV_DUMP_TEMPLATE = """for d in /proc/[0-9]*; do
   args=$(tr '\\0' '\\n' < $d/cmdline 2>/dev/null) || continue
   case "$args" in *openace-webui-launch*) ;; *) continue ;; esac
-  printf '%s\\n' "$args" | awk -v p='PORTARG' 'prev=="--port"&&$0==p{f=1}{prev=$0}END{exit f?0:1}' || continue
+  printf '%s\\n' "$args" | awk -v p='PORTARG' -v u='ACCOUNTARG' 'prev=="--port"&&$0==p{f=1} prev=="-u"&&$0==u{g=1} {prev=$0} END{exit (f&&g)?0:1}' || continue
   printf '%s\\n' "$args" | grep -E '^[A-Za-z_][A-Za-z0-9_]*='
   exit 0
 done
@@ -869,13 +879,14 @@ exit 1"""
 
 
 def webui_env_of(port: int, account: str, *, attempts: int = 5) -> dict[str, str]:
-    """The injected environment of the webui launched for *port*, read from
-    the sudo parent's inline KEY=VALUE cmdline args (see the template's
-    comment for why /proc environ is not usable on CI runners).
+    """The injected environment of the webui launched for *port* AS *account*,
+    read from that account's sudo parent (inline KEY=VALUE cmdline args — see
+    the template's comment for why /proc environ is not usable on CI runners,
+    and why the -u match is load-bearing).
 
     Retried — a launch still forking raises after `attempts` tries so
     callers can record the failure instead of silently skipping."""
-    script = _ENV_DUMP_TEMPLATE.replace("PORTARG", str(port))
+    script = _ENV_DUMP_TEMPLATE.replace("PORTARG", str(port)).replace("ACCOUNTARG", account)
     last = ""
     for _attempt in range(attempts):
         out = compose_exec(SERVICE, script, timeout=20, check=False)
@@ -890,8 +901,10 @@ def webui_env_of(port: int, account: str, *, attempts: int = 5) -> dict[str, str
         time.sleep(2)
     raise AcceptanceError(
         f"webui launch env for port {port} (account {account}) not readable "
-        f"after {attempts} attempts — the sudo wrapper with inline KEY=VALUE "
-        f"args was not found in /proc (instance may not be running); last: {last}"
+        f"after {attempts} attempts — no sudo wrapper matching BOTH --port {port} "
+        f"and -u {account} in /proc: the instance is not running, or the port is "
+        f"served by ANOTHER account's instance (instance-crossover finding — "
+        f"record it, do not retry as an env-read issue); last: {last}"
     )
 
 
@@ -1102,11 +1115,18 @@ def item_a_concurrent_private_workspaces(sc: Scenario) -> None:
             and envs["alice"]["OPENAI_API_KEY"] != envs["bob"].get("OPENAI_API_KEY"),
         )
     # app-side note (7374): OPENACE_PROXY_TOKEN is NOT exported on the sudo
-    # path — recorded, not asserted (would be a product change, follow-up)
+    # path. Review round 4 (4013714130): reading the args handed to sudo makes
+    # this BY CONSTRUCTION — webui_manager's sudo launch inlines only its
+    # standard key set, and OPENACE_PROXY_TOKEN sits in
+    # _WEBUI_ENV_SUDO_KNOWN_KEYS (excluded from the dynamic loop) but NOT in
+    # the inlined standard keys — so this documents the launch shape rather
+    # than reporting an observation; the proxy token reaches the webui as
+    # OPENAI_API_KEY.
     if envs and all("OPENACE_PROXY_TOKEN" not in env for env in envs.values()):
         recorder_note = (
-            "OPENACE_PROXY_TOKEN absent from webui env (sudo-launch inlines only the "
-            "known key set); the proxy token reaches the webui as OPENAI_API_KEY"
+            "OPENACE_PROXY_TOKEN absent from webui env by construction (sudo-launch "
+            "inlines only the known key set, which excludes it); the proxy token "
+            "reaches the webui as OPENAI_API_KEY"
         )
         rec.note(recorder_note)
     # History roots are per-account by construction (0700 homes); record the
@@ -1646,6 +1666,11 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
                 got == want,
                 f"uid={got or '<missing>'} expected={want} (UID drift / useradd renumbering)",
             )
+    # review round 4 (4013712293): with an account MISSING post-recreate
+    # these rows used to pass vacuously — `exec -u alice` fails with its own
+    # non-zero rc when the account does not exist, and with no active account
+    # created at all, an orphan owner proves nothing about inheritance.
+    missing = sorted(set(active_accounts) - set(active_uids.values()))
     for dir_path in ("/home/bob", "/workspace/bob"):
         # review round 3 (4004861021): assert by OWNER NAME — the uid-set
         # approach missed admin and erin, which the entrypoint sync also
@@ -1653,23 +1678,30 @@ def item_f_deactivation_and_restart(sc: Scenario) -> None:
         # bob's uid landing on either passed vacuously. Today's product leaves
         # the dirs on an orphan uid (owner "UNKNOWN"); after #3390's
         # placeholder-account fix the owner should be bob himself.
-        owner = compose_exec(
-            SERVICE, f"stat -c %U {dir_path}", timeout=15, check=False
-        ).stdout.strip()
+        owner = compose_exec(SERVICE, f"stat -c %U {dir_path}", timeout=15, check=False).stdout
+        detail = (
+            f"owner={owner.strip()!r} — inherited by an active account "
+            "(product: entrypoint re-useradds active users without uid pinning, #3390)"
+        )
+        if missing:
+            # nobody exists to inherit anything — an orphan owner proves nothing
+            detail = f"owner={owner.strip()!r} — not evaluable: {missing} missing post-recreate"
         rec.check(
             "f",
             f"post-recreate: deactivated bob's {dir_path} not inherited by an active account",
-            owner in ("UNKNOWN", "bob"),
-            f"owner={owner!r} — inherited by an active account "
-            "(product: entrypoint re-useradds active users without uid pinning, #3390)",
+            owner.strip() in ("UNKNOWN", "bob") and not missing,
+            detail,
         )
     for attacker in ("alice", "carol"):
         proc = compose_exec(SERVICE, "ls /home/bob", user=attacker, timeout=15, check=False)
         rec.check(
             "f",
             f"post-recreate isolation: {attacker} shell ls /home/bob -> EACCES",
-            proc.returncode != 0,
-            f"rc={proc.returncode}",
+            # rc alone also "passes" when the attacker account does not exist
+            # (docker exec: unable to find user) — require the real EACCES
+            # (LANG=C.UTF-8 container: the error text is stable)
+            proc.returncode != 0 and "Permission denied" in proc.stderr,
+            f"rc={proc.returncode} stderr={proc.stderr.strip()[:120]!r}",
         )
     rec.note(
         "ephemeral materials live and die with the container lifecycle (handbook); "
