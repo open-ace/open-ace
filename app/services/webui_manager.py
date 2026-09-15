@@ -2465,13 +2465,39 @@ class WebUIManager:
         Returns:
             True if user exists or was created successfully.
         """
-        tenant_id = None
+        # PR #3402 review (Issue #3396): tenant_id=None means "platform
+        # admin" (openace-shared-0), so a FAILED lookup used to fail OPEN —
+        # a tenant user whose row could not be read was enrolled into the
+        # platform admins' content group. A failed/missing lookup (or no
+        # user context at all) now passes TENANT_UNRESOLVED: only the
+        # global namespace group is granted, the tenant group waits for a
+        # call that can resolve the tenant.
+        from app.utils.workspace import TENANT_UNRESOLVED, TenantIdOrUnresolved
+
+        tenant_id: TenantIdOrUnresolved = TENANT_UNRESOLVED
         if user_id is not None:
             try:
-                user_row = _webui_token_user(user_id) or {}
-                tenant_id = user_row.get("tenant_id")
+                user_row = _webui_token_user(user_id)
             except Exception as e:  # noqa: BLE001 - enrollment best effort
-                logger.warning(f"Failed to look up tenant for user {user_id}: {e}")
+                logger.warning(
+                    f"Failed to look up tenant for user {user_id}: {e}; "
+                    f"{system_account} gets the global shared group only"
+                )
+            else:
+                if user_row is None:
+                    logger.warning(
+                        f"User {user_id} not found; cannot resolve tenant for "
+                        f"{system_account} — global shared group only"
+                    )
+                else:
+                    # a row with tenant_id NULL is a genuine platform admin:
+                    # openace-shared-0 is the CORRECT content group
+                    tenant_id = user_row.get("tenant_id")
+        else:
+            logger.warning(
+                f"No user context to resolve a tenant for {system_account} — "
+                "global shared group only"
+            )
         return _ensure_user_shared(system_account, tenant_id=tenant_id)
 
     def _stop_instance_internal(self, user_id: int):

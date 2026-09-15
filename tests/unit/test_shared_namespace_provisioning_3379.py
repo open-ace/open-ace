@@ -50,7 +50,10 @@ CALLS_FILE="$TEST_TMP/calls"
 touch "$CALLS_FILE"
 # FAIL injects a failure ONLY for the shared-root steps (a failing BASE mkdir
 # legitimately aborts — pre-existing behavior outside this provisioning).
-mkdir() { echo "mkdir $*" >> "$CALLS_FILE"; if [ "$FAIL" = "mkdir" ]; then case "$*" in *"/shared") return 1;; esac; fi; return 0; }
+# /etc/openace (the openace-chown.conf dir) ALWAYS fails in the harness: the
+# conf write must degrade to its WARNING branch, and a root-run harness must
+# never touch the host's real /etc/openace (PR #3402 review).
+mkdir() { echo "mkdir $*" >> "$CALLS_FILE"; case "$*" in *"/etc/openace"*) return 1;; esac; if [ "$FAIL" = "mkdir" ]; then case "$*" in *"/shared") return 1;; esac; fi; return 0; }
 chgrp() { echo "chgrp $*" >> "$CALLS_FILE"; [ "$FAIL" = "chgrp" ] && return 1; return 0; }
 chmod() { echo "chmod $*" >> "$CALLS_FILE"; [ "$FAIL" = "chmod" ] && return 1; return 0; }
 id()    { echo "id $*" >> "$CALLS_FILE"; [ -n "$ID_SHARED_OK" ] && [ "$1" = "shared" ] && return 0; return 1; }
@@ -71,6 +74,22 @@ def _extract_block() -> str:
     return block
 
 
+def _bash_candidates() -> list[str]:
+    """/bin/bash (3.2 on macOS) plus a Homebrew bash 5 when installed — the
+    CI runners and the container run bash 5, whose `set -e` aborts on a
+    failed `{ ...; } > file` redirection where 3.2 does not (PR #3402
+    review). Proving the degradation on BOTH locally pins the CI behavior."""
+    candidates = ["/bin/bash"]
+    for extra in ("/opt/homebrew/bin/bash", "/usr/local/bin/bash"):
+        if (
+            Path(extra).is_file()
+            and "version 5"
+            in subprocess.run([extra, "--version"], capture_output=True, text=True).stdout
+        ):
+            candidates.append(extra)
+    return candidates
+
+
 def _run_block(
     workspace_dir_value: str,
     *,
@@ -78,6 +97,7 @@ def _run_block(
     stat_owner: str = "",
     fail: str = "",
     precreate_shared: bool = False,
+    bash_bin: str = "/bin/bash",
 ) -> str:
     """Run the extracted provisioning block with stubs; returns rc + call log.
 
@@ -100,7 +120,7 @@ def _run_block(
             env["ID_SHARED_OK"] = "1"
         if stat_owner:
             env["STAT_OWNER"] = stat_owner
-        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+        proc = subprocess.run([bash_bin, "-c", script], capture_output=True, text=True, env=env)
         calls_path = Path(tmp) / "calls"
         calls = calls_path.read_text() if calls_path.exists() else ""
         return f"rc={proc.returncode}\n{calls}"
@@ -134,9 +154,20 @@ class TestSharedNamespaceProvisioning:
         ), "non-root-owned existing root must not be re-provisioned"
 
     def test_provisioning_failure_degrades_to_warning_not_abort(self):
-        for fail in ("mkdir", "chgrp", "chmod"):
-            log = _run_block("/ws", fail=fail)
-            assert log.startswith("rc=0"), f"{fail} failure must not abort the entrypoint"
+        # PR #3402 review: run under BOTH bash 3.2 and bash 5 (when
+        # installed). Bash 5 aborts under set -e on a failed redirection —
+        # the openace-chown.conf write used to sit in a then-branch, which
+        # is what turned this test red on CI (the harness mkdir stub
+        # succeeds, the real write to /etc/openace fails on non-root
+        # runners) while passing on macOS bash 3.2. The write now lives in
+        # the if-condition itself, so the failure degrades to the WARNING on
+        # both versions.
+        for bash_bin in _bash_candidates():
+            for fail in ("mkdir", "chgrp", "chmod"):
+                log = _run_block("/ws", fail=fail, bash_bin=bash_bin)
+                assert log.startswith(
+                    "rc=0"
+                ), f"{fail} failure must not abort the entrypoint ({bash_bin})"
 
     def test_block_sits_after_group_creation_in_entrypoint(self):
         """The chgrp references $SHARED_GROUP, so the entrypoint must create
@@ -144,6 +175,93 @@ class TestSharedNamespaceProvisioning:
         functional scenarios cannot see the surrounding file)."""
         content = ENTRYPOINT.read_text(encoding="utf-8")
         assert content.index("groupadd") < content.index('mkdir -p "$_base_dir/shared"')
+
+
+class TestChownConfWrite:
+    """PR #3402 review: the boot-time openace-chown.conf generation.
+
+    Two findings fixed here: (1) the ``{ ...; } > file`` write sat in a
+    then-branch, so under bash 5 ``set -e`` a failed redirection (read-only
+    /etc/openace mount, unwritable conf) exited the entrypoint — a crash
+    loop, the exact opposite of the surrounding "degrade to a warning"
+    contract; (2) the emitted conf was a SOURCED shell array, so a ``"`` or
+    ``$(...)`` inside WORKSPACE_BASE_DIR became code the root-run wrapper
+    executes. The conf is now data — one prefix per line, character-filtered
+    — and the write is part of the if-condition."""
+
+    CONF_BLOCK_START = '_chown_conf_dir="/etc/openace"'
+    CONF_BLOCK_END = "unset _wb _wb_raw _wb_list _chown_conf_dir _chown_conf"
+
+    @classmethod
+    def _extract_conf_block(cls) -> str:
+        content = ENTRYPOINT.read_text(encoding="utf-8")
+        start = content.index(cls.CONF_BLOCK_START)
+        end = content.index(cls.CONF_BLOCK_END, start) + len(cls.CONF_BLOCK_END)
+        return content[start:end]
+
+    @classmethod
+    def _run_conf_block(cls, workspace_base_dir: str) -> tuple[int, str, str, str | None]:
+        """Run the extracted block with /etc/openace redirected into a tmp
+        dir; returns (rc, stdout, stderr, conf content or None)."""
+        import shlex
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conf_dir = f"{tmp}/etc-openace"
+            block = cls._extract_conf_block().replace('"/etc/openace"', f'"{conf_dir}"')
+            script = f"set -e\nWORKSPACE_BASE_DIR={shlex.quote(workspace_base_dir)}\n{block}"
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                env={"PATH": "/usr/bin:/bin"},
+            )
+            conf_path = Path(conf_dir) / "openace-chown.conf"
+            content = conf_path.read_text() if conf_path.is_file() else None
+            return proc.returncode, proc.stdout, proc.stderr, content
+
+    @staticmethod
+    def _prefix_lines(content: str) -> list[str]:
+        return [ln for ln in content.splitlines() if ln and not ln.startswith("#")]
+
+    def test_writes_one_prefix_per_line_from_base_dirs(self):
+        rc, _out, _err, content = self._run_conf_block(" /data , srv/ws/ ,/,//")
+        assert rc == 0
+        assert content is not None
+        # "/" and "//" entries vanish (a "/" prefix would disable the
+        # wrapper's path guard entirely); relative segments are rooted;
+        # /home/ is always appended
+        assert self._prefix_lines(content) == ["/data/", "/srv/ws/", "/home/"]
+        # no shell syntax is ever emitted — the file is data, not code
+        assert "ALLOWED_PREFIXES" not in content
+
+    def test_unsafe_entries_are_skipped_not_emitted(self):
+        rc, _out, err, content = self._run_conf_block('/da ta","$(reboot),/ok')
+        assert rc == 0, "an unsafe entry must be skipped, never abort the boot"
+        assert self._prefix_lines(content) == ["/ok/", "/home/"]
+        assert "skipping unsafe" in err
+
+    def test_write_failure_degrades_to_warning_under_bash5_too(self):
+        """A conf path that cannot be written (here: it is a DIRECTORY, so
+        the redirection fails for root and non-root alike) must produce the
+        WARNING and rc=0 — on bash 3.2 AND bash 5, pinning the CI behavior
+        (bash 5 aborts under set -e where 3.2 did not)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            conf_dir = f"{tmp}/etc-openace"
+            Path(conf_dir).mkdir()
+            # pre-create the conf path as a directory: mkdir -p succeeds,
+            # the `> file` redirection cannot
+            Path(conf_dir, "openace-chown.conf").mkdir()
+            block = self._extract_conf_block().replace('"/etc/openace"', f'"{conf_dir}"')
+            script = f"set -e\nWORKSPACE_BASE_DIR=/ws\n{block}"
+            for bash_bin in _bash_candidates():
+                proc = subprocess.run(
+                    [bash_bin, "-c", script],
+                    capture_output=True,
+                    text=True,
+                    env={"PATH": "/usr/bin:/bin"},
+                )
+                assert proc.returncode == 0, f"write failure must not abort ({bash_bin})"
+                assert "WARNING: could not write" in proc.stdout, bash_bin
 
 
 class TestTenantSharedGroupSync:
@@ -157,6 +275,11 @@ class TestTenantSharedGroupSync:
     FUNCTIONALLY per the #3379 convention: extracted verbatim and run under
     stubbed psycopg2/subprocess modules.
     """
+
+    # The class covers both the #3379 extraction convention and the #3396
+    # sync semantics themselves (PR #3402 review): the file-level issue
+    # marker is 3379, so the #3396 defect regressions carry it here too.
+    pytestmark = [pytest.mark.issue(3396)]
 
     HEREDOC_TAG = "PY_SYNC_GROUPS_EOF"
 
@@ -177,6 +300,7 @@ class TestTenantSharedGroupSync:
         project_rows: list[tuple],
         existing_groups: dict[str, str | tuple[str, str]],
         reclaim_rows: list[tuple] | None = None,
+        system_groups: dict[str, list[str]] | None = None,
     ) -> list[tuple]:
         """Execute the extracted block under stubs; returns recorded commands.
 
@@ -187,7 +311,12 @@ class TestTenantSharedGroupSync:
         stat-fail, exercising the reconcile's own groupadd path).
 
         *reclaim_rows* feeds the third query (the no-longer-shared RECLAIM
-        pass); defaults to none.
+        pass; 3-tuples ``path, tenant_id, system_account``); defaults to
+        none.
+
+        *system_groups* feeds ``getent group``: existing OS groups mapped to
+        their member lists (the membership-reconcile pass converges tenant
+        groups onto the DB's desired list).
         """
         code = TestTenantSharedGroupSync._extract_sync_code()
         (tmp_path / "shared").mkdir(parents=True, exist_ok=True)
@@ -203,6 +332,16 @@ class TestTenantSharedGroupSync:
 
         def fake_run(cmd, **_kwargs):
             calls.append(tuple(cmd))
+            if cmd[:2] == ["getent", "group"]:
+                lines = [
+                    f"{name}:x:{1000 + i}:{','.join(members)}"
+                    for i, (name, members) in enumerate(sorted((system_groups or {}).items()))
+                ]
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="\n".join(lines) + ("\n" if lines else ""),
+                    stderr="",
+                )
             if cmd[:3] == ["stat", "-c", "%G %a"]:
                 reported = group_by_abs_path.get(cmd[3])
                 if reported is None:
@@ -271,9 +410,9 @@ class TestTenantSharedGroupSync:
             monkeypatch,
             tmp_path,
             user_rows=[
-                ("alice-acct", "alice", 1),
-                ("bob-acct", "bob", 1),
-                ("carol-acct", "carol", 2),
+                ("alice-acct", 1),
+                ("bob-acct", 1),
+                ("carol-acct", 2),
             ],
             project_rows=[],
             existing_groups={},
@@ -294,21 +433,32 @@ class TestTenantSharedGroupSync:
         calls = self._run_sync(
             monkeypatch,
             tmp_path,
-            user_rows=[("admin-acct", "admin", None)],
+            user_rows=[("admin-acct", None)],
             project_rows=[],
             existing_groups={},
         )
         assert ("usermod", "-aG", "openace-shared-0", "admin-acct") in calls
 
-    def test_username_fallback_when_system_account_missing(self, monkeypatch, tmp_path):
+    def test_no_username_fallback_when_system_account_missing(self, monkeypatch, tmp_path):
+        """PR #3402 review: ``system_account or username`` crossed tenant
+        boundaries — an unmapped user's username may equal another user's
+        system_account, and the sync would enroll THAT OS account into this
+        user's tenant group. Enrollment (and the membership reconcile) must
+        trust the mapping only."""
         calls = self._run_sync(
             monkeypatch,
             tmp_path,
-            user_rows=[(None, "erin", 1)],
+            user_rows=[(None, 1)],
             project_rows=[],
             existing_groups={},
+            system_groups={"openace-shared-1": ["erin"]},
         )
-        assert ("usermod", "-aG", "openace-shared-1", "erin") in calls
+        assert not any(
+            c[:3] == ("usermod", "-aG", "openace-shared-1") for c in calls
+        ), "an unmapped username must never be enrolled"
+        # the stale membership of that OS account is REMOVED: desired is
+        # empty (no mapped users in tenant 1), so gpasswd -d must run
+        assert ("gpasswd", "-d", "erin", "openace-shared-1") in calls
 
     def test_reconciles_legacy_shared_dir_onto_tenant_group(self, monkeypatch, tmp_path):
         legacy = str(tmp_path / "shared" / "team-proj")
@@ -320,8 +470,12 @@ class TestTenantSharedGroupSync:
             existing_groups={"shared/team-proj": "openace-shared"},  # pre-#3396 layout
         )
         assert ("chgrp", "-R", "openace-shared-1", legacy) in calls
-        assert ("find", legacy, "-type", "d", "-exec", "chmod", "2770", "{}", ";") in calls
-        assert ("find", legacy, "-type", "f", "-exec", "chmod", "660", "{}", ";") in calls
+        # PR #3402 review: the chmod passes are BATCHED (`{} +`, one chmod
+        # per find batch — not one fork per entry). The pinned argv is the
+        # deliberate contract: `{} ;` on a node_modules-scale tree kept the
+        # pre-service-start reconcile running for tens of minutes.
+        assert ("find", legacy, "-type", "d", "-exec", "chmod", "2770", "{}", "+") in calls
+        assert ("find", legacy, "-type", "f", "-exec", "chmod", "660", "{}", "+") in calls
 
     def test_reconcile_skipped_when_already_normalized(self, monkeypatch, tmp_path):
         clean = str(tmp_path / "shared" / "team-proj")
@@ -358,9 +512,9 @@ class TestTenantSharedGroupSync:
             "chmod",
             "2770",
             "{}",
-            ";",
+            "+",
         ) in calls, "wrong mode must be normalized even when the group already matches"
-        assert ("find", drifted, "-type", "f", "-exec", "chmod", "660", "{}", ";") in calls
+        assert ("find", drifted, "-type", "f", "-exec", "chmod", "660", "{}", "+") in calls
 
     def test_shared_rows_only_and_base_prefixed_paths_touched(self, monkeypatch, tmp_path):
         sql = self._run_sync(
@@ -401,7 +555,7 @@ class TestTenantSharedGroupSync:
             existing_groups={},
         )[0]
         assert sql[1] == (
-            "SELECT system_account, username, tenant_id FROM users "
+            "SELECT system_account, tenant_id FROM users "
             "WHERE is_active = true AND deleted_at IS NULL"
         ), "soft-deleted users must never be re-enrolled at boot"
 
@@ -409,7 +563,9 @@ class TestTenantSharedGroupSync:
         """Review on #3396 (finding 4): revocation runs fail-soft AFTER the DB
         flip, so a timeout/crash leaves the dir 2770 on openace-shared-<t>
         with is_shared=false forever. The boot sync must re-run the reclaim:
-        chown -R to the creator + dirs 0700 / files 0600."""
+        chown -R to the creator + dirs 0700 / files 0600. PR #3402 review:
+        the reclaim now keys on the ROW's tenant — the dir must be on this
+        tenant's own group to be provably its leftover."""
         revoked = str(tmp_path / "shared" / "team-proj")
         calls = self._run_sync(
             monkeypatch,
@@ -417,15 +573,18 @@ class TestTenantSharedGroupSync:
             user_rows=[],
             project_rows=[],
             existing_groups={"shared/team-proj": "openace-shared-1"},
-            reclaim_rows=[(revoked, "alice-acct", "alice")],
+            reclaim_rows=[(revoked, 1, "alice-acct")],
         )
         assert ("chown", "-R", "1042:1042", revoked) in calls
-        assert ("find", revoked, "-type", "d", "-exec", "chmod", "0700", "{}", ";") in calls
-        assert ("find", revoked, "-type", "f", "-exec", "chmod", "0600", "{}", ";") in calls
+        assert ("find", revoked, "-type", "d", "-exec", "chmod", "0700", "{}", "+") in calls
+        assert ("find", revoked, "-type", "f", "-exec", "chmod", "0600", "{}", "+") in calls
 
     def test_reclaim_pass_uses_legacy_global_group_owner_too(self, monkeypatch, tmp_path):
         """A pre-#3396 dir still on the legacy global group with a revoked row
-        must also be reclaimed (same leftover-shared-state class)."""
+        must also be reclaimed — but ONLY at the exact first-level
+        <base>/shared/<name> shape those deployments laid out (PR #3402
+        review: anything else on the global group cannot be distinguished
+        from namespace plumbing)."""
         revoked = str(tmp_path / "shared" / "legacy-proj")
         calls = self._run_sync(
             monkeypatch,
@@ -433,7 +592,7 @@ class TestTenantSharedGroupSync:
             user_rows=[],
             project_rows=[],
             existing_groups={"shared/legacy-proj": "openace-shared"},
-            reclaim_rows=[(revoked, "bob-acct", "bob")],
+            reclaim_rows=[(revoked, 1, "bob-acct")],
         )
         assert ("chown", "-R", "1042:1042", revoked) in calls
 
@@ -466,7 +625,7 @@ class TestTenantSharedGroupSync:
             user_rows=[],
             project_rows=[],
             existing_groups={"shared/already-private": "alice-acct"},
-            reclaim_rows=[(private, "alice-acct", "alice")],
+            reclaim_rows=[(private, 1, "alice-acct")],
         )
         assert not any(c[:1] == ("chown",) for c in calls)
 
@@ -481,11 +640,11 @@ class TestTenantSharedGroupSync:
             user_rows=[],
             project_rows=[],
             existing_groups={"shared/gone-proj": "openace-shared-2"},
-            reclaim_rows=[(deleted, "carol-acct", "carol")],
+            reclaim_rows=[(deleted, 2, "carol-acct")],
         )
         reclaim_sql = " ".join(result[0][3].split())
         assert reclaim_sql == (
-            "SELECT p.path, u.system_account, u.username FROM projects p "
+            "SELECT p.path, p.tenant_id, u.system_account FROM projects p "
             "LEFT JOIN users u ON p.created_by = u.id "
             "WHERE NOT (p.is_active = true AND p.is_shared = true)"
         ), (
@@ -495,7 +654,161 @@ class TestTenantSharedGroupSync:
             "select the wrong rows at boot"
         )
         assert ("chown", "-R", "1042:1042", deleted) in result
-        assert ("find", deleted, "-type", "d", "-exec", "chmod", "0700", "{}", ";") in result
+        assert ("find", deleted, "-type", "d", "-exec", "chmod", "0700", "{}", "+") in result
+
+    def test_reclaim_pass_refuses_cross_tenant_takeover_of_live_shared(self, monkeypatch, tmp_path):
+        """PR #3402 review (takeover, probe 2): private registration has NO
+        path-ownership validation (api_create_project validates only
+        ``if is_shared:``) and get_project_by_path is tenant-scoped, so
+        tenant-2's carol can register tenant-1's LIVE shared project path
+        as a private project. The old predicate (any openace-shared* group)
+        would chown -R the dir to carol at the next boot, right after the
+        reconcile pass normalized it. The tightened predicate must refuse:
+        the path overlaps a live shared project."""
+        live = str(tmp_path / "shared" / "team-proj")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(live, 1)],
+            existing_groups={"shared/team-proj": ("openace-shared-1", "2770")},
+            reclaim_rows=[(live, 2, "carol-acct")],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls), "takeover row must not be chowned"
+        assert not any(
+            c[:1] == ("find",) and ("0700" in c or "0600" in c) for c in calls
+        ), "the live shared dir must keep 2770/660, never be reclaimed"
+
+    def test_reclaim_pass_refuses_foreign_tenant_group_dir(self, monkeypatch, tmp_path):
+        """PR #3402 review (takeover, general form): a private row whose dir
+        sits on ANOTHER tenant's group (registered cross-tenant, no live
+        row involved) must not be reclaimed — only the row's OWN tenant
+        group proves this tenant ever shared the dir. The legitimate row of
+        the OWNING tenant still is."""
+        victim = str(tmp_path / "shared" / "t1-proj")
+        legit = str(tmp_path / "shared" / "t1-old")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={
+                "shared/t1-proj": "openace-shared-1",
+                "shared/t1-old": "openace-shared-1",
+            },
+            reclaim_rows=[(victim, 2, "carol-acct"), (legit, 1, "alice-acct")],
+        )
+        assert ("chown", "-R", "1042:1042", victim) not in calls
+        assert ("chown", "-R", "1042:1042", legit) in calls
+
+    def test_reclaim_pass_never_reclaims_namespace_root(self, monkeypatch, tmp_path):
+        """PR #3402 review (takeover, probe 1): <base>/shared itself is
+        root:openace-shared 3775 — a private row pointing at the namespace
+        root used to chown -R the WHOLE namespace (every tenant's shared
+        projects) to the registering user."""
+        root = str(tmp_path / "shared")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={"shared": "openace-shared"},
+            reclaim_rows=[(root, 2, "carol-acct")],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls)
+
+    def test_reclaim_pass_refuses_subdir_of_live_shared_project(self, monkeypatch, tmp_path):
+        """PR #3402 review (takeover, probe 3): registering a SUBDIRECTORY of
+        a live shared project as a private project (it inherits the tenant
+        group via setgid) must not hand the subtree — including other
+        members' files — to the registrant. The overlap check contains it
+        even though the group matches the row's tenant."""
+        live = str(tmp_path / "shared" / "team-proj")
+        sub = str(tmp_path / "shared" / "team-proj" / "sub")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[(live, 1)],
+            existing_groups={"shared/team-proj/sub": "openace-shared-1"},
+            reclaim_rows=[(sub, 1, "mallory-acct")],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls)
+
+    def test_reclaim_pass_skips_unshaped_legacy_global_group_dir(self, monkeypatch, tmp_path):
+        """PR #3402 review: a legacy dir on the GLOBAL group that is not a
+        first-level <base>/shared/<name> cannot be distinguished from
+        namespace plumbing — declared residual, never auto-reclaimed."""
+        deep = str(tmp_path / "shared" / "legacy" / "proj")
+        home_like = str(tmp_path / "alice-acct" / "old-share")
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[],
+            project_rows=[],
+            existing_groups={
+                "shared/legacy/proj": "openace-shared",
+                "alice-acct/old-share": "openace-shared",
+            },
+            reclaim_rows=[(deep, 1, "alice-acct"), (home_like, 1, "alice-acct")],
+        )
+        assert not any(c[:1] == ("chown",) for c in calls)
+
+    def test_membership_reconcile_converges_tenant_groups_onto_db(self, monkeypatch, tmp_path):
+        """PR #3402 review: the sync used to only ADD (usermod -aG).
+        Removals ran solely in the request-handling container, so after a
+        tenant move the scheduler container's /etc/group kept BOTH tenant
+        groups — and its autonomous agents (openace-run-as resolves
+        supplementary groups against the local /etc/group) held the old
+        tenant's content access until the container was RECREATED (restart
+        does not reset /etc/group). The boot sync is now authoritative:
+        gpasswd -M sets each existing openace-shared-<t> to the DB's exact
+        member list; the GLOBAL group is deliberately never converged
+        (deactivated accounts keep namespace-root creation — accepted
+        residual, no content access)."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1), ("bob-acct", 2)],  # bob moved 1 -> 2
+            project_rows=[],
+            existing_groups={},
+            system_groups={
+                "openace-shared": ["alice-acct", "bob-acct"],
+                "openace-shared-1": ["alice-acct", "bob-acct"],  # bob stale
+                "openace-shared-2": ["bob-acct"],
+            },
+        )
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+        assert ("gpasswd", "-M", "bob-acct", "openace-shared-2") in calls
+        # the global group is untouched in BOTH forms
+        assert not any(c[:2] == ("gpasswd", "-M") and c[3] == "openace-shared" for c in calls)
+        assert not any(c[:2] == ("gpasswd", "-d") and c[3] == "openace-shared" for c in calls)
+
+    def test_membership_reconcile_removes_stale_members_when_desired_empty(
+        self, monkeypatch, tmp_path
+    ):
+        """Deactivated/deleted/moved-away users are not in the active DB set,
+        so their tenant group's desired list no longer names them. With
+        remaining members, gpasswd -M drops them in one call; with NO
+        remaining members, shadow-utils `gpasswd -M ""` is a documented
+        no-op, so each current member is removed with gpasswd -d."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={
+                "openace-shared-1": ["alice-acct", "erin-acct"],  # erin deactivated
+                "openace-shared-2": ["carol-acct"],  # whole tenant moved away
+            },
+        )
+        # erin dropped via the exact-list -M; carol's group emptied via -d
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+        assert ("gpasswd", "-d", "carol-acct", "openace-shared-2") in calls
+        assert not any(
+            c[:4] == ("gpasswd", "-M", "", "openace-shared-2") for c in calls
+        ), "gpasswd -M '' is a no-op in shadow-utils and must not be relied on"
 
     def test_block_runs_after_main_user_sync(self):
         """Enrollment must follow the main DB user sync (the accounts it

@@ -557,7 +557,24 @@ def api_update_user(user_id):
         # tenant move this enrolls for the TARGET tenant, matching the row
         # just written; a failure here is logged, not fatal — the boot sync
         # re-enrolls by the DB row, so the state self-heals on restart.
-        if enroll_account:
+        #
+        # Review on #3400/#3396 (PR #3402 review): gate on the user's FINAL
+        # active state — only for users who end up ACTIVE. Enrolling a user
+        # who ends up inactive (a PUT without is_active on an already
+        # DEACTIVATED row, e.g. {"role": ...} from an API client) re-grants
+        # the tenant content group the deactivation dropped and re-shells
+        # the nologin placeholder, and the boot sync (which mirrors the DB)
+        # would keep that grant; the deactivate-drop below only fires when
+        # is_active=false is REQUESTED, so it cannot undo this. Also from
+        # #3390: an inactive row with a NEW mapping gets no OS provisioning
+        # here (deliberate) — its uid is handled by the entrypoint sync once
+        # activated, never before.
+        final_active = (
+            requested_is_active
+            if requested_is_active is not None
+            else bool((current_user or {}).get("is_active"))
+        )
+        if enroll_account and final_active:
             uid = data.get("system_uid")
             effective_tenant_id = (
                 new_tenant_id
@@ -617,9 +634,11 @@ def api_update_user(user_id):
                 # need not carry system_account). Fail-soft: group removal
                 # failure is logged, not fatal.
                 if current_user:
-                    deactivated_account = current_user.get("system_account") or current_user.get(
-                        "username"
-                    )
+                    # system_account ONLY (PR #3402 review): an unmapped
+                    # user's username may equal ANOTHER user's
+                    # system_account, and the old `or username` fallback
+                    # would remove that OS account from ITS tenant's group.
+                    deactivated_account = current_user.get("system_account")
                     if deactivated_account:
                         from app.utils.workspace import remove_user_from_shared_group
 
@@ -716,8 +735,10 @@ def api_delete_user(user_id):
     # Issue #3396: a deleted user must also lose the tenant shared-content
     # group — their shells/agents would otherwise keep OS read/write on the
     # tenant's shared projects. Fail-soft (restore re-enrolls via
-    # ensure_system_user on the restore path).
-    deleted_account = user.get("system_account") or username
+    # ensure_system_user on the restore path). system_account ONLY (PR
+    # #3402 review): the username fallback could target another user's OS
+    # account (see the deactivation drop above).
+    deleted_account = user.get("system_account")
     if deleted_account:
         from app.utils.workspace import remove_user_from_shared_group
 

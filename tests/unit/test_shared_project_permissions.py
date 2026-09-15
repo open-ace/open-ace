@@ -30,6 +30,8 @@ from app.utils.workspace import (
 class TestSharedTenantGroupName:
     """Issue #3396: tenant group naming."""
 
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
+
     def test_tenant_id_suffix(self):
         assert shared_tenant_group_name(1) == "openace-shared-1"
         assert shared_tenant_group_name(42) == "openace-shared-42"
@@ -398,6 +400,8 @@ class TestSetupPermissionsWithDepthLimit:
 class TestRevokeSharedProjectAccess:
     """Issue #3396: revocation reclaims OS-level access."""
 
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
+
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     def test_skip_non_docker_mode(self, mock_docker_mode):
         mock_docker_mode.return_value = False
@@ -634,6 +638,8 @@ class TestSubmitTaskTenantPayload:
     The queue table has no consumer and no dedicated column, so tenant_id
     rides in the checkpoint_data JSON payload slot at submit time."""
 
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
+
     def _submit(self, monkeypatch, tmp_path, tenant_id):
         from app.services.permission_task_service import get_permission_task_service
 
@@ -687,3 +693,87 @@ class TestSubmitTaskTenantPayload:
         assert success, error_msg
         assert params["checkpoint_data"] is None
         assert task_info["tenant_id"] is None
+
+
+class TestTenantUnresolvedEnrollment:
+    """PR #3402 review (Issue #3396): ``tenant_id=None`` doubles as "platform
+    admin" (enrolled in ``openace-shared-0``), so a tenant/user LOOKUP
+    FAILURE must not be expressed as None — that fails OPEN into the
+    platform admins' shared content group. The ``TENANT_UNRESOLVED``
+    sentinel enrolls only the global namespace group (fail-closed), and the
+    WebUI launch path (webui_manager._ensure_system_user) passes it on
+    lookup failure/missing row/missing user context, while a genuine
+    NULL-tenant platform-admin row still maps to the pseudo-tenant 0."""
+
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("subprocess.run")
+    def test_unresolved_tenant_enrolls_global_group_only(self, mock_run, mock_docker_mode):
+        mock_docker_mode.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        from app.utils.workspace import TENANT_UNRESOLVED
+
+        assert add_user_to_shared_group("testuser", tenant_id=TENANT_UNRESOLVED) is True
+        usermod_cmds = [c.args[0] for c in mock_run.call_args_list if c.args[0][0] == "usermod"]
+        assert usermod_cmds == [
+            ["usermod", "-aG", "openace-shared", "testuser"]
+        ], "an unresolved tenant must grant the global namespace group ONLY"
+        assert not any(
+            "openace-shared-0" in cmd for cmd in usermod_cmds
+        ), "must never fail open into the platform-admins' content group"
+
+    @staticmethod
+    def _webui_ensure(monkeypatch, lookup):
+        """Run webui_manager._ensure_system_user under a stubbed lookup and
+        a recording ensure; returns the tenant_id it resolved to."""
+        from app.services import webui_manager as wmm
+        from app.utils.workspace import TENANT_UNRESOLVED
+
+        recorded: dict = {}
+
+        def fake_ensure(account, uid=None, tenant_id=None):
+            recorded["tenant_id"] = tenant_id
+            return True
+
+        monkeypatch.setattr(wmm, "_ensure_user_shared", fake_ensure)
+        monkeypatch.setattr(wmm, "_webui_token_user", lookup)
+        # _ensure_system_user never touches self — call it unbound
+        assert wmm.WebUIManager._ensure_system_user(object(), "acct", user_id=5) is True
+        return recorded["tenant_id"], TENANT_UNRESOLVED
+
+    def test_webui_lookup_exception_is_fail_closed(self, monkeypatch):
+        def boom(_uid):
+            raise RuntimeError("db down")
+
+        tenant_id, sentinel = self._webui_ensure(monkeypatch, boom)
+        assert tenant_id is sentinel, "a raised lookup must NOT enroll a tenant group"
+
+    def test_webui_user_row_missing_is_fail_closed(self, monkeypatch):
+        tenant_id, sentinel = self._webui_ensure(monkeypatch, lambda _uid: None)
+        assert tenant_id is sentinel, "a missing row must NOT enroll a tenant group"
+
+    def test_webui_missing_user_context_is_fail_closed(self, monkeypatch):
+        from app.services import webui_manager as wmm
+        from app.utils.workspace import TENANT_UNRESOLVED
+
+        recorded: dict = {}
+
+        def fake_ensure(account, uid=None, tenant_id=None):
+            recorded["tenant_id"] = tenant_id
+            return True
+
+        monkeypatch.setattr(wmm, "_ensure_user_shared", fake_ensure)
+        assert wmm.WebUIManager._ensure_system_user(object(), "acct") is True
+        assert recorded["tenant_id"] is TENANT_UNRESOLVED
+
+    def test_webui_platform_admin_row_still_uses_pseudo_group_zero(self, monkeypatch):
+        """A row with tenant_id NULL IS a platform admin — openace-shared-0
+        is the CORRECT content group; the sentinel must not swallow it."""
+        tenant_id, sentinel = self._webui_ensure(monkeypatch, lambda _uid: {"tenant_id": None})
+        assert tenant_id is None and tenant_id is not sentinel
+
+    def test_webui_tenant_row_enrolls_that_tenant(self, monkeypatch):
+        tenant_id, sentinel = self._webui_ensure(monkeypatch, lambda _uid: {"tenant_id": 3})
+        assert tenant_id == 3

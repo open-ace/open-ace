@@ -63,6 +63,29 @@ SHARED_TENANT_GROUP_PREFIX = "openace-shared-"
 # 15 chars, leaving 16 digits of tenant-id headroom.
 _MAX_LINUX_GROUP_NAME_LEN = 31
 
+
+class _TenantUnresolved:
+    """Sentinel: the caller could NOT determine the user's tenant.
+
+    PR #3402 review (Issue #3396): ``tenant_id=None`` legitimately means
+    "platform admin" (enrolled in the ``openace-shared-0`` pseudo-tenant's
+    content group), so a tenant LOOKUP FAILURE must never be expressed as
+    ``None`` — that fails OPEN into the platform admins' shared content.
+    Passing ``TENANT_UNRESOLVED`` enrolls the account in the global
+    namespace-creation group ONLY and skips the tenant content group
+    entirely (fail-closed); the caller logs why. A later call that CAN
+    resolve the tenant completes the enrollment.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "TENANT_UNRESOLVED"
+
+
+TENANT_UNRESOLVED = _TenantUnresolved()
+# Public annotation alias: enrollment helpers accept a real tenant id, the
+# platform-admin None, or the unresolved-lookup sentinel.
+TenantIdOrUnresolved = int | None | _TenantUnresolved
+
 # Wrapper script paths (Issue #1855 + #2181)
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
 OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
@@ -345,7 +368,7 @@ def _ensure_login_shell(system_account: str) -> None:
 
 
 def ensure_system_user(
-    system_account: str, uid: int | None = None, tenant_id: int | None = None
+    system_account: str, uid: int | None = None, tenant_id: TenantIdOrUnresolved = None
 ) -> bool:
     """确保系统用户存在，创建工作目录。
 
@@ -369,7 +392,10 @@ def ensure_system_user(
             数据库记录的 pinned UID（Issue #3390）。
         tenant_id: 用户所属租户 ID。Issue #3396: 账号被加入「全局组
             openace-shared（仅授予在 <base>/shared 命名空间根内建目录的
-            权限）+ 租户内容组 openace-shared-<tenant_id>」。
+            权限）+ 租户内容组 openace-shared-<tenant_id>」。PR #3402
+            review: 传 ``TENANT_UNRESOLVED`` 表示租户查询失败——只加全局
+            组、跳过租户内容组（fail-closed，绝不因查询失败落入
+            openace-shared-0）。
 
     Returns:
         True 如果用户存在或创建成功。
@@ -709,7 +735,7 @@ def ensure_shared_group(tenant_id: int | None = None) -> bool:
     return True
 
 
-def add_user_to_shared_group(system_account: str, tenant_id: int | None = None) -> bool:
+def add_user_to_shared_group(system_account: str, tenant_id: TenantIdOrUnresolved = None) -> bool:
     """Enroll a user in BOTH shared-project groups (Issue #3396).
 
     1. Global ``openace-shared`` — grants only the right to create a project
@@ -725,6 +751,9 @@ def add_user_to_shared_group(system_account: str, tenant_id: int | None = None) 
         system_account: Username to enroll.
         tenant_id: Tenant whose content group to join. ``None`` maps to the
             ``openace-shared-0`` pseudo-tenant (platform admins).
+            ``TENANT_UNRESOLVED`` (PR #3402 review) enrolls ONLY the global
+            namespace group — a failed tenant lookup must not fail open
+            into the platform-admins' content group.
 
     Returns:
         True if the user was added (or already was) to both groups.
@@ -732,14 +761,24 @@ def add_user_to_shared_group(system_account: str, tenant_id: int | None = None) 
     if not _is_docker_multi_user_mode():
         return True  # Skip in non-Docker mode
 
-    try:
-        tenant_group = shared_tenant_group_name(tenant_id)
-    except ValueError as e:
-        logger.error(f"Cannot derive shared group for tenant {tenant_id!r}: {e}")
-        return False
+    if tenant_id is TENANT_UNRESOLVED:
+        logger.warning(
+            f"Tenant could not be resolved for {system_account}: enrolling ONLY the "
+            "global shared group (tenant content group skipped — fail-closed)"
+        )
+        groups: tuple[str, ...] = (SHARED_GROUP_NAME,)
+    else:
+        # narrows the alias for mypy: the sentinel took the branch above
+        assert not isinstance(tenant_id, _TenantUnresolved)
+        try:
+            tenant_group = shared_tenant_group_name(tenant_id)
+        except ValueError as e:
+            logger.error(f"Cannot derive shared group for tenant {tenant_id!r}: {e}")
+            return False
+        groups = (SHARED_GROUP_NAME, tenant_group)
 
     ok = True
-    for group in (SHARED_GROUP_NAME, tenant_group):
+    for group in groups:
         if not _ensure_linux_group(group):
             ok = False
             continue
@@ -753,10 +792,7 @@ def add_user_to_shared_group(system_account: str, tenant_id: int | None = None) 
             ok = False
 
     if ok:
-        logger.info(
-            f"User '{system_account}' enrolled in shared groups "
-            f"({SHARED_GROUP_NAME} + {tenant_group})"
-        )
+        logger.info(f"User '{system_account}' enrolled in shared groups ({' + '.join(groups)})")
     return ok
 
 

@@ -339,10 +339,9 @@ class TestSystemUidSqlHelpers:
         # 1003 (deactivated), 1004 (soft-deleted); NULL (acealice) never
         # enters; the caller's own row (by system_account) is excluded.
         assert ws._recorded_pin_uids("acedave") == {1009, 1003, 1004}
-        assert ws._recorded_pin_uids("acebob") == {
-            1004,
-            1010,
-        }, "exclusion is by system_account — BOTH acebob rows are the caller's own"
+        assert ws._recorded_pin_uids("acebob") == {1004, 1010}, (
+            "exclusion is by system_account — BOTH acebob rows are the caller's own"
+        )
         assert ws._recorded_pin_uids("stranger") == {1009, 1003, 1004, 1010}
 
 
@@ -874,12 +873,11 @@ class TestEntrypointSyncTextual:
         """Review round 2 on #3390: the sync's outermost except printed the
         error and ended with exit 0, so the pipefail wrapper never fired the
         WARNING for mid-stage exceptions (functionally proven in
-        test_midstage_exception_exits_nonzero); pin the wiring marker."""
+        test_midstage_exception_exits_nonzero); pin the wiring marker.
+        The explicit assert keeps the failure semantics visible (and
+        satisfies the false-positive scanner's no_assertion gate)."""
         content = open(ENTRYPOINT, encoding="utf-8").read()
         handler = content.index("Error syncing users and projects")
-        # index() raises when the marker is absent after the handler; the
-        # explicit assert keeps the failure visible and satisfies the
-        # false-positive scanner's no_assertion gate (PR review round 3).
         assert content.index("sys.exit(1)", handler) > handler
 
 
@@ -949,7 +947,9 @@ class TestAdminUpdateUserProvisioning:
         monkeypatch.setattr(admin_mod, "_spawn_background", lambda fn: None)
         monkeypatch.setattr(wm, "peek_webui_manager", lambda: None)
 
-        def fake_ensure(system_account, uid=None):
+        def fake_ensure(system_account, uid=None, tenant_id=None):
+            # tenant_id kwarg: PR #3402 (#3396) enrolls into the tenant-
+            # scoped shared group; the #3390 provisioning tests don't care.
             events.append(("ensure_system_user", system_account, uid))
             return True
 

@@ -342,3 +342,62 @@ class TestAdminTenantMoveGroupDrop:
         mock_remove.assert_called_once_with("mover-acct", tenant_id=1)
         mock_ensure.assert_called_once_with("new-acct", uid=None, tenant_id=2)
         assert repo.update_user.call_args.kwargs.get("system_account") == "new-acct"
+
+
+class TestDeactivatedUserNoReenroll:
+    """PR #3402 review: gate the post-success enroll on the user's FINAL
+    active state. A PUT without ``is_active`` on a DEACTIVATED row (e.g.
+    ``{"role": "manager"}`` from an API client — the UI always sends
+    ``is_active``, API clients often do not) used to re-run
+    ensure_system_user on the exists-path: the tenant content group the
+    deactivation dropped was re-granted, the nologin placeholder was
+    re-shelled, and the boot sync (which mirrors the DB row) preserved the
+    grant — the deactivate-drop only fires when ``is_active=false`` is
+    REQUESTED, so it could not undo this."""
+
+    ROW = {
+        "id": 11,
+        "username": "sleeper",
+        "system_account": "sleeper-acct",
+        "tenant_id": 4,
+        "role": "user",
+        "is_active": False,
+    }
+
+    def _put(self, admin_app, row, body):
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = dict(row)
+        repo.update_user.return_value = True
+        auth_stubs = _auth_stubs()
+        for s_ in auth_stubs:
+            s_.start()
+        try:
+            with (
+                patch("app.routes.admin.user_repo", repo),
+                _tenant_scope_stub(),
+                patch("app.routes.admin.ensure_system_user") as mock_ensure,
+                patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
+                patch("app.routes.admin.audit_logger"),
+            ):
+                resp = admin_app.test_client().put(
+                    "/api/admin/users/11",
+                    json=body,
+                    headers={"Authorization": "Bearer t"},
+                )
+        finally:
+            for s_ in auth_stubs:
+                s_.stop()
+        return resp, mock_ensure, mock_remove
+
+    def test_put_without_is_active_on_deactivated_row_does_not_enroll(self, admin_app):
+        resp, mock_ensure, mock_remove = self._put(admin_app, dict(self.ROW), {"role": "manager"})
+        assert resp.status_code == 200, resp.get_json()
+        mock_ensure.assert_not_called(), "a user who ends up INACTIVE must never be enrolled"
+        mock_remove.assert_not_called(), "no is_active=false requested — nothing to drop"
+
+    def test_explicit_reactivation_enrolls_again(self, admin_app):
+        """The gate's other edge: a PUT that makes the user ACTIVE (final
+        state) must still enroll — the enroll must not become dead code."""
+        resp, mock_ensure, _mock_remove = self._put(admin_app, dict(self.ROW), {"is_active": True})
+        assert resp.status_code == 200, resp.get_json()
+        mock_ensure.assert_called_once_with("sleeper-acct", uid=None, tenant_id=4)

@@ -208,63 +208,169 @@ class TestChownWrapperConfigurablePrefixes:
     """Issue #3396 review (finding 8): ALLOWED_PREFIXES was hardcoded to
     /workspace + /home, so a deployment with a custom WORKSPACE_BASE_DIR
     (e.g. /data) had every reclaim rejected by the wrapper — fail-soft,
-    forever. The wrapper must source an optional conf that may redefine the
-    array, and the entrypoint must write that conf at boot from the
-    configured base dirs. Textual tests per the entrypoint-test convention
-    (the wrapper itself needs root to execute)."""
+    forever. The wrapper reads an optional conf, and the entrypoint writes
+    it at boot from the configured base dirs.
+
+    PR #3402 review: the wrapper runs as ROOT via sudo, so the conf is DATA
+    (one prefix per line), never sourced shell code. Before use the wrapper
+    stat-validates it (root-owned, no group/world write bits) and validates
+    every line (absolute, not "/", [A-Za-z0-9/._-] only); a rejected conf
+    falls back to the built-in prefixes with an audit line. Tested
+    FUNCTIONALLY with a PATH-shimmed harness (fake stat/chown/flock): the
+    wrapper's own logic runs verbatim, only the system commands are
+    stubbed."""
 
     WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "openace-chown.sh"
     ENTRYPOINT = Path(__file__).resolve().parents[2] / "docker-entrypoint.sh"
 
-    def test_wrapper_sources_optional_conf_over_defaults(self):
+    def _run_wrapper(
+        self,
+        tmp_path: Path,
+        *,
+        conf_lines: str | None,
+        stat_out: str = "0 644",
+        args: tuple[str, ...] = ("1000:1000", "/data/proj"),
+    ) -> tuple[int, str, str, str]:
+        """Run a relocated copy of the wrapper with stubbed stat/chown/flock.
+
+        Returns (rc, stdout, stderr, chown-log). ``stat_out`` is what the
+        fake ``stat -c '%u %a'`` reports for the conf file."""
+        import os
+        import subprocess
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        chown_log = tmp_path / "chown.log"
+        chown_log.unlink(missing_ok=True)  # one log per invocation
+        fake_stat = bin_dir / "stat"
+        fake_stat.write_text('#!/bin/sh\necho "$FAKE_STAT_OUT"\n')
+        fake_stat.chmod(0o755)
+        fake_chown = bin_dir / "chown"
+        fake_chown.write_text('#!/bin/sh\necho "chown $*" >> "$FAKE_CHOWN_LOG"\n')
+        fake_chown.chmod(0o755)
+        fake_flock = bin_dir / "flock"
+        fake_flock.write_text("#!/bin/sh\nexit 0\n")
+        fake_flock.chmod(0o755)
+
+        conf = tmp_path / "openace-chown.conf"
+        if conf_lines is not None:
+            conf.write_text(conf_lines)
+
+        script = (
+            self.WRAPPER.read_text(encoding="utf-8")
+            .replace('CONF_FILE="/etc/openace/openace-chown.conf"', f'CONF_FILE="{conf}"')
+            .replace('LOCK_FILE="/var/lock/openace-chown.lock"', f'LOCK_FILE="{tmp_path}/lock"')
+            .replace('AUDIT_LOG="/app/logs/sudoers-audit.log"', f'AUDIT_LOG="{tmp_path}/audit.log"')
+        )
+        runner = tmp_path / "wrapper-under-test.sh"
+        runner.write_text(script)
+        runner.chmod(0o755)
+
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "FAKE_STAT_OUT": stat_out,
+            "FAKE_CHOWN_LOG": str(chown_log),
+        }
+        proc = subprocess.run(
+            ["/bin/bash", str(runner), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        log = chown_log.read_text() if chown_log.exists() else ""
+        return proc.returncode, proc.stdout, proc.stderr, log
+
+    def test_wrapper_reads_validated_conf_data_not_shell(self):
         content = self.WRAPPER.read_text(encoding="utf-8")
         assert (
             'ALLOWED_PREFIXES=("/workspace/" "/home/")' in content
         ), "built-in defaults must be kept for conf-less environments"
-        conf_line = '. "$CONF_FILE"'
         assert 'CONF_FILE="/etc/openace/openace-chown.conf"' in content
-        assert conf_line in content, "a readable conf must be sourced"
-        # the empty-array guard: an operator conf must not silently allow all
-        assert "${#ALLOWED_PREFIXES[@]} -eq 0" in content
+        assert '. "$CONF_FILE"' not in content, (
+            "the conf must never be SOURCED: it is env-derived data and this "
+            "wrapper runs as root (PR #3402 review)"
+        )
+        assert "stat -c '%u %a'" in content, "ownership/permission validation required"
+        assert "${#ALLOWED_PREFIXES[@]} -eq 0" in content, "empty-list guard must be kept"
 
     def test_entrypoint_writes_conf_from_workspace_base_dirs(self):
         content = self.ENTRYPOINT.read_text(encoding="utf-8")
         assert "openace-chown.conf" in content, "entrypoint must write the conf at boot"
         # derived from WORKSPACE_BASE_DIR (comma list, trimmed, slash-normalized)
         assert "WORKSPACE_BASE_DIR:-/workspace" in content
-        assert '"/home/"' in content
+        assert "printf '/home/\\n'" in content, "one prefix per line, /home always included"
 
-    def test_generated_conf_shape(self, tmp_path):
-        """Run the entrypoint's generation snippet standalone and check the
-        emitted conf is a valid bash array assignment the wrapper can
-        source."""
-        content = self.ENTRYPOINT.read_text(encoding="utf-8")
-        start = content.index('_chown_conf="$_chown_conf_dir/openace-chown.conf"')
-        # extract just the generation block between { and } > "$_chown_conf"
-        block_start = content.index("{\n", start)
-        block_end = content.index('} > "$_chown_conf"', block_start)
-        gen_block = content[block_start + 2 : block_end]
-        script = f"""
-            _chown_conf="$(mktemp)"
-            WORKSPACE_BASE_DIR=" /data ,/srv/ws "
-            {{ {gen_block} }} > "$_chown_conf"
-            cat "$_chown_conf"
-        """
-        import subprocess
-
-        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
-        assert proc.returncode == 0, proc.stderr
-        # simulate the wrapper consuming it
-        check = subprocess.run(
-            [
-                "bash",
-                "-c",
-                'ALLOWED_PREFIXES=("/workspace/" "/home/"); '
-                + proc.stdout.strip()
-                + '; echo "${ALLOWED_PREFIXES[*]}"',
-            ],
-            capture_output=True,
-            text=True,
+    def test_clean_root_owned_conf_extends_prefixes(self, tmp_path):
+        rc, _out, _err, log = self._run_wrapper(
+            tmp_path,
+            conf_lines="# comment\n/data/\n",
+            stat_out="0 644",
+            args=("1000:1000", "/data/proj"),
         )
-        assert check.returncode == 0, check.stderr
-        assert check.stdout.strip() == "/data/ /srv/ws/ /home/"
+        assert rc == 0, _err
+        assert "chown 1000:1000 /data/proj" in log
+
+    def test_non_root_owned_conf_rejected_with_fallback(self, tmp_path):
+        """A conf not owned by root must be refused — but fail-safe: the
+        built-in prefixes still apply (an operator error must not brick
+        every reclaim)."""
+        rc, _out, err, log = self._run_wrapper(
+            tmp_path,
+            conf_lines="/data/\n",
+            stat_out="1001 644",
+            args=("1000:1000", "/data/proj"),
+        )
+        assert rc == 2, "conf prefix must not apply when the file is not root-owned"
+        assert "not root-owned" in err
+        assert log == "", "no chown may run under an untrusted conf's prefixes"
+        # fall back: a built-in prefix still works (a non-existent /workspace
+        # path resolves through the parent — deterministic on every host)
+        rc2, _o2, _e2, log2 = self._run_wrapper(
+            tmp_path,
+            conf_lines="/data/\n",
+            stat_out="1001 644",
+            args=("1000:1000", "/workspace/foo/x"),
+        )
+        assert rc2 == 0, _e2
+        assert "chown 1000:1000 /workspace/foo/x" in log2
+
+    def test_world_writable_conf_rejected(self, tmp_path):
+        rc, _out, err, log = self._run_wrapper(
+            tmp_path,
+            conf_lines="/data/\n",
+            stat_out="0 666",
+            args=("1000:1000", "/data/proj"),
+        )
+        assert rc == 2
+        assert "group/world-writable" in err
+        assert log == ""
+
+    def test_malformed_conf_entries_are_skipped(self, tmp_path):
+        """Only admissible lines apply: absolute paths, not "/", characters
+        within [A-Za-z0-9/._-]. A relative entry, the filesystem root, and
+        shell-metacharacter entries are skipped with a warning; a conf of
+        ONLY inadmissible lines keeps the built-in prefixes."""
+        conf = '/ok/\nnot/absolute\n/\n/quo"te\n$(reboot)\n'
+        rc, _out, err, log = self._run_wrapper(
+            tmp_path, conf_lines=conf, stat_out="0 644", args=("1000:1000", "/ok/f")
+        )
+        assert rc == 0, err
+        assert "chown 1000:1000 /ok/f" in log
+        assert err.count("skipped") >= 3, "each inadmissible line must be loudly skipped"
+        # the shell-syntax lines did NOT execute (the harness surviving this
+        # far proves it: $(reboot) as a command would have errored loudly)
+        rc2, _o, _e, log2 = self._run_wrapper(
+            tmp_path, conf_lines=conf, stat_out="0 644", args=("1000:1000", "/data/proj")
+        )
+        assert rc2 == 2, "no inadmissible prefix may broaden the guard"
+        assert log2 == ""
+        # only-inadmissible conf: built-ins still apply
+        rc3, _o3, _e3, log3 = self._run_wrapper(
+            tmp_path,
+            conf_lines="/\nrelative\n",
+            stat_out="0 644",
+            args=("1000:1000", "/workspace/foo/x"),
+        )
+        assert rc3 == 0
+        assert "chown 1000:1000 /workspace/foo/x" in log3

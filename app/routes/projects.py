@@ -293,6 +293,64 @@ def api_create_project():
                 400,
             )
 
+    else:
+        # PR #3402 review (#3396 boot-reclaim hardening): PRIVATE
+        # registrations had no path validation at all (everything above
+        # gates on ``if is_shared:``), and the tenant-scoped
+        # get_project_by_path below never 409s across tenants — so any
+        # tenant's user could register another tenant's shared project
+        # directory (or the <base>/shared namespace root, or a base dir)
+        # as a private project. The boot reclaim pass is hardened against
+        # exactly those rows, but the API must not accept them in the
+        # first place. A private path must not BE a workspace base dir or
+        # a shared-namespace root, and must not overlap (be equal to, lie
+        # inside, or contain) an ACTIVE project row of ANOTHER tenant.
+        # Fail-soft on the enumeration like the shared-path check above.
+        base_dirs = get_workspace_base_dirs()
+        resolved = os.path.realpath(path).rstrip(os.sep)
+        if any(resolved == os.path.realpath(b).rstrip(os.sep) for b in base_dirs):
+            return jsonify({"error": "Path must not be a workspace base directory itself"}), 400
+        if any(
+            resolved == ns or resolved.startswith(ns + os.sep)
+            for ns in shared_namespace_roots(base_dirs)
+        ):
+            # The whole namespace subtree, not just the root: <base>/shared
+            # is sticky and group-writable by EVERY tenant's accounts (the
+            # global creation group) with others traversal — a "private"
+            # dir there is not private. Private projects belong in the
+            # creator's own workspace.
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Path is inside the shared namespace (<base>/shared) — "
+                            "register shared projects there and private projects "
+                            "in your own workspace"
+                        )
+                    }
+                ),
+                400,
+            )
+        try:
+            foreign_paths = [
+                os.path.realpath(p.path).rstrip(os.sep)
+                for p in project_repo.get_all_projects()
+                if p.tenant_id != tenant_id and p.path
+            ]
+        except Exception as e:  # noqa: BLE001 - guard is best-effort
+            logger.warning("Failed to enumerate projects for private path check: %s", e)
+            foreign_paths = []
+        for other in foreign_paths:
+            if (
+                resolved == other
+                or resolved.startswith(other + os.sep)
+                or other.startswith(resolved + os.sep)
+            ):
+                return (
+                    jsonify({"error": "Path overlaps a project of another tenant"}),
+                    400,
+                )
+
     # Check if project already exists
     existing = project_repo.get_project_by_path(path, tenant_id=tenant_id)
     if existing:
@@ -540,7 +598,11 @@ def api_update_project(project_id):
             if project.created_by:
                 creator = user_repo.get_user_by_id(project.created_by)
                 if creator:
-                    owner_account = creator.get("system_account") or creator.get("username")
+                    # system_account ONLY (PR #3402 review): an unmapped
+                    # user's username may equal another user's system_account,
+                    # and the fallback would hand the reclaimed tree to that
+                    # other OS account.
+                    owner_account = creator.get("system_account")
             if not owner_account:
                 revoke_warning = (
                     "Revocation recorded, but the OS-level permission reclaim was skipped: "
