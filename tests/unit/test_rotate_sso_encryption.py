@@ -279,3 +279,34 @@ def test_candidate_key_validation_is_mode_independent(monkeypatch):
     monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     with pytest.raises(ValueError):
         SMTPPasswordManager(encryption_key="")
+
+
+def test_short_legacy_old_key_migrates_to_strong_new_key(tmp_path, monkeypatch):
+    """Regression (PR #3386 review): a legacy deployment with a SHORT old key
+    must still be able to rotate AWAY from it — rejecting the old key strands
+    non-compliant deployments on the weak key forever, defeating the tool's
+    recovery purpose. Only the NEW key must satisfy strength rules."""
+    legacy_old = "legacy-short-key"  # 16 chars — decrypts fine, fails strength
+    monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", legacy_old)
+    db_url = _make_db(tmp_path)
+
+    # pre-flight passes with the short legacy key
+    assert verify_key_works(db_url, NEW_KEY)[0] is True
+    # rotation completes: every value decrypts with the strong new key
+    success, count, failed = rotate_keys(db_url, NEW_KEY)
+    assert (success, failed) == (True, [])
+    assert _decrypt_all_with(_dump(db_url), NEW_KEY) == EXPECTED_PLAINTEXTS
+
+
+def test_same_key_noop_rotation_is_refused(tmp_path):
+    """Regression (PR #3386 review): rotating to the SAME key must fail
+    closed — a "successful" no-op re-encryption reports a false completion
+    signal in a key-compromise response."""
+    db_url = _make_db(tmp_path)
+    before = _dump(db_url)
+
+    assert verify_key_works(db_url, OLD_KEY) == (False, ["<same-key-noop>"])
+    assert rotate_keys(db_url, OLD_KEY) == (False, 0, ["<same-key-noop>"])
+
+    # nothing was rewritten
+    assert _dump(db_url) == before

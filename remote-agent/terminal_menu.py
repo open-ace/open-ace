@@ -30,7 +30,7 @@ TOOLS = [
         "name": "Qwen Code",
         "cli": "qwen",
         "cmd": "qwen --auth-type openai",
-        "install_cmd": "npm install -g @qwen-code/qwen-code@latest",
+        "install_cmd": "npm install -g @qwen-code/qwen-code@0.23.3",
         "env_key": "OPENAI_API_KEY",
     },
     {

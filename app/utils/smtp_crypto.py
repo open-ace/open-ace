@@ -43,6 +43,24 @@ class SMTPPasswordManager:
         """
         self._encryption_key = self._get_encryption_key(encryption_key)
 
+    @classmethod
+    def for_legacy_rotation_key(cls, encryption_key: str) -> "SMTPPasswordManager":
+        """Migration-only constructor for the CURRENT (old) key.
+
+        The unconditional strength validation on explicit keys exists so a
+        rotation can never COMPLETE with a key the production runtime would
+        refuse. The OLD key is the opposite case: it already protects the
+        existing ciphertext, and migrating AWAY from a weak/short/historical
+        key is exactly what rotation is for — rejecting it would strand
+        legacy deployments on the non-compliant key forever. Only requires
+        non-empty key material; derives with the same historical SHA-256.
+        """
+        if not encryption_key:
+            raise ValueError("Legacy rotation key must not be empty")
+        manager = cls.__new__(cls)
+        manager._encryption_key = hashlib.sha256(encryption_key.encode()).digest()
+        return manager
+
     def _get_encryption_key(self, encryption_key: str | None = None) -> bytes:
         """Derive the Fernet encryption key from OPENACE_ENCRYPTION_KEY.
 

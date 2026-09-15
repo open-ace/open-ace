@@ -27,10 +27,14 @@ class QwenCodeAdapter(BaseCLIAdapter):
     EXECUTABLE = "qwen"
     DISPLAY_NAME = "Qwen Code"
     NPM_PACKAGE = "@qwen-code/qwen-code"
+    # Pinned to the validated pair (see Dockerfile); @latest would drift the
+    # agent onto unvalidated engines/CLI changes while npm still exits 0 on a
+    # mere EBADENGINE warning (PR #3386 review).
+    PINNED_VERSION = "0.23.3"
 
     def get_install_command(self) -> str:
         """Return the command to install qwen-code CLI."""
-        return f"npm install -g {self.NPM_PACKAGE}@latest"
+        return f"npm install -g {self.NPM_PACKAGE}@{self.PINNED_VERSION}"
 
     def check_installed(self) -> bool:
         """Check if qwen-code CLI is installed."""

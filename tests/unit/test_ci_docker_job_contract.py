@@ -140,8 +140,9 @@ def test_docker_sandbox_blocks_the_pr_gate():
 
 
 def test_qwen_stack_pins_are_consistent_across_all_sites():
-    """Upgrade guard (PR #3386): the webui/CLI pair is pinned at FIVE sites
-    (two Dockerfiles, package install.sh, remote-agent install.sh/.ps1).
+    """Upgrade guard (PR #3386): the webui/CLI pair is pinned at SEVEN sites
+    (two Dockerfiles, package install.sh, remote-agent install.sh/.ps1,
+    terminal_menu.py, cli_adapters/qwen_code.py).
     An upgrade that misses any site ships mixed versions. This contract
     fails with the per-site inventory the moment the pins disagree, so an
     upgrade is one commit that touches every site CI points at.
@@ -211,6 +212,22 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         {"remote-agent/install.ps1": cli_sites["remote-agent/install.ps1"]},
         r"^\$QwenCliVersion = \"([0-9.]+)\"",
     )["remote-agent/install.ps1"]
+    cli["remote-agent/terminal_menu.py"] = pins(
+        {
+            "remote-agent/terminal_menu.py": (
+                REPO_ROOT / "remote-agent" / "terminal_menu.py"
+            ).read_text(encoding="utf-8")
+        },
+        r"npm install -g @qwen-code/qwen-code@([0-9.]+)",
+    )["remote-agent/terminal_menu.py"]
+    cli["remote-agent/cli_adapters/qwen_code.py"] = pins(
+        {
+            "remote-agent/cli_adapters/qwen_code.py": (
+                REPO_ROOT / "remote-agent" / "cli_adapters" / "qwen_code.py"
+            ).read_text(encoding="utf-8")
+        },
+        r'^\s*PINNED_VERSION = "([0-9.]+)"',
+    )["remote-agent/cli_adapters/qwen_code.py"]
 
     assert len(set(webui.values())) == 1, f"webui pins disagree: {webui}"
     assert len(set(cli.values())) == 1, f"CLI pins disagree: {cli}"

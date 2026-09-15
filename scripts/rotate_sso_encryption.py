@@ -145,6 +145,10 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
     from app.repositories.database import Database
     from app.utils.smtp_crypto import SMTPPasswordManager
 
+    if new_key == get_current_encryption_key():
+        logger.error("New key is identical to the current key; rotation would be a no-op")
+        return False, ["<same-key-noop>"]
+
     db = Database(db_url=db_url)
     pm_new = SMTPPasswordManager(encryption_key=new_key)
     probe = pm_new.encrypt("openace-rotation-probe")
@@ -156,7 +160,7 @@ def verify_key_works(db_url: str, new_key: str) -> tuple[bool, list[str]]:
     if not old_key:
         logger.error("OPENACE_ENCRYPTION_KEY not set")
         return False, ["<current-key-missing>"]
-    pm_old = SMTPPasswordManager(encryption_key=old_key)
+    pm_old = SMTPPasswordManager.for_legacy_rotation_key(old_key)
 
     failed_stores: list[str] = []
     checked = 0
@@ -203,7 +207,10 @@ def rotate_keys(db_url: str, new_key: str) -> tuple[bool, int, list[str]]:
     if not old_key:
         logger.error("OPENACE_ENCRYPTION_KEY not set")
         return False, 0, []
-    pm_old = SMTPPasswordManager(encryption_key=old_key)
+    if new_key == old_key:
+        logger.error("New key is identical to the current key; rotation would be a no-op")
+        return False, 0, ["<same-key-noop>"]
+    pm_old = SMTPPasswordManager.for_legacy_rotation_key(old_key)
 
     # Decrypt and re-encrypt EVERYTHING (all stores) before the first write,
     # then write all updates in a single transaction. A per-row autocommit
@@ -347,6 +354,11 @@ def main():
     current_key = get_current_encryption_key()
     if not current_key:
         logger.error("OPENACE_ENCRYPTION_KEY environment variable not set")
+        sys.exit(1)
+    if args.new_key == current_key:
+        logger.error(
+            "--new-key is identical to the current OPENACE_ENCRYPTION_KEY; refusing the no-op rotation"
+        )
         sys.exit(1)
 
     # Get database URL

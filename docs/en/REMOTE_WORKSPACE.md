@@ -349,7 +349,7 @@ cd ~/.open-ace-agent
 pip3 install -r requirements.txt
 
 # 3. Install CLI tool
-npm install -g @qwen-code/qwen-code@latest
+npm install -g @qwen-code/qwen-code@0.23.3
 
 # 4. Create the config file
 cat > config.json << 'EOF'
@@ -861,7 +861,7 @@ curl -b cookies.txt -X POST \
 
 | CLI Tool | Identifier | Install Command | Environment Variables |
 |----------|-----------|-----------------|----------------------|
-| Qwen Code | `qwen-code-cli` | `npm install -g @qwen-code/qwen-code@latest` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+| Qwen Code | `qwen-code-cli` | `npm install -g @qwen-code/qwen-code@0.23.3` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
 | Claude Code | `claude-code` | `npm install -g @anthropic-ai/claude-code@latest` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
 | OpenClaw | `openclaw` | `npm install -g openclaw@latest` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
 
@@ -1072,7 +1072,7 @@ sudo journalctl -u open-ace-agent -f
 
 ```bash
 # Install Qwen Code CLI
-npm install -g @qwen-code/qwen-code@latest
+npm install -g @qwen-code/qwen-code@0.23.3
 
 # Or install Claude Code
 npm install -g @anthropic-ai/claude-code@latest
