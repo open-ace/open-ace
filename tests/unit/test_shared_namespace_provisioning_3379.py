@@ -502,7 +502,10 @@ class TestTenantSharedGroupSync:
         usermods are created there); textual ordering by necessity."""
         content = ENTRYPOINT.read_text(encoding="utf-8")
         sync_end = content.index("open-ace-user-sync.log")
-        content.index(f"<<'{self.HEREDOC_TAG}'", sync_end)
+        # index() raises if the heredoc tag is absent after sync_end; the
+        # explicit assert keeps the failure semantics visible (and satisfies
+        # the false-positive scanner's no_assertion gate).
+        assert content.index(f"<<'{self.HEREDOC_TAG}'", sync_end) > sync_end
 
     def test_sync_pipeline_hardened_like_user_sync(self):
         """Review on #3396 (finding 1): the old plain `python3 - <<EOF ...
