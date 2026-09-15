@@ -339,9 +339,10 @@ class TestSystemUidSqlHelpers:
         # 1003 (deactivated), 1004 (soft-deleted); NULL (acealice) never
         # enters; the caller's own row (by system_account) is excluded.
         assert ws._recorded_pin_uids("acedave") == {1009, 1003, 1004}
-        assert ws._recorded_pin_uids("acebob") == {1004, 1010}, (
-            "exclusion is by system_account — BOTH acebob rows are the caller's own"
-        )
+        assert ws._recorded_pin_uids("acebob") == {
+            1004,
+            1010,
+        }, "exclusion is by system_account — BOTH acebob rows are the caller's own"
         assert ws._recorded_pin_uids("stranger") == {1009, 1003, 1004, 1010}
 
 
