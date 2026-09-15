@@ -164,7 +164,15 @@ def get_recorded_system_uid(system_account: str) -> int | None:
             row = cursor.fetchone()
             if row is None:
                 return None
-            value = row[0]
+            # Review on #3390 (🔴): PostgreSQL connections are wrapped with
+            # cursor_factory=RealDictCursor (app/repositories/database.py),
+            # so fetchone() yields a dict — positional row[0] raises KeyError
+            # there and the except below swallowed it, making the pin
+            # permanently unreadable on PG while record_system_uid kept
+            # OVERWRITING it with auto-assigned uids. Dual-shape access,
+            # same pattern as session_manager._count_session_messages
+            # (sqlite tuple / sqlite Row / PG RealDictRow all work).
+            value = row["system_uid"] if isinstance(row, dict) else row[0]
             return int(value) if value is not None else None
     except Exception as e:
         # Read failure must not block account creation — an unpinned useradd
@@ -199,6 +207,77 @@ def record_system_uid(system_account: str, uid: int) -> bool:
     except Exception as e:
         logger.warning(f"Could not record system_uid {uid} for {system_account}: {e}")
         return False
+
+
+def _recorded_pin_uids(exclude_account: str) -> set[int] | None:
+    """All uids pinned in ACTIVE, non-deleted user rows (review on #3390 ⚪).
+
+    The auto-assign path must treat these as taken even when NO OS account
+    in the current container carries them — e.g. the boot sync failed
+    (#3399) and the pinned accounts are exactly the ones missing from
+    /etc/passwd, so a plain useradd could otherwise land on a recorded pin,
+    numerically own that user's directories, and pin the stolen uid to the
+    new account. ``exclude_account`` drops the caller's own row (its pin,
+    if any, was already consumed as the explicit ``-u``). Returns None on
+    read failure so callers can fail soft.
+    """
+    try:
+        from app.repositories.database import adapt_sql, get_db_connection
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "SELECT system_uid FROM users "
+                    "WHERE system_uid IS NOT NULL AND deleted_at IS NULL "
+                    "AND is_active = true AND system_account != ?"
+                ),
+                (exclude_account,),
+            )
+            pins: set[int] = set()
+            for row in cursor.fetchall() or []:
+                # Dual row shape (PG RealDictCursor vs sqlite tuple) — see
+                # get_recorded_system_uid.
+                value = row["system_uid"] if isinstance(row, dict) else row[0]
+                if value is not None:
+                    pins.add(int(value))
+            return pins
+    except Exception as e:
+        logger.warning(f"Could not read recorded system_uid pins: {e}")
+        return None
+
+
+def _passwd_uids() -> set[int] | None:
+    """Every uid resolvable in /etc/passwd (None if unreadable)."""
+    try:
+        import pwd
+
+        return {entry.pw_uid for entry in pwd.getpwall()}
+    except Exception as e:
+        logger.warning(f"Could not enumerate passwd uids: {e}")
+        return None
+
+
+def _pick_auto_uid(system_account: str) -> int | None:
+    """Pick a free uid (>= 1001) for an unpinned account (review on #3390 ⚪).
+
+    The exclusion set combines /etc/passwd AND the DB's recorded active pins
+    (minus this account's own row), so an auto-assign can no longer steal a
+    pin whose OS account is missing from this container. Returns None to
+    fail soft (either source unreadable) — the caller then runs the plain
+    unpinned ``useradd`` exactly as before this review fix.
+    """
+    recorded = _recorded_pin_uids(system_account)
+    passwd = _passwd_uids()
+    if recorded is None or passwd is None:
+        return None
+    taken = passwd | recorded
+    # < 1000 is the reserved system range (rejected above); 1000 is the
+    # image's default `open-ace` account.
+    uid = 1001
+    while uid in taken:
+        uid += 1
+    return uid
 
 
 def _actual_uid_of(system_account: str) -> int | None:
@@ -357,6 +436,16 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
                 f"(this account keeps a placeholder pin in the database)"
             )
             return False
+
+    # Review on #3390 (⚪): /etc/passwd is not the only reserved-uid source.
+    # When the boot sync failed (#3399) the pinned accounts are exactly the
+    # ones MISSING from the container, and the guard above (NSS lookup)
+    # cannot see those pins — a plain auto-assigning useradd could land this
+    # unpinned account on a recorded pin. Choose the auto uid explicitly,
+    # excluding passwd uids AND DB-recorded active pins; on a read failure
+    # fall back to the plain unpinned useradd (pre-review behavior).
+    if uid is None:
+        uid = _pick_auto_uid(system_account)
 
     # 创建用户（通过 wrapper 或 sudo）
     # Issue #1855: 优先使用安全 wrapper，wrapper 内部做参数校验和审计日志

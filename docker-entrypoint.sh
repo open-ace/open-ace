@@ -1605,8 +1605,12 @@ try:
     # without an OS account — that user cannot log in to a workspace at all.
     # Verify loudly and exit nonzero: the pipefail wrapper in the entrypoint
     # turns this into the WARNING line (visible in container logs) without
-    # crash-looping the service. The pins above were already committed, so
-    # the next recreation retries from the recorded state.
+    # crash-looping the service. Review round 2: the exit happens only AFTER
+    # the project-dir pass below — that section already tolerates missing
+    # owners per-project (Warning + skip), so one failed account must not
+    # block every other user's project directories on every boot. The pins
+    # above were already committed, so the next recreation retries from the
+    # recorded state.
     missing_actives = []
     for row_id, username, account, recorded_uid in active_rows:
         try:
@@ -1614,8 +1618,7 @@ try:
         except KeyError:
             missing_actives.append(account)
     if missing_actives:
-        print(f'  ERROR (issue #3390): active users WITHOUT an OS account after sync: {sorted(missing_actives)} — see the collision/failure lines above; resolve manually (project-dir sync skipped)')
-        sys.exit(1)
+        print(f'  ERROR (issue #3390): active users WITHOUT an OS account after sync: {sorted(missing_actives)} — see the collision/failure lines above; resolve manually')
 
     # Sync project directories from database (Issue #1083)
     print('Syncing project directories...')
@@ -1646,9 +1649,19 @@ try:
                 print(f'  Project directory exists: {path}')
 
     conn.close()
+    if missing_actives:
+        # exit nonzero only AFTER the project-dir pass (review on #3390:
+        # one failed account must not block everyone's project sync) —
+        # the pipefail wrapper turns this into the WARNING line.
+        sys.exit(1)
     print('User and project sync completed.')
 except Exception as e:
     print(f'Error syncing users and projects: {e}')
+    # nonzero, or the pipefail wrapper never fires the WARNING (#3399-style
+    # silent death: a mid-stage exception — UPDATE failure, connection drop,
+    # makedirs PermissionError on root_squash NFS — used to end as exit 0,
+    # skipping conn.commit() and the missing-actives verification).
+    sys.exit(1)
 " 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 

@@ -43,6 +43,7 @@ import sys
 import types
 from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -85,6 +86,12 @@ class TestEnsureSystemUidPinning:
             "uid_of": {"acealice": 1042, "acebob": 1003},  # id -u answers
             "exists": set(),  # accounts for which `id <name>` succeeds
             "cmds": [],  # run_as_root_if_needed commands
+            # Review on #3390 (⚪): answers for the auto-assign exclusion
+            # set. db_pins None = DB read failure (fail-soft -> plain
+            # useradd, the fixture default so the pre-review assertions
+            # below keep pinning that fallback).
+            "db_pins": None,  # _recorded_pin_uids answer (set, or None)
+            "passwd_uids": {0, 999, 1000},  # _passwd_uids answer (or None)
         }
         monkeypatch.setattr(ws, "get_recorded_system_uid", lambda acc: state["recorded"].get(acc))
         monkeypatch.setattr(
@@ -94,6 +101,8 @@ class TestEnsureSystemUidPinning:
             or state["recorded"].__setitem__(acc, uid),
         )
         monkeypatch.setattr(ws, "_lookup_uid_owner", lambda uid: state["uid_owner"].get(uid))
+        monkeypatch.setattr(ws, "_recorded_pin_uids", lambda acc: state["db_pins"])
+        monkeypatch.setattr(ws, "_passwd_uids", lambda: state["passwd_uids"])
         monkeypatch.setattr(
             ws,
             "run_as_root_if_needed",
@@ -120,6 +129,47 @@ class TestEnsureSystemUidPinning:
         assert state["record_calls"] == [
             ("acealice", 1042)
         ], "assigned uid must be written back to users.system_uid (#3390)"
+
+    # ── Review on #3390 (⚪): the auto-assign exclusion set ──────────────
+    # The collision guard only sees the CURRENT container's /etc/passwd; a
+    # boot-sync failure (#3399) leaves pinned accounts missing from it, and
+    # an unpinned account's useradd could then land on a recorded pin.
+
+    def test_auto_assign_skips_db_recorded_pins(self, pin_env):
+        """The pinned accounts are missing from /etc/passwd (boot sync
+        failed) but recorded in the DB — the auto uid must skip them."""
+        state = pin_env
+        state["db_pins"] = {1001, 1002, 1003}
+        assert ws.ensure_system_user("acealice") is True
+        useradd = [c for c in state["cmds"] if c[0] == "useradd"]
+        assert ("-u", "1004") in zip(useradd[0], useradd[0][1:]), (
+            "auto-assign must pass an explicit -u outside the recorded pin "
+            "set — a plain useradd here would grab 1001 (someone's pin)"
+        )
+
+    def test_auto_assign_skips_passwd_uids_too(self, pin_env):
+        state = pin_env
+        state["db_pins"] = set()
+        state["passwd_uids"] = {0, 999, 1000, 1001}
+        assert ws.ensure_system_user("acealice") is True
+        useradd = [c for c in state["cmds"] if c[0] == "useradd"]
+        assert ("-u", "1002") in zip(useradd[0], useradd[0][1:])
+
+    def test_auto_assign_failsoft_on_db_read_failure(self, pin_env):
+        """DB unreadable -> plain unpinned useradd (pre-review behavior)."""
+        state = pin_env
+        state["db_pins"] = None
+        assert ws.ensure_system_user("acealice") is True
+        useradd = [c for c in state["cmds"] if c[0] == "useradd"]
+        assert useradd == [("useradd", "-m", "-s", "/bin/bash", "acealice")]
+
+    def test_auto_assign_failsoft_on_passwd_read_failure(self, pin_env):
+        state = pin_env
+        state["db_pins"] = {1001}
+        state["passwd_uids"] = None
+        assert ws.ensure_system_user("acealice") is True
+        useradd = [c for c in state["cmds"] if c[0] == "useradd"]
+        assert useradd == [("useradd", "-m", "-s", "/bin/bash", "acealice")]
 
     def test_recreation_pins_recorded_uid(self, pin_env):
         state = pin_env
@@ -273,6 +323,114 @@ class TestSystemUidSqlHelpers:
             "the active row's recording — it is what the placeholder restores"
         )
 
+    def test_recorded_pin_uids_scoped_and_excluding_self(self, sqlite_conn):
+        """Review on #3390 (⚪): the auto-assign exclusion set — active
+        non-deleted pins only, minus the caller's own row."""
+        sqlite_conn.execute(
+            "INSERT INTO users (id, username, system_account, system_uid, is_active, deleted_at)"
+            " VALUES (5, 'acedave', 'acedave', 1010, 1, NULL)"
+        )
+        sqlite_conn.commit()
+        # Active non-deleted pins: acebob's row (1009) + acedave (1010);
+        # acebob-1 (1003, deactivated) and acecarol (1004, soft-deleted) are
+        # out of scope; acealice's pin is NULL.
+        assert ws._recorded_pin_uids("acedave") == {1009}, "own row excluded"
+        assert ws._recorded_pin_uids("acebob") == {1010}, (
+            "exclusion is by system_account — acebob2's active row is the " "caller's own"
+        )
+        assert ws._recorded_pin_uids("stranger") == {1009, 1010}
+
+
+# ============================================================================
+# Review on #3390 (🔴): PostgreSQL row shapes (RealDictCursor)
+# ============================================================================
+
+try:  # RealDictRow is a dict subclass; keep the fake faithful when present
+    from psycopg2.extras import RealDictRow as _RealDictRow
+except ImportError:  # psycopg2 not installed in the unit-test env
+
+    class _RealDictRow(dict):
+        """Stand-in: RealDictRow subclasses OrderedDict (a dict)."""
+
+
+class _PgShapeCursor:
+    """Cursor over a PG-shaped row: fetchone/fetchall return RealDictRow."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def execute(self, sql, params=()):
+        return self
+
+    def fetchone(self):
+        return self._row
+
+    def fetchall(self):
+        return [] if self._row is None else [self._row]
+
+
+class _PgShapeConn:
+    def __init__(self, row):
+        self._row = row
+
+    def cursor(self):
+        return _PgShapeCursor(self._row)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestRecordedUidPgRowShapes:
+    """On PostgreSQL get_db_connection wraps every connection with
+    cursor_factory=RealDictCursor (app/repositories/database.py), so
+    fetchone() yields a dict — positional row[0] raised KeyError(0), the
+    except below the query swallowed it, and the pin ALWAYS read as None on
+    the only deployment shape that runs ensure_system_user (compose is PG)
+    while record_system_uid kept overwriting the correct pin. CI's SQLite
+    matrix returns tuples and cannot see this class of bug."""
+
+    @pytest.fixture()
+    def pg_shape(self, monkeypatch):
+        import app.repositories.database as dbmod
+
+        holder = {}
+        monkeypatch.setattr(dbmod, "adapt_sql", lambda q: q)
+
+        @contextmanager
+        def fake_get_db_connection():
+            yield _PgShapeConn(holder["row"])
+
+        monkeypatch.setattr(dbmod, "get_db_connection", fake_get_db_connection)
+        return holder
+
+    def test_reads_pin_from_real_dict_row(self, pg_shape):
+        pg_shape["row"] = _RealDictRow(system_uid=1003)
+        assert ws.get_recorded_system_uid("acebob") == 1003
+
+    def test_reads_null_pin_from_real_dict_row(self, pg_shape):
+        pg_shape["row"] = _RealDictRow(system_uid=None)
+        assert ws.get_recorded_system_uid("acealice") is None
+
+    def test_missing_row_is_none(self, pg_shape):
+        pg_shape["row"] = None
+        assert ws.get_recorded_system_uid("nobody") is None
+
+    def test_recorded_pin_uids_reads_real_dict_rows(self, pg_shape):
+        pg_shape["row"] = _RealDictRow(system_uid=1005)
+        assert ws._recorded_pin_uids("acebob") == {1005}
+
+    def test_the_fake_row_is_faithfully_pg_shaped(self):
+        """Guard the guard: positional access must REALLY break on this row
+        shape (a plain dict fake that tolerated row[0] would pass the tests
+        above against broken code)."""
+        row = _RealDictRow(system_uid=1003)
+        assert isinstance(row, dict)
+        with pytest.raises(KeyError):
+            row[0]
+
 
 # ============================================================================
 # Entrypoint: functional execution of the extracted embedded sync
@@ -292,16 +450,20 @@ def _extract_sync_python() -> str:
 
 
 class _FakeCursor:
-    def __init__(self, scenario_rows, updates):
+    def __init__(self, scenario_rows, updates, project_rows=(), fail_on_sql=None):
         self._scenario_rows = scenario_rows
+        self._project_rows = list(project_rows)
+        self._fail_on_sql = fail_on_sql
         self.updates = updates
         self._rows = []
 
     def execute(self, sql, params=()):
+        if self._fail_on_sql is not None and sql.startswith(self._fail_on_sql):
+            raise RuntimeError(f"simulated failure: {sql[:30]}...")
         if sql.startswith("SELECT id, username"):
             self._rows = self._scenario_rows
         elif sql.startswith("SELECT path FROM projects"):
-            self._rows = []
+            self._rows = self._project_rows
         elif sql.startswith("UPDATE users"):
             self.updates.append((sql, params))
         return self
@@ -311,14 +473,16 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, scenario_rows, updates):
+    def __init__(self, scenario_rows, updates, project_rows=(), fail_on_sql=None):
         self.scenario_rows = scenario_rows
         self.updates = updates
+        self.project_rows = project_rows
+        self.fail_on_sql = fail_on_sql
         self.commits = 0
         self.closed = False
 
     def cursor(self):
-        return _FakeCursor(self.scenario_rows, self.updates)
+        return _FakeCursor(self.scenario_rows, self.updates, self.project_rows, self.fail_on_sql)
 
     def commit(self):
         self.commits += 1
@@ -376,10 +540,24 @@ class _FakePasswd:
         return uid
 
 
-def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None, allocator="max"):
+def _run_sync(
+    monkeypatch,
+    tmp_path,
+    db_rows,
+    passwd_accounts=None,
+    allocator="max",
+    project_rows=(),
+    workspace_base=None,
+    fail_on_sql=None,
+):
     """Execute the extracted entrypoint sync with fakes; returns the log of
     useradd/usermod calls, the UPDATE statements, captured stdout, and the
-    block's exit code (nonzero when the missing-actives verification fires)."""
+    block's exit code (nonzero when the missing-actives verification or the
+    outermost exception handler fires).
+
+    ``fail_on_sql`` makes the fake cursor raise on matching SQL prefixes —
+    the mid-stage-exception scenario (UPDATE failure) the outermost
+    ``except Exception`` must convert into a nonzero exit."""
     fake_pwd = _FakePasswd(passwd_accounts, allocator=allocator)
     user_cmds: list[tuple] = []
     conn_log = {"commits": 0, "updates": []}
@@ -422,14 +600,14 @@ def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None, allocator="m
     conn_holder = {}
 
     def fake_connect(url):
-        conn = _FakeConn(db_rows, conn_log["updates"])
+        conn = _FakeConn(db_rows, conn_log["updates"], project_rows, fail_on_sql)
         conn_holder["conn"] = conn
         return conn
 
     fake_psycopg2 = SimpleNamespace(connect=fake_connect)
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WORKSPACE_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("WORKSPACE_BASE_DIR", workspace_base or str(tmp_path))
     monkeypatch.setitem(sys.modules, "subprocess", fake_subprocess)
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
@@ -441,7 +619,7 @@ def _run_sync(monkeypatch, tmp_path, db_rows, passwd_accounts=None, allocator="m
     with redirect_stdout(buf):
         try:
             exec(compile(_extract_sync_python(), "entrypoint-user-sync", "exec"), {})
-        except SystemExit as exc:  # the block's missing-actives verification
+        except SystemExit as exc:  # missing-actives abort / outermost handler
             exit_code = int(exc.code or 0)
     conn_log["commits"] = conn_holder["conn"].commits
     if exit_code == 0:
@@ -564,6 +742,45 @@ class TestEntrypointSyncFunctional:
         assert log["exit_code"] == 1
         assert "WITHOUT an OS account" in log["stdout"] and "acezoe" in log["stdout"]
 
+    def test_missing_active_still_syncs_project_dirs_then_exits_nonzero(
+        self, monkeypatch, tmp_path
+    ):
+        """Review round 2 on #3390: the missing-actives abort moved AFTER the
+        project-dir pass — one failed account (here: zoe's pin collides with
+        acemallory) must not block every other user's project-dir sync on
+        every boot. The block still exits nonzero overall."""
+        import os as real_os
+
+        made = []
+        monkeypatch.setattr(real_os, "makedirs", lambda path, **kw: made.append(path))
+        monkeypatch.setattr(real_os.path, "exists", lambda path: False)
+        rows = list(RECREATE_ROWS) + [(8, "acezoe", "acezoe", 1003, True, None)]
+        log = _run_sync(
+            monkeypatch,
+            tmp_path,
+            rows,
+            passwd_accounts={"acemallory": [1003, "/bin/bash"], "acealice": [1002, "/bin/bash"]},
+            project_rows=[("/workspace/acealice/proj",)],
+            workspace_base="/workspace",
+        )
+        assert (
+            "/workspace/acealice/proj" in made
+        ), "the project-dir pass must run despite the missing active account"
+        assert "Created project directory: /workspace/acealice/proj" in log["stdout"]
+        assert "WITHOUT an OS account" in log["stdout"] and "acezoe" in log["stdout"]
+        assert log["exit_code"] == 1, "nonzero overall — the failure is not silenced"
+
+    def test_midstage_exception_exits_nonzero(self, monkeypatch, tmp_path):
+        """Review round 2 on #3390: the outermost ``except Exception`` used to
+        print the error and END WITH EXIT 0, so the pipefail wrapper never
+        fired the WARNING — the same silence class as #3399 (a mid-stage
+        UPDATE failure, connection drop, or makedirs PermissionError also
+        skipped conn.commit() and the missing-actives verification). Any
+        Python exception must exit nonzero."""
+        log = _run_sync(monkeypatch, tmp_path, RECREATE_ROWS, fail_on_sql="UPDATE users")
+        assert "Error syncing users and projects" in log["stdout"]
+        assert log["exit_code"] == 1
+
     def test_reactivated_placeholder_upgraded_to_bash(self, monkeypatch, tmp_path):
         # bob is ACTIVE again; the account exists as his old nologin placeholder.
         rows = [list(r) for r in RECREATE_ROWS]
@@ -636,13 +853,26 @@ class TestEntrypointSyncTextual:
         """Review on #3390: a collision skip or useradd failure leaving an
         ACTIVE user without an OS account must abort the block loudly —
         verified functionally in TestEntrypointSyncFunctional; this pins the
-        wiring markers (sys.exit after the missing-account check)."""
+        wiring markers: the abort lands AFTER the project-dir pass (review
+        round 2) and the pins are committed before it can fire."""
         content = open(ENTRYPOINT, encoding="utf-8").read()
         check = content.index("missing_actives")
-        content.index("sys.exit(1)", check)
+        exit_pos = content.index("sys.exit(1)", check)
         assert (
             content.index("conn.commit()") < check
         ), "pins must be committed before the verification can exit"
+        assert (
+            content.index("Syncing project directories") < exit_pos
+        ), "review round 2: the project-dir pass must run before the nonzero abort"
+
+    def test_outermost_exception_handler_exits_nonzero(self):
+        """Review round 2 on #3390: the sync's outermost except printed the
+        error and ended with exit 0, so the pipefail wrapper never fired the
+        WARNING for mid-stage exceptions (functionally proven in
+        test_midstage_exception_exits_nonzero); pin the wiring marker."""
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        handler = content.index("Error syncing users and projects")
+        content.index("sys.exit(1)", handler)
 
 
 class TestSchedulerSyncScopedToActiveUsers:
@@ -663,4 +893,111 @@ class TestSchedulerSyncScopedToActiveUsers:
         assert "deleted_at IS NULL" in window and "is_active = true" in window, (
             "the scheduler must not ensure accounts for deactivated/soft-deleted "
             "users — it would strip their placeholder shells"
+        )
+
+
+# ============================================================================
+# Admin PUT /admin/users/<id>: provision after the row write, active only
+# ============================================================================
+
+
+class TestAdminUpdateUserProvisioning:
+    """Review on #3390: api_update_user called ensure_system_user BEFORE
+    update_user and regardless of active state:
+    (1) record_system_uid writes back WHERE system_account = ?, but the NEW
+        mapping was not on the row yet — the pin UPDATE hit 0 rows, so a
+        container recreation before first login re-assigned the uid while
+        /workspace/<account> kept the old owner;
+    (2) editing a DEACTIVATED user hit the exists-path and _ensure_login_shell
+        usermod'd the nologin placeholder back to /bin/bash (the same leak
+        the scheduler fix in this PR removed elsewhere).
+    Harness follows test_deactivate_revokes_workspace_3379."""
+
+    _ADMIN = {"id": 1, "username": "admin", "role": "admin", "tenant_id": 1}
+
+    @pytest.fixture()
+    def put_env(self, app, client, monkeypatch):
+        import app.routes.admin as admin_mod
+        from app.services import webui_manager as wm
+
+        events: list = []
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = {
+            "id": 7,
+            "username": "bob",
+            "tenant_id": 2,
+            "role": "user",
+            "is_active": True,
+        }
+        repo.update_user.side_effect = lambda **kw: events.append("update_user") or True
+        repo.set_tokens_valid_after.return_value = True
+        repo.delete_all_sessions_for_user.return_value = {"sessions": 0}
+        monkeypatch.setattr(admin_mod, "user_repo", repo)
+        monkeypatch.setattr(admin_mod, "audit_logger", MagicMock())
+        monkeypatch.setattr(admin_mod, "_spawn_background", lambda fn: None)
+        monkeypatch.setattr(wm, "peek_webui_manager", lambda: None)
+
+        def fake_ensure(system_account, uid=None):
+            events.append(("ensure_system_user", system_account, uid))
+            return True
+
+        monkeypatch.setattr(admin_mod, "ensure_system_user", fake_ensure)
+
+        def run(payload):
+            client.set_cookie("session_token", "t")
+            with (
+                patch(
+                    "app.auth.decorators._authenticate",
+                    return_value=(True, {**self._ADMIN, "user_id": 1}),
+                ),
+                patch("app.routes.admin.same_tenant_user_required", lambda f: f),
+            ):
+                return client.put("/api/admin/users/7", json=payload)
+
+        return SimpleNamespace(repo=repo, events=events, run=run)
+
+    def test_new_mapping_provisions_after_row_write(self, put_env):
+        env = put_env
+        resp = env.run({"system_account": "acenew", "system_uid": 1010})
+        assert resp.status_code == 200
+        assert env.events == ["update_user", ("ensure_system_user", "acenew", 1010)], (
+            "provisioning must happen AFTER update_user succeeds — the uid "
+            "write-back matches WHERE system_account = ?, which only the "
+            "written row carries"
+        )
+        assert env.repo.update_user.call_args.kwargs["system_account"] == "acenew"
+
+    def test_deactivated_target_is_not_provisioned(self, put_env):
+        put_env.repo.get_user_by_id.return_value = {
+            "id": 7,
+            "username": "bob",
+            "tenant_id": 2,
+            "role": "user",
+            "is_active": False,
+        }
+        resp = put_env.run({"system_account": "acenew"})  # no is_active in payload
+        assert resp.status_code == 200
+        assert put_env.events == ["update_user"], (
+            "editing a deactivated user must NOT re-shell their nologin "
+            "placeholder or provision an OS account for the new mapping"
+        )
+
+    def test_explicit_deactivation_request_skips_provisioning(self, put_env):
+        resp = put_env.run({"system_account": "acenew", "is_active": False})
+        assert resp.status_code == 200
+        assert put_env.events == ["update_user"]
+
+    def test_reactivation_provisions(self, put_env):
+        put_env.repo.get_user_by_id.return_value = {
+            "id": 7,
+            "username": "bob",
+            "tenant_id": 2,
+            "role": "user",
+            "is_active": False,
+        }
+        resp = put_env.run({"system_account": "acenew", "is_active": True})
+        assert resp.status_code == 200
+        assert put_env.events == ["update_user", ("ensure_system_user", "acenew", None)], (
+            "a user who ends up ACTIVE via this PUT gets provisioned (the "
+            "exists-path upgrades their placeholder back to /bin/bash)"
         )
