@@ -1120,3 +1120,62 @@ class TestEnsureWorkspaceDirsSharedGuard:
         assert any(
             str(c[0]).split("/")[-1].startswith("chown") for c in calls
         ), "single-user/package mode has no namespace root; 'shared' is an ordinary account there"
+
+
+class TestWorkspaceDirPrivateMode:
+    """Issue #3410: <base>/<account> must be 0700, like /home/<account>.
+
+    It is the fs API's home root and the OS layer the capability contract's
+    `filesystem` dimension claims; at 0755 any other system account could read
+    a user's whole workspace from a terminal or webui session. Shared projects
+    live at <base>/shared/<name>, outside every home, so sharing is unaffected.
+    """
+
+    @pytest.fixture()
+    def stubbed(self, monkeypatch):
+        from app.utils import workspace as ws
+
+        monkeypatch.setattr(ws, "run_as_root_if_needed", lambda cmd: _FakeProc(0, ""))
+        monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
+        monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: False)
+        # uid/gid lookup fails -> the chown block is skipped entirely; the mode
+        # normalization must still run (it is at function level, not nested).
+        monkeypatch.setattr(ws.subprocess, "run", lambda cmd, **kw: _FakeProc(1, ""))
+        return ws
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_new_workspace_dirs_are_private(self, stubbed, tmp_path):
+        base = tmp_path / "workspace"
+        base.mkdir()
+        stubbed._ensure_workspace_dirs("alice", str(base))
+        assert (base / "alice").is_dir()
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o700"
+        assert oct((base / "alice" / ".qwen").stat().st_mode & 0o777) == "0o700"
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_pre_existing_0755_dirs_converge_on_restart(self, stubbed, tmp_path):
+        base = tmp_path / "workspace"
+        (base / "alice" / ".qwen").mkdir(parents=True)
+        (base / "alice").chmod(0o755)
+        (base / "alice" / ".qwen").chmod(0o755)
+        stubbed._ensure_workspace_dirs("alice", str(base))
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o700"
+        assert oct((base / "alice" / ".qwen").stat().st_mode & 0o777) == "0o700"
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_shared_namespace_root_is_never_chmodded(self, stubbed, tmp_path):
+        """The 3770 namespace root must not be taken to 0700 by this pass.
+
+        The guard at the top of _ensure_workspace_dirs is gated on
+        _is_docker_multi_user_mode(), which went stale when #3393 made the
+        package installer provision <base>/shared too — so this normalization
+        must carry its own skip rather than depend on that guard firing.
+        """
+        base = tmp_path / "workspace"
+        (base / "shared").mkdir(parents=True)
+        (base / "shared").chmod(0o3770)
+        stubbed._ensure_workspace_dirs("shared", str(base))
+        assert oct((base / "shared").stat().st_mode & 0o7777) == "0o3770"

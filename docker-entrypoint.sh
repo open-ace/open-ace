@@ -1429,10 +1429,28 @@ def create_system_user(username, uid=None):
     # Create workspace directory for user (always attempt if user exists or was just created)
     user_workspace = os.path.join(workspace_base, username)
     if not os.path.exists(user_workspace):
-        os.makedirs(user_workspace, exist_ok=True)
+        # Issue #3410: 0700, like /home/<user> — <base>/<account> is the fs
+        # API's home root; at 0755 any other account could read the whole
+        # workspace from a terminal or webui session.
+        os.makedirs(user_workspace, mode=0o700, exist_ok=True)
         # Set ownership to user
         subprocess.run(['chown', f'{username}:{username}', user_workspace], capture_output=True)
         print(f'  Created workspace directory: {user_workspace}')
+    elif username == 'shared':
+        # <base>/shared is the shared-project NAMESPACE ROOT (root:openace-shared
+        # 3770), not a user workspace — the same collision the provisioner at the
+        # top of this script and _ensure_workspace_dirs both refuse. Normalizing
+        # it to 0700 would break shared-project creation for every tenant.
+        print(f'  WARNING: skipping mode normalization for {user_workspace} '
+              f'(shared-project namespace root, not a user workspace)')
+    else:
+        # Issue #3410: converge volumes created before the 0700 default, but
+        # only when the directory really belongs to this account.
+        try:
+            if os.stat(user_workspace).st_uid == pwd.getpwnam(username).pw_uid:
+                os.chmod(user_workspace, 0o700)
+        except (OSError, KeyError) as e:
+            print(f'  WARNING: cannot chmod 0700 {user_workspace}: {e}')
 
     # Fix home directory permissions (Issue #1205)
     # When /home is mounted as volume, useradd -m won't fix permissions on existing directory

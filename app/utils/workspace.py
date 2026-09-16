@@ -581,10 +581,12 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     qwen_dir = f"{workspace_dir}/.qwen"
 
     # 创建目录（必要时通过 wrapper 或 sudo）
+    # Issue #3410: 0700, not 0755 — <base>/<account> is the fs API's home root
+    # and the OS layer the capability contract's `filesystem` dimension claims.
     for directory in [workspace_dir, qwen_dir]:
         if not os.path.exists(directory):
             try:
-                os.makedirs(directory, mode=0o755, exist_ok=True)
+                os.makedirs(directory, mode=0o700, exist_ok=True)
             except PermissionError:
                 # Issue #1855: 优先使用安全 wrapper
                 # Issue #2894: wrapper 脚本需要 root 权限
@@ -597,7 +599,7 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                         continue
                 else:
                     # Fallback: 使用传统 mkdir 命令
-                    result = run_as_root_if_needed(["mkdir", "-p", "-m", "755", directory])
+                    result = run_as_root_if_needed(["mkdir", "-p", "-m", "700", directory])
                     if result.returncode != 0:
                         logger.warning(f"Cannot create {directory}: {result.stderr}")
                         continue
@@ -623,6 +625,29 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                 result = run_as_root_if_needed(["chown", f"{uid}:{gid}", directory])
                 if result.returncode != 0:
                     logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
+
+    # Issue #3410: normalize the mode to 0700 so volumes created before this
+    # change converge on the next boot. Deliberately at FUNCTION level, not
+    # nested inside the uid/gid block above — the normalization must run even
+    # when the uid lookup fails (openace-mkdir creates 0755 and has no -m).
+    #
+    # The `shared` skip mirrors the namespace-root guard at the top of this
+    # function and deliberately does NOT rely on it: that guard is gated on
+    # _is_docker_multi_user_mode(), which went stale when #3393 made the
+    # PACKAGE installer provision <base>/shared too (root:openace-shared 3770,
+    # scripts/install-central/package-method/install.sh). On a package
+    # deployment the guard does not fire for an account named `shared`, and an
+    # unconditional chmod here would take the namespace root to 0700 and break
+    # shared-project creation for every tenant. Correcting the guard itself
+    # inverts a behavior pinned by this module's tests, so it is a separate
+    # change; spotted while fixing #3410.
+    if system_account != "shared":
+        for directory in [workspace_dir, qwen_dir]:
+            try:
+                if os.path.isdir(directory):
+                    os.chmod(directory, 0o700)
+            except OSError as e:
+                logger.warning(f"Cannot chmod 0700 {directory}: {e}")
 
 
 def ensure_user_workspace(system_account: str, tenant_id: int | None = None) -> bool:
