@@ -134,20 +134,23 @@ class TestSharedNamespaceProvisioning:
         assert "mkdir -p /ws" in log
         assert "mkdir -p /ws/shared" in log
         assert "chgrp openace-shared /ws/shared" in log
-        assert "chmod 3775 /ws/shared" in log, "sticky bit required (cross-tenant rename guard)"
+        assert "chmod 3770 /ws/shared" in log, (
+            "sticky bit required (cross-tenant rename guard) and NO others "
+            "bits — others r-x let non-member processes list shared project names"
+        )
 
     def test_comma_list_iterates_and_trims(self):
         log = _run_block("  /a , /b  ")
         assert "mkdir -p /a/shared" in log and "mkdir -p /b/shared" in log
         assert (
-            log.count("chmod 3775") == 2
+            log.count("chmod 3770") == 2
         ), "exactly two bases provisioned (empty/padded segments skipped)"
         assert not any(", /" in ln or "/," in ln for ln in log.splitlines()), "no literal comma dir"
 
     def test_skips_when_real_shared_account_exists(self):
         log = _run_block("/ws", id_shared_ok=True)
         assert "id shared" in log, "the guard probe must run"
-        assert "chmod 3775 /ws/shared" not in log, "guard must skip provisioning on collision"
+        assert "chmod 3770 /ws/shared" not in log, "guard must skip provisioning on collision"
 
     def test_skips_when_existing_path_not_root_owned(self):
         log = _run_block("TMP", stat_owner="someoneelse", precreate_shared=True)
@@ -305,6 +308,8 @@ class TestTenantSharedGroupSync:
         system_groups: dict[str, list[str]] | None = None,
         links: dict[str, str] | None = None,
         missing_accounts: set[str] | None = None,
+        ambiguous_accounts: set[str] | None = None,
+        getent_rc_sequences: dict[str, list[int]] | None = None,
     ) -> list[tuple]:
         """Execute the extracted block under stubs; returns recorded commands.
 
@@ -326,7 +331,11 @@ class TestTenantSharedGroupSync:
         existing_groups placeholders are laid down (a placeholder the map
         pre-created is replaced by the link) — for the round-5 N1
         symlink-alias scenarios. *missing_accounts* makes ``getent passwd``
-        fail for those names (ghost OS accounts).
+        fail for those names with rc=2 (ghost OS accounts);
+        *ambiguous_accounts* fail with rc=1 (transient NSS failure, both
+        attempts); *getent_rc_sequences* scripts per-call return codes for
+        a member (consumed front-first, then the defaults apply) — for the
+        retry-recovers scenario.
         """
         code = TestTenantSharedGroupSync._extract_sync_code()
         (tmp_path / "shared").mkdir(parents=True, exist_ok=True)
@@ -361,12 +370,22 @@ class TestTenantSharedGroupSync:
                     stderr="",
                 )
             if cmd[:2] == ["getent", "passwd"]:
-                # the account-existence model for round-5 N4: everything
-                # resolves except the flagged ghosts
-                if cmd[2] in (missing_accounts or frozenset()):
+                # the account-existence model for round-5 N4 + the NSS
+                # transient scenarios: everything resolves except the
+                # flagged ghosts (rc=2), the flagged ambiguous members
+                # (rc=1, both attempts), and any scripted rc sequence
+                name = cmd[2]
+                seqs = getent_rc_sequences or {}
+                if name in seqs and seqs[name]:
+                    rc = seqs[name].pop(0)
+                    out = "" if rc else f"{name}:x:1042:1042::/:/bin/sh\n"
+                    return SimpleNamespace(returncode=rc, stdout=out, stderr="")
+                if name in (ambiguous_accounts or frozenset()):
+                    return SimpleNamespace(returncode=1, stdout="", stderr="")
+                if name in (missing_accounts or frozenset()):
                     return SimpleNamespace(returncode=2, stdout="", stderr="")
                 return SimpleNamespace(
-                    returncode=0, stdout=f"{cmd[2]}:x:1042:1042::/:/bin/sh\n", stderr=""
+                    returncode=0, stdout=f"{name}:x:1042:1042::/:/bin/sh\n", stderr=""
                 )
             if cmd[:3] == ["stat", "-c", "%G %a"]:
                 reported = group_by_abs_path.get(cmd[3])
@@ -426,7 +445,8 @@ class TestTenantSharedGroupSync:
         import contextlib
         import io
 
-        with contextlib.redirect_stdout(io.StringIO()):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
             try:
                 exec(compile(code, "<entrypoint-shared-group-sync>", "exec"), {"__name__": "sync"})
             except SystemExit as exc:
@@ -434,6 +454,8 @@ class TestTenantSharedGroupSync:
                 # exercising a loud failure record it instead of crashing
                 calls.append(("__EXIT__", exc.code))
         calls.insert(0, ("__SQL__", *executed_sql))
+        # stdout lands LAST: existing assertions index from the front
+        calls.append(("__STDOUT__", buf.getvalue()))
         return calls
 
     def test_enrolls_each_user_into_global_and_tenant_groups(self, monkeypatch, tmp_path):
@@ -810,6 +832,79 @@ class TestTenantSharedGroupSync:
         ), "a missing OS account must not poison the whole -M call"
         assert ("getent", "passwd", "ghost-acct") in calls, "the ghost was probed before filtering"
 
+    def test_converge_ignores_unicode_digit_lookalike_groups(self, monkeypatch, tmp_path):
+        """str.isdigit() ACCEPTS non-ASCII digits (fullwidth '１２３',
+        Arabic-Indic '٤٢', ...), so a root-created
+        openace-shared-<unicode-digits> group passed the numeric-suffix
+        guard — and the converge loop then emptied it member by member
+        (desired has no such tenant). The suffix must be ASCII digits."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={
+                "openace-shared-1": ["alice-acct"],
+                "openace-shared-１２３": ["ops-acct"],
+            },
+        )
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+        assert not any(
+            c[3] == "openace-shared-１２３"
+            for c in calls
+            if c[:2] in (("gpasswd", "-M"), ("gpasswd", "-d"))
+        ), "a unicode-digit lookalike group must never be converged (isdigit alone accepts it)"
+
+    def test_converge_skips_group_on_persistent_nss_transient_failure(self, monkeypatch, tmp_path):
+        """NSS transient hardening: getent passwd failing with rc=1 twice
+        (socket timeout / sssd restart — neither 0=present nor
+        2=genuinely-absent) must NOT produce a membership list: converging
+        one built on an unreliable answer either poisons gpasswd -M with a
+        missing account (N4 rejection) or strips a member who is actually
+        present. The group's convergence is skipped this boot with a loud
+        warning; the current members stay untouched and the next boot
+        retries. Not a failure — the degradation is deliberate."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1), ("bob-acct", 2)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={
+                "openace-shared-1": ["alice-acct"],
+                "openace-shared-2": ["bob-acct"],
+            },
+            ambiguous_accounts={"alice-acct"},
+        )
+        # tenant 2 (all answers clean) still converges
+        assert ("gpasswd", "-M", "bob-acct", "openace-shared-2") in calls
+        # tenant 1 is skipped in BOTH forms — no -M and no -d
+        assert not any(
+            c[3] == "openace-shared-1"
+            for c in calls
+            if c[:2] in (("gpasswd", "-M"), ("gpasswd", "-d"))
+        ), "an ambiguous presence answer must not drive any membership write"
+        stdout = next(c[1] for c in calls if c[0] == "__STDOUT__")
+        assert "still ambiguous after retry" in stdout
+        assert "openace-shared-1" in stdout
+        assert ("__EXIT__", 1) not in calls, "deliberate one-boot degradation, not a failure"
+
+    def test_converge_nss_retry_recovers_and_keeps_member(self, monkeypatch, tmp_path):
+        """One transient rc=1 followed by a clean rc=0 (retry succeeds) is
+        NOT ambiguous — the member is present and must stay in the -M list."""
+        calls = self._run_sync(
+            monkeypatch,
+            tmp_path,
+            user_rows=[("alice-acct", 1)],
+            project_rows=[],
+            existing_groups={},
+            system_groups={"openace-shared-1": ["alice-acct"]},
+            getent_rc_sequences={"alice-acct": [1, 0]},
+        )
+        assert calls.count(("getent", "passwd", "alice-acct")) == 2, "exactly one retry"
+        assert ("gpasswd", "-M", "alice-acct", "openace-shared-1") in calls
+
     def test_reclaim_pass_refuses_foreign_tenant_group_dir(self, monkeypatch, tmp_path):
         """PR #3402 review (takeover, general form): a private row whose dir
         sits on ANOTHER tenant's group (registered cross-tenant, no live
@@ -834,7 +929,7 @@ class TestTenantSharedGroupSync:
 
     def test_reclaim_pass_never_reclaims_namespace_root(self, monkeypatch, tmp_path):
         """PR #3402 review (takeover, probe 1): <base>/shared itself is
-        root:openace-shared 3775 — a private row pointing at the namespace
+        root:openace-shared 3770 — a private row pointing at the namespace
         root used to chown -R the WHOLE namespace (every tenant's shared
         projects) to the registering user."""
         root = str(tmp_path / "shared")

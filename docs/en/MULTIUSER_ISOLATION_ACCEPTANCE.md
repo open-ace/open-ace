@@ -16,7 +16,12 @@ assertions. The approved plan of record is
 - **#3389 shared-namespace provisioning**: nothing in the product created
   `<base>/shared` — item (d) used to record the fresh-deployment 403 as a
   declared known gap; the entrypoint now provisions it (openace-shared
-  group, **3775** with the sticky bit).
+  group, **3770**: sticky + setgid, NO others bits — the earlier 3775's
+  others r-x let any non-member process on the host list shared project
+  NAMES; declared residual, inherent to the namespace design: every active
+  account joins the global group for namespace creation, so cross-tenant
+  members can still list the root via the group r-x — content access stays
+  fenced by the per-tenant groups).
 - **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
   active users without uid pinning — a deactivated user's directories are
   numerically inherited by an active account. Item (f) asserts this by

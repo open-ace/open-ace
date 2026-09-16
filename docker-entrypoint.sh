@@ -1197,7 +1197,7 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # Issue #2730 + #3396: shared-project groups.
     # - openace-shared (GLOBAL): membership grants ONLY the right to create a
     #   project directory inside the sticky <base>/shared namespace root
-    #   (root:openace-shared 3775). It is never the group-owner of project
+    #   (root:openace-shared 3770). It is never the group-owner of project
     #   content since #3396.
     # - openace-shared-<tenant_id>: per-tenant CONTENT group — shared project
     #   dirs are group-owned by it with 2770/660 (no others bits), so members
@@ -1252,16 +1252,28 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         # an administrator fixes it; the app's own dir/ownership failures are
         # warning-grade too, and set -e would otherwise restart-loop the whole
         # service on e.g. a root_squash NFS base dir.
-        # chmod 3775 (review round 3, 4004874853): +sticky — rename(2) only
-        # needs write+search on the parent, and openace-shared is a GLOBAL
-        # group (every tenant's account joins, for namespace creation only),
-        # so without the sticky bit any member could mv/replace another
+        # chmod 3770 (was 3775; sticky since review round 3, 4004874853):
+        # +sticky — rename(2) only needs
+        # write+search on the parent, and openace-shared is a GLOBAL group
+        # (every tenant's account joins, for namespace creation only), so
+        # without the sticky bit any member could mv/replace another
         # tenant's project directory. Sticky blocks non-owner renames at the
         # root; sudo -u <user> mkdir for new projects and root-run
         # setup_permissions_with_depth_limit are unaffected. Content-level
         # cross-tenant access inside projects is fenced by the per-tenant
         # groups (openace-shared-<tenant>, 2770/660 — Issue #3396).
-        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3775 "$_base_dir/shared"; }; then
+        # The OTHERS bits are now dropped (3775 -> 3770): the old others r-x
+        # let ANY non-member process on the host enumerate the namespace
+        # root and read shared project NAMES — metadata only (content access
+        # always needed the tenant group), but project names can be
+        # sensitive. Declared residual, inherent to the namespace design:
+        # openace-shared is global, so every active account — including
+        # OTHER tenants', who need the creation right — can still list the
+        # root via the GROUP r-x; per-tenant name secrecy is not achievable
+        # while namespace creation is a global right (content stays fenced).
+        # The unconditional chgrp+chmod below re-normalizes mode drift from
+        # any pre-existing 3775 deployment on the next boot (idempotent).
+        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3770 "$_base_dir/shared"; }; then
             echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
         fi
     done
@@ -2040,20 +2052,48 @@ try:
             name = line.split(':', 1)[0]
             if not name.startswith(GLOBAL_GROUP + '-'):
                 continue  # foreign groups and the global group itself
-            if not name[len(GLOBAL_GROUP) + 1:].isdigit():
+            suffix = name[len(GLOBAL_GROUP) + 1:]
+            if not (suffix.isascii() and suffix.isdigit()):
                 # round-5 N2: tenant group suffixes are numeric by
                 # construction — an operator-created lookalike such as
                 # openace-shared-backup must never be converged (its
-                # members would be stripped one by one).
+                # members would be stripped one by one). isascii() is
+                # load-bearing: str.isdigit() alone ACCEPTS non-ASCII
+                # digits (e.g. fullwidth '１２３'), and a root-created
+                # openace-shared-<unicode-digits> group would pass the
+                # guard and be converged to the empty list.
                 continue
             # round-5 N4: a desired member whose OS account is missing this
             # boot (user-sync failure, #3399 shape) makes shadow-utils
             # reject the WHOLE gpasswd -M call, silently keeping the group's
             # stale list. Converge the present subset instead — the missing
             # account's absence is already loud in the user-sync log.
-            members = sorted(
-                m for m in desired.get(name, ()) if run(['getent', 'passwd', m]).returncode == 0
-            )
+            # NSS transient hardening: getent rc==0 -> the account is
+            # present; rc==2 -> genuinely absent (getent's documented
+            # not-found); any OTHER rc is a transient NSS failure (socket
+            # timeout, sssd restart, nscd hiccup) — retry once, and if it
+            # STAYS ambiguous skip this group's convergence entirely this
+            # boot with a loud warning: a list built on an unreliable
+            # answer would either poison gpasswd -M with a missing account
+            # (N4 rejection, stale list kept) or silently strip a member
+            # who is actually present. The stale-but-valid membership waits
+            # one boot instead; the convergence is retried automatically.
+            members = []
+            ambiguous = False
+            for m in sorted(desired.get(name, ())):
+                rc = run(['getent', 'passwd', m]).returncode
+                if rc not in (0, 2):
+                    rc = run(['getent', 'passwd', m]).returncode
+                if rc == 0:
+                    members.append(m)
+                elif rc == 2:
+                    continue
+                else:
+                    ambiguous = True
+            if ambiguous:
+                print(f'  WARNING: NSS lookup for a member of {name} still ambiguous after retry — '
+                      'membership convergence skipped this boot (current members kept; retried next boot)')
+                continue
             if members:
                 r = run(['gpasswd', '-M', ','.join(members), name])
                 if r.returncode != 0:

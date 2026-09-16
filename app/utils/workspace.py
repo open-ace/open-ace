@@ -47,8 +47,9 @@ __all__ = [
 #
 # - ``openace-shared`` (global, unchanged): membership ONLY grants the right
 #   to create a project directory inside the sticky shared-namespace root
-#   ``<base>/shared`` (root:openace-shared 3775, sticky bit from #3389). It
-#   is no longer the group-owner of any project CONTENT.
+#   ``<base>/shared`` (root:openace-shared 3770, sticky bit from #3389,
+#   others bits dropped 3775->3770). It is no longer the group-owner of any
+#   project CONTENT.
 #
 # - ``openace-shared-<tenant_id>`` (per tenant): group-owner of the tenant's
 #   shared project directories, mode 2770 (dirs) / 660 (files) — setgid kept
@@ -558,7 +559,7 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     """Ensure workspace directories exist with correct ownership."""
     # Issue #3379 (PR #3389 review round 2): in Docker multi-user mode
     # <base>/shared is the shared-project NAMESPACE ROOT (provisioned by the
-    # entrypoint, group openace-shared, 3775). An account literally named
+    # entrypoint, group openace-shared, 3770). An account literally named
     # "shared" would map its workspace onto that root and this function's
     # chown loop would TAKE IT OVER — breaking shared-project creation for
     # everyone, hiding existing shared projects from the read-side home
