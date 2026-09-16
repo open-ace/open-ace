@@ -150,6 +150,7 @@ def test_public_dict_shape(monkeypatch):
         "unsupported",
         "reasons",
         "entry_points",
+        "entry_point_details",
         "policy_revision",
     }
     assert data["local_workspace_multi_user"] == "supported"
@@ -455,3 +456,181 @@ def test_single_user_degraded_floor_is_silent(caplog):
     with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
         assert wic.resolve_required_floor(cfg, degraded) == "none"
     assert not caplog.records
+
+
+# ---------------------------------------------------------------------------
+# Issue #3410: the machine-readable entry-point contract.
+# ---------------------------------------------------------------------------
+
+
+def _supported(monkeypatch):
+    """An os_user (supported) snapshot payload."""
+    _patch_deployment(monkeypatch, docker_multi_user=True)
+    return wic.build_workspace_isolation_snapshot(_ReadyStubManager(readiness=None)).public_dict()
+
+
+def _unsupported(monkeypatch):
+    _patch_deployment(monkeypatch)
+    return wic.build_workspace_isolation_snapshot(_StubManager(enabled=False)).public_dict()
+
+
+def _sandboxed():
+    """A sandboxed snapshot payload, built directly (no deployment patching).
+
+    Mirrors the construction in test_workspace_isolation_sandboxed_3378.py: the
+    sandboxed READINESS machinery is irrelevant here — what is under test is
+    how the snapshot renders its per-level entry matrix.
+    """
+    return wic.IsolationCapabilitySnapshot(
+        supported=True,
+        backend="opensandbox:kata",
+        isolation_level=wic.ISOLATION_LEVEL_SANDBOXED,
+        enforced=wic._SANDBOXED_ENFORCED,
+        unsupported=wic._SANDBOXED_UNSUPPORTED,
+        reasons=(wic.IsolationReason("sandbox_runtime_unverified", "stub"),),
+    ).public_dict()
+
+
+@pytest.mark.issue(3410)
+class TestEntryPointDetails:
+    def test_every_entry_has_details_and_statuses_agree(self, monkeypatch):
+        data = _supported(monkeypatch)
+        assert set(data["entry_points"]) == set(data["entry_point_details"])
+        for name, status in data["entry_points"].items():
+            d = data["entry_point_details"][name]
+            assert d["status"] == status, name
+            assert d["scope"] in wic.ENTRY_POINT_SCOPES, name
+            assert d["operations"] and isinstance(d["operations"], list), name
+            for op in d["operations"]:
+                assert set(op) == {"name", "roots", "symlink_policy"}, (name, op)
+            for bucket in ("limitations", "residuals"):
+                for entry in d[bucket]:
+                    assert set(entry) == {"code", "message"}, (name, bucket)
+
+    def test_enforced_entries_declare_no_limitations_but_may_declare_residuals(self, monkeypatch):
+        data = _supported(monkeypatch)
+        for name, d in data["entry_point_details"].items():
+            if d["status"] == "enforced":
+                assert d["limitations"] == [], name
+                assert d["covered_by_isolation_level"] is True, name
+        # residuals are informational and MUST NOT gate admission
+        assert data["entry_point_details"]["filesystem_api"]["residuals"]
+
+    def test_filesystem_api_is_enforced_and_local(self, monkeypatch):
+        d = _supported(monkeypatch)["entry_point_details"]["filesystem_api"]
+        assert d["status"] == "enforced"
+        assert d["scope"] == "local_workspace"
+        names = {op["name"] for op in d["operations"]}
+        assert names == {
+            "browse",
+            "check-path",
+            "create-directory",
+            "home",
+            "upload",
+            "download",
+            "delete-file",
+            "search",
+        }
+        by_name = {op["name"]: op for op in d["operations"]}
+        assert by_name["upload"]["roots"] == ["home"]
+        assert by_name["upload"]["symlink_policy"] == "never_followed_below_home_root"
+        assert by_name["browse"]["roots"] == ["home", "shared_projects"]
+        assert "workspace_root_first_level_non_home" in by_name["create-directory"]["roots"]
+
+    def test_remote_entries_are_scoped_not_partial(self, monkeypatch):
+        data = _supported(monkeypatch)
+        for name in ("terminal", "vscode"):
+            d = data["entry_point_details"][name]
+            assert d["status"] == "remote_machine_scope"
+            assert d["scope"] == "remote_machine"
+            assert d["covered_by_isolation_level"] is False
+            assert "machine_assignment_acl" in d["access_control"]
+
+    def test_no_snapshot_emits_the_reserved_disabled_status(self, monkeypatch):
+        """`disabled` is reserved for a kill switch Open ACE does not have yet."""
+        for data in (_supported(monkeypatch), _sandboxed()):
+            assert wic.ENTRY_POINT_STATUS_DISABLED not in data["entry_points"].values()
+
+    def test_sandboxed_entries_are_reported_unwired(self):
+        data = _sandboxed()
+        for name in ("filesystem_api", "terminal", "vscode"):
+            d = data["entry_point_details"][name]
+            assert d["status"] == "sandboxed_entry_not_wired"
+            assert d["covered_by_isolation_level"] is False
+            assert [x["code"] for x in d["limitations"]] == ["sandboxed_entry_not_wired"]
+
+    def test_public_payload_cannot_corrupt_the_module_constants(self, monkeypatch):
+        data = _supported(monkeypatch)
+        data["entry_point_details"]["filesystem_api"]["operations"][0]["roots"].append("evil")
+        data["entry_point_details"]["filesystem_api"]["limitations"].append({"code": "x"})
+        fresh = _supported(monkeypatch)
+        assert (
+            "evil" not in fresh["entry_point_details"]["filesystem_api"]["operations"][0]["roots"]
+        )
+        assert fresh["entry_point_details"]["filesystem_api"]["limitations"] == []
+
+    def test_policy_revision(self):
+        assert wic.POLICY_REVISION == "2026-09-16.1"
+
+    def test_unsupported_snapshot_omits_both_maps(self, monkeypatch):
+        data = _unsupported(monkeypatch)
+        assert "entry_points" not in data
+        assert "entry_point_details" not in data
+
+
+@pytest.mark.issue(3410)
+class TestDocumentedAdmissionPredicate:
+    """The §7 doc example must be executable, not prose that rots on a bump.
+
+    Keep this predicate and the snippet in
+    docs/WORKSPACE_ISOLATION_CAPABILITIES.md §7 identical — if you change one,
+    change the other.
+    """
+
+    NEEDED = ("webui", "filesystem_api", "session_history")
+    KNOWN = {
+        "enforced",
+        "partial",
+        "remote_machine_scope",
+        "separate_contract",
+        "sandboxed_entry_not_wired",
+        "disabled",
+    }
+    REVIEWED_REVISIONS = {"2026-09-16.1"}
+
+    def _accept(self, c):
+        if c.get("local_workspace_multi_user") != "supported":
+            return False
+        if c.get("isolation_level") != "os_user":
+            return False
+        if c.get("policy_revision") not in self.REVIEWED_REVISIONS:
+            return False
+        if not {"identity", "filesystem", "environment", "process"} <= set(c.get("enforced", [])):
+            return False
+        if not all(s in self.KNOWN for s in c.get("entry_points", {}).values()):
+            return False
+        details = c.get("entry_point_details", {})
+        return all(
+            details.get(e, {}).get("status") == "enforced"
+            and details.get(e, {}).get("covered_by_isolation_level")
+            and not details.get(e, {}).get("limitations")
+            for e in self.NEEDED
+        )
+
+    def test_os_user_snapshot_is_accepted(self, monkeypatch):
+        assert self._accept(_supported(monkeypatch)) is True
+
+    def test_sandboxed_snapshot_is_rejected(self, monkeypatch):
+        assert self._accept(_sandboxed()) is False
+
+    def test_unsupported_snapshot_is_rejected(self, monkeypatch):
+        assert self._accept(_unsupported(monkeypatch)) is False
+
+    def test_unknown_revision_is_rejected(self, monkeypatch):
+        data = dict(_supported(monkeypatch), policy_revision="9999-01-01.9")
+        assert self._accept(data) is False
+
+    def test_unknown_entry_status_is_rejected(self, monkeypatch):
+        data = _supported(monkeypatch)
+        data["entry_points"] = dict(data["entry_points"], terminal="brand_new_token")
+        assert self._accept(data) is False

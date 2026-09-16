@@ -26,6 +26,29 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+# Revision 5 (2026-09-16.1, Issue #3410): entry-point matrix RECALIBRATED and
+# made machine-readable.
+#  - filesystem_api: partial -> enforced. The /fs write paths no longer derive
+#    their target through realpath() (the #3410 cross-user symlink overwrite: a
+#    user planted <own home>/x -> <other user>/x and the root branch wrote
+#    through it); every write now descends from the home root with O_NOFOLLOW
+#    and renames inside a directory fd. create-directory gained the home lock
+#    it never had, the per-file paths use the same per-base home roots browse
+#    does, and <base>/<account> is now 0700 like /home/<account>.
+#  - terminal / vscode: partial -> remote_machine_scope. Their old "partial"
+#    reasons (terminal tokens not bound to the session owner; VS Code owner =
+#    machine creator) were FIXED by #3376 / PR #3380 and the matrix was never
+#    updated. The honest statement is not "enforced" either: both entries
+#    execute on a REMOTE machine under that machine's agent account, so the
+#    local os_user level does not extend to them; access is governed by the
+#    machine assignment ACL + session ownership + tenant gate.
+#  - New sibling map ENTRY_POINT_DETAILS (emitted as entry_point_details):
+#    scope, coverage, per-operation roots and symlink policy, access-control
+#    mechanisms, structured limitations (gaps that DO gate admission) and
+#    residuals (accepted properties that do NOT), so an integrator can tell
+#    "covered by the declared level" from "governed by a different mechanism"
+#    from "real gap" without parsing prose.
+#
 # Revision 4 (2026-09-12.2, review round 1 T-K): the entry-point matrix is
 # per-level — sandboxed snapshots report terminal/vscode/filesystem_api as
 # ``sandboxed_entry_not_wired`` (those executors still live on the control
@@ -40,7 +63,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-12.2"
+POLICY_REVISION = "2026-09-16.1"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -202,31 +225,291 @@ def _reset_sandbox_runtime_verification() -> None:
     _SANDBOX_RUNTIME_MEMO.clear()
 
 
-# Static, revision-gated audit result (design doc §2.4). Values:
-# enforced | partial | separate_contract.
-ENTRY_POINT_STATUSES = {
-    "webui": "enforced",
-    "filesystem_api": "partial",
-    "session_history": "enforced",
-    "terminal": "partial",
-    "vscode": "partial",
-    "autonomous": "separate_contract",
+# --- Entry-point matrix (design doc §2.4, recalibrated by Issue #3410) ------
+# Status vocabulary. An integrator MUST fail closed on an unknown status.
+ENTRY_POINT_STATUS_ENFORCED = "enforced"
+ENTRY_POINT_STATUS_PARTIAL = "partial"
+ENTRY_POINT_STATUS_REMOTE_SCOPE = "remote_machine_scope"
+ENTRY_POINT_STATUS_SEPARATE = "separate_contract"
+ENTRY_POINT_STATUS_SANDBOX_UNWIRED = "sandboxed_entry_not_wired"
+# RESERVED, and deliberately never emitted by any snapshot today: Open ACE has
+# no server-side entry kill switch (docs §8). The token is defined so an
+# integrator can write its admission check once; a deployment that gains the
+# switch will emit it without a contract-shape change. A unit test pins that
+# nothing emits it.
+ENTRY_POINT_STATUS_DISABLED = "disabled"
+
+ENTRY_POINT_SCOPE_LOCAL = "local_workspace"
+ENTRY_POINT_SCOPE_REMOTE = "remote_machine"
+ENTRY_POINT_SCOPE_SEPARATE = "separate_contract"
+ENTRY_POINT_SCOPES = (
+    ENTRY_POINT_SCOPE_LOCAL,
+    ENTRY_POINT_SCOPE_REMOTE,
+    ENTRY_POINT_SCOPE_SEPARATE,
+)
+
+# Symlink policy tokens for a single operation.
+_SYMLINK_NEVER_BELOW_HOME = "never_followed_below_home_root"
+_SYMLINK_RESOLVED_THEN_CHECKED = "resolved_then_rejected_if_outside"
+_SYMLINK_NOT_WALKED = "not_followed_during_walk"
+_SYMLINK_NA = "not_applicable"
+
+# Root tokens an operation admits.
+_ROOTS_HOME = ("home",)
+_ROOTS_HOME_SHARED = ("home", "shared_projects")
+_ROOTS_CREATABLE = (
+    "home",
+    "shared_projects",
+    "workspace_root",
+    "workspace_root_first_level_non_home",
+)
+
+_REMOTE_SCOPE_LIMITATION = {
+    "code": "remote_execution_not_isolated_by_this_level",
+    "message": (
+        "The local isolation level says nothing about a remote machine's own "
+        "user separation; a deployment that needs it must not grant machine "
+        "assignments."
+    ),
 }
 
-# T-K (review round 1): the matrix is PER-LEVEL. On a sandboxed snapshot
-# only the webui entry rides the pod — terminal/vscode/filesystem_api
-# executors still run on the control-plane host and are NOT wired to the
-# user's sandbox instance, so reporting the os_user "partial" status would
-# claim coverage that does not exist. session_history is enforced via the
-# per-pod snapshot store; autonomous stays a separate contract.
-ENTRY_POINTS_SANDBOXED = {
-    "webui": "enforced",
-    "filesystem_api": "sandboxed_entry_not_wired",
-    "session_history": "enforced",
-    "terminal": "sandboxed_entry_not_wired",
-    "vscode": "sandboxed_entry_not_wired",
-    "autonomous": "separate_contract",
+ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
+    "webui": {
+        "status": ENTRY_POINT_STATUS_ENFORCED,
+        "scope": ENTRY_POINT_SCOPE_LOCAL,
+        "covered_by_isolation_level": True,
+        "operations": [
+            {"name": "user-url", "roots": list(_ROOTS_HOME), "symlink_policy": _SYMLINK_NA},
+            {"name": "prestart", "roots": list(_ROOTS_HOME), "symlink_policy": _SYMLINK_NA},
+            {"name": "stop", "roots": [], "symlink_policy": _SYMLINK_NA},
+            {"name": "token-validate", "roots": [], "symlink_policy": _SYMLINK_NA},
+        ],
+        "access_control": ["per_user_instance", "per_instance_token", "os_account_uid"],
+        "boundary": (
+            "One qwen-code-webui instance per user, launched under that user's OS "
+            "account and port; stop and token revocation are keyed by user_id."
+        ),
+        "limitations": [],
+        "residuals": [],
+    },
+    "filesystem_api": {
+        "status": ENTRY_POINT_STATUS_ENFORCED,
+        "scope": ENTRY_POINT_SCOPE_LOCAL,
+        "covered_by_isolation_level": True,
+        # Per-operation, because the admissible root set is NOT uniform: browse
+        # and check-path reach shared projects, check-path/create-directory also
+        # admit the workspace root and its non-home first-level children, and
+        # the per-file paths are home-only. One prose sentence could not be
+        # true of all eight (Issue #3410 review).
+        "operations": [
+            {
+                "name": "browse",
+                "roots": list(_ROOTS_HOME_SHARED),
+                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
+            },
+            {
+                "name": "check-path",
+                "roots": list(_ROOTS_CREATABLE),
+                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
+            },
+            {
+                "name": "create-directory",
+                "roots": list(_ROOTS_CREATABLE),
+                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
+            },
+            {"name": "home", "roots": list(_ROOTS_HOME), "symlink_policy": _SYMLINK_NA},
+            {
+                "name": "upload",
+                "roots": list(_ROOTS_HOME),
+                "symlink_policy": _SYMLINK_NEVER_BELOW_HOME,
+            },
+            {
+                "name": "download",
+                "roots": list(_ROOTS_HOME),
+                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
+            },
+            {
+                "name": "delete-file",
+                "roots": list(_ROOTS_HOME),
+                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
+            },
+            {
+                "name": "search",
+                "roots": list(_ROOTS_HOME),
+                "symlink_policy": _SYMLINK_NOT_WALKED,
+            },
+        ],
+        "access_control": ["home_subtree_lock", "shared_project_acl", "os_account_dac"],
+        "boundary": (
+            "Every /api/fs operation is locked to the roots its row declares: the "
+            "caller's own per-base home roots (<workspace base>/<account>), plus "
+            "the tenant's explicitly shared project roots for browse/check-path, "
+            "plus the workspace root itself and its first-level children that are "
+            "not another user's home root for check-path/create-directory. Reads "
+            "resolve symlinks and reject anything landing outside that set; writes "
+            "never traverse a symlink below the home root (Issue #3410) and "
+            "execute as the target OS account."
+        ),
+        "limitations": [],
+        "residuals": [
+            {
+                "code": "shared_project_roots_are_cross_user_by_design",
+                "message": (
+                    "browse/check-path also admit the tenant's explicitly shared "
+                    "project roots; those are cross-user on purpose and fenced by "
+                    "a per-tenant OS group, not by the home lock."
+                ),
+            },
+            {
+                "code": "read_paths_validate_by_path",
+                "message": (
+                    "download/delete-file/search validate a resolved path and then "
+                    "act on it; a local attacker who can already write inside the "
+                    "user's own home can race that window. Write paths do not have "
+                    "this window (they operate on a directory fd)."
+                ),
+            },
+            {
+                "code": "write_as_wrapper_required_for_package_non_root",
+                "message": (
+                    "On package non-root multi-user deployments the openace-write-as "
+                    "wrapper is the symlink enforcement point for uploads. This is a "
+                    "residual rather than a limitation because the route verifies the "
+                    "installed wrapper's capability marker and REFUSES the upload "
+                    "(500, fail closed) when it predates the hardening — the entry "
+                    "never silently degrades to an unenforced write."
+                ),
+            },
+        ],
+    },
+    "session_history": {
+        "status": ENTRY_POINT_STATUS_ENFORCED,
+        "scope": ENTRY_POINT_SCOPE_LOCAL,
+        "covered_by_isolation_level": True,
+        "operations": [
+            {"name": "list", "roots": [], "symlink_policy": _SYMLINK_NA},
+            {"name": "get", "roots": [], "symlink_policy": _SYMLINK_NA},
+            {"name": "restore", "roots": [], "symlink_policy": _SYMLINK_NA},
+        ],
+        "access_control": ["session_owner", "tenant_fail_closed"],
+        "boundary": "Application-layer ownership gate plus a fail-closed tenant check.",
+        "limitations": [],
+        "residuals": [],
+    },
+    "terminal": {
+        "status": ENTRY_POINT_STATUS_REMOTE_SCOPE,
+        "scope": ENTRY_POINT_SCOPE_REMOTE,
+        "covered_by_isolation_level": False,
+        "operations": [
+            {"name": name, "roots": [], "symlink_policy": _SYMLINK_NA}
+            for name in ("start", "attach", "status", "stop", "ws")
+        ],
+        "access_control": [
+            "machine_assignment_acl",
+            "session_owner",
+            "tenant_fail_closed",
+            "platform_admin",
+        ],
+        "boundary": (
+            "This entry allocates no local workspace path, account or token: it "
+            "attaches to a shell on a REMOTE machine registered with Open ACE, "
+            "running under that machine's agent account. Access is the machine "
+            "assignment ACL plus session ownership (#3376); whether a user may "
+            "reach a remote machine at all is an ACL decision, not an isolation "
+            "level decision."
+        ),
+        "limitations": [_REMOTE_SCOPE_LIMITATION],
+        "residuals": [],
+    },
+    "vscode": {
+        "status": ENTRY_POINT_STATUS_REMOTE_SCOPE,
+        "scope": ENTRY_POINT_SCOPE_REMOTE,
+        "covered_by_isolation_level": False,
+        "operations": [
+            {"name": name, "roots": [], "symlink_policy": _SYMLINK_NA}
+            for name in ("start", "attach", "status", "stop", "proxy", "ws")
+        ],
+        "access_control": [
+            "machine_assignment_acl",
+            "session_owner",
+            "tenant_fail_closed",
+            "machine_admin",
+            "platform_admin",
+        ],
+        "boundary": (
+            "code-server on a REMOTE machine; ownership is the requester "
+            "(#3376 VSCodeOwnerStore), and the proxy/WS paths share the same "
+            "gate. Same remote-scope caveat as `terminal`."
+        ),
+        "limitations": [_REMOTE_SCOPE_LIMITATION],
+        "residuals": [],
+    },
+    "autonomous": {
+        "status": ENTRY_POINT_STATUS_SEPARATE,
+        "scope": ENTRY_POINT_SCOPE_SEPARATE,
+        "covered_by_isolation_level": False,
+        "operations": [{"name": "task-execution", "roots": [], "symlink_policy": _SYMLINK_NA}],
+        "access_control": ["sandbox_effective_policy"],
+        "boundary": "Governed by the #2022 sandbox contract; see docs/SANDBOX_BACKENDS.md.",
+        "limitations": [
+            {
+                "code": "separate_contract",
+                "message": (
+                    "Autonomous task isolation is declared by sandbox_effective_policy, "
+                    "not by this contract."
+                ),
+            }
+        ],
+        "residuals": [],
+    },
 }
+
+ENTRY_POINT_STATUSES = {name: d["status"] for name, d in ENTRY_POINT_DETAILS.items()}
+
+# T-K (review round 1): the matrix is PER-LEVEL. On a sandboxed snapshot only
+# the webui entry rides the pod — terminal/vscode/filesystem_api executors
+# still run on the control-plane host and are NOT wired to the user's sandbox
+# instance, so reporting the os_user status would claim coverage that does not
+# exist. session_history is enforced via the per-pod snapshot store;
+# autonomous stays a separate contract.
+_SANDBOX_UNWIRED_LIMITATION = {
+    "code": "sandboxed_entry_not_wired",
+    "message": (
+        "The executor for this entry still runs on the control-plane host and is "
+        "not wired to the user's sandbox pod; the user's files live inside the pod."
+    ),
+}
+_SANDBOX_UNWIRED_ENTRIES = ("filesystem_api", "terminal", "vscode")
+
+ENTRY_POINT_DETAILS_SANDBOXED: dict[str, dict[str, Any]] = {
+    name: (
+        detail
+        if name not in _SANDBOX_UNWIRED_ENTRIES
+        else {
+            **detail,
+            "status": ENTRY_POINT_STATUS_SANDBOX_UNWIRED,
+            "covered_by_isolation_level": False,
+            "limitations": [_SANDBOX_UNWIRED_LIMITATION],
+        }
+    )
+    for name, detail in ENTRY_POINT_DETAILS.items()
+}
+
+ENTRY_POINTS_SANDBOXED = {name: d["status"] for name, d in ENTRY_POINT_DETAILS_SANDBOXED.items()}
+
+
+def _public_entry_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """Deep-ish copy of one entry detail for the public payload."""
+    return {
+        "status": detail["status"],
+        "scope": detail["scope"],
+        "covered_by_isolation_level": detail["covered_by_isolation_level"],
+        "operations": [{**op, "roots": list(op["roots"])} for op in detail["operations"]],
+        "access_control": list(detail["access_control"]),
+        "boundary": detail["boundary"],
+        "limitations": [dict(x) for x in detail["limitations"]],
+        "residuals": [dict(x) for x in detail["residuals"]],
+    }
 
 
 def _current_platform() -> str:
@@ -281,12 +564,17 @@ class IsolationCapabilitySnapshot:
         # "webui: enforced" next to "no isolation at all". T-K: the matrix is
         # level-aware — a sandboxed snapshot reports its own wiring truth.
         if self.supported:
-            matrix = (
-                ENTRY_POINTS_SANDBOXED
-                if self.isolation_level == ISOLATION_LEVEL_SANDBOXED
-                else ENTRY_POINT_STATUSES
-            )
-            data["entry_points"] = dict(matrix)
+            sandboxed = self.isolation_level == ISOLATION_LEVEL_SANDBOXED
+            details = ENTRY_POINT_DETAILS_SANDBOXED if sandboxed else ENTRY_POINT_DETAILS
+            data["entry_points"] = {name: d["status"] for name, d in details.items()}
+            # Issue #3410: the string map alone could not tell an integrator
+            # "covered by the declared level" from "governed by a different
+            # mechanism" from "real gap". The detail map is the machine-readable
+            # answer; the string map stays for existing consumers. `limitations`
+            # gate admission, `residuals` are informational and must not.
+            data["entry_point_details"] = {
+                name: _public_entry_detail(d) for name, d in details.items()
+            }
         return data
 
 
