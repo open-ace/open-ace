@@ -19,13 +19,29 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
   "reasons": [{"code": "...", "message": "..."}],
   "entry_points": {
     "webui": "enforced",
-    "filesystem_api": "partial",
+    "filesystem_api": "enforced",
     "session_history": "enforced",
-    "terminal": "partial",
-    "vscode": "partial",
+    "terminal": "remote_machine_scope",
+    "vscode": "remote_machine_scope",
     "autonomous": "separate_contract"
   },
-  "policy_revision": "2026-09-12.2"
+  "entry_point_details": {
+    "filesystem_api": {
+      "status": "enforced",
+      "scope": "local_workspace",
+      "covered_by_isolation_level": true,
+      "operations": [
+        {"name": "upload", "roots": ["home"], "symlink_policy": "never_followed_below_home_root"},
+        {"name": "browse", "roots": ["home", "shared_projects"],
+         "symlink_policy": "resolved_then_rejected_if_outside"}
+      ],
+      "access_control": ["home_subtree_lock", "shared_project_acl", "os_account_dac"],
+      "boundary": "...",
+      "limitations": [],
+      "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
+    }
+  },
+  "policy_revision": "2026-09-16.1"
 }
 ```
 
@@ -35,6 +51,19 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
   等级,WebUI 运行于该 tier 的 OpenSandbox pod)。
 - `isolation_level` / `enforced` / `unsupported`:见下节。
 - `reasons`:unsupported 时的机器可读原因(可能为空)。
+- `entry_point_details`(#3410 新增,与 `entry_points` 同生共死):每个入口的机器
+  可读细节,让接入方能区分「满足所声明等级」「由其它机制治理」「真实缺口」,
+  而不必解析散文。字段:
+  - `status`:与 `entry_points` 中同名键完全一致(单测钉住);
+  - `scope`:`local_workspace` / `remote_machine` / `separate_contract`;
+  - `covered_by_isolation_level`:该入口是否被本快照声明的 `isolation_level` 覆盖;
+  - `operations[]`:`{name, roots, symlink_policy}`——**逐操作**声明可达根集合与
+    符号链接策略(同一入口内并不统一,见 §4);
+  - `access_control[]`:实际强制该入口的机制代号;
+  - `limitations[]`:**真实缺口/未覆盖范围,参与准入判定**(`enforced` 入口恒为空);
+  - `residuals[]`:已知且被接受的性质(如共享项目根按设计跨用户),**不参与准入判定**。
+- **未知 `status` 或未评审过的 `policy_revision` 必须按拒绝处理**(fail closed):
+  本契约会新增状态词,接入方不得把未知值当作通过。
 - `entry_points`:各入口的隔离覆盖状态(§4)。**仅在 supported 快照中输出**——
   入口矩阵描述的是多用户隔离的覆盖面,unsupported(单用户/未验证/降级)部署
   不携带该矩阵,避免"无隔离"与"webui: enforced"同帧自相矛盾。该矩阵为静态
@@ -132,24 +161,62 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 
 ## 4. 入口覆盖矩阵
 
-| 入口 | 状态 | 说明 |
-|---|---|---|
-| webui(聊天工具) | enforced | 每用户独立实例/UID/端口/token;停止与 token 撤销按 user_id 隔离 |
-| filesystem_api | partial | 上传/下载/删除有 home 子树锁(#1813);browse/check-path 依赖 OS 权限作用域 |
-| session_history | enforced | 应用层所有权闸门 + 租户 fail-closed |
-| terminal | partial | 终端令牌按机器授权,不绑定终端会话所有者(已知缺口) |
-| vscode | partial | owner 记录为 machine.created_by;project_path 校验弱(已知缺口) |
-| autonomous | separate_contract | 沿用 #2022 sandbox 契约,不在本契约范围 |
+| 入口 | 状态 | scope | 覆盖范围与证据 |
+|---|---|---|---|
+| webui(聊天工具) | enforced | local_workspace | 每用户独立实例/UID/端口/token;停止与 token 撤销按 user_id 隔离 |
+| filesystem_api | enforced | local_workspace | 八个 `/api/fs` 操作逐个声明 roots 与符号链接策略(见下表与 `entry_point_details`);写路径自 home 根逐段 `O_NOFOLLOW` 下降并在目录 fd 内 `renameat`(#3410),读路径 realpath 后越界即拒;`create-directory` 与 check-path 同可创建集;单文件路径锁与 browse 同口径(逐 base home 根);`<base>/<account>` 0700 |
+| session_history | enforced | local_workspace | 应用层所有权闸门 + 租户 fail-closed |
+| terminal | remote_machine_scope | remote_machine | **远端机器能力**:本入口不分配本地路径/账户/令牌;治理方为 machine assignment ACL + 会话所有者 + 租户(#3376)。本地隔离等级不覆盖远端机器自身的用户隔离 |
+| vscode | remote_machine_scope | remote_machine | 同上(code-server);owner=请求者(#3376 `VSCodeOwnerStore`),proxy/WS 同闸门 |
+| autonomous | separate_contract | separate_contract | 沿用 #2022 sandbox 契约,不在本契约范围 |
 
-**sandboxed 部署下的矩阵取值(#3378,revision 2026-09-12.2 起)**:矩阵按等级
+**`filesystem_api` 逐操作边界**(即 `entry_point_details.filesystem_api.operations`,
+同一入口内并不统一,这正是单句散文无法如实描述的原因):
+
+| 操作 | roots | 符号链接策略 |
+|---|---|---|
+| `browse` | home, shared_projects | resolved_then_rejected_if_outside |
+| `check-path` | home, shared_projects, workspace_root, workspace_root_first_level_non_home | resolved_then_rejected_if_outside |
+| `create-directory` | 同 `check-path` | resolved_then_rejected_if_outside |
+| `home` | home | not_applicable |
+| `upload` | home | **never_followed_below_home_root** |
+| `download` | home | resolved_then_rejected_if_outside |
+| `delete-file` | home | resolved_then_rejected_if_outside |
+| `search` | home | not_followed_during_walk |
+
+`workspace_root_first_level_non_home` 指 base dir 的**一级**子目录且**不是任何用户的
+home 根**(`_check_path_rejection_reason` 规则 3);写入口不包含 shared_projects——
+browse/check-path 可读共享项目,但单文件写/下载仍限本人 home,放宽属于新功能。
+
+**部署前提(`filesystem_api: enforced` 的证据边界)**:
+
+1. workspace base dir 必须 root 所有且非用户可写(`docker-entrypoint.sh` 以 root
+   `mkdir -p` 建为 `root:root 0755`,`/home` 为 `chmod 755`)。写路径的信任锚是
+   `realpath(<base>/<account>)`,其**下**不跟随任何符号链接;`<base>/<account>`
+   本身允许是符号链接(运维挂大卷的常见做法),root 分支另以 `fstat` 断言该锚
+   属于目标账户。
+2. **包安装非 root 多用户形态必须重装 `openace-write-as`**(≥ 本次版本):该形态下
+   web 进程无法穿越 0700 home,符号链接/目录拒绝由 wrapper 强制(exit 5 / exit 6),
+   路由把它们翻译成 400。**若 wrapper 版本过旧**(缺少能力标记
+   `openace-write-as-capability: symlink-refusal=1`),路由直接
+   **fail-closed 拒绝上传(500,错误信息给出重装指引)**——因此 `enforced` 声明对
+   所有部署都成立:要么 wrapper 强制,要么上传根本不发生。
+3. 三项已声明 residual(共享项目根按设计跨用户、读路径按路径校验存在 TOCTOU 窗口、
+   上述 wrapper 前提)在 `entry_point_details.filesystem_api.residuals` 中机器可读,
+   **不参与准入判定**。
+4. `os_user` 共享宿主内核:`resources` / `network_egress` / `kernel` 三维度仍
+   `unsupported`(§2 边界声明)。
+
+**sandboxed 部署下的矩阵取值(#3378 起)**:矩阵按等级
 输出——`webui` 随 `sandboxed` 等级进入 pod(`enforced`);`terminal`/`vscode`/
 `filesystem_api` 输出 **`sandboxed_entry_not_wired`**(执行体仍在控制面宿主上,
 未接线到用户的沙箱实例),对 sandboxed 用户的 `/fs` host 树亦不可用——其文件在
 pod 内,由 webui 自带的 in-pod 文件浏览承载;`session_history` 仍 `enforced`
 (per-pod 快照存储);`autonomous` 仍 `separate_contract`。os_user/none 快照的
-矩阵取值不变。这些入口的既有缺口(§8)不受隔离等级影响。
+矩阵取值见上表(#3410 重标定);`filesystem_api` 在 sandboxed 下与 os_user 下的取值
+不同是**刻意**的——本地强制不等于已接线到 pod。
 
-## 5. 多用户模式部署要求(policy revision 2026-09-11.2)
+## 5. 多用户模式部署要求(policy revision 2026-09-16.1)
 
 契约是否报告 `supported/os_user` 由**启动路径就绪探针**判定(§3.3:WebUI 解析、
 非 dev 目录模式、`openace-webui-launch` 包装器、sudo),不再以 Docker 布局为
@@ -334,6 +401,48 @@ curl -H "Authorization: Bearer <token>" \
 - 鉴权:任意已认证用户(session cookie 或 Bearer)。契约不含机密;WebUI-token
   iframe 调用方不在此端点服务范围内(iframe 流程使用各自的 per-resource token)。
 
+**安全准入示例(#3410)**。下面这段判定与单元测试
+`TestDocumentedAdmissionPredicate`(`tests/unit/test_workspace_isolation_contract_3374.py`)
+**逐项一致**——改一处必须改另一处,否则文档会随版本漂移:
+
+```bash
+curl -s -H "Authorization: Bearer <token>" \
+  https://<open-ace>/api/workspace/isolation-capabilities > caps.json
+python3 - caps.json <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+NEEDED = ("webui", "filesystem_api", "session_history")    # 本地工作台入口
+KNOWN  = {"enforced", "partial", "remote_machine_scope",
+          "separate_contract", "sandboxed_entry_not_wired", "disabled"}
+REVIEWED = {"2026-09-16.1"}                                # 你已评审过的 revision
+d = c.get("entry_point_details", {})
+ok = (
+    c.get("local_workspace_multi_user") == "supported"
+    and c.get("isolation_level") == "os_user"
+    and c.get("policy_revision") in REVIEWED
+    and {"identity", "filesystem", "environment", "process"} <= set(c.get("enforced", []))
+    and all(s in KNOWN for s in c.get("entry_points", {}).values())   # 未知状态 -> 拒绝
+    and all(
+        d.get(e, {}).get("status") == "enforced"
+        and d.get(e, {}).get("covered_by_isolation_level")
+        and not d.get(e, {}).get("limitations")                      # residuals 不参与判定
+        for e in NEEDED
+    )
+)
+print("ACCEPT" if ok else "REJECT")
+PY
+```
+
+要点:
+
+- **只钉你已评审过的 `policy_revision`**;未知 revision 与未知入口 `status` 一律拒绝。
+- 判定用 `limitations` 是否为空,**不要**用 `residuals`——后者是已知且被接受的性质
+  (如共享项目根按设计跨用户),把它当缺口会把所有健康部署也拒掉。
+- `terminal` / `vscode` 是 `remote_machine_scope`:它们由机器 ACL 治理,不在本地
+  隔离等级的覆盖面内。**需要"仅本地工作台、禁远端机器"的产品形态,做法是不授予
+  machine assignment**,而不是要求这两个入口变成 `enforced`——契约报告的是机制,
+  不是你的授权决定(服务端入口开关见 §8 第 7 条)。
+
 带隔离要求启动工作区(能力不足时得到结构化 400,而非静默弱启动):
 
 ```bash
@@ -383,13 +492,24 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
 以下缺口已在审计中确认,按 issue #3374 的指示拆分为独立后续工作,本契约的
 `entry_points` 矩阵如实反映:
 
-1. 终端/VSCode 令牌与用户绑定:`terminal/<id>/status` 不向同机器其他授权用户返回
-   browser token;attach 校验会话所有者;VSCode owner 改为请求者。
-2. 终端 `work_dir` 服务端校验(对齐 fs.py base_dirs)。
-3. `/fs/browse`、`/fs/check-path` 补 home 子树锁。
+1. ~~终端/VSCode 令牌与用户绑定~~、~~终端 `work_dir` 服务端校验~~、
+   ~~`/fs/browse`、`/fs/check-path` 补 home 子树锁~~ — **已于 #3376 / PR #3380 关闭**。
+   这三条在 2026-09-13 合入后,矩阵与本节文字一直未更新,导致接入方把已修好的缺口
+   当作现存风险(#3410 的起因之一)。当前边界以 §4 与 `entry_point_details` 为准。
+2. 文件接口跨用户符号链接写入 — **已于 #3410 关闭**(见 §4 与 CHANGELOG)。
+   同批关闭的还有:`create-directory` 缺失的 home 子树锁、多 base 部署下
+   `/api/fs` 单文件路径与 `/api/fs/home` 的全线 400、`<base>/<account>` 0755。
+3. *(编号保留,原条目已关闭)*
 4. WebUI `token_secret` 未持久化时重启导致已发 token 失效的加固。
 5. 交互工作区 `sandboxed` 等级:#3378 已交付(§6);遗留 follow-up:真实集群
    端到端验收(#3379,含 3100 端点可达性验证)、`terminal`/`vscode`/`fs` 入口
    沙箱接线、webui 历史 quota/GC、多 web 副本下的 token 校验/实例管理
    (reconcile 已心跳互斥,但 pod 归属仍是单进程内存态)。
-6. 多用户模式真实 Linux 端到端隔离验收(并发用户 + 越权尝试矩阵)。
+6. 多用户模式真实 Linux 端到端隔离验收(并发用户 + 越权尝试矩阵)——已由 #3379
+   交付基线;#3410 追加了上传符号链接矩阵、跨用户 `create-directory` 与
+   `<base>/<account>` 0700 探针(`scripts/multiuser_acceptance.py` item b)。
+7. **入口禁用开关(kill switch)缺失**:契约保留 `disabled` 状态,但当前**没有任何
+   部署形态会输出它**——服务端尚无"强制关闭 terminal/vscode/filesystem_api 入口"
+   的配置项(单元测试 `test_no_snapshot_emits_the_reserved_disabled_status` 钉住
+   这一点)。需要"仅本地工作台"形态的部署,目前通过不授予远端机器(machine
+   assignment)实现,并由 `entry_point_details[*].scope` 让接入方机器可判。
