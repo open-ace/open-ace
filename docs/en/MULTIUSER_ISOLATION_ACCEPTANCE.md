@@ -22,7 +22,16 @@ assertions. The approved plan of record is
   account joins the global group for namespace creation, so cross-tenant
   members can still list the root via the group r-x — content access stays
   fenced by the per-tenant groups).
-- **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
+- **#3393 (fixed; app-side on-demand provisioning)**: on a shape the
+  entrypoint never reaches (package installs, or a lost/missing root), the
+  FIRST shared-project creation (`create_dir: true` at `<base>/shared/<name>`)
+  still mkdir'd against the missing root. POST /api/projects now provisions
+  the namespace root on demand BEFORE the user-side mkdir (root-owned,
+  `openace-shared` group, **3770** = sticky+setgid, no others bits — the
+  entrypoint's semantics; an existing root is left untouched, failures
+  degrade to a clean 5xx); the multi-user path of
+  `scripts/install-central/package-method/install.sh` provisions the
+  equivalent at install time.- **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
   active users without uid pinning — a deactivated user's directories are
   numerically inherited by an active account. Item (f) asserts this by
   owner name and is expected to FAIL until the fix lands (recorded
@@ -121,7 +130,7 @@ registered on the default branch first — that is why pre-merge dispatch
 | e | Resource ceilings / cancellation / crash isolation | Pre-seeded `max_instances=3`; a 4th instance; admin stops alice's instance; `kill -9` bob's webui | 4th instance 503 (body unstructured — recorded verbatim, itself an acceptance finding); others' sessions and /readyz undisturbed; the freed slot is reusable |
 | f | Deactivation / token revocation / restart orphans | After deactivating bob: session, URL-token, process, proxy token (read from the webui env's `OPENAI_API_KEY` — the sudo-launch path inlines only that known key set); after `up -d --force-recreate` (container recreated, volumes kept — `restart` keeps the writable layer and cannot distinguish a secret on the volume from one left in the layer): in-container process and port checks; alice's old token re-verified | All 401 / instance destroyed / proxy token 401; no leftover webui processes after recreation, nothing listening on 3100–3200 in-container; token_secret volume persistence keeps the old token valid (#3377's actual claim). **Depends on PR-A (#3384)** |
 | g | Explicit refusal when a backend/level is unavailable | Contract endpoint; user-url requesting `sandboxed`; unmapped user (erin) requesting `os_user` | Contract `isolation_level=os_user` with reasons containing **no** SANDBOX_PROBE_REASON_CODES; 400 `isolation_level_unsupported`; 400 `identity_mapping_missing` |
-| h | No regression in single-user mode | Base compose in its OWN project (port 19889, fresh volumes), leaving the multi-user stack untouched | Contract `none`, single instance on 3100 (recorded as a declared exemption if the app-side single-user launch limitation fires — §5.8), admin login, /readyz 200 |
+| h | No regression in single-user mode | Base compose in its OWN project (port 19889, fresh volumes), leaving the multi-user stack untouched | Contract `none`, single instance on the configured range's first free port (default 3100; the offset tail shape gets 13100 — the hardcoded-3100 leftover is fixed, §5.8) (recorded as a declared exemption if the app-side single-user launch limitation fires — §5.8), admin login, /readyz 200 |
 | i | Publishable sample / permission conditions / capability matrix / real results | Recorder | Record carries git SHA, image digest, docker/compose versions, kernel, policy_revision; capability matrix cross-references `WORKSPACE_ISOLATION_CAPABILITIES` |
 
 ## 4. Records and template
@@ -194,10 +203,13 @@ registered on the default branch first — that is why pre-merge dispatch
    EXEMPT (the declared limitation). The exemption collapses once the app
    side maps an account for the default admin. Note: the single-user tail runs in its own
    compose project (web port 19889, workspace port range offset to
-   13100-13200 to avoid colliding with the multi-user stack's 3100-3200)
-   — in that shape the single-user webui is not reachable at its
-   advertised host URL; the item-h assertions are all API-level and never
-   connect to it.
+   13100-13200 to avoid colliding with the multi-user stack's 3100-3200).
+   The single-user instance now honors the configured range (first free
+   port, default 3100 — previously hardcoded 3100, which bound an
+   unpublished port and advertised an unreachable `:3100` URL in this
+   offset shape), so it binds 13100 and advertises `:13100`; the item-h
+   assertions remain API-level and do not depend on connecting to it
+   directly.
 
 ## 6. Deployment note (carried from #3384)
 

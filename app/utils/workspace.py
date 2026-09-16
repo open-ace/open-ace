@@ -30,6 +30,7 @@ __all__ = [
     "SHARED_TENANT_GROUP_PREFIX",
     "shared_tenant_group_name",
     "ensure_shared_group",
+    "ensure_shared_namespace_root",
     "add_user_to_shared_group",
     "remove_user_from_shared_group",
     "setup_shared_project_permissions",
@@ -734,6 +735,107 @@ def ensure_shared_group(tenant_id: int | None = None) -> bool:
 
     logger.info(f"Shared tenant group '{group_name}' ensured")
     return True
+
+
+# Namespace-root mode, mirroring the Docker entrypoint's provisioning (Issue
+# #3379 / PR #3389 review rounds): sticky + setgid with NO others bits. Sticky
+# (1000) blocks cross-tenant rename/replace of another tenant's project dir at
+# the root (rename(2) only needs write+search on the parent, and the global
+# openace-shared creation group spans every tenant); setgid (2000) keeps new
+# project dirs inheriting the creation group; dropping "others" keeps
+# non-members out entirely.
+SHARED_NAMESPACE_ROOT_MODE = "3770"
+
+
+def ensure_shared_namespace_root(base_dir: str) -> tuple[bool, str]:
+    """On-demand provisioning of the shared-namespace root (Issue #3393).
+
+    The root ``<base>/shared`` is normally provisioned by the Docker
+    entrypoint at boot. On a deployment where the entrypoint did not run, or
+    where the volume/root went missing, the FIRST shared-project creation
+    (``create_dir: true`` at ``<base>/shared/<name>``) ran ``mkdir -p`` as
+    the creating user against a root-owned 0755 parent and EACCESed (403).
+    This helper closes that gap from the API side: when the root does not
+    exist, create it — root-owned, group ``openace-shared`` (created if
+    missing, mirroring the entrypoint), mode 3770 (sticky+setgid, no others).
+
+    Semantics deliberately mirrored from docker-entrypoint.sh:
+
+    - idempotent and NON-INTRUSIVE: an EXISTING root is left untouched (no
+      re-chgrp/chmod — a steady-state deployment must not ping-pong
+      ownership, and a root that is already someone else's is never taken
+      over from the request path);
+    - fail-closed on the account-named-"shared" collision: if a real OS
+      account ``shared`` exists, ``<base>/shared`` is its home root and must
+      not be group-opened by an API request (the registration-time
+      path_guard already rejects such paths — this is defense in depth);
+    - every provisioning step runs as root (``run_as_root_if_needed``), so
+      the root ends up root-owned like the entrypoint leaves it.
+
+    Args:
+        base_dir: Workspace base directory the namespace root lives under
+            (the root is ``<base_dir>/shared``).
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty on success
+        (including the skip cases: non-multi-user mode, root already exists).
+    """
+    if not _is_docker_multi_user_mode():
+        return (True, "")  # Skip in non-Docker mode
+
+    if not base_dir or not os.path.isabs(base_dir):
+        return (False, f"Workspace base directory must be absolute: {base_dir!r}")
+
+    # Same single source of truth the registration-time validation uses
+    # (path_guard.SHARED_NAMESPACE_DIRNAME); path_guard imports nothing from
+    # this module, so the lazy import cannot cycle.
+    from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME
+
+    root = f"{base_dir.rstrip('/')}/{SHARED_NAMESPACE_DIRNAME}"
+
+    if os.path.exists(root):
+        logger.debug(f"Shared namespace root already exists, leaving untouched: {root}")
+        return (True, "")
+
+    # Fail closed on the account-named-shared collision (see docstring).
+    id_result = subprocess.run(["id", "shared"], capture_output=True, text=True)
+    if id_result.returncode == 0:
+        return (
+            False,
+            f"{root} collides with the home directory of a user account named "
+            "'shared'; administrator intervention required",
+        )
+
+    try:
+        # 1. Global creation group (idempotent; mirrors the entrypoint's
+        #    `groupadd -f openace-shared`).
+        result = run_as_root_if_needed(["groupadd", "-f", SHARED_GROUP_NAME])
+        if result.returncode != 0:
+            return (False, f"groupadd failed: {result.stderr.strip()}")
+
+        # 2. Create the root (parent base dirs included) — as root, so the
+        #    root is root-owned exactly as the entrypoint provisions it.
+        result = run_as_root_if_needed(["mkdir", "-p", root])
+        if result.returncode != 0:
+            return (False, f"mkdir failed: {result.stderr.strip()}")
+
+        # 3. Group-own it by the global creation group + sticky/setgid mode.
+        result = run_as_root_if_needed(["chgrp", SHARED_GROUP_NAME, root])
+        if result.returncode != 0:
+            return (False, f"chgrp failed: {result.stderr.strip()}")
+        result = run_as_root_if_needed(["chmod", SHARED_NAMESPACE_ROOT_MODE, root])
+        if result.returncode != 0:
+            return (False, f"chmod failed: {result.stderr.strip()}")
+    except Exception as e:  # noqa: BLE001 - degrade to a clean error, never crash
+        return (False, f"Unexpected provisioning failure: {e}")
+
+    logger.info(
+        "Provisioned shared namespace root %s (root-owned, group %s, mode %s) on demand (#3393)",
+        root,
+        SHARED_GROUP_NAME,
+        SHARED_NAMESPACE_ROOT_MODE,
+    )
+    return (True, "")
 
 
 def add_user_to_shared_group(system_account: str, tenant_id: TenantIdOrUnresolved = None) -> bool:

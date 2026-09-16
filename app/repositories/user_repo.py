@@ -758,9 +758,28 @@ class UserRepository:
         validate_session) funnels through this query. The route-level
         revocation becomes a row-cleanup measure rather than the door.
 
+        Registered leftover (session-side tokens_valid_after reuse): URL
+        tokens honor ``users.tokens_valid_after`` (R-5: minted-before-stamp
+        stays dead across a later reactivation), but the session side only
+        had the is_active gate — which the SAME reactivation flips back to
+        passing. A pre-deactivation session row that survived the (fail-soft)
+        revocation, or was never revoked at all (org-sync writes is_active
+        directly and deletes no sessions), therefore VALIDATED AGAIN after
+        reactivation — the old cookie resurrected while the equivalent URL
+        token stayed dead. The session now carries the same floor: a session
+        CREATED before the stamp is refused, reactivation re-mints fresh
+        sessions on the next login (the R-5 declared residual, aligned
+        across both token families). Note the stamp is never cleared on
+        reactivation/restore by design, so only post-stamp logins pass.
+
         ``is_active IS TRUE`` follows the get_all_users precedent: native on
         PostgreSQL, supported by SQLite >= 3.23 — the same expression both
-        dialects already run elsewhere in this repository.
+        dialects already run elsewhere in this repository. The created_at
+        comparison is a plain timestamp comparison on both dialects; SQLite
+        stores created_at at second resolution while the stamp carries
+        microseconds, so a session minted in the SAME second as the stamp
+        can be refused (bounded by one second — the same tolerance the
+        URL-token side declares in the opposite direction).
 
         Args:
             token: Session token.
@@ -774,6 +793,7 @@ class UserRepository:
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
               AND u.is_active IS TRUE AND u.deleted_at IS NULL
+              AND (u.tokens_valid_after IS NULL OR s.created_at >= u.tokens_valid_after)
         """)
 
         # Use UTC to match auth_service._utcnow() which stores expires_at in UTC

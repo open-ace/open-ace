@@ -170,9 +170,10 @@ def _single_user_env() -> dict[str, str]:
     two uncoupled ones), and the workspace port RANGE is offset to
     13100-13200 — the running multi-user stack already holds host
     3100-3200 and a second docker-proxy bind there aborts the up.
-    Declared consequence (handbook §5.8): the single-user webui is not
-    reachable at its advertised host URL; acceptable because item h's
-    assertions are API-level and never connect to it."""
+    Since the single-user instance honors the configured range (first free
+    port — the hardcoded-3100 leftover is fixed), it binds 13100 and
+    advertises :13100; item h's assertions remain API-level and never
+    connect to it."""
     from urllib.parse import urlparse
 
     port = urlparse(SINGLE_USER_BASE_URL).port or (
