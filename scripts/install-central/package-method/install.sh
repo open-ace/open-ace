@@ -2685,6 +2685,58 @@ configure_transcript_acl() {
     return 0
 }
 
+# SHARED_NAMESPACE_PROVISION_BEGIN
+# Issue #3393: provision the multi-user shared-namespace root (the package
+# twin of the Docker entrypoint's #3379 block). Package-method multi-user
+# installs never created <base>/shared, so the FIRST shared-project creation
+# (POST /api/projects with create_dir at <base>/shared/<name>) mkdir'd as
+# the creating user against a root-owned 0755 parent and failed 403 — the
+# #3376 first-class namespace could not bootstrap outside Docker.
+#
+# Semantics mirror docker-entrypoint.sh: per comma-separated WORKSPACE_BASE_DIR
+# entry (Package default /home), the root is created root-owned, group
+# openace-shared (groupadd -f, idempotent), mode 3770 — sticky (members of the
+# GLOBAL creation group cannot rename/replace each other's project dirs) +
+# setgid (group inheritance), no others bits. Guards: a REAL account named
+# "shared" (its home root must not be group-opened) and an existing path that
+# is not root-owned are skipped loudly; a root-owned existing root is
+# idempotently re-converged (mkdir -p is a no-op, chgrp/chmod fix drift).
+# Failures degrade to a WARNING — the app's on-demand provisioning
+# (app.utils.workspace.ensure_shared_namespace_root) retries at request time.
+provision_shared_namespace() {
+    local _sn_group="openace-shared"
+    local _sn_dir="${WORKSPACE_BASE_DIR:-/home}"
+    local _sn_base
+    local _sn_base_dirs
+    IFS=',' read -r -a _sn_base_dirs <<< "$_sn_dir"
+    for _sn_base in "${_sn_base_dirs[@]}"; do
+        # trim leading/trailing whitespace and trailing slashes (pure bash; $()
+        # aborts under set -e when a base dir contains a quote character — same
+        # note as the entrypoint)
+        _sn_base="${_sn_base#"${_sn_base%%[![:space:]]*}"}"
+        _sn_base="${_sn_base%"${_sn_base##*[![:space:]]}"}"
+        while [ "${_sn_base: -1:1}" = "/" ] && [ "$_sn_base" != "/" ]; do
+            _sn_base="${_sn_base%/}"
+        done
+        [ -z "$_sn_base" ] && continue
+        if id "shared" &>/dev/null || { [ -e "$_sn_base/shared" ] && [ "$(stat -c '%U' "$_sn_base/shared" 2>/dev/null)" != "root" ]; }; then
+            print_warning "skipping shared-namespace provisioning for $_sn_base/shared — path collides with a real account or is not root-owned (administrator intervention required)"
+            continue
+        fi
+        if ! as_root groupadd -f "$_sn_group"; then
+            print_warning "could not ensure group $_sn_group — shared-project creation may fail until an administrator fixes it"
+            continue
+        fi
+        if ! { as_root mkdir -p "$_sn_base/shared" && as_root chgrp "$_sn_group" "$_sn_base/shared" && as_root chmod 3770 "$_sn_base/shared"; }; then
+            print_warning "could not provision $_sn_base/shared — shared-project creation may fail until an administrator fixes it"
+        else
+            print_success "provisioned shared namespace root: $_sn_base/shared (root:$_sn_group, mode 3770)"
+        fi
+    done
+    unset _sn_base _sn_base_dirs _sn_dir _sn_group
+}
+# SHARED_NAMESPACE_PROVISION_END
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -4684,6 +4736,11 @@ install_local() {
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         # Stop existing qwen-code-webui systemd service first
         stop_webui_systemd_service
+
+        # Issue #3393: provision <base>/shared (root:openace-shared 3770) —
+        # runs on fresh installs AND upgrades (idempotent convergence), before
+        # the service starts serving shared-project creations.
+        provision_shared_namespace
 
         # Determine the correct sudoers user and install_dir
         # If user declined service switch, sudoers should configure for the systemd service's actual User=
