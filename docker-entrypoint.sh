@@ -1725,6 +1725,80 @@ except Exception as e:
     fi
 
     # ========================================================================
+    # Issue #3390 declared residual, now closed: first-boot orphan-uid
+    # adoption.
+    # ========================================================================
+    # After an upgrade, a DEACTIVATED/soft-deleted user from BEFORE the pin
+    # era has no recorded uid (their rows are never re-synced), so the sync
+    # above creates no placeholder for them: their volume dirs (/home/<user>,
+    # <base>/<user>, <base>/shared leftovers) sit on uids no account owns
+    # (owner "UNKNOWN"), and a future account's auto-assigned useradd can
+    # numerically inherit them. Close the residual by scanning the volume
+    # trees AFTER the user-sync (its pinned accounts must exist first, or
+    # every pin of a recreated deployment would look orphaned) and reserving
+    # each unowned uid >= 1000 as a nologin placeholder account
+    # openace-orphan-<uid> — from then on useradd can never hand that uid
+    # (and with it the numeric ownership of the orphaned dirs) to anyone.
+    # Idempotent: an adopted uid resolves via getent on the next boot and is
+    # skipped silently. Quoted heredoc (verbatim python, no shell expansion
+    # — the #3399 class cannot recur here); failure degrades to the WARNING
+    # line, never aborts the boot.
+    if [ -n "$DATABASE_URL" ]; then
+    ( set -o pipefail; python3 -u - <<'ORPHAN_UID_SCAN_EOF' 2>&1 | tee /app/logs/open-ace-orphan-uid-scan.log ) || echo "WARNING: orphan-uid adoption scan failed - unreserved orphan uids may be inherited by a future account; check /app/logs/open-ace-orphan-uid-scan.log"
+import os
+import subprocess
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+# Scan roots: /home plus every configured workspace base dir (deduped) —
+# the trees the user-sync and the app create per-user content in.
+bases = [b.strip().rstrip('/') for b in os.environ.get('WORKSPACE_BASE_DIR', '/workspace').split(',') if b.strip()]
+roots = []
+for root in ['/home'] + bases:
+    if root and root not in roots:
+        roots.append(root)
+
+# Collect owner uids of existing entries (dirs AND files) up to depth 3 —
+# a user's home/workspace plus their immediate project trees. find -exec
+# stat {} + batches the stat calls (one fork per batch, not per entry).
+observed_uids = set()
+for root in roots:
+    if not os.path.isdir(root):
+        continue
+    r = run(['find', root, '-maxdepth', '3', '-exec', 'stat', '-c', '%u', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING (issue #3390): orphan-uid scan could not walk {root}: {r.stderr.strip()}')
+        continue
+    for token in r.stdout.split():
+        try:
+            uid = int(token)
+        except ValueError:
+            continue
+        observed_uids.add(uid)
+
+# Adopt: reserve every observed uid >= 1000 that no account owns (getent
+# passwd by uid fails) as a nologin placeholder. useradd -M creates no home;
+# the volume dirs already carry this numeric owner, and stat -c %U reports
+# the placeholder name from then on.
+adopted = 0
+for uid in sorted(u for u in observed_uids if u >= 1000):
+    if run(['getent', 'passwd', str(uid)]).returncode == 0:
+        continue  # owned by an account (or already reserved by a placeholder)
+    name = f'openace-orphan-{uid}'
+    r = run(['useradd', '-M', '-s', '/usr/sbin/nologin', '-u', str(uid), name])
+    if r.returncode == 0:
+        adopted += 1
+    else:
+        print(f'  WARNING (issue #3390): could not reserve orphan uid {uid} as {name}: {r.stderr.strip()} — the uid may be handed to a future account')
+if adopted:
+    print(f'Adopted {adopted} orphan uid(s) from volumes as reserved placeholders.')
+ORPHAN_UID_SCAN_EOF
+    fi
+
+    # ========================================================================
     # Issue #3396: tenant-scoped shared-group sync (DB-driven).
     # ========================================================================
     # Replaces the two /home-glob usermod passes (#3389 rounds 2/3): a
