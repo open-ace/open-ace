@@ -372,7 +372,7 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     log_warn "Failed to install Homebrew. Please install Node.js manually:"
                     log_warn "  1. Install Homebrew: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""
                     log_warn "  2. Install Node.js: brew install node"
-                    log_warn "  3. Install CLI: npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
+                    log_warn "  3. Install CLI: npm install -g @qwen-code/qwen-code@0.23.3"
                 fi
             fi
         elif [ -n "$USER_NPM_PREFIX" ]; then
@@ -438,13 +438,13 @@ if [[ -n "$INSTALL_CLI" ]]; then
                 *)
                     log_warn "Unsupported OS: $ID. Cannot auto-install Node.js."
                     log_warn "Please install Node.js manually and then run:"
-                    log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
+                    log_warn "  npm install -g @qwen-code/qwen-code@0.23.3"
                     ;;
             esac
         else
             log_warn "Cannot detect OS. Cannot auto-install Node.js."
             log_warn "Please install Node.js manually and then run:"
-            log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
+            log_warn "  npm install -g @qwen-code/qwen-code@0.23.3"
         fi
     fi
 
@@ -470,11 +470,11 @@ if [[ -n "$INSTALL_CLI" ]]; then
                     # never start.
                     qwen_npm_install_ok=0
                     if [ -n "$PRIV_SUDO" ]; then
-                        ${PRIV_SUDO} npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}" && qwen_npm_install_ok=1
+                        ${PRIV_SUDO} npm install -g "@qwen-code/qwen-code@0.23.3" && qwen_npm_install_ok=1
                     elif [ -n "$USER_NPM_PREFIX" ]; then
-                        npm install -g --prefix "${USER_NPM_PREFIX}" "@qwen-code/qwen-code@${QWEN_CLI_VERSION}" && qwen_npm_install_ok=1
+                        npm install -g --prefix "${USER_NPM_PREFIX}" "@qwen-code/qwen-code@0.23.3" && qwen_npm_install_ok=1
                     else
-                        npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}" && qwen_npm_install_ok=1
+                        npm install -g "@qwen-code/qwen-code@0.23.3" && qwen_npm_install_ok=1
                     fi
                     if [ "$qwen_npm_install_ok" -ne 1 ]; then
                         log_error "Failed to install qwen-code-cli."
@@ -507,7 +507,7 @@ if [[ -n "$INSTALL_CLI" ]]; then
         fi
         log_warn "npm still not available after attempting Node.js installation."
         log_warn "Please install Node.js manually and then run:"
-        log_warn "  npm install -g "@qwen-code/qwen-code@${QWEN_CLI_VERSION}""
+        log_warn "  npm install -g @qwen-code/qwen-code@0.23.3"
     fi
 fi
 
