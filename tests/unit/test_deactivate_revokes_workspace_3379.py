@@ -1151,11 +1151,88 @@ def test_session_refused_after_deactivation(user_db):
 
 
 def test_session_revived_only_by_real_reactivation(user_db):
+    """R-4 + the session-side tokens_valid_after floor (registered leftover):
+    while DEACTIVATED the stale row is refused by the is_active gate; after a
+    REAL reactivation the OLD (pre-stamp) session STAYS DEAD — the same
+    semantics the URL-token side has had since R-5 (the stamp is never
+    cleared on reactivation, so leaked credentials do not resurrect). The
+    reactivated user simply logs in again and mints a fresh post-stamp
+    session. (Before the floor, this test pinned the old asymmetry: the
+    org-sync path deletes no session rows and reactivation flipped the
+    is_active gate back, reviving the pre-deactivation cookie.)"""
     repo, uid = user_db
     repo.update_user(uid, is_active=False)
     assert repo.get_session_by_token("tok-alice") is None
     assert repo.update_user(uid, is_active=True) is True
+    assert repo.get_session_by_token("tok-alice") is None, (
+        "a session created before the deactivation stamp must stay dead "
+        "across reactivation (same semantics as URL tokens, R-5)"
+    )
+    # A fresh login AFTER the reactivation validates normally. The sleep
+    # crosses the second boundary so created_at (second resolution on
+    # SQLite) is unambiguously past the stamp.
+    time.sleep(1.1)
+    assert (
+        repo.create_session(
+            uid,
+            "tok-alice-new",
+            datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
+        )
+        is True
+    )
+    assert repo.get_session_by_token("tok-alice-new") is not None
+
+
+def test_session_of_unstamped_user_unaffected(user_db):
+    """The floor only bites when a stamp exists: a never-deactivated user's
+    sessions (created_at however old) keep validating — no behavior change
+    for the common case."""
+    repo, uid = user_db
+    assert repo.get_user_by_id(uid)["tokens_valid_after"] is None
     assert repo.get_session_by_token("tok-alice") is not None
+
+
+def test_session_created_before_stamp_stays_dead(user_db):
+    """Direct stamp semantics on the session side: a session whose created_at
+    predates the stamp is refused even while the user is ACTIVE — the exact
+    predicate the URL-token comparison performs on the mint timestamp."""
+    repo, uid = user_db
+    assert repo.get_session_by_token("tok-alice") is not None
+    repo.set_tokens_valid_after(uid)  # now — the fixture's row predates it
+    assert repo.get_session_by_token("tok-alice") is None
+
+
+def test_session_created_after_stamp_validates(user_db):
+    """A session minted after the stamp survives — the floor must not brick
+    live users. The stamp is pinned to a clearly earlier wall-clock time so
+    SQLite's second-resolution created_at comparison is unambiguous."""
+    repo, uid = user_db
+    repo.set_tokens_valid_after(uid, when=datetime(2020, 1, 1, 0, 0, 0))
+    assert (
+        repo.create_session(
+            uid,
+            "tok-post-stamp",
+            datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
+        )
+        is True
+    )
+    assert repo.get_session_by_token("tok-post-stamp") is not None
+
+
+def test_admin_route_delete_failure_surviving_row_stays_dead(user_db):
+    """The fail-soft window the leftover was registered against: the admin
+    deactivation path deletes sessions fail-soft (a failure is logged, not
+    fatal), so a row can survive the deactivation — after reactivation the
+    is_active gate alone would have revived it. The floor keeps it dead
+    exactly like the user's pre-deactivation URL tokens."""
+    repo, uid = user_db
+    # Simulate: deactivation stamped + session delete FAILED (row survives).
+    assert repo.update_user(uid, is_active=False) is True
+    assert repo.get_session_by_token("tok-alice") is None  # gate while inactive
+    assert repo.update_user(uid, is_active=True) is True  # reactivation
+    assert repo.get_session_by_token("tok-alice") is None, (
+        "a session that survived the fail-soft revocation must not resurrect " "after reactivation"
+    )
 
 
 def test_session_refused_after_soft_delete(user_db):
