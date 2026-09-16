@@ -13,6 +13,13 @@
 - **#3389 共享命名空间预置**：产品原无任何步骤创建 `<base>/shared`——d 项曾把全新
   部署的 403 记为声明已知缺口；entrypoint 现已预置该目录（`openace-shared` 组，
   **3775**，含 sticky bit）。
+- **#3393（已修，app 侧按需预置）**：entrypoint 没跑到的形态（package 安装、或根目录
+  丢失）下，首个共享项目创建（`create_dir: true` 于 `<base>/shared/<name>`）仍会在
+  缺失的根上 mkdir 失败。POST /api/projects 现在在用户侧 mkdir **之前**按需预置该
+  命名空间根（root 属主、`openace-shared` 组、**3770**＝sticky+setgid、无 others 位，
+  与 entrypoint 语义一致；已存在的根不动、失败降级为干净的 5xx）；
+  `scripts/install-central/package-method/install.sh` 的多用户路径也在安装期补齐同
+  等预置。
 - **#3390（UID 漂移）**：容器重建后 entrypoint 按在役用户重新 useradd 且不固定
   uid，已停用用户的目录被在役账号数字继承——f 项断言预期 FAIL，如实记录。
 - **#3394（已修，PR #3395）**：前端完整性检查期望与 vite 产物不符导致生产镜像
