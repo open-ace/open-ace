@@ -237,11 +237,17 @@ def test_manager_get_user_webui_url_single_user():
 
     manager._launch_webui_process = MagicMock(side_effect=fake_launch)
     manager._wait_for_service_ready = MagicMock(return_value=True)
+    # The single-user port is derived from the configured range's first FREE
+    # port (default start 3100); stub the availability probe so the test does
+    # not depend on the runner's port table (same determinism rule as the
+    # multi-user instance-limit test).
+    manager._is_port_available = MagicMock(return_value=True)
 
     url, token = manager.get_user_webui_url(user_id=1, system_account="testuser")
 
-    # Single-user mode pins the WebUI to the fixed port 3100 (Issue #3129):
-    # the config URL's host is kept but its port is replaced with 3100.
+    # Single-user mode pins the WebUI to the range's first free port — the
+    # default range starts at 3100 (Issue #3129): the config URL's host is
+    # kept but its port is replaced with 3100.
     assert url == "http://localhost:3100"
     # Token is generated for iframe auth in cross-origin API calls
     # v2 format: v2:user_id:port:timestamp:random:signature

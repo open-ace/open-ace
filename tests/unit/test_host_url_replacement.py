@@ -84,16 +84,19 @@ def test_get_user_webui_url_with_host_url():
     manager.stop_cleanup_thread()
 
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
-    # a real WebUI process in test environment (Issue #3129)
+    # a real WebUI process in test environment (Issue #3129). The single-user
+    # port is the configured range's first FREE port (default start 3100), so
+    # the availability probe is stubbed for determinism on busy runners.
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         # Without host_url: uses config.url directly (fallback)
         url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
         assert url1 == "http://172.17.0.1:3100"
 
-        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        # With host_url: uses request IP with the range's port (Issue #1357)
         url2, token2 = manager.get_user_webui_url(
             user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
         )
@@ -105,10 +108,11 @@ def test_get_user_webui_url_with_host_url():
 
 
 def test_get_user_webui_url_preserves_port_single_user():
-    """Test that single-user mode uses fixed port 3100 (Issue #1357).
+    """Test that single-user mode uses the range's first free port (Issue #1357).
 
-    In single-user mode (docker compose), WebUI runs on fixed port 3100.
-    URL should come from request.host_url with port 3100, NOT from config.json.
+    In single-user mode (docker compose) the WebUI runs on the first free
+    port of the configured range — 3100 for the default range. URL should
+    come from request.host_url with that port, NOT from config.json.
     """
     # Config URL with port (but will be ignored in single-user mode with host_url)
     config = WorkspaceConfig(
@@ -120,16 +124,19 @@ def test_get_user_webui_url_preserves_port_single_user():
     manager.stop_cleanup_thread()
 
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
-    # a real WebUI process in test environment (Issue #3129)
+    # a real WebUI process in test environment (Issue #3129); the port
+    # availability probe is stubbed so the default range's start (3100) wins
+    # deterministically.
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         # Without host_url: uses config.url as fallback (with port 3100)
         url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
         assert url1 == "http://172.17.0.1:3100"
 
-        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        # With host_url: uses request IP with the range's port (Issue #1357)
         url2, token2 = manager.get_user_webui_url(
             user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
         )

@@ -101,6 +101,7 @@ def test_user_url_route_uses_request_host_not_config_ip(
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         resp = _authed_get(
             workspace_app.test_client(),
@@ -111,7 +112,8 @@ def test_user_url_route_uses_request_host_not_config_ip(
     assert resp.status_code == 200
     data = resp.get_json()
 
-    # url must be built from the request host (single-user fixed port 3100),
+    # url must be built from the request host (single-user range port, 3100
+    # for the default range),
     # NOT the container IP.
     assert data["url"] == "http://my-host.example:3100", data["url"]
     assert UNREACHABLE_CONTAINER_IP not in data["url"]
@@ -138,6 +140,7 @@ def test_user_url_route_uses_localhost_in_default_case(
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         resp = _authed_get(
             workspace_app.test_client(),

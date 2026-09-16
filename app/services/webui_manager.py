@@ -1441,12 +1441,19 @@ class WebUIManager:
                         self._stop_single_user_instance_internal()
                     self._start_single_user_instance(user_id, system_account, base_url)
 
-            # Generate token for the request
-            token = self.generate_token(user_id, 3100)
-            # Always add port 3100 in single-user mode
-            # Remove any existing port from base_url first, then add 3100
+            # Generate token for the request. The port follows the INSTANCE's
+            # actual port (range-derived, #3379 §5.8): a deployment that
+            # offsets the published range must not advertise the historical
+            # fixed 3100 its instance never bound.
+            instance = self._single_user_instance
+            if instance is None:  # pragma: no cover - start() raises on failure
+                raise ValueError("Single-user WebUI instance is not running")
+            instance_port = instance.port
+            token = self.generate_token(user_id, instance_port)
+            # Remove any existing port from base_url first, then add the
+            # instance's port.
             base_url_no_port = self._remove_port_from_url(base_url)
-            url = f"{base_url_no_port}:3100"
+            url = f"{base_url_no_port}:{instance_port}"
             return url, token
 
         # KNOWN LIMITATION (Issue #3378 review, m6 — documented, deliberately
@@ -1563,9 +1570,35 @@ class WebUIManager:
             else WEBUI_FORM_LOCAL
         )
 
+    def _allocate_single_user_port(self) -> int:
+        """Pick the single-user instance's port from the configured range.
+
+        Historically the port was hardcoded 3100 regardless of
+        ``workspace.port_range_start`` (default 3100 — so default deployments
+        are unchanged). Two shapes broke (#3379 acceptance tail, handbook
+        §5.8): a deployment that offsets the published range (the multi-user
+        stack already holds host 3100-3200) got an instance bound on an
+        UNPUBLISHED container port advertising an unreachable ``:3100`` URL;
+        and a busy 3100 (foreign listener) was never detected — the connect
+        based readiness probe happily "succeeded" against the foreign
+        service. The port is now the FIRST FREE port of the configured range
+        (same availability probe as the multi-user ``allocate_port``); the
+        URL and token follow the instance's actual port.
+
+        Raises:
+            ValueError: if no port in the configured range is available.
+        """
+        for port in range(self.config.port_range_start, self.config.port_range_end + 1):
+            if self._is_port_available(port):
+                return port
+        raise ValueError(
+            f"No available ports in range {self.config.port_range_start}-"
+            f"{self.config.port_range_end} for the single-user WebUI instance"
+        )
+
     def _start_single_user_instance(self, user_id: int, system_account: str, base_url: str) -> None:
         """
-        Start the single-user WebUI instance on port 3100.
+        Start the single-user WebUI instance on the range's first free port.
 
         This method is called when the first user requests the WebUI URL
         in single-user mode (Docker compose). It starts a single shared
@@ -1579,9 +1612,10 @@ class WebUIManager:
             base_url: Base URL from request (e.g., http://192.168.1.87).
 
         Raises:
-            ValueError: If the WebUI process fails to start.
+            ValueError: If the WebUI process fails to start or no port in the
+                configured range is available.
         """
-        port = 3100  # Fixed port for single-user mode
+        port = self._allocate_single_user_port()
         logger.info(f"Starting single-user WebUI instance on port {port}")
 
         # Generate token
