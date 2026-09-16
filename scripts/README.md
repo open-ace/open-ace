@@ -35,7 +35,7 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 - `open-ace.service`、`openace-scheduler.service` — systemd 单元
 - sudoers 家族：`generate-sudoers.sh`、`upgrade-sudoers-security.sh`、`openace-{cat,chown,mkdir,rm,restore-sudoers,useradd,write-as,webui-launch}.sh`、`openace-{gh,git}.py`
 - 发布：`release.sh`、`gen_requirements_lock.sh`、`generate_changelog.py`
-- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
+- 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`（仅覆盖 3 个旧存储，**不得**用作密钥轮换——轮换走 `rotate_sso_encryption.py` 全存储原子路径）、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
 
 ### 4. 应急工具（低频但关键，勿当死代码清理）
 
@@ -50,3 +50,49 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 2. 长期运维入口优先挂到 `manage.py` 子命令，而不是新增顶层文件。
 3. 确需新增顶层脚本时：自带 docstring 说明用途与调用方；若是 CI 门禁，
    同步登记 `ci/suites.json`；若是安全/应急工具，在 `docs/` 对应文档留引用。
+
+## 升级 qwen 栈（qwen-code-webui + @qwen-code/qwen-code）runbook
+
+两个包按**经验证的一对**固定版本分发（不追 `@latest`：安装脚本里的
+Node>=22 门与 adapter 启动参数只对 pin 过的组合验证过，而 npm 对
+engines 冲突只给 EBADENGINE 警告仍 exit 0）。版本 pin 在**七处**（另有三类文档指引同步：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
+`docs/{cn,en}/DEPLOYMENT.md`、`scripts/install-central/*/README.md`；
+docker-method 不设宿主机 pin——其 qwen 栈完全由镜像内 `Dockerfile` 的
+pin 提供），
+`tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites`
+锁定它们必须一致，且全仓扫描不允许出现未带 `@版本号`（或指向上述常量的
+`${..._VERSION}` 变体）的 qwen 栈 npm install 条目——升级时改漏任何
+一处 CI 会以"各站点版本清单"报错。
+
+升级步骤：
+
+1. **改七处 pin**（同一 commit）：
+   - `Dockerfile`（webui/CLI 固定版本对写在同一条安装命令里；同时覆盖
+     docker-method 部署的镜像内栈）
+   - `scripts/docker/webui-sandbox.Dockerfile`（同一对）
+   - `scripts/install-central/package-method/install.sh`（`QWEBUI_VERSION` / `QWEN_CLI_VERSION`）
+   - `remote-agent/install.sh`（`QWEN_CLI_VERSION`）
+   - `remote-agent/install.ps1`（`$QwenCliVersion`）
+   - `remote-agent/terminal_menu.py`（`install_cmd`）
+   - `remote-agent/cli_adapters/qwen_code.py`（`PINNED_VERSION`，`get_install_command` 修复路径）
+   - 同步文档中的版本与 Node 要求：`docs/{cn,en}/REMOTE_WORKSPACE.md`、
+     `docs/{cn,en}/DEPLOYMENT.md`（宿主机手工安装指引）、
+     `scripts/install-central/{package-method,docker-method}/README.md`
+2. **兼容性验证**（对照新版本源码/产物逐项核实，参考 PR #3386 的先例）：
+   - 会话存储布局 `~/.qwen/projects/<id>/chats/<sessionId>.jsonl` 是否不变
+     （`fetch_qwen.py` 与 webui histories 依赖）
+   - remote-agent 使用的 6 个 flag：`--auth-type openai`、
+     `--input-format/--output-format stream-json`、`--channel=SDK`、
+     `--resume`、`--approval-mode`（含取值枚举——0.15→0.20 期间曾新增
+     `auto`，`suggest` 从来不是合法值）
+   - `OPENAI_API_KEY`/`OPENAI_BASE_URL` 代理约定
+   - `engines.node`：若提高，同步所有 Node 版本门（镜像 NodeSource、
+     安装脚本 `ensure_node_22`/版本门、CI 契约）
+   - webui dist 行为：此前 5 个 bundle patch 对应的上游修复
+     （histories/navparams/permission/vscode-folder/local-permission）
+     是否仍然存在
+   - 沙箱基础镜像账户布局（node 官方镜像 uid/gid 1000）
+3. **同步测试期望**：`tests/unit/test_remote_agent_installer.py` 的固定
+   版本断言、`test_qwen_adapter_approval_mode.py` 的合法枚举。
+4. **CI 兜底**：`docker-sandbox` job 每个 PR 构建沙箱镜像（PR Gate
+   required）；`docker` job 在 main push 构建完整生产镜像。

@@ -793,17 +793,21 @@ Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 
 ### qwen-code-webui Installation
 
-Install `qwen-code-webui` in one of these locations:
+Install `qwen-code-webui` in one of these locations (pinned version pair,
+Node >= 22 required — npm only warns on an engines mismatch and still exits 0):
 
 ```bash
-# Method 1: npm global install (recommended)
-npm install -g @ivycomputing/qwen-code-webui
+# Method 1: npm global install of the pinned pair (recommended — the same
+# validated combination shipped by the installers and the Docker image)
+npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3
 
 # Verify installation
 which qwen-code-webui
 # Should output: /usr/local/bin/qwen-code-webui
 
-# Method 2: Manual install
+# Method 2: build from source (not recommended)
+# Upstream git tags lag the npm releases; cloning HEAD yields an unvalidated
+# version for this deployment. Use only if you can validate the pair yourself.
 git clone https://github.com/ivycomputing/qwen-code-webui.git
 cd qwen-code-webui
 npm install && npm run build

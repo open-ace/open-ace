@@ -524,10 +524,12 @@ class TestGithubOpsCommandShapeCoverage:
     GIT_WRAPPER_ENTRY = "/usr/local/bin/openace-git *"
     GH_WRAPPER_ENTRY = "/usr/local/bin/openace-gh *"
 
+    # docker-method deliberately generates NO host sudoers (the container's
+    # entrypoint owns that, PR #3386 R15 review); entrypoint + package-method
+    # + generate-sudoers.sh remain under contract.
     GENERATOR_FILES = [
         ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
         ("scripts/install-central/package-method/install.sh", INSTALL_SH),
-        ("scripts/install-central/docker-method/install.sh", DOCKER_METHOD_INSTALL_SH),
         ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
     ]
 
@@ -580,17 +582,10 @@ class TestGithubOpsCommandShapeCoverage:
             assert needle in text
         assert "Cmnd_Alias OPENACE_UTILS" in text
 
-    def test_docker_method_installer_installs_git_gh_wrappers_and_config(self):
-        """Docker-method installs must install wrappers and config files."""
-        text = DOCKER_METHOD_INSTALL_SH.read_text()
-        for needle in ("openace-git.py", "openace-gh.py", "config/openace", "/etc/openace"):
-            assert needle in text
-
     @pytest.mark.parametrize(
         "label,path",
         [
             ("scripts/install-central/package-method/install.sh", INSTALL_SH),
-            ("scripts/install-central/docker-method/install.sh", DOCKER_METHOD_INSTALL_SH),
         ],
     )
     def test_git_gh_wrapper_install_failures_block_sudoers_rewrite(self, label, path):
@@ -667,29 +662,7 @@ openace ALL=(ALL) NOPASSWD: MKDIR_SAFE
         assert not self._git_gh_wrapper_upgrade_probe_passes(old_sudoers)
         assert self._git_gh_wrapper_upgrade_probe_passes(new_sudoers)
 
-    def test_docker_method_incremental_update_probes_git_gh_wrappers_before_early_return(self):
-        """Docker-method upgrades must not keep old direct git/gh sudoers aliases."""
-        text = DOCKER_METHOD_INSTALL_SH.read_text()
-        incremental_start = text.index("# Check if sudoers file already exists")
-        early_return = text.index('if [ "$needs_update" = false ]', incremental_start)
-        probe_block = text[incremental_start:early_return]
-
-        for needle in (
-            "Cmnd_Alias[[:space:]]+GIT_SAFE",
-            "/usr/local/bin/openace-git[[:space:]]+\\*",
-            "Cmnd_Alias[[:space:]]+GH_SAFE",
-            "/usr/local/bin/openace-gh[[:space:]]+\\*",
-            "NOPASSWD: GIT_SAFE",
-            "NOPASSWD: GH_SAFE",
-        ):
-            assert needle in probe_block, (
-                f"Docker-method sudoers incremental probes must check {needle!r} "
-                "before the 'already correct' return, otherwise upgrades can "
-                "preserve old direct git/gh wildcard aliases from Issue #2650."
-            )
-
-    # Bare-wildcard shapes the #2635 acceptance criterion forbids: an entry
-    # that is just the binary plus ``*`` — whether written with a resolved
+    # A bare wildcard is either the resolved host binary at a known
     # path, the unexpanded ${GIT_PATH}/${GH_PATH} variable, or a bare
     # ``git``/``gh`` name — after stripping line-continuation backslashes.
     BARE_WILDCARD_RE = re.compile(
@@ -871,10 +844,12 @@ class TestMkdirShapeCoverage:
         "/bin/mkdir *",
     ]
 
+    # docker-method deliberately generates NO host sudoers (the container's
+    # entrypoint owns that, PR #3386 R15 review); entrypoint + package-method
+    # + generate-sudoers.sh remain under contract.
     GENERATOR_FILES = [
         ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
         ("scripts/install-central/package-method/install.sh", INSTALL_SH),
-        ("scripts/install-central/docker-method/install.sh", DOCKER_METHOD_INSTALL_SH),
         ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
     ]
 
@@ -1012,3 +987,24 @@ class TestSudoersDrift:
         # Generator should also have GH_SAFE
         generator_text = GENERATE_SUDOERS_SH.read_text()
         assert "Cmnd_Alias GH_SAFE" in generator_text, "Generator should define GH_SAFE"
+
+
+class TestDockerMethodHostSudoersAbsence:
+    """PR #3386 R15 review: docker deployments run the qwen stack and its
+    sudoers entirely inside the image (Dockerfile pin + entrypoint
+    generation). The docker-method installer must not install host wrappers
+    or write host sudoers — the container cannot use them."""
+
+    def test_docker_method_installer_generates_no_host_sudoers(self):
+        text = DOCKER_METHOD_INSTALL_SH.read_text()
+        for token in (
+            "install_git_gh_wrappers",
+            "install_run_as_wrapper",
+            "install_fetch_wrapper",
+            "configure_sudoers",
+            "/etc/sudoers.d",
+        ):
+            assert token not in text, (
+                f"docker-method must not touch host sudoers ({token!r} found); "
+                "docker-entrypoint.sh owns the in-container sudoers"
+            )

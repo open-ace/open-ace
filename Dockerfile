@@ -91,11 +91,11 @@ RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources
     sshpass \
     git \
     acl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     # === Node.js Installation Verification (Issue #1006) ===
     && test -x /usr/bin/node \
-    && node --version | grep -q '^v20\.' \
+    && node --version | grep -q '^v22\.' \
     # Create symlink backup for node (prevent accidental removal, skip if already same file)
     && sh -c 'test -e /bin/node || ln -sf /usr/bin/node /bin/node' \
     # === Process Tools Verification (Issue #1050) ===

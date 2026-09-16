@@ -322,21 +322,21 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 **前置要求：**
 
-1. **Node.js 20+**：qwen-code-webui 要求 Node.js 20 或更高版本
+1. **Node.js 22+**：@qwen-code/qwen-code@0.23.3 要求 Node.js 22 或更高版本（engines.node >=22）
    ```bash
-   # 使用 NodeSource 安装 Node.js 20.x
-   curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+   # 使用 NodeSource 安装 Node.js 22.x
+   curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
    yum install -y nodejs  # Rocky Linux/CentOS
 
    # 或 Debian/Ubuntu
-   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
    apt-get install -y nodejs
    ```
 
 2. **安装 qwen-code-webui 和 qwen-code CLI**：
    ```bash
-   npm install -g qwen-code-webui
-   npm install -g @qwen-code/qwen-code
+   npm install -g qwen-code-webui@0.2.43
+   npm install -g @qwen-code/qwen-code@0.23.3
    ```
 
    **注意：**
@@ -349,7 +349,7 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 **自动配置：**
 
 安装脚本在启用多用户模式时会自动：
-- 安装 Node.js 20.x（如果未安装）
+- 安装 Node.js 22.x（如果未安装）
 - 安装 `qwen-code-webui` 和 `@qwen-code/qwen-code` CLI
 - 检测 `qwen-code-webui` 安装位置并写入配置
 - 创建 `/etc/sudoers.d/open-ace-webui` 配置文件

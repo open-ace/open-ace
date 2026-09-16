@@ -30,7 +30,7 @@ TOOLS = [
         "name": "Qwen Code",
         "cli": "qwen",
         "cmd": "qwen --auth-type openai",
-        "install_cmd": "npm install -g @qwen-code/qwen-code@latest",
+        "install_cmd": "npm install -g @qwen-code/qwen-code@0.23.3",
         "env_key": "OPENAI_API_KEY",
     },
     {
@@ -69,6 +69,72 @@ YELLOW = "\x1b[33m"
 
 def check_installed(cli_name: str) -> bool:
     return shutil.which(cli_name) is not None
+
+
+# Pinned to the validated pair (see Dockerfile); npm only warns EBADENGINE on
+# an engines mismatch and still exits 0, so availability checks alone would
+# launch an unvalidated Node/CLI combination (PR #3386 review).
+QWEN_PINNED_VERSION = "0.23.3"
+
+
+def qwen_precheck() -> tuple[bool, str]:
+    """Fail-closed precheck before the menu installs/launches qwen.
+
+    1. Node >= 22 (required by the pinned qwen-code version; npm exits 0 on
+       a mere EBADENGINE warning).
+    2. A qwen already on PATH must EXACTLY match the pinned version — an
+       arbitrary old binary would otherwise launch unvalidated.
+    Both the Windows and POSIX select paths route through here.
+    """
+    if shutil.which("node") is None:
+        return (
+            False,
+            "Node.js >= 22 is required by qwen-code "
+            f"{QWEN_PINNED_VERSION}, but node was not found. "
+            "Ask your admin to install Node.js >= 22.",
+        )
+    try:
+        out = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+        major = int(out.stdout.strip().lstrip("v").split(".")[0])
+    except subprocess.TimeoutExpired:
+        # TimeoutExpired is not an OSError; a hung node/wrapper must fail the
+        # precheck instead of crashing the menu (PR #3386 review).
+        return (
+            False,
+            "Node.js >= 22 is required by qwen-code "
+            f"{QWEN_PINNED_VERSION}, but 'node --version' timed out "
+            "(possibly broken Node installation). Ask your admin to check it.",
+        )
+    except (ValueError, IndexError, OSError):
+        major = 0
+    if major < 22:
+        return (
+            False,
+            f"Node.js >= 22 is required by @qwen-code/qwen-code@{QWEN_PINNED_VERSION} "
+            f"(found Node {major}). npm would install an unsupported combination.",
+        )
+    if shutil.which("qwen") is not None:
+        try:
+            out = subprocess.run(
+                ["qwen", "--version"], capture_output=True, text=True, timeout=10, check=False
+            )
+            installed = (
+                out.stdout.strip().splitlines()[0].strip().lstrip("v") if out.stdout.strip() else ""
+            )
+        except (IndexError, OSError, subprocess.TimeoutExpired):
+            # A hung/broken qwen wrapper reads as "unknown" below and is
+            # refused, never launched (fail closed).
+            installed = ""
+        if installed != QWEN_PINNED_VERSION:
+            return (
+                False,
+                f"qwen on PATH is {installed or 'unknown'}, this deployment runs "
+                f"@qwen-code/qwen-code@{QWEN_PINNED_VERSION}. Refusing to launch "
+                "an unvalidated version — ask your admin to reinstall.",
+            )
+    return True, ""
 
 
 def get_menu_items() -> list[dict]:
@@ -209,6 +275,13 @@ def handle_select(item: dict) -> None:
         clear_active_terminal()
         os.execvp(get_login_shell_args()[0], get_login_shell_args())
         return
+
+    if item.get("cli") == "qwen":
+        ok, reason = qwen_precheck()
+        if not ok:
+            show_message(f"{BOLD_RED}✗ {reason}{RESET}")
+            wait_for_continue()
+            return
 
     if item["installed"] and not item["configured"]:
         show_message(

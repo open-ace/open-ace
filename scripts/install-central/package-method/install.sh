@@ -1679,73 +1679,266 @@ stop_webui_systemd_service() {
     return 0
 }
 
-# Install qwen-code-webui via npm if not found
-install_webui() {
-    print_info "Installing qwen-code-webui via npm..."
-    print_info "This may take several minutes, please wait..."
+# Canonical qwen stack versions for the package-method runtime. Keep in sync
+# with the Dockerfile pair (qwen-code-webui@0.2.43 + @qwen-code/qwen-code@0.23.3).
+QWEBUI_VERSION="0.2.43"
+QWEN_CLI_VERSION="0.23.3"
 
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_warning "npm not found, installing Node.js via NodeSource..."
-        print_info "Downloading Node.js 20.x setup script..."
-        if [ "$EUID" -eq 0 ]; then
-            # Use NodeSource to get Node.js 20.x
-            if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
-                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-                if command -v dnf &>/dev/null; then
-                    dnf install -y nodejs
-                else
-                    yum install -y nodejs
-                fi
-            elif command -v apt-get &>/dev/null; then
-                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-                apt-get install -y nodejs
-            else
-                print_error "Cannot install Node.js automatically on this system"
-                print_info "Please install Node.js 20+ manually"
-                return 1
-            fi
-        else
-            print_error "Not running as root, cannot install Node.js automatically"
-            print_info "Please run with sudo: curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo yum install -y nodejs"
-            return 1
-        fi
+# Node major version, 0 when node is absent (guarded: never aborts the script).
+node_major_version() {
+    if ! command -v node &>/dev/null; then
+        echo 0
+        return 0
     fi
+    local version
+    version="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
+    echo "${version:-0}"
+}
 
-    # Install qwen-code-webui globally (with progress)
-    print_info "Downloading qwen-code-webui package..."
-    print_info "Package size: ~50MB, this may take 2-5 minutes depending on network speed"
-    if npm install -g qwen-code-webui; then
-        print_success "qwen-code-webui installed successfully"
+# Ensure Node >= 22 (required by @qwen-code/qwen-code@0.23.3, engines.node >=22;
+# npm only warns EBADENGINE and still exits 0). Upgrades in place via NodeSource
+# when an older Node is present; fails explicitly when it cannot reach 22.
+ensure_node_22() {
+    local major
+    major="$(node_major_version)"
+    if [ "$major" -ge 22 ]; then
+        return 0
+    fi
+    if [ "$major" -gt 0 ]; then
+        print_info "Node ${major} < 22 (required by @qwen-code/qwen-code@${QWEN_CLI_VERSION}); upgrading Node.js..."
     else
-        print_error "Failed to install qwen-code-webui"
+        print_info "Node.js not found; installing Node.js 22.x..."
+    fi
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root required to install/upgrade Node.js. Install Node >= 22 and re-run."
         return 1
     fi
-
-    # Check and install qwen-code CLI (required by qwen-code-webui)
-    if ! command -v qwen &>/dev/null; then
-        print_info ""
-        print_info "qwen-code CLI not found, installing..."
-        print_info "This is required for qwen-code-webui to function"
-        print_info "Package size: ~30MB, this may take 1-3 minutes"
-        if npm install -g @qwen-code/qwen-code; then
-            print_success "qwen-code CLI installed successfully"
+    if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        if command -v dnf &>/dev/null; then
+            dnf install -y nodejs
         else
-            print_warning "Failed to install qwen-code CLI automatically"
-            print_info "You may need to install it manually: npm install -g @qwen-code/qwen-code"
+            yum install -y nodejs
         fi
+    elif command -v apt-get &>/dev/null; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+            || { print_error "NodeSource setup failed."; return 1; }
+        apt-get install -y nodejs
     else
-        print_success "qwen-code CLI already installed"
+        print_error "Cannot install/upgrade Node.js automatically on this system. Install Node >= 22 and re-run."
+        return 1
     fi
-
-    # Create symlinks in /usr/bin for easier access
-    create_webui_symlinks
-
+    major="$(node_major_version)"
+    if [ "$major" -lt 22 ]; then
+        print_error "Node upgrade did not reach >= 22 (found: ${major}). Refusing to continue."
+        return 1
+    fi
+    print_success "Node.js $(node --version) active"
     return 0
 }
 
+# Single gated, pinned install path for the qwen stack. EVERY deployment path
+# (fresh install, existing-but-missing webui, and upgrades of existing
+# webui/CLI) funnels through here: Node gate first, then explicit pinned
+# versions, then verification. Never installs an unpinned/latest version.
+install_qwen_stack() {
+    ensure_node_22 || return 1
+    if ! command -v npm &>/dev/null; then
+        print_error "npm not available after Node setup; cannot install the qwen stack."
+        return 1
+    fi
+    print_info "Installing qwen-code-webui@${QWEBUI_VERSION} + @qwen-code/qwen-code@${QWEN_CLI_VERSION}..."
+    if ! npm install -g "qwen-code-webui@0.2.43"; then
+        print_error "Failed to install qwen-code-webui@${QWEBUI_VERSION}"
+        return 1
+    fi
+    if ! npm install -g "@qwen-code/qwen-code@0.23.3"; then
+        print_error "Failed to install @qwen-code/qwen-code@${QWEN_CLI_VERSION}"
+        return 1
+    fi
+    if ! command -v qwen-code-webui &>/dev/null; then
+        print_error "qwen-code-webui not on PATH after install"
+        return 1
+    fi
+    # Verify the webui that will actually be LAUNCHED (PR #3386 R15 review):
+    # the version contract is the webui+CLI pair, but a stale binary at a
+    # candidate location can shadow the fresh npm install (e.g. npm updates
+    # /usr/bin while an old /usr/local/bin entry wins resolution). Resolve
+    # with the same resolver the runtime/sudoers config uses and require an
+    # exact version match there — never trust presence alone.
+    local webui_exe webui_ver
+    webui_exe="$(find_webui_executable 2>/dev/null)"
+    if [ -z "$webui_exe" ]; then
+        webui_exe="$(command -v qwen-code-webui)"
+    fi
+    if [ -z "$webui_exe" ]; then
+        print_error "qwen-code-webui executable not found after install"
+        return 1
+    fi
+    webui_ver="$("$webui_exe" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [ "${webui_ver#v}" != "${QWEBUI_VERSION}" ]; then
+        print_error "qwen-code-webui version verification failed at ${webui_exe}"
+        print_error "expected ${QWEBUI_VERSION}, got: ${webui_ver:-none} — a stale binary is shadowing the npm install; remove it or fix PATH order."
+        return 1
+    fi
+    # Exact-match verification (plain grep -q would also accept 0.23.30 /
+    # 10.23.3 / any surrounding text — PR #3386 review): normalize the first
+    # output line and compare as a whole string.
+    local installed_ver
+    installed_ver="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [ "${installed_ver#v}" != "${QWEN_CLI_VERSION}" ]; then
+        print_error "qwen-code CLI version verification failed (expected ${QWEN_CLI_VERSION}, got: ${installed_ver:-none})"
+        return 1
+    fi
+    print_success "qwen stack ready: webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION}"
+    return 0
+}
+
+
 # Create symlinks in /usr/bin for qwen-code-webui and qwen-code executables
 # This ensures all users can access these commands regardless of npm global install location
+# Install the qwen stack ONLY when this deployment actually uses it, and
+# only AFTER the fresh/upgrade decision (PR #3386 review):
+#  - workspace capabilities enabled (WORKSPACE_ENABLED / multi-user), or
+#  - a managed stack already exists on this host (its upgrade must reach the
+#    pinned versions).
+# API-only deployments (--config WORKSPACE_ENABLED=false /
+# WORKSPACE_MULTI_USER_MODE=false, no existing stack) skip Node/npm entirely,
+# and a declined upgrade never mutates Node or global npm packages.
+maybe_install_qwen_stack() {
+    if [ "$WORKSPACE_ENABLED" != "true" ] \
+        && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
+        && ! command -v qwen-code-webui >/dev/null 2>&1 \
+        && ! command -v qwen >/dev/null 2>&1; then
+        print_info "Workspace disabled and no existing qwen stack found; skipping qwen stack installation (API-only deployment)."
+        return 0
+    fi
+    if ! install_qwen_stack; then
+        print_error "qwen stack installation/verification failed (Node >= 22 required by @qwen-code/qwen-code@${QWEN_CLI_VERSION})."
+        print_error "Fix Node/npm and re-run."
+        exit 1
+    fi
+}
+
+# Deploy-mode variant of maybe_install_qwen_stack() (see its docstring).
+maybe_install_qwen_stack_remote() {
+    local remote="$1"
+    # Existing remote deployments may be API-only, and interactive_config()
+    # only reads the LOCAL config.json — for an interactively confirmed
+    # remote upgrade WORKSPACE_ENABLED/WORKSPACE_MULTI_USER_MODE would still
+    # hold their defaults. Load the flags from the remote config before
+    # deciding (PR #3386 review); a missing/unreadable config keeps the
+    # defaults (fresh install).
+    # One-liner over ssh (single-quoted remote command, python uses only
+    # double quotes): macOS bash 3.2 fails to parse a heredoc inside $( )
+    # command substitution when the script arrives via `bash -c`, which is
+    # exactly how the installer tests execute these functions.
+    # Semantics: whole config absent (fresh install) -> "missing" (keep this
+    # deployment's params); existing config -> per-key values with the
+    # RUNTIME defaults (WorkspaceConfig false) for missing keys, so
+    # pre-workspace API-only deployments are not forced onto the qwen stack
+    # (PR #3386 review). An unreadable config also falls back to "missing".
+    local flags
+    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False)).lower())"' 2>/dev/null || echo missing)"
+    if [ "$flags" != "missing" ] && [ -n "$flags" ]; then
+        WORKSPACE_ENABLED="${flags%% *}"
+        WORKSPACE_MULTI_USER_MODE="${flags##* }"
+        print_info "Remote config: WORKSPACE_ENABLED=$WORKSPACE_ENABLED WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE"
+    fi
+    if [ "$WORKSPACE_ENABLED" != "true" ] \
+        && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ] \
+        && ! ssh "$remote" "command -v qwen-code-webui >/dev/null 2>&1 || command -v qwen >/dev/null 2>&1"; then
+        print_info "Workspace disabled and no existing qwen stack on ${remote}; skipping qwen stack installation (API-only deployment)."
+        return 0
+    fi
+    if ! ensure_qwen_stack_remote "$remote"; then
+        print_error "Remote qwen stack installation/verification failed."
+        exit 1
+    fi
+}
+
+# Ensure the qwen stack (Node >= 22 + pinned webui/CLI) on a REMOTE deploy
+# target via ssh — the deploy-mode equivalent of install_qwen_stack(). Runs
+# the same gate/versions/verification; sudo is used on the remote when the
+# login user is not root. Fails hard so a remote deploy never finishes with
+# app code updated but the old webui/CLI (and possibly Node 20) still active.
+ensure_qwen_stack_remote() {
+    local remote="$1"
+    print_info "Ensuring qwen stack on ${remote} (Node >= 22 + webui@${QWEBUI_VERSION} + cli@${QWEN_CLI_VERSION})..."
+    # sudo is chosen per-host, never unconditional (PR #3386 review): root
+    # without sudo must work; a user-scoped npm (nvm / writable prefix) must
+    # install directly; sudo is only used when non-root AND passwordless.
+    if ssh "$remote" bash -s -- "$QWEBUI_VERSION" "$QWEN_CLI_VERSION" <<'REMOTE_QWEN_SCRIPT'
+set -e
+WEBUI_VER="$1"
+CLI_VER="$2"
+node_major() {
+    if command -v node >/dev/null 2>&1; then
+        node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1
+    else
+        echo 0
+    fi
+}
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        SUDO="sudo"
+    fi
+fi
+if [ "$(node_major)" -lt 22 ]; then
+    echo "Node < 22 on remote; installing/upgrading via NodeSource..."
+    if [ "$(id -u)" -ne 0 ] && [ -z "$SUDO" ]; then
+        echo "ERROR: non-root login without passwordless sudo cannot upgrade Node; install Node >= 22 manually and re-run." >&2
+        exit 1
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} apt-get install -y nodejs
+    elif command -v dnf >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} dnf install -y nodejs
+    elif command -v yum >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | ${SUDO} bash -
+        ${SUDO} yum install -y nodejs
+    else
+        echo "ERROR: cannot install Node.js on remote (no supported package manager); install Node >= 22 manually and re-run." >&2
+        exit 1
+    fi
+fi
+if [ "$(node_major)" -lt 22 ]; then
+    echo "ERROR: Node >= 22 required on remote (found $(node_major))" >&2
+    exit 1
+fi
+command -v npm >/dev/null 2>&1 || { echo "ERROR: npm not available on remote" >&2; exit 1; }
+# npm strategy: install directly when the global prefix is writable by the
+# login user (nvm / user-scoped installs); use sudo only for system prefixes.
+NPM_PREFIX="$(npm config get prefix 2>/dev/null || true)"
+NPM_CMD=(npm)
+if [ -n "$NPM_PREFIX" ] && [ ! -w "$NPM_PREFIX" ]; then
+    if [ -n "$SUDO" ]; then
+        NPM_CMD=(sudo npm)
+    else
+        echo "ERROR: npm prefix ${NPM_PREFIX} is not writable and no sudo is available on the remote." >&2
+        exit 1
+    fi
+fi
+"${NPM_CMD[@]}" install -g "qwen-code-webui@0.2.43"
+"${NPM_CMD[@]}" install -g "@qwen-code/qwen-code@0.23.3"
+command -v qwen-code-webui >/dev/null 2>&1 || { echo "ERROR: qwen-code-webui not on PATH after install" >&2; exit 1; }
+INSTALLED_VER="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+[ "${INSTALLED_VER#v}" = "${CLI_VER}" ] || { echo "ERROR: qwen CLI version mismatch on remote (expected ${CLI_VER}, got ${INSTALLED_VER:-none})" >&2; exit 1; }
+echo "REMOTE_QWEN_STACK_OK"
+REMOTE_QWEN_SCRIPT
+    then
+        print_success "qwen stack ready on ${remote}"
+        return 0
+    fi
+    print_error "Failed to install/verify the qwen stack on ${remote}."
+    print_error "Ensure Node >= 22 and a writable npm prefix (or sudo) work on the remote, then re-run."
+    return 1
+}
+
 create_webui_symlinks() {
     # Check if running as root (required to write to /usr/bin)
     if [ "$EUID" -ne 0 ]; then
@@ -1856,64 +2049,34 @@ find_webui_executable() {
         fi
     done
 
-    # Try to find in PATH
+    # Try to find in PATH (command -v: POSIX builtin — `which` is absent on
+    # minimal hosts and would silently yield an empty-but-successful resolve)
+    if command -v qwen-code-webui &>/dev/null; then
+        command -v qwen-code-webui
+        return 0
+    fi
+
+    # Not found: EVERY install path (npm present or not) funnels through the
+    # single gated, pinned installer — an unpinned `npm install -g <pkg>`
+    # would follow npm's "latest" (currently engines.node >=22) past a mere
+    # EBADENGINE warning and leave an unsupported Node/CLI combination.
+    print_warning "qwen-code-webui not found" >&2
+    if ! install_qwen_stack >&2; then
+        print_error "Failed to install the qwen stack (Node >= 22 gate or pinned install failed)" >&2
+        return 1
+    fi
+    create_webui_symlinks >&2
+    # Try to find again after installation
     if command -v qwen-code-webui &>/dev/null; then
         which qwen-code-webui
         return 0
     fi
-
-    # Not found, check if npm is available
-    print_warning "qwen-code-webui not found" >&2
-    if command -v npm &>/dev/null; then
-        print_info "npm is available, installing qwen-code-webui..." >&2
-        print_info "This may take several minutes, please wait..." >&2
-        print_info "Downloading qwen-code-webui (~50MB)..." >&2
-        if npm install -g qwen-code-webui >&2; then
-            print_success "qwen-code-webui installed successfully" >&2
-            # Check and install qwen-code CLI (required by qwen-code-webui)
-            if ! command -v qwen &>/dev/null; then
-                print_info "" >&2
-                print_info "qwen-code CLI not found, installing..." >&2
-                print_info "This is required for qwen-code-webui to function" >&2
-                print_info "Downloading qwen-code (~30MB)..." >&2
-                npm install -g @qwen-code/qwen-code >&2 || print_warning "Failed to install qwen-code CLI" >&2
-            fi
-            # Create symlinks in /usr/bin (if running as root)
-            create_webui_symlinks >&2
-            # Try to find again after installation
-            if command -v qwen-code-webui &>/dev/null; then
-                which qwen-code-webui
-                return 0
-            fi
-            # Check common paths again
-            for candidate in "${candidates[@]}"; do
-                if [ -x "$candidate" ]; then
-                    echo "$candidate"
-                    return 0
-                fi
-            done
-        else
-            print_error "Failed to install qwen-code-webui via npm" >&2
-            return 1
+    for candidate in "${candidates[@]}"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
         fi
-    else
-        # npm not available, need to install Node.js first
-        print_info "npm not available, installing Node.js 20.x via NodeSource..." >&2
-        if install_webui >&2; then
-            # Try to find again after installation
-            if command -v qwen-code-webui &>/dev/null; then
-                which qwen-code-webui
-                return 0
-            fi
-            # Check common paths again
-            for candidate in "${candidates[@]}"; do
-                if [ -x "$candidate" ]; then
-                    echo "$candidate"
-                    return 0
-                fi
-            done
-        fi
-    fi
+    done
 
     return 1
 }
@@ -2551,8 +2714,8 @@ configure_sudoers() {
 
     if [ -z "$webui_path" ]; then
         print_warning "qwen-code-webui executable not found"
-        print_info "Please install qwen-code-webui first:"
-        print_info "  npm install -g qwen-code-webui"
+        print_info "Please install qwen-code-webui first (pinned pair, Node >= 22):"
+        print_info "  npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3"
         print_info ""
         print_info "After installation, manually configure sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
@@ -3716,9 +3879,12 @@ detect_and_load_local_upgrade() {
         # Preserve config path for database configuration reuse
         EXISTING_CONFIG_PATH="$config_file"
 
-        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting)
-        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting).
+        # Python prints True/False (capitalized), but shell expects true/false (lowercase).
+        # Missing keys follow the RUNTIME default (WorkspaceConfig: false) —
+        # a pre-workspace-era API-only deployment must not suddenly require
+        # the qwen stack (PR #3386 review).
+        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [ -n "$enabled" ]; then
             WORKSPACE_ENABLED="$enabled"
             print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
@@ -3726,7 +3892,7 @@ detect_and_load_local_upgrade() {
 
         # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
         # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [ -n "$multi_user" ]; then
             WORKSPACE_MULTI_USER_MODE="$multi_user"
             print_info "Read WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE from existing config"
@@ -4161,9 +4327,9 @@ build_frontend() {
     major_version=$(echo "$node_version" | cut -d. -f1)
 
     if [ "$major_version" -lt 20 ]; then
-        print_warning "Node.js version $node_version is too old. Need Node.js 20 or later."
+        print_warning "Node.js version $node_version is too old. Need Node.js 20 or later (22 for the qwen CLI runtime)."
         print_warning "Frontend build will be skipped."
-        print_info "To build the frontend manually, install Node.js 20+ and run: cd $target_path/frontend && npm run build"
+        print_info "To build the frontend manually, install Node.js 22+ and run: cd $target_path/frontend && npm run build"
         return 0
     fi
 
@@ -4285,12 +4451,14 @@ install_local() {
 
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
+        maybe_install_qwen_stack
         do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
     elif [ -d "$target_path" ] && [ -f "$target_path/server.py" ]; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
         if [ "$upgrade" = "yes" ]; then
+            maybe_install_qwen_stack
             do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
         else
             print_info "Installation cancelled."
@@ -4300,8 +4468,10 @@ install_local() {
         # Directory exists but no valid installation
         print_warning "Directory exists at: $target_path but no valid installation found"
         print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        maybe_install_qwen_stack
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     else
+        maybe_install_qwen_stack
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
 
@@ -4786,12 +4956,14 @@ install_deploy() {
 
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
+        maybe_install_qwen_stack_remote "$remote"
         do_upgrade_remote "$remote" "$target_path"
     elif ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/server.py' ]"; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
         if [ "$upgrade" = "yes" ]; then
+            maybe_install_qwen_stack_remote "$remote"
             do_upgrade_remote "$remote" "$target_path"
         else
             print_info "Installation cancelled."
@@ -4801,8 +4973,10 @@ install_deploy() {
         # Directory exists but no valid installation
         print_warning "Directory exists at: $target_path but no valid installation found"
         print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        maybe_install_qwen_stack_remote "$remote"
         do_fresh_install_remote "$remote" "$target_path"
     else
+        maybe_install_qwen_stack_remote "$remote"
         do_fresh_install_remote "$remote" "$target_path"
     fi
 
@@ -6270,8 +6444,8 @@ show_help() {
     echo "  If DB_INSTALL_METHOD is 'binary' or 'docker', will install new PostgreSQL."
     echo ""
     echo "Multi-User Workspace Mode:"
-    echo "  Requires qwen-code-webui installed:"
-    echo "    npm install -g qwen-code-webui"
+    echo "  Requires qwen-code-webui installed (pinned pair, Node >= 22):"
+    echo "    npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3"
     echo ""
     echo "  The installer will auto-configure sudoers for user switching."
     echo "  Each user needs a system account and ~/.qwen/ directory."

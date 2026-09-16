@@ -551,23 +551,18 @@ class TestSudoersSecurityRules:
             "'\"$webui_path\"' first-argument constraint."
         )
 
-    def test_docker_install_no_unrestricted_webui_launch_rule(self, docker_install_sh):
-        """Docker-method install.sh must NOT put openace-webui-launch in the
-        security_wrapper_rules loop (which generates unrestricted rules)."""
+    def test_docker_install_generates_no_webui_sudoers(self, docker_install_sh):
+        """PR #3386 R15 review: docker deployments own their sudoers
+        in-container (docker-entrypoint.sh); the docker-method installer
+        must not write any webui-launch sudoers rules on the host — the
+        container cannot use them (nothing host-side is mounted)."""
         if not docker_install_sh.exists():
             pytest.skip("docker-method install.sh not found")
 
         content = docker_install_sh.read_text()
-
-        loop_lines = _security_wrapper_loop_lines(content)
-
-        # Guard the scan itself: if the loop marker line is ever renamed,
-        # loop_lines stays empty and the "not in" below would pass vacuously.
-        assert loop_lines, "security_wrapper_rules loop not found in install.sh"
-        loop_text = "\n".join(loop_lines)
-        assert "openace-webui-launch" not in loop_text, (
-            "openace-webui-launch must NOT be in the security_wrapper_rules loop "
-            "(generates unrestricted rule allowing privilege escalation)."
+        assert "openace-webui-launch" not in content, (
+            "docker-method must not author host sudoers for openace-webui-launch; "
+            "docker-entrypoint.sh owns the in-container rule"
         )
 
     def test_package_install_has_restricted_webui_launch_rule(self, package_install_sh):
@@ -586,26 +581,6 @@ class TestSudoersSecurityRules:
         # The restricted rule must exist (Issue #2313: with * before $webui_path)
         assert 'openace-webui-launch * "$webui_path" *' in content, (
             "Package install.sh must contain the restricted sudoers rule "
-            "for openace-webui-launch with '$webui_path' argument constraint "
-            "(env vars allowed before webui_path per Issue #2313)"
-        )
-
-    def test_docker_install_has_restricted_webui_launch_rule(self, docker_install_sh):
-        """Docker-method install.sh must have the restricted webui-launch rule
-        with the ``"$webui_path"`` constraint.
-
-        Issue #2313: The rule format was updated to allow environment variable
-        arguments (KEY=VAL) before the webui_path. The format is now:
-        ``openace-webui-launch * "$webui_path" *``
-        """
-        if not docker_install_sh.exists():
-            pytest.skip("docker-method install.sh not found")
-
-        content = docker_install_sh.read_text()
-
-        # The restricted rule must exist (Issue #2313: with * before $webui_path)
-        assert 'openace-webui-launch * "$webui_path" *' in content, (
-            "Docker install.sh must contain the restricted sudoers rule "
             "for openace-webui-launch with '$webui_path' argument constraint "
             "(env vars allowed before webui_path per Issue #2313)"
         )

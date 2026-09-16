@@ -27,10 +27,22 @@ class QwenCodeAdapter(BaseCLIAdapter):
     EXECUTABLE = "qwen"
     DISPLAY_NAME = "Qwen Code"
     NPM_PACKAGE = "@qwen-code/qwen-code"
+    # Pinned to the validated pair (see Dockerfile); @latest would drift the
+    # agent onto unvalidated engines/CLI changes while npm still exits 0 on a
+    # mere EBADENGINE warning (PR #3386 review).
+    PINNED_VERSION = "0.23.3"
 
     def get_install_command(self) -> str:
         """Return the command to install qwen-code CLI."""
-        return f"npm install -g {self.NPM_PACKAGE}@latest"
+        return "npm install -g @qwen-code/qwen-code@0.23.3"
+
+    def get_install_requirements_hint(self) -> str:
+        """Manual-recovery prerequisite hint (surfaced with install_command).
+
+        npm only warns EBADENGINE on an engines mismatch and still exits 0,
+        so the Node requirement must be stated explicitly, not implied.
+        """
+        return f"Node.js >= 22 is required by {self.NPM_PACKAGE}@{self.PINNED_VERSION}"
 
     def check_installed(self) -> bool:
         """Check if qwen-code CLI is installed."""
@@ -87,8 +99,10 @@ class QwenCodeAdapter(BaseCLIAdapter):
             args.extend(["--resume", session_id])
 
         # Issue #2645: Map permission_mode to Qwen CLI --approval-mode flags.
-        # CLI >= 0.20 supports: "plan", "default", "auto-edit", "auto", "yolo"
-        # ("suggest" was renamed to "default" between 0.15 and 0.20).
+        # CLI choices: 0.15.10 = plan|default|auto-edit|yolo; >= 0.20 adds
+        # "auto". "suggest" was never a valid CLI value — the old
+        # ask->suggest mapping failed yargs choices validation at launch
+        # against the pinned 0.15.10 (and every later version).
         # - "ask": Safe mode, suggests actions for confirmation ("default")
         # - "auto": Safe automatic mode ("auto")
         # - "bypass": Dangerous mode, full autonomy ("yolo")
@@ -107,7 +121,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
                 # permission policy disabled (default) the request would buffer
                 # for a frontend that is never there and stall until timeout.
                 "auto-edit": "yolo",
-                "suggest": "default",  # Pre-0.20 spelling of "default"
+                "suggest": "default",  # open-ace legacy spelling, never a CLI value
             }
             cli_mode = approval_mode_map.get(permission_mode, permission_mode)
             args.extend(["--approval-mode", cli_mode])

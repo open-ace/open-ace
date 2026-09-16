@@ -4,11 +4,18 @@
 
 ## Overview
 
-Open-ACE uses Fernet symmetric encryption to protect sensitive data at rest:
+Open-ACE uses Fernet symmetric encryption to protect sensitive data at rest.
+The same key directly encrypts **all 8 stores** (authoritative list in
+[Key Sharing Impact](#key-sharing-impact) below):
 
 - API keys for remote workspaces (`api_key_store` table)
 - SMTP passwords (`smtp_settings` table)
 - Model Gateway API keys (`model_gateway_config` table)
+- SSO provider credentials (`sso_providers` table)
+- DingTalk integration (`dingtalk_settings` table)
+- Feishu integration (`feishu_settings` table)
+- Webhook configs (`webhook_settings` table)
+- Notification preferences (`notification_preferences` table)
 
 Proxy tokens use HMAC-SHA256 signatures (not Fernet) for authentication.
 
@@ -27,15 +34,16 @@ OPENACE_ENCRYPTION_KEY (env var, >= 32 chars)
          ▼
     Fernet key (44 chars)
          │
-         ├────────────────┬────────────────┐
-         ▼                ▼                ▼
-   API Key          SMTP Password    Model Gateway
-   Encryption       Encryption       Encryption
-         │
-         │ Same key for HMAC-SHA256
-         ▼
-   Proxy Token
-   Signing
+         ├──────────────────────────────┐
+         ▼                              ▼
+   ALL 8 encrypted stores           Proxy Token
+   (api_key_store / smtp_settings /   signing (HMAC-SHA256,
+    model_gateway_config /             not Fernet)
+    sso_providers / dingtalk_settings /
+    feishu_settings / webhook_settings /
+    notification_preferences —
+    full list in "Key Sharing Impact")
+
 ```
 
 **Key derivation code**:
@@ -51,30 +59,45 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
 
 ## Key Sharing Impact
 
-The same key is used for:
+The same key (`OPENACE_ENCRYPTION_KEY`, SHA-256-derived Fernet key) directly
+encrypts every store below:
 
 1. **API Key encryption** - `api_key_store.encrypted_key`
 2. **SMTP password encryption** - `smtp_settings.encrypted_password`
 3. **Model Gateway encryption** - `model_gateway_config.encrypted_api_key`
-4. **Proxy Token signing** - HMAC-SHA256 signatures for remote agent authentication
+4. **SSO provider configs** - `sso_providers` (third-party credentials embedded in JSON)
+5. **DingTalk integration** - `dingtalk_settings`
+6. **Feishu integration** - `feishu_settings`
+7. **Webhook configs** - `webhook_settings`
+8. **Notification preferences** - `notification_preferences`
+
+The same key also signs **Proxy Tokens** (HMAC-SHA256, remote agent
+authentication).
 
 **Implications**:
 
-- Key rotation requires re-encrypting all three data stores
+- Rotation must re-encrypt **ALL of the stores above in one pass** — rotating
+  only a subset leaves the remaining ciphertexts undecryptable after the key
+  switch (this is exactly why `scripts/rotate_sso_encryption.py` rotates every
+  store in a single transaction)
 - Active proxy tokens signed with the old key will fail validation after rotation
-- Key compromise affects all four security domains
+- Key compromise affects all of the security domains above
 
 ## Key Rotation
 
-### Current Limitations
+### Rotation Capabilities and Boundaries
 
-- **Single-key Fernet**: No support for MultiFernet multi-key decryption
-- **Rotation requires downtime**: Cannot rotate keys without service restart
-- **Manual process**: No automated key rotation mechanism
+- **Atomic full-store rotation**: `scripts/rotate_sso_encryption.py`
+  re-encrypts EVERY store bound to this key in a single transaction (full
+  rollback on any failure); `--verify` provides a no-write pre-flight
+- **Single-key Fernet**: No MultiFernet multi-key decryption (see
+  "MultiFernet Support (Future enhancement)" below)
+- **Restart on switch**: the service must be restarted after the
+  environment variable switches to the new key
 
-### Rotation Methods
+### Rotation Method
 
-#### Method A: Stop-and-Rotate (Recommended for small deployments)
+#### Atomic full-store rotation (`rotate_sso_encryption.py`)
 
 **Prerequisites**:
 
@@ -94,64 +117,60 @@ The same key is used for:
    cp app.db app_backup_$(date +%Y%m%d).db
    ```
 
-2. **Export encrypted data**
+2. **Generate a new key (do NOT enable it yet)**
 
    ```bash
-   python scripts/export_encrypted_data.py --output encrypted_data_backup.json
+   NEW_KEY=$(openssl rand -hex 32)
    ```
 
-   This exports:
-   - `api_key_store.encrypted_key` → plaintext API keys
-   - `smtp_settings.encrypted_password` → plaintext SMTP passwords
-   - `model_gateway_config.encrypted_api_key` → plaintext gateway keys
+3. **Stop every reader/writer that uses the old key** (app, scheduler/
+   workers; the database itself stays up). This is a PRECONDITION of the
+   script's safety, not an option: the script takes no table locks; each
+   UPDATE is only optimistic on the value it scanned (a concurrent
+   MODIFICATION of a scanned row → 0/2 affected rows → full rollback), but
+   rows INSERTED after a table's scan are invisible inside the transaction,
+   and the post-check can only REPORT committed mixed-key data, never roll
+   it back — old-key ciphertext WILL remain if writers stay up.
 
-3. **Generate and set new key**
+4. **Keep the environment on the OLD key and run the pre-flight dry run**
 
    ```bash
-   # Generate a new 32-byte key
-   NEW_KEY=$(openssl rand -hex 32)
-   echo "New key: $NEW_KEY"
+   python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY" --verify
+   ```
 
-   # Update environment variable
-   # Docker Compose: edit .env file
+   The pre-flight round-trips a probe with the new key and verifies every
+   store decrypts under the old key; nothing is written on failure. The
+   environment must stay on the OLD key for the whole rotation — switching
+   early makes the old ciphertexts undecryptable and fails the pre-flight.
+
+5. **Run the rotation (single transaction, per-UPDATE row-count validation; a concurrent modification rolls the whole rotation back)**
+
+   ```bash
+   python scripts/rotate_sso_encryption.py --new-key "$NEW_KEY"
+   ```
+
+   Every store the key directly protects is re-encrypted (registry-format
+   ciphertexts prefixed `v1k<id>:` are bound to the `OPENACE_ENCRYPTION_KEYS`
+   data keys and are skipped automatically), and the script re-verifies all
+   stores with the new key afterwards.
+
+6. **Switch the environment to the new key and restart ALL services**
+
+   ```bash
+   # Docker Compose: edit .env
    # Kubernetes: update Secret
    # Systemd: edit /etc/open-ace/environment
+   docker-compose restart   # or: sudo systemctl restart open-ace
    ```
 
-4. **Restart the service**
+7. **Verify functionality**: API keys, SMTP, Model Gateway, SSO login,
+   DingTalk/Feishu/webhooks/notifications. Existing proxy tokens are
+   invalidated (users must restart sessions).
 
-   ```bash
-   # Docker Compose
-   docker-compose restart
+8. **Secure cleanup**: archive or remove the database backup after
+   verification.
 
-   # Systemd
-   sudo systemctl restart open-ace
-   ```
-
-5. **Re-encrypt and import data**
-
-   ```bash
-   python scripts/import_encrypted_data.py --input encrypted_data_backup.json
-   ```
-
-6. **Verify functionality**
-
-   - Test API key storage and retrieval
-   - Test SMTP email sending
-   - Test Model Gateway calls
-   - Note: Existing proxy tokens will be invalid (users need to restart sessions)
-
-7. **Secure cleanup**
-
-   ```bash
-   # Remove plaintext backup after verification
-   rm encrypted_data_backup.json
-
-   # Optionally archive encrypted database backup
-   gzip openace_backup_*.sql
-   ```
-
-#### Method B: MultiFernet Support (Future enhancement)
+#### MultiFernet Support (Future enhancement)
 
 **Requirements**:
 
@@ -191,13 +210,26 @@ openssl rand -hex 32
 
 ### Key Compromise Response
 
-1. Immediately generate and set new key
+1. Generate the new key but do **not** enable it yet; back up the affected
+   stores and pause writes to them
 2. Revoke all active proxy tokens (if applicable)
-3. Rotate all encrypted credentials (SSO provider `client_secret` values can be
-   re-encrypted in bulk with `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`;
-   dry-run with `--verify` first)
-4. Audit access logs for suspicious activity
-5. Document incident and remediation steps
+3. Keep `OPENACE_ENCRYPTION_KEY` set to the **old** key and rotate all
+   encrypted credentials: `scripts/rotate_sso_encryption.py --new-key <NEW_KEY>`
+   re-encrypts every store protected by the key in a **single transaction**
+   (`sso_providers`, `api_key_store`, `smtp_settings`,
+   `model_gateway_config`, `dingtalk_settings`, `feishu_settings`,
+   `webhook_settings`, `notification_preferences`; `v1k<id>:`-prefixed
+   key-registry ciphertexts are bound to the `OPENACE_ENCRYPTION_KEYS` data
+   keys instead and are skipped automatically). Run the `--verify`
+   pre-flight first. The script reads the environment variable as the old
+   key and `--new-key` as the new one — switching the environment variable
+   before rotating makes the old ciphertext undecryptable and fails the
+   pre-flight
+4. Only after the rotation completes (the script re-checks every store with
+   the new key after writing) and no other store sharing this key remains,
+   switch `OPENACE_ENCRYPTION_KEY` to the new key and restart the service
+5. Audit access logs for suspicious activity; document incident and
+   remediation steps
 
 ## Database Schema
 
