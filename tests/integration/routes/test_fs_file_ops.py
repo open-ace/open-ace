@@ -546,7 +546,13 @@ class TestUploadRootBranch:
             # temp→chown→replace branch.
             patch("app.routes.fs.os.geteuid", return_value=0),
             # Stub chown to succeed (the actual os.chown would need root).
-            patch("app.routes.fs._chown_to_user", return_value=True),
+            # #3410: the root branch now uses the fd form.
+            patch("app.routes.fs._fchown_to_user", return_value=True),
+            # STANDING RULE (#3410): every helper the ROOT branch calls must
+            # be patched here. `_resolve_uid_gid` shells out to `id -u
+            # testuser`, which fails on CI and on any dev box — the route would
+            # then 400 on the ownership gate before doing anything else.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
             # Bypass the sudo-based writable check (no real "testuser" OS user
             # exists on the dev machine).
             patch(
@@ -597,7 +603,12 @@ class TestUploadRootBranch:
             patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
             patch("app.routes.fs.os.geteuid", return_value=0),
             # chown fails — upload must abort and clean up the temp file.
-            patch("app.routes.fs._chown_to_user", return_value=False),
+            patch("app.routes.fs._fchown_to_user", return_value=False),
+            # STANDING RULE (#3410): every helper the ROOT branch calls must
+            # be patched here. `_resolve_uid_gid` shells out to `id -u
+            # testuser`, which fails on CI and on any dev box — the route would
+            # then 400 on the ownership gate before doing anything else.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
             patch(
                 "app.routes.fs.get_directory_info",
                 return_value={
@@ -1331,6 +1342,10 @@ class TestUploadNonRootMultiUserBranch:
             patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
             # Wrapper is installed.
             patch("app.routes.fs._is_wrapper_available", return_value=True),
+            # #3410: ...and carries the symlink-refusal capability marker.
+            # /usr/local/bin/openace-write-as does not exist on CI, so without
+            # this the route fails closed with a 500 before spawning anything.
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
             # Bypass the sudo-based writable pre-check (no real "testuser" OS
             # user exists on the dev machine).
             patch(
@@ -1783,3 +1798,145 @@ class TestUploadSymlinkEscape:
             resp = self._upload(self._app().test_client(), home, "plain.txt", payload=b"OK")
         assert resp.status_code == 500
         assert "reinstall" in resp.get_json()["error"].lower()
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+def test_write_lock_accepts_every_base_dirs_home_root():
+    """#3410: the /fs per-file paths must not use single-base get_home_directory().
+
+    ``get_workspace_base_dir()`` returns the RAW env value, so on
+    ``WORKSPACE_BASE_DIR=/a,/b`` the old helper produced the literal
+    ``"/a,/b/<account>"`` — a path no lock can ever match, which 400'd
+    upload/download/delete/search on every multi-base deployment. #3376 fixed
+    exactly this for browse; these endpoints now share that root set.
+    """
+    from app.routes.fs import _home_roots_for_write, _primary_home_root
+
+    user = {"id": 1, "username": "alice", "system_account": "alice"}
+    with (
+        patch("app.routes.fs.get_workspace_base_dirs", return_value=["/a", "/b"]),
+        patch("app.routes.fs.get_workspace_base_dir", return_value="/a,/b"),
+        # Without this, _home_roots_for_write reaches get_home_directory ->
+        # run_as_user("alice", ["test", "-e", ...]) — a real `sudo -u` with
+        # timeout=10 and no exception handling, which can PROMPT on a
+        # developer machine and raise TimeoutExpired out of the test.
+        patch("app.routes.fs.get_home_directory", return_value="/a,/b/alice"),
+    ):
+        roots = _home_roots_for_write(user)
+        # The REPORTING helper must agree with the lock — this is the assertion
+        # that actually fails on the pre-#3410 code.
+        primary = _primary_home_root(user)
+    assert os.path.realpath("/a/alice") in roots
+    assert os.path.realpath("/b/alice") in roots
+    assert primary == os.path.realpath("/a/alice")
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+def test_api_home_reports_a_root_the_lock_accepts(client, workspace):
+    """#3410 smoke check: /api/fs/home must not report a path upload rejects.
+
+    Single-base fixture, so this passes before and after the change — the
+    multi-base regression is pinned by
+    ``test_write_lock_accepts_every_base_dirs_home_root``.
+    """
+    _, user_home = workspace
+    resp = client.get("/api/fs/home")
+    assert resp.status_code == 200
+    assert resp.get_json()["homePath"] == str(user_home)
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+class TestReadPathSymlinkLock:
+    """#3410 evidence for the `enforced` claim: download/delete/search too.
+
+    These pin behavior that is already correct — ``_resolve_file_in_home``
+    realpaths BEFORE the home check, so a symlink out of the home resolves to
+    a path the lock rejects. The upload fix would be half a story without
+    them: the contract declares a symlink policy for all eight operations.
+    """
+
+    def test_download_through_symlink_to_other_user_is_rejected(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "secret.txt").write_text("VICTIM")
+        os.symlink(str(other / "secret.txt"), str(user_home / "link.txt"))
+        resp = client.get("/api/fs/download", query_string={"path": str(user_home / "link.txt")})
+        assert resp.status_code == 400
+
+    def test_delete_through_symlink_to_other_user_is_rejected(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "secret.txt").write_text("VICTIM")
+        os.symlink(str(other / "secret.txt"), str(user_home / "link2.txt"))
+        resp = client.post("/api/fs/delete-file", json={"path": str(user_home / "link2.txt")})
+        assert resp.status_code == 400
+        assert (other / "secret.txt").read_text() == "VICTIM"
+
+    def test_search_does_not_descend_into_a_symlinked_directory(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "needle-target.txt").write_text("VICTIM")
+        os.symlink(str(other), str(user_home / "linkdir"))
+        resp = client.get(
+            "/api/fs/search", query_string={"path": str(user_home), "q": "needle-target"}
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["results"] == []
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+def test_write_as_wrapper_capability_sentinel_is_in_sync():
+    """The route's capability marker must match the shipped wrapper (#3410).
+
+    A drift here silently disables the fail-closed gate that keeps the
+    ``filesystem_api: enforced`` claim true on package non-root deployments.
+    Uses parents[3] deliberately: this module's own ``project_root`` is
+    ``<repo>/tests``.
+    """
+    from app.routes.fs import _WRITE_AS_CAPABILITY_SENTINEL
+
+    repo_root = Path(__file__).resolve().parents[3]
+    wrapper = repo_root / "scripts" / "openace-write-as.sh"
+    text = wrapper.read_text()
+    assert _WRITE_AS_CAPABILITY_SENTINEL in text
+    assert 'if [ -L "$TARGET_PATH" ]' in text
+    assert 'readlink -f "$TARGET_PATH"' not in text
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+class TestWriteAsCapabilityProbe:
+    """#3410: the probe that decides whether the installed wrapper enforces."""
+
+    def _probe(self, path):
+        import app.routes.fs as fsm
+
+        fsm._reset_write_as_capability_cache()
+        try:
+            with patch.object(fsm, "OPENACE_WRITE_AS_WRAPPER", str(path)):
+                return fsm._write_as_wrapper_enforces_symlink_refusal()
+        finally:
+            fsm._reset_write_as_capability_cache()
+
+    def test_true_when_the_sentinel_is_present(self, tmp_path):
+        from app.routes.fs import _WRITE_AS_CAPABILITY_SENTINEL
+
+        f = tmp_path / "openace-write-as"
+        f.write_text(f"#!/bin/bash\n# {_WRITE_AS_CAPABILITY_SENTINEL}\n")
+        assert self._probe(f) is True
+
+    def test_false_for_a_pre_3410_wrapper(self, tmp_path):
+        f = tmp_path / "openace-write-as"
+        f.write_text('#!/bin/bash\ntee "$RESOLVED_PATH"\n')
+        assert self._probe(f) is False
+
+    def test_false_when_the_wrapper_is_absent(self, tmp_path):
+        assert self._probe(tmp_path / "nope") is False

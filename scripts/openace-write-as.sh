@@ -18,6 +18,15 @@
 #   2 - Path validation failed
 #   3 - User validation failed
 #   4 - Write failed
+#   5 - Target is a symbolic link
+#   6 - Target is a directory
+#
+# Capability marker (Issue #3410). app/routes/fs.py greps the INSTALLED wrapper
+# for this exact line and refuses uploads fail-closed when it is absent, so a
+# host still running a pre-#3410 wrapper cannot silently keep the escalation
+# while the capability contract reports filesystem_api: enforced. Keep it in
+# sync with _WRITE_AS_CAPABILITY_SENTINEL (a test asserts both files agree).
+# openace-write-as-capability: symlink-refusal=1
 
 set -euo pipefail
 
@@ -64,20 +73,38 @@ if [ "$TARGET_UID" -lt "$MIN_UID" ]; then
     exit 3
 fi
 
-# Resolve path (handle symlinks and ..). For non-existent paths, resolve the
-# parent directory then re-append the basename so path-prefix validation sees
-# the real location the file will land in.
+# Issue #3410: never write THROUGH a symlink. The caller cannot do this check
+# reliably — in this deployment shape the web process is a service account that
+# cannot traverse the target user's 0700 home, so its os.path.islink() probe
+# returns False on EACCES. This wrapper is the enforcement point.
+if [ -L "$TARGET_PATH" ]; then
+    echo "ERROR: Target '$TARGET_PATH' is a symbolic link; refusing to write through it" >&2
+    log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${TARGET_PATH} result=reject_symlink"
+    exit 5
+fi
+
+# Issue #3410: `mv src dir` moves src INTO dir and exits 0, so a directory
+# named like the upload would silently swallow the temp file while the API
+# answered 200 with the directory's path. `tee` used to fail here ("Is a
+# directory"); keep that a refusal, with its own code. This test MUST come
+# after the -L check: [ -d ] follows symlinks, so a symlink-to-a-directory has
+# to be reported as a symlink, not as a directory.
+if [ -d "$TARGET_PATH" ]; then
+    echo "ERROR: Target '$TARGET_PATH' is a directory" >&2
+    log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${TARGET_PATH} result=reject_directory"
+    exit 6
+fi
+
+# Resolve the PARENT directory only and re-append the basename: the target
+# itself is known not to be a symlink (checked above), and resolving it would
+# reintroduce the #3410 escape for any future caller.
 RESOLVED_PATH=""
-if [ -e "$TARGET_PATH" ]; then
-    RESOLVED_PATH=$(readlink -f "$TARGET_PATH" 2>/dev/null || echo "$TARGET_PATH")
+PARENT_DIR=$(dirname "$TARGET_PATH")
+if [ -d "$PARENT_DIR" ]; then
+    RESOLVED_PARENT=$(readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
+    RESOLVED_PATH="${RESOLVED_PARENT}/$(basename "$TARGET_PATH")"
 else
-    PARENT_DIR=$(dirname "$TARGET_PATH")
-    if [ -d "$PARENT_DIR" ]; then
-        RESOLVED_PARENT=$(readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
-        RESOLVED_PATH="${RESOLVED_PARENT}/$(basename "$TARGET_PATH")"
-    else
-        RESOLVED_PATH="$TARGET_PATH"
-    fi
+    RESOLVED_PATH="$TARGET_PATH"
 fi
 
 # Validate path prefix
@@ -97,13 +124,30 @@ fi
 
 log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} result=attempt"
 
-# Drop to target user via runuser and write stdin to the target path. runuser
-# (not sudo) performs the user drop, so no extra sudoers rule for cp/tee is
-# needed; the wrapper is already root via its own sudoers rule. tee truncates
-# the file and writes stdin to it; stdout is discarded so it doesn't echo
-# back. A temp file + atomic rename would be nicer for crash safety, but tee
-# matches the simplicity of the single-user file.save() path.
-if runuser -u "$TARGET_USER" -- tee "$RESOLVED_PATH" > /dev/null; then
+# Drop to target user via runuser and write stdin to a TEMP file in the target
+# directory, then rename it into place. runuser (not sudo) performs the user
+# drop, so no extra sudoers rule for cp/tee/mv is needed; the wrapper is
+# already root via its own sudoers rule.
+#
+# Issue #3410: the write is a temp + rename rather than `tee "$RESOLVED_PATH"`
+# because the [ -L ] check above and the write are two syscalls apart — the
+# target user could swap the name in between, and tee follows a symlink at the
+# final component. `mv` uses rename(2), which replaces the DIRECTORY ENTRY and
+# never follows a symlink there. `-T` (--no-target-directory) forces rename
+# semantics so the directory case fails even if the [ -d ] pre-check raced.
+# The trap removes the temp file on every error path and on SIGTERM; a leaked
+# dotfile would be invisible to /fs browse and search and effectively
+# undeletable by the user. (SIGKILL is untrappable — the caller sends SIGTERM
+# first for exactly this reason.) The runuser sub-calls read /dev/null so
+# nothing in the PAM chain can consume bytes of the upload body.
+TMP_PATH=$(runuser -u "$TARGET_USER" -- mktemp "${RESOLVED_PARENT:-$(dirname "$RESOLVED_PATH")}/.openace-write-as.XXXXXX" </dev/null) || {
+    log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} result=fail_mktemp"
+    exit 4
+}
+trap 'runuser -u "$TARGET_USER" -- rm -f "$TMP_PATH" </dev/null 2>/dev/null || true' EXIT INT TERM
+
+if runuser -u "$TARGET_USER" -- tee "$TMP_PATH" > /dev/null \
+   && runuser -u "$TARGET_USER" -- mv -fT "$TMP_PATH" "$RESOLVED_PATH" </dev/null; then
     log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} result=success"
     exit 0
 else
