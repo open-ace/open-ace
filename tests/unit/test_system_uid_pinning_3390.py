@@ -1070,3 +1070,161 @@ class TestSyncPayloadBashQuoting:
             "embedded sync python (#3399 class bug)"
         )
         ast.parse(bash_passed)
+
+
+# ============================================================================
+# Entrypoint: first-boot orphan-uid adoption (the #3390 declared residual)
+# ============================================================================
+
+ORPHAN_SCAN_TAG = "ORPHAN_UID_SCAN_EOF"
+
+
+def _extract_orphan_scan_python() -> str:
+    """Pull the quoted ORPHAN_UID_SCAN_EOF heredoc (the first-boot
+    orphan-uid adoption step) verbatim from the entrypoint. A QUOTED heredoc
+    needs no unescaping — the #3399 raw-quote class cannot recur in it — and
+    the compile() guards against a malformed extraction."""
+    content = open(ENTRYPOINT, encoding="utf-8").read()
+    start = content.index(f"<<'{ORPHAN_SCAN_TAG}'")
+    body_start = content.index("\n", start) + 1
+    end = content.index(f"\n{ORPHAN_SCAN_TAG}\n", body_start)
+    py = content[body_start:end]
+    compile(py, "entrypoint-orphan-uid-scan", "exec")
+    return py
+
+
+def _run_orphan_scan(
+    monkeypatch,
+    tmp_path,
+    observed_uids,
+    *,
+    owned_uids=(),
+    useradd_rc=0,
+    useradd_err="",
+):
+    """Execute the extracted orphan-uid scan under fakes; returns the run
+    log (useradd calls, stdout, exit code, post-run owned set).
+
+    *observed_uids* is what the volume walk reports (one entry per uid);
+    *owned_uids* are the uids getent passwd resolves (existing accounts or
+    placeholders). A successful placeholder useradd marks its uid owned, so
+    feeding the returned ``owned`` into a second invocation models the
+    second boot after an adoption."""
+    user_cmds: list[tuple] = []
+    owned = set(owned_uids)
+    exit_code = 0
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "find":
+            # the real `find -exec stat -c %u {} +` prints one uid per
+            # walked entry; the fake reports the scenario's owners directly
+            return _FakeProc(0, "".join(f"{u}\n" for u in observed_uids))
+        if cmd[:2] == ["getent", "passwd"]:
+            return _FakeProc(0 if int(cmd[2]) in owned else 2, "")
+        if cmd[0] == "useradd":
+            user_cmds.append(tuple(cmd))
+            if useradd_rc == 0:
+                owned.add(int(cmd[cmd.index("-u") + 1]))
+            return _FakeProc(useradd_rc, "", useradd_err)
+        return _FakeProc(0, "")
+
+    fake_subprocess = SimpleNamespace(run=fake_run)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
+    monkeypatch.setenv("WORKSPACE_BASE_DIR", str(tmp_path))
+    monkeypatch.setitem(sys.modules, "subprocess", fake_subprocess)
+
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        try:
+            exec(compile(_extract_orphan_scan_python(), "entrypoint-orphan-uid-scan", "exec"), {})
+        except SystemExit as exc:  # the scan must never abort; guard the harness
+            exit_code = int(exc.code or 0)
+    return {
+        "user_cmds": user_cmds,
+        "stdout": buf.getvalue(),
+        "exit_code": exit_code,
+        "owned": owned,
+    }
+
+
+class TestOrphanUidAdoptionFunctional:
+    """Issue #3390's declared residual, closed: after an upgrade a
+    DEACTIVATED/soft-deleted pre-pin-era user has no recorded uid, so the
+    user-sync creates no placeholder — their volume dirs sit on an unowned
+    uid that a future account's auto-assigned useradd can numerically
+    inherit. The first-boot scan adopts observed orphan uids as
+    openace-orphan-<uid> nologin placeholders so they are never handed out."""
+
+    def test_orphan_dir_uid_adopted_as_placeholder(self, monkeypatch, tmp_path):
+        log = _run_orphan_scan(monkeypatch, tmp_path, observed_uids=[1017])
+        assert log["user_cmds"] == [
+            ("useradd", "-M", "-s", "/usr/sbin/nologin", "-u", "1017", "openace-orphan-1017")
+        ], "an unowned uid >= 1000 must be reserved by a nologin placeholder with NO home (-M)"
+        assert (
+            "Adopted 1 orphan uid(s) from volumes as reserved placeholders." in log["stdout"]
+        ), "one summary line, nothing per-uid on the happy path"
+        assert log["exit_code"] == 0
+
+    def test_uid_of_existing_account_skipped(self, monkeypatch, tmp_path):
+        log = _run_orphan_scan(monkeypatch, tmp_path, observed_uids=[1042], owned_uids={1042})
+        assert log["user_cmds"] == [], "a uid owned by a live account is not an orphan"
+        assert "Adopted" not in log["stdout"]
+
+    def test_uid_below_1000_skipped(self, monkeypatch, tmp_path):
+        log = _run_orphan_scan(monkeypatch, tmp_path, observed_uids=[33, 999, 1017])
+        assert [c[-1] for c in log["user_cmds"]] == [
+            "openace-orphan-1017"
+        ], "system-range uids (< 1000) must never be adopted"
+
+    def test_second_boot_with_placeholder_existing_is_noop(self, monkeypatch, tmp_path):
+        # First boot adopts 1017; on the second boot getent resolves the
+        # uid (the placeholder owns it) -> idempotent, no new useradd, no
+        # summary noise on steady-state boots.
+        first = _run_orphan_scan(monkeypatch, tmp_path, observed_uids=[1017])
+        assert first["user_cmds"], "precondition: the first boot adopted the orphan"
+        second = _run_orphan_scan(
+            monkeypatch, tmp_path, observed_uids=[1017], owned_uids=set(first["owned"])
+        )
+        assert second["user_cmds"] == []
+        assert "Adopted" not in second["stdout"]
+        assert second["exit_code"] == 0
+
+    def test_useradd_failure_warns_boot_continues(self, monkeypatch, tmp_path):
+        log = _run_orphan_scan(
+            monkeypatch,
+            tmp_path,
+            observed_uids=[1017],
+            useradd_rc=1,
+            useradd_err="useradd: UID 1017 is already in use",
+        )
+        assert "WARNING (issue #3390)" in log["stdout"]
+        assert "could not reserve orphan uid 1017" in log["stdout"]
+        assert "Adopted" not in log["stdout"], "a failed reservation must not be counted"
+        assert log["exit_code"] == 0, "a useradd failure degrades to a warning, never aborts"
+
+
+class TestOrphanScanWiring:
+    """Textual ordering/wiring markers the functional scenarios cannot see."""
+
+    def test_scan_runs_after_user_sync_before_group_sync(self):
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        user_sync_end = content.index("open-ace-user-sync.log")
+        scan_start = content.index(f"<<'{ORPHAN_SCAN_TAG}'", user_sync_end)
+        group_sync_start = content.index("PY_SYNC_GROUPS_EOF", scan_start)
+        assert (
+            user_sync_end < scan_start < group_sync_start
+        ), "the scan must follow the user-sync (pinned accounts must exist first, or every pin of a recreated deployment would look orphaned) and precede the group sync"
+
+    def test_scan_invocation_hardened_like_sibling_syncs(self):
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        start = content.index(f"<<'{ORPHAN_SCAN_TAG}'")
+        line_start = content.rindex("\n", 0, start) + 1
+        line = content[line_start : content.index("\n", start)]
+        assert line.lstrip().startswith(
+            "( set -o pipefail; python3 -u - <<'"
+        ), "the scan must run in a pipefail subshell with unbuffered python (a death must fire the WARNING, not vanish)"
+        assert "2>&1 | tee /app/logs/open-ace-orphan-uid-scan.log )" in line
+        assert '|| echo "WARNING' in line, "a nonzero exit must surface as the WARNING line"

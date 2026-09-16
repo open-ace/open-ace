@@ -11,17 +11,33 @@ name: multiuser-acceptance
 on:
   push:
     branches: [main]
+    # #3399-class lesson: the acceptance environment is shaped by MORE than
+    # the runner — the entrypoint, the compose files and the image build all
+    # determine what the lanes exercise. A paths filter listing only the
+    # runner/workflow/docs let an entrypoint-only PR (the #3399 boot death)
+    # merge without ever triggering this lane.
+    paths:
+      - scripts/multiuser_acceptance.py
+      - .github/workflows/multiuser-acceptance.yml
+      - docker-entrypoint.sh
+      - docker-compose.yml
+      - docker-compose.multi-user.yml
+      - Dockerfile
   # review round 4 (4003823515): pull_request events use the workflow file
   # FROM THE PR BRANCH, so this gives the acceptance a REAL run on this very
   # PR before merge (workflow_dispatch cannot — it requires the workflow to
-  # be registered on the default branch). Paths-filtered to the runner and
-  # this file.
+  # be registered on the default branch). Paths-filtered to the runner, this
+  # file, and every file that shapes the acceptance environment.
   pull_request:
     paths:
       - scripts/multiuser_acceptance.py
       - .github/workflows/multiuser-acceptance.yml
       - docs/cn/MULTIUSER_ISOLATION_ACCEPTANCE.md
       - docs/en/MULTIUSER_ISOLATION_ACCEPTANCE.md
+      - docker-entrypoint.sh
+      - docker-compose.yml
+      - docker-compose.multi-user.yml
+      - Dockerfile
   workflow_dispatch:
 
 permissions:
