@@ -40,6 +40,7 @@ from app.utils.request_context import get_current_tenant_id
 from app.utils.validators import validate_project_name
 from app.utils.workspace import (
     _is_docker_multi_user_mode,
+    ensure_shared_namespace_root,
     estimate_file_count_fast,
     get_workspace_base_dirs,
     revoke_shared_project_access,
@@ -359,6 +360,45 @@ def api_create_project():
     # Create directory if requested and doesn't exist
     dir_created = False
     if create_dir:
+        # Issue #3393: on-demand shared-namespace-root provisioning. The
+        # entrypoint (Docker) or install.sh (package) normally provisions
+        # <base>/shared at boot/install time; on a deployment where that
+        # never ran — or the root went missing — the FIRST shared-project
+        # creation ran `mkdir -p <base>/shared/<name>` as the creating user
+        # against a root-owned 0755 parent and EACCESed (403). Provision the
+        # one namespace root this path lives under BEFORE the user-side
+        # mkdir; failures degrade to a clean 5xx, never a crash (the helper
+        # is a no-op outside Docker multi-user mode and leaves an existing
+        # root untouched).
+        if is_shared:
+            resolved_path = os.path.realpath(path)
+            for base in base_dirs:
+                if not base:
+                    continue
+                resolved_base = os.path.realpath(base).rstrip(os.sep)
+                if resolved_path != resolved_base and not resolved_path.startswith(
+                    resolved_base + os.sep
+                ):
+                    continue
+                provisioned, provision_error = ensure_shared_namespace_root(base)
+                if not provisioned:
+                    logger.error(
+                        "Failed to provision shared namespace root under %s: %s (#3393)",
+                        base,
+                        provision_error,
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "error": (
+                                    "Failed to provision the shared namespace root "
+                                    f"({provision_error}); contact an administrator"
+                                )
+                            }
+                        ),
+                        500,
+                    )
+                break
         try:
             effective_system_account = get_effective_system_account(system_account)
             if effective_system_account:
