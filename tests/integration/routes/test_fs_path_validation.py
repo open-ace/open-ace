@@ -308,8 +308,15 @@ class TestCreateDirectory:
         assert target.is_dir()
 
     def test_create_multi_level(self, client, workspace):
-        """Multi-level directory creation should succeed (issue #2317 fix)."""
-        target = workspace / "subdir" / "new-project"
+        """Multi-level directory creation should succeed (issue #2317 fix).
+
+        Issue #3410: re-pointed under the user's own home, mirroring the
+        check-path counterpart ``test_multi_level_new_path_valid`` — mkdir -p
+        semantics stay available inside the home subtree, but a multi-level
+        path directly under the workspace root is no longer creatable (see
+        ``test_create_multi_level_outside_home_rejected``).
+        """
+        target = workspace / "testuser" / "subdir" / "new-project"
         resp = client.post(
             "/api/fs/create-directory",
             json={"path": str(target)},
@@ -320,8 +327,8 @@ class TestCreateDirectory:
         assert target.is_dir()
 
     def test_create_deep_multi_level(self, client, workspace):
-        """Deeply nested directory creation should succeed."""
-        target = workspace / "a" / "b" / "c" / "d" / "new-project"
+        """Deeply nested directory creation should succeed (inside own home)."""
+        target = workspace / "testuser" / "a" / "b" / "c" / "d" / "new-project"
         resp = client.post(
             "/api/fs/create-directory",
             json={"path": str(target)},
@@ -329,6 +336,39 @@ class TestCreateDirectory:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
+        assert target.is_dir()
+
+    @pytest.mark.security
+    @pytest.mark.regression
+    @pytest.mark.issue(3410)
+    def test_create_multi_level_outside_home_rejected(self, client, workspace):
+        """#3410: create-directory now uses check-path's admissible set.
+
+        ``test_multi_level_directly_under_base_rejected`` already pins this for
+        check-path; create-directory had NO app-layer lock at all and relied on
+        OS DAC, so a mapped user could target any depth under the base dir.
+        """
+        target = workspace / "subdir" / "new-project"
+        resp = client.post("/api/fs/create-directory", json={"path": str(target)})
+        assert resp.status_code == 400
+        assert not target.exists()
+
+    @pytest.mark.security
+    @pytest.mark.regression
+    @pytest.mark.issue(3410)
+    def test_create_in_another_users_home_rejected(self, client, workspace):
+        other = workspace / "otheruser"
+        other.mkdir(exist_ok=True)
+        resp = client.post("/api/fs/create-directory", json={"path": str(other / "evil")})
+        assert resp.status_code == 400
+        assert not (other / "evil").exists()
+
+    @pytest.mark.issue(3410)
+    def test_create_first_level_under_base_still_allowed(self, client, workspace):
+        """#2317 parity with check-path: a NEW first-level project dir."""
+        target = workspace / "new-project"
+        resp = client.post("/api/fs/create-directory", json={"path": str(target)})
+        assert resp.status_code == 200
         assert target.is_dir()
 
     def test_create_already_exists(self, client, workspace):

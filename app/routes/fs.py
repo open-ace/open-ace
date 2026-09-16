@@ -1409,6 +1409,16 @@ def api_create_directory():
 
     dir_path = os.path.realpath(dir_path)
 
+    # Issue #3410: create-directory is a WRITE entry and was the one /fs write
+    # path with no app-layer boundary — it checked only the workspace base
+    # prefix, so a mapped user could target any depth under the base dir and
+    # relied on OS DAC alone. Reuse check-path's admissible set (NOT browse's):
+    # the two are halves of the #2317 flow — validate a path, then create it —
+    # so a path check-path reports creatable must stay creatable here.
+    reason = _check_path_rejection_reason(dir_path, user)
+    if reason is not None:
+        return jsonify({"success": False, "error": f"{reason}. Provided path: {dir_path}"}), 400
+
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
 
