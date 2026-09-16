@@ -22,7 +22,16 @@ assertions. The approved plan of record is
   account joins the global group for namespace creation, so cross-tenant
   members can still list the root via the group r-x — content access stays
   fenced by the per-tenant groups).
-- **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
+- **#3393 (fixed; app-side on-demand provisioning)**: on a shape the
+  entrypoint never reaches (package installs, or a lost/missing root), the
+  FIRST shared-project creation (`create_dir: true` at `<base>/shared/<name>`)
+  still mkdir'd against the missing root. POST /api/projects now provisions
+  the namespace root on demand BEFORE the user-side mkdir (root-owned,
+  `openace-shared` group, **3770** = sticky+setgid, no others bits — the
+  entrypoint's semantics; an existing root is left untouched, failures
+  degrade to a clean 5xx); the multi-user path of
+  `scripts/install-central/package-method/install.sh` provisions the
+  equivalent at install time.- **#3390 (UID drift)**: on container recreation the entrypoint re-useradds
   active users without uid pinning — a deactivated user's directories are
   numerically inherited by an active account. Item (f) asserts this by
   owner name and is expected to FAIL until the fix lands (recorded

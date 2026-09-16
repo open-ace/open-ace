@@ -16,7 +16,13 @@
   非成员进程列出共享项目**名称**；声明残留（命名空间设计固有）：全部在役账号都为
   建目录权加入全局组，跨租户成员仍可经组 r-x 列出根目录——内容访问仍由按租户组
   封锁）。
-- **#3390（UID 漂移）**：容器重建后 entrypoint 按在役用户重新 useradd 且不固定
+- **#3393（已修，app 侧按需预置）**：entrypoint 没跑到的形态（package 安装、或根目录
+  丢失）下，首个共享项目创建（`create_dir: true` 于 `<base>/shared/<name>`）仍会在
+  缺失的根上 mkdir 失败。POST /api/projects 现在在用户侧 mkdir **之前**按需预置该
+  命名空间根（root 属主、`openace-shared` 组、**3770**＝sticky+setgid、无 others 位，
+  与 entrypoint 语义一致；已存在的根不动、失败降级为干净的 5xx）；
+  `scripts/install-central/package-method/install.sh` 的多用户路径也在安装期补齐同
+  等预置。- **#3390（UID 漂移）**：容器重建后 entrypoint 按在役用户重新 useradd 且不固定
   uid，已停用用户的目录被在役账号数字继承——f 项断言预期 FAIL，如实记录。
 - **#3394（已修，PR #3395）**：前端完整性检查期望与 vite 产物不符导致生产镜像
   crash-loop。
