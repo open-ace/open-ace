@@ -1028,7 +1028,45 @@ except Exception:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-    if [ "$HAS_APP_SCHEMA" = "yes" ]; then
+    # Issue #3397: fresh-database self-initialization.
+    # A fresh production install used to be REFUSED here: with no schema and
+    # no alembic_version table, scripts/check_min_revision.py exits 1 in
+    # production mode ("Fresh database detected"), so the documented compose
+    # deployment path could not boot at all — the acceptance run had to use a
+    # one-shot `alembic upgrade head && python3 scripts/init_db.py` container
+    # as a DECLARED DEVIATION. The entrypoint now SELF-initializes exactly
+    # that state: NO application schema AND no alembic_version table (the
+    # same two commands as the deviation workaround, run by the normal flow
+    # below). A database with existing schema OR a recorded revision is NEVER
+    # touched by this branch — it keeps the minimum-revision refusal and the
+    # regular upgrade path (init_db.py still seeds only when no application
+    # schema existed at boot). Quoted heredoc probe (the #3399 raw-quote class
+    # cannot recur); a probe failure yields "unknown", which is NOT fresh, so
+    # detection fails strict, never loose.
+    HAS_ALEMBIC_VERSION=$(python3 - <<'PY_FRESH_DB_PROBE_EOF' 2>/dev/null || echo "unknown"
+import os
+
+import psycopg2
+
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
+    )
+    result = 'yes' if cur.fetchone() else 'no'
+    conn.close()
+    print(result)
+except Exception:
+    print('unknown')
+PY_FRESH_DB_PROBE_EOF
+)
+    FRESH_DB="false"
+    if [ "$HAS_APP_SCHEMA" = "no" ] && [ "$HAS_ALEMBIC_VERSION" = "no" ]; then
+        FRESH_DB="true"
+        echo "Fresh database detected — self-initializing schema and seed (was #3397)."
+    elif [ "$HAS_APP_SCHEMA" = "yes" ]; then
         echo "Existing application schema detected."
     elif [ "$HAS_APP_SCHEMA" = "no" ]; then
         echo "No application schema detected. Treating this as a fresh installation."
@@ -1040,10 +1078,12 @@ except Exception:
     # Verify the database is on the supported (>= baseline_2026_06_23) lineage
     # before upgrading. Fresh databases (no alembic_version table) pass through;
     # the schema is built from the baseline snapshot below.
-    if ! python3 scripts/check_min_revision.py; then
-        echo "ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23)."
-        echo "       Restore a known-healthy backup already on the baseline lineage, then restart the container."
-        exit 1
+    if [ "$FRESH_DB" != "true" ]; then
+        if ! python3 scripts/check_min_revision.py; then
+            echo "ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23)."
+            echo "       Restore a known-healthy backup already on the baseline lineage, then restart the container."
+            exit 1
+        fi
     fi
 
     echo "Running database migrations..."
