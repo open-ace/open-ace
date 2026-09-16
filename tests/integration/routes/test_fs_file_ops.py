@@ -14,10 +14,12 @@ build a throwaway workspace tree there and clean it up in teardown.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1487,3 +1489,297 @@ class TestUploadNonRootMultiUserBranch:
         assert "openace-write-as" in resp.get_json()["error"]
         # Must not have spawned the wrapper at all.
         popen_mock.assert_not_called()
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+class TestUploadSymlinkEscape:
+    """#3410: the upload target must never be resolved through a symlink.
+
+    The attacker owns their home, so they can plant a symlink whose NAME is the
+    name they are about to upload and whose TARGET is another user's file.
+    Before the fix ``realpath(join(resolved_dir, safe_name))`` resolved to the
+    victim path and the final guard only re-checked the workspace base dirs
+    (not the home subtree), so the root branch's ``os.replace`` overwrote it.
+    """
+
+    @pytest.fixture
+    def tree(self):
+        # Own UNIQUE root (NOT the module-level fixed-path `workspace`
+        # fixture): this file runs under `pytest -n auto` in the python-core
+        # lane with --maxfail=1, so a cross-worker collision costs the lane.
+        # is_valid_path blacklists /var (macOS tmp resolves under /private/var),
+        # so anchor under the real home rather than tmp_path.
+        ws_root = Path.home() / f".ace_fs_3410_{uuid.uuid4().hex[:8]}"
+        (ws_root / "testuser").mkdir(parents=True)
+        (ws_root / "victim").mkdir(parents=True)
+        (ws_root / "victim" / "secret.txt").write_text("VICTIM-ORIGINAL")
+        yield ws_root, ws_root / "testuser", ws_root / "victim" / "secret.txt"
+        shutil.rmtree(ws_root, ignore_errors=True)
+
+    def _app(self, system_account="testuser"):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []  # app-scope only (see `app` fixture)
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": system_account}
+
+        return app
+
+    @contextlib.contextmanager
+    def _root_env(self, ws_root, home):
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            patch("app.routes.fs._fchown_to_user", return_value=True),
+            # STANDING RULE (#3410 review): every helper the ROOT branch calls
+            # must be patched here. `_resolve_uid_gid` shells out to
+            # `id -u testuser`, which fails on CI and on any dev box — the
+            # route would then 400 on the ownership gate BEFORE reaching the
+            # symlink check, and the symlink tests would pass vacuously.
+            # os.fstat is deliberately NOT patched (patching os.geteuid touches
+            # only that attribute), so the expected uid must be the real
+            # process uid that owns the test-created directory.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            yield
+
+    def _upload(self, client, path, filename, payload=b"PWNED"):
+        return client.post(
+            "/api/fs/upload",
+            data={"file": (io.BytesIO(payload), filename), "path": str(path)},
+            content_type="multipart/form-data",
+        )
+
+    def test_root_branch_symlink_to_other_user_is_rejected(self, tree):
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+        # The attacker's own dirent is untouched and still a symlink.
+        assert os.path.islink(str(home / "secret.txt"))
+        assert list(home.glob(".openace-upload-*")) == []
+
+    def test_root_branch_does_not_disclose_the_symlink_target(self, tree):
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert str(victim) not in resp.get_data(as_text=True)
+
+    def test_root_branch_symlinked_parent_dir_is_rejected(self, tree):
+        """A symlinked intermediate directory must not be traversed either."""
+        ws_root, home, victim = tree
+        os.symlink(str(victim.parent), str(home / "linkdir"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home / "linkdir", "secret.txt")
+        assert resp.status_code == 400
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_root_branch_symlink_outside_workspace_is_rejected(self, tree):
+        ws_root, home, _ = tree
+        outside = ws_root.parent / f"{ws_root.name}-outside.txt"
+        outside.write_text("OUTSIDE-ORIGINAL")
+        try:
+            os.symlink(str(outside), str(home / "out.txt"))
+            with self._root_env(ws_root, home):
+                resp = self._upload(self._app().test_client(), home, "out.txt")
+            assert resp.status_code == 400
+            assert outside.read_text() == "OUTSIDE-ORIGINAL"
+        finally:
+            outside.unlink(missing_ok=True)
+
+    def test_root_branch_overwrites_a_plain_file_normally(self, tree):
+        ws_root, home, victim = tree
+        (home / "notes.txt").write_text("OLD")
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "notes.txt", payload=b"NEW")
+        assert resp.status_code == 200
+        assert (home / "notes.txt").read_bytes() == b"NEW"
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_root_branch_uploads_into_own_subdirectory(self, tree):
+        ws_root, home, _ = tree
+        sub = home / "docs" / "2026"
+        sub.mkdir(parents=True)
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), sub, "ok.txt", payload=b"OK")
+        assert resp.status_code == 200
+        assert (sub / "ok.txt").read_bytes() == b"OK"
+
+    def test_root_branch_refuses_a_home_root_not_owned_by_the_account(self, tree):
+        """#3410: the anchor assertion needs POSITIVE coverage.
+
+        Every other root-branch test patches `_resolve_uid_gid` to the process
+        uid so the gate passes; this one makes it disagree, which is the only
+        test that proves the gate is wired at all.
+        """
+        ws_root, home, _ = tree
+        with (
+            self._root_env(ws_root, home),
+            patch(
+                "app.routes.fs._resolve_uid_gid",
+                return_value=(os.getuid() + 4242, os.getgid()),
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "x.txt", payload=b"NOPE")
+        assert resp.status_code == 400
+        assert not (home / "x.txt").exists()
+        assert list(home.glob(".openace-upload-*")) == []
+
+    def test_direct_branch_rejects_a_directory_target(self, tree):
+        ws_root, home, _ = tree
+        (home / "notes.txt").mkdir()
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "notes.txt")
+        assert resp.status_code == 400
+        assert "directory" in resp.get_json()["error"].lower()
+        assert (home / "notes.txt").is_dir()
+        # Nothing moved INTO it.
+        assert list((home / "notes.txt").iterdir()) == []
+
+    def test_direct_branch_symlink_is_rejected(self, tree):
+        """Single-user / non-root: the process already owns the home."""
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+        ):
+            resp = self._upload(self._app(system_account=None).test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_wrapper_branch_passes_the_in_home_path_not_the_resolved_one(self, tree):
+        """Package non-root multi-user.
+
+        The web process is a service account that CANNOT traverse the target
+        user's 0700 home, so the route's own ``islink`` probe cannot see the
+        symlink (it returns False on EACCES) — the wrapper is the enforcement
+        point. What the route must guarantee is that the path it hands over is
+        the IN-HOME joined path, never the realpath-escaped one.
+        """
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        seen = {}
+
+        class _Proc:
+            returncode = 0
+
+            def __init__(self):
+                self.stdin = io.BytesIO()
+
+            def communicate(self, timeout=None):
+                return b"", b""
+
+        def _popen(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return _Proc()
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.os.path.islink", return_value=False),  # simulate EACCES probe
+            patch("app.routes.fs.subprocess.Popen", side_effect=_popen),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            self._upload(self._app().test_client(), home, "secret.txt")
+        assert seen["cmd"][-1] == str(home / "secret.txt")  # NOT str(victim)
+
+    def test_wrapper_branch_maps_exit_5_to_a_symlink_rejection(self, tree):
+        """The wrapper's symlink refusal must surface as 400, not a bare 403."""
+        ws_root, home, _ = tree
+
+        class _Proc:
+            returncode = 5
+
+            def __init__(self):
+                self.stdin = io.BytesIO()
+
+            def communicate(self, timeout=None):
+                return b"", b"ERROR: Target is a symbolic link; refusing to write through it"
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.os.path.islink", return_value=False),
+            patch("app.routes.fs.subprocess.Popen", side_effect=lambda cmd, **kw: _Proc()),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        assert "symbolic link" in resp.get_json()["error"].lower()
+
+    def test_wrapper_branch_refuses_when_the_installed_wrapper_is_outdated(self, tree):
+        """#3410: fail closed rather than let the contract over-claim."""
+        ws_root, home, _ = tree
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=False),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "plain.txt", payload=b"OK")
+        assert resp.status_code == 500
+        assert "reinstall" in resp.get_json()["error"].lower()
