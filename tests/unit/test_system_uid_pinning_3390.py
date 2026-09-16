@@ -1014,3 +1014,59 @@ class TestAdminUpdateUserProvisioning:
             "a user who ends up ACTIVE via this PUT gets provisioned (the "
             "exists-path upgrades their placeholder back to /bin/bash)"
         )
+
+
+class TestSyncPayloadBashQuoting:
+    """Issue #3399 root cause, permanent guard.
+
+    The user-sync python is embedded in a bash DOUBLE-QUOTED ``python3 -u -c``
+    argument. Raw (unescaped) ``"`` inside the payload — introduced by an
+    auto-dev commit's SSH-sync section — flips bash's quoting: bash strips the
+    quotes, splits the argument at the first unquoted whitespace, and hands
+    python a TRUNCATED program (SyntaxError, exit 1), while the pipeline tail
+    (``2>&1 | tee``) is mis-parsed so the traceback never reaches the log —
+    the exact "zero-output silent death" of #3399. ``bash -n`` cannot catch
+    it (quotes stay balanced) and the functional harnesses below extract the
+    payload with their OWN unescape, hiding it.
+
+    This test runs the invocation through REAL bash with a PATH-shimmed
+    python3 that dumps argv, then asserts bash's expansion is byte-identical
+    to the harness's unescape extraction and parses as python."""
+
+    def test_bash_passes_the_full_parseable_payload(self, tmp_path):
+        import ast
+        import os
+        import stat
+        import subprocess as sp
+
+        content = open(ENTRYPOINT, encoding="utf-8").read()
+        start = content.index("Syncing workspace users")
+        py_start = content.index('python3 -u -c "', start)
+        line_start = content.rindex("\n", 0, py_start) + 1
+        end = content.index('" 2>&1 | tee', py_start)
+        invocation = content[line_start : content.index("\n", end) + 1]
+
+        shim_dir = tmp_path / "bin"
+        shim_dir.mkdir()
+        dump = tmp_path / "argv3.txt"
+        (shim_dir / "python3").write_text(f'#!/bin/bash\nprintf "%s" "$3" > "{dump}"\nexit 0\n')
+        (shim_dir / "python3").chmod((shim_dir / "python3").stat().st_mode | stat.S_IEXEC)
+
+        script = tmp_path / "line.sh"
+        script.write_text(invocation)
+        env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+        proc = sp.run(["bash", str(script)], capture_output=True, text=True, env=env)
+        assert proc.returncode == 0, proc.stderr
+
+        bash_passed = dump.read_text()
+        # the harness's extraction (unescape) — must be byte-identical to what
+        # bash actually passes; any raw quote makes bash truncate instead
+        extracted = content[py_start + len('python3 -u -c "') : end]
+        for esc, raw in (("\\$", "$"), ("\\`", "`"), ('\\"', '"')):
+            extracted = extracted.replace(esc, raw)
+        assert bash_passed == extracted, (
+            "bash's expansion of the -c payload diverges from the source "
+            "extraction — unescaped shell metacharacters (raw quotes) in the "
+            "embedded sync python (#3399 class bug)"
+        )
+        ast.parse(bash_passed)

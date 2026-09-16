@@ -4,6 +4,8 @@
 Executes the #3374 nine-item acceptance checklist against a REAL multi-user
 Compose deployment (production image, real useradd/sudo wrapper, real
 processes) and produces a reviewable acceptance record (JSON + Markdown).
+# fix(#3399): comment-only touch to trigger this lane for the entrypoint
+# user-sync quoting fix (docker-entrypoint.sh is outside the paths filter).
 
 Deliberately NOT a pytest module (#2457 lesson: real gevent hubs inside
 pytest crash xdist workers — and an acceptance run needs the whole stack,
