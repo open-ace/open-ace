@@ -98,7 +98,7 @@ workflow 文件，所以触碰 `scripts/multiuser_acceptance.py` / 本 workflow 
 | e | 资源上限/取消/异常退出不影响他人 | 预置 `max_instances=3`；第 4 实例；admin 停 alice 实例；`kill -9` bob 的 webui | 第 4 实例 503（body 非结构化——如实记录，本身是验收发现）；他人会话与 /readyz 不受扰；释放的槽位可复用 |
 | f | 停用用户/撤销 token/重启 orphan | 停用 bob 后查会话/URL-token/进程/代理 token（代理 token 取自 webui 环境的 `OPENAI_API_KEY`——sudo 启动路径只内联该键集）；`up -d --force-recreate`（重建容器、保留卷——`restart` 不重建可写层，分辨不出 secret 是否真落在卷上）后容器内查进程与端口、alice 旧 token 复验 | 全部 401/进程销毁/代理 token 401；重建后无残留 webui 进程、3100–3200 容器内无监听；token_secret 卷持久化使旧 token 仍有效（#3377 的真实主张）。**依赖 PR-A（3384）** |
 | g | backend 不支持时明确拒绝 | 契约端点；user-url 请求 `sandboxed`；无映射用户（erin）请求 `os_user` | 契约 `isolation_level=os_user` 且 reasons **不含任何** SANDBOX_PROBE_REASON_CODES；400 `isolation_level_unsupported`；400 `identity_mapping_missing` |
-| h | 单用户模式无退化 | 独立 compose 项目（端口 19889）起基础栈,自带全新卷,不影响多用户栈 | 契约 `none`、单实例 3100（若触发 app 侧单用户启动限制则记声明豁免,见 §5.8）、admin 登录、/readyz 200 |
+| h | 单用户模式无退化 | 独立 compose 项目（端口 19889）起基础栈,自带全新卷,不影响多用户栈 | 契约 `none`、单实例落位所配端口段首个空闲端口（默认 3100；偏移尾段形态为 13100——硬编码 3100 的遗留已修，见 §5.8）（若触发 app 侧单用户启动限制则记声明豁免,见 §5.8）、admin 登录、/readyz 200 |
 | i | 发布样例/权限条件/能力矩阵/真实结果 | 记录器 | 记录含 git SHA、镜像 digest、docker/compose 版本、内核、policy_revision；能力矩阵交叉引用 `WORKSPACE_ISOLATION_CAPABILITIES` |
 
 ## 4. 记录产物与模板
@@ -152,8 +152,9 @@ workflow 文件，所以触碰 `scripts/multiuser_acceptance.py` / 本 workflow 
    的 502/503 也一律 FAIL（回归不被吞）；能力断言通过时，admin 的 502/503 才记 EXEMPT
    （声明限制）。待 app 侧为 admin 提供映射后豁免自动收敛。另注：单用户尾段
    在独立 compose 项目中运行（web 端口 19889、工作区端口段偏移到 13100–13200，避免
-   与多用户栈的 3100–3200 冲突）——该形态下单用户 webui 不在其广播的主机 URL 上可达，
-   h 项断言全部为 API 层，不依赖直连它。
+   与多用户栈的 3100–3200 冲突）。单用户实例现已遵循所配端口段（首个空闲端口，默认
+   3100——此前硬编码 3100，在偏移形态下绑定未发布端口且广播不可达的 `:3100` URL），
+   该形态下绑定 13100 并广播 `:13100`；h 项断言仍全部为 API 层，不依赖直连它。
 
 ## 6. 部署注记（承接 #3384）
 
