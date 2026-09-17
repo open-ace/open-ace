@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Route tests for the recursive name-search endpoint (Issue #1923).
 
-Mirrors the stubbing pattern in test_fs_file_ops.py: pre-stub app.* packages
-so fs.py can be loaded without triggering the full app/__init__.py import
-chain, then register only fs_bp against an isolated Flask app.
+Same pattern as test_fs_file_ops.py: try the real app.routes.fs import
+first; only when it fails (dev machines where the package init cannot
+import) fall back to stubbing app.* and file-loading fs.py, then register
+only fs_bp against an isolated Flask app.
 """
 
 from __future__ import annotations
@@ -11,83 +12,89 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-project_root = str(Path(__file__).resolve().parent.parent.parent)
+# parents[3]: this file lives at <repo>/tests/integration/routes/, so the
+# repository root is three directories up (a bare parent.parent.parent chain
+# used to resolve to <repo>/tests and broke standalone runs).
+project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# ---------------------------------------------------------------------------
-# Same module pre-stubbing as test_fs_file_ops.py (idempotent — harmless if
-# test_fs_file_ops.py already ran and stubbed everything).
-# ---------------------------------------------------------------------------
 import importlib.util  # noqa: E402
 
-if "app.routes.fs" not in sys.modules:
-    for _pkg in [
-        "app",
-        "app.routes",
-        "app.repositories",
-        "app.repositories.user_repo",
-        "app.utils",
-        "app.utils.workspace",
-        "app.auth",
-        "app.auth.decorators",
-        "app.services",
-        "app.services.webui_manager",
-    ]:
-        if _pkg not in sys.modules:
-            sys.modules[_pkg] = type(sys)(_pkg)
-            if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
-                sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
+# Real import first (same guard as test_fs_file_ops.py): stubbing
+# sys.modules unconditionally leaks __path__=[] packages into the process
+# and breaks later test modules that import app.* normally.
+try:
+    import app.routes.fs  # noqa: F401
+except Exception:  # pragma: no cover - dev-machine-specific import failure
+    if "app.routes.fs" not in sys.modules:
+        for _pkg in [
+            "app",
+            "app.routes",
+            "app.repositories",
+            "app.repositories.user_repo",
+            "app.utils",
+            "app.utils.workspace",
+            "app.auth",
+            "app.auth.decorators",
+            "app.services",
+            "app.services.webui_manager",
+        ]:
+            if _pkg not in sys.modules:
+                sys.modules[_pkg] = type(sys)(_pkg)
+                if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
+                    sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
 
-    class _UR:
-        def get_user_by_id(self, _):
-            return None
+        class _UR:
+            def get_user_by_id(self, _):
+                return None
 
-    sys.modules["app.repositories.user_repo"].UserRepository = _UR
+        sys.modules["app.repositories.user_repo"].UserRepository = _UR
 
-    _ad = sys.modules["app.auth.decorators"]
-    _ad._extract_token = lambda: None  # type: ignore[attr-defined]
-    _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
-    _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
+        _ad = sys.modules["app.auth.decorators"]
+        _ad._extract_token = lambda: None  # type: ignore[attr-defined]
+        _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
+        _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
 
-    sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
+        sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
 
-    _cache_mod = type(sys)("app.utils.cache")
+        _cache_mod = type(sys)("app.utils.cache")
 
-    class _Cache:
-        def clear(self):
-            pass
+        class _Cache:
+            def clear(self):
+                pass
 
-    _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
-    sys.modules["app.utils.cache"] = _cache_mod
-    _auth_svc = type(sys)("app.services.auth_service")
-    _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
-    sys.modules["app.services.auth_service"] = _auth_svc
+        _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
+        sys.modules["app.utils.cache"] = _cache_mod
+        _auth_svc = type(sys)("app.services.auth_service")
+        _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
+        sys.modules["app.services.auth_service"] = _auth_svc
 
-    _ws = sys.modules["app.utils.workspace"]
-    _rspec = importlib.util.spec_from_file_location(
-        "_real_workspace_for_search_test", str(Path(project_root) / "app/utils/workspace.py")
-    )
-    _rw = importlib.util.module_from_spec(_rspec)
-    _rspec.loader.exec_module(_rw)
-    _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
-    _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
-    _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
-    _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
-    _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
+        _ws = sys.modules["app.utils.workspace"]
+        _rspec = importlib.util.spec_from_file_location(
+            "_real_workspace_for_search_test", str(Path(project_root) / "app/utils/workspace.py")
+        )
+        _rw = importlib.util.module_from_spec(_rspec)
+        _rspec.loader.exec_module(_rw)
+        _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
+        _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
+        _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+        _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
+        _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
 
-    _fs_spec = importlib.util.spec_from_file_location(
-        "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
-    )
-    assert _fs_spec is not None and _fs_spec.loader is not None
-    _fs_mod = importlib.util.module_from_spec(_fs_spec)
-    sys.modules["app.routes.fs"] = _fs_mod
-    _fs_spec.loader.exec_module(_fs_mod)
+        _fs_spec = importlib.util.spec_from_file_location(
+            "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
+        )
+        assert _fs_spec is not None and _fs_spec.loader is not None
+        _fs_mod = importlib.util.module_from_spec(_fs_spec)
+        sys.modules["app.routes.fs"] = _fs_mod
+        _fs_spec.loader.exec_module(_fs_mod)
 
 
 @pytest.fixture
@@ -97,8 +104,11 @@ def workspace(tmp_path_factory):
     is_valid_path blacklists /root, /tmp, /var, etc. When tests run as root
     (HOME=/root), Path.home() is also blacklisted, so we use the project
     directory itself (under /tools, non-blacklisted) as the workspace parent.
+    The uuid suffix is load-bearing: `pytest -n auto` spreads one module's
+    tests across workers — a fixed name made two workers rmtree each other's
+    tree mid-test (same hazard the sibling fs test files document).
     """
-    ws = Path(project_root) / ".test-ws-search"
+    ws = Path(project_root) / f".test-ws-search-{uuid.uuid4().hex[:8]}"
     if ws.exists():
         shutil.rmtree(ws, ignore_errors=True)
     ws.mkdir(parents=True, exist_ok=True)
@@ -306,6 +316,18 @@ class TestSearchEndpoint:
         data = resp.get_json()
         assert data["total"] == 2
         assert data["truncated"] is True
+
+    def test_search_exactly_max_results_is_not_truncated(self, client, workspace):
+        """Boundary: a walk that completes NATURALLY with exactly max_results
+        matches found nothing more to cut — truncated must be False, or the UI
+        offers "more results" that do not exist."""
+        _, user_home = workspace
+        _build_tree(user_home)
+
+        resp = client.get("/api/fs/search?q=report&max_results=4")
+        data = resp.get_json()
+        assert data["total"] == 4
+        assert data["truncated"] is False
 
     def test_search_kind_filter_dir(self, client, workspace):
         _, user_home = workspace

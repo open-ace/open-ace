@@ -8,6 +8,7 @@
 #   - Owner must match target user
 #   - Dangerous options are rejected
 #   - TOCTOU protection via flock
+#   - Every filesystem probe and the rm itself run AS the target user
 #   - Audit logging
 #
 # Usage: openace-rm <target_user> <path> [rm_options...]
@@ -21,6 +22,13 @@
 #   5 - rm execution failed
 #   6 - TOCTOU attack detected
 #   7 - Symlink escape detected
+#
+# Capability marker (Issue #3410). app/routes/fs.py greps the INSTALLED wrapper
+# for this exact line and refuses deletes fail-closed when it is absent: a host
+# still running a pre-#3410 openace-rm, whose final rm ran as root, would keep
+# that race while the capability contract reports filesystem_api: enforced.
+# Keep it in sync with _RM_CAPABILITY_SENTINEL (a test asserts both files agree).
+# openace-rm-capability: account-scoped=1
 
 set -euo pipefail
 
@@ -134,6 +142,16 @@ for reserved in $RESERVED_USERNAMES; do
     fi
 done
 
+# Issue #3410: from here on every filesystem probe AND the final rm run as the
+# target user. The checks below used to run as root on a path, and so did the
+# rm: a parent directory swapped for a symlink between the TOCTOU re-check and
+# the rm made root delete another user's file. As the target user, both the
+# probes and the delete are bounded by what that user can do from a shell.
+# stdin is /dev/null so nothing in the PAM chain can read from the caller.
+as_target() {
+    runuser -u "$TARGET_USER" -- "$@" </dev/null
+}
+
 # ========================================
 # 3. Path validation
 # ========================================
@@ -154,13 +172,13 @@ fi
 
 # Resolve to canonical path
 RESOLVED_PATH=""
-if [ -e "$TARGET_PATH" ]; then
-    RESOLVED_PATH=$(readlink -f "$TARGET_PATH" 2>/dev/null || echo "$TARGET_PATH")
+if as_target test -e "$TARGET_PATH"; then
+    RESOLVED_PATH=$(as_target readlink -f "$TARGET_PATH" 2>/dev/null || echo "$TARGET_PATH")
 else
     # For non-existent paths, resolve the parent directory
     PARENT_DIR=$(dirname "$TARGET_PATH")
-    if [ -d "$PARENT_DIR" ]; then
-        RESOLVED_PARENT=$(readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
+    if as_target test -d "$PARENT_DIR"; then
+        RESOLVED_PARENT=$(as_target readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
         RESOLVED_PATH="${RESOLVED_PARENT}/$(basename "$TARGET_PATH")"
     else
         RESOLVED_PATH="$TARGET_PATH"
@@ -215,9 +233,9 @@ check_symlink_escape() {
         current_path="${current_path}/${component}"
 
         # Check if this component is a symlink
-        if [ -L "$current_path" ]; then
+        if as_target test -L "$current_path"; then
             local link_target
-            link_target=$(readlink -f "$current_path" 2>/dev/null || echo "")
+            link_target=$(as_target readlink -f "$current_path" 2>/dev/null || echo "")
 
             if [ -n "$link_target" ]; then
                 # Check if symlink target is still within allowed prefixes
@@ -239,7 +257,7 @@ check_symlink_escape() {
 }
 
 # Only check symlink escape for existing paths
-if [ -e "$TARGET_PATH" ]; then
+if as_target test -e "$TARGET_PATH"; then
     if ! check_symlink_escape "$TARGET_PATH"; then
         echo "ERROR: Symlink escape detected: path points outside allowed directories" >&2
         log_audit "caller=$(whoami) target=${TARGET_USER} path=${TARGET_PATH} result=reject_symlink_escape"
@@ -251,8 +269,8 @@ fi
 # 5. Owner validation (for existing files)
 # ========================================
 
-if [ -e "$TARGET_PATH" ]; then
-    FILE_OWNER=$(stat -c '%U' "$TARGET_PATH" 2>/dev/null || echo "")
+if as_target test -e "$TARGET_PATH"; then
+    FILE_OWNER=$(as_target stat -c '%U' "$TARGET_PATH" 2>/dev/null || echo "")
 
     if [ -z "$FILE_OWNER" ]; then
         echo "ERROR: Cannot determine owner of: $TARGET_PATH" >&2
@@ -281,9 +299,9 @@ for opt in "${RM_OPTIONS[@]}"; do
 done
 
 # If recursive and target is a directory, check for other users' files
-if [ "$HAS_RECURSIVE" = true ] && [ -d "$TARGET_PATH" ]; then
+if [ "$HAS_RECURSIVE" = true ] && as_target test -d "$TARGET_PATH"; then
     # Find files not owned by target user
-    OTHER_USER_FILES=$(find "$TARGET_PATH" -type f ! -user "$TARGET_USER" 2>/dev/null | head -1 || true)
+    OTHER_USER_FILES=$(as_target find "$TARGET_PATH" -type f ! -user "$TARGET_USER" 2>/dev/null | head -1 || true)
 
     if [ -n "$OTHER_USER_FILES" ]; then
         echo "ERROR: Directory contains files owned by other users. Cannot recursively delete." >&2
@@ -308,12 +326,12 @@ fi
 
 # Re-validate path after acquiring lock (TOCTOU protection)
 RESOLVED_PATH_AFTER=""
-if [ -e "$TARGET_PATH" ]; then
-    RESOLVED_PATH_AFTER=$(readlink -f "$TARGET_PATH" 2>/dev/null || echo "$TARGET_PATH")
+if as_target test -e "$TARGET_PATH"; then
+    RESOLVED_PATH_AFTER=$(as_target readlink -f "$TARGET_PATH" 2>/dev/null || echo "$TARGET_PATH")
 else
     PARENT_DIR=$(dirname "$TARGET_PATH")
-    if [ -d "$PARENT_DIR" ]; then
-        RESOLVED_PARENT=$(readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
+    if as_target test -d "$PARENT_DIR"; then
+        RESOLVED_PARENT=$(as_target readlink -f "$PARENT_DIR" 2>/dev/null || echo "$PARENT_DIR")
         RESOLVED_PATH_AFTER="${RESOLVED_PARENT}/$(basename "$TARGET_PATH")"
     else
         RESOLVED_PATH_AFTER="$TARGET_PATH"
@@ -331,7 +349,9 @@ fi
 # 8. Execute rm
 # ========================================
 
-if rm "${RM_OPTIONS[@]}" "$TARGET_PATH"; then
+# As the target user (see as_target): if a component was swapped for a symlink
+# after the re-check above, the rm can reach only what that user could delete.
+if as_target rm "${RM_OPTIONS[@]}" -- "$TARGET_PATH"; then
     log_audit "caller=$(whoami) target=${TARGET_USER} path=${TARGET_PATH} result=success"
     flock -u 200
     exit 0

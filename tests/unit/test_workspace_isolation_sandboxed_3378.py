@@ -323,7 +323,7 @@ def test_snapshot_appends_sandbox_reason_when_configured_but_failing(monkeypatch
 
 
 def test_policy_revision_bumped():
-    assert wic.POLICY_REVISION == "2026-09-12.2"
+    assert wic.POLICY_REVISION == "2026-09-16.1"
 
 
 def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
@@ -349,9 +349,14 @@ def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
     for name in ("terminal", "vscode", "filesystem_api"):
         assert entry_points[name] == "sandboxed_entry_not_wired"
     # The os_user/default matrix is untouched.
-    assert wic.ENTRY_POINT_STATUSES["terminal"] == "partial"
-    assert wic.ENTRY_POINT_STATUSES["filesystem_api"] == "partial"
-    assert wic.ENTRY_POINT_STATUSES["vscode"] == "partial"
+    # Issue #3410 recalibration: the os_user matrix these compare against is
+    # no longer "partial" for any of the three — filesystem_api is enforced
+    # and the two remote entries carry their own scope token. The point of
+    # this assertion is unchanged: the SANDBOXED matrix must differ from the
+    # os_user one for the unwired entries.
+    assert wic.ENTRY_POINT_STATUSES["filesystem_api"] == "enforced"
+    assert wic.ENTRY_POINT_STATUSES["terminal"] == "remote_machine_scope"
+    assert wic.ENTRY_POINT_STATUSES["vscode"] == "remote_machine_scope"
 
 
 def test_cold_worker_sandbox_snapshot_is_provisional(monkeypatch):

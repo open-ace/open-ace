@@ -24,6 +24,7 @@ and executed under stubbed ``psycopg2``/``subprocess`` modules, asserting the
 per-tenant enrollment and the legacy-directory reconcile command sequences.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -1090,6 +1091,9 @@ class TestEnsureWorkspaceDirsSharedGuard:
         modes: list[bool] = []
         monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: bool(modes))
         monkeypatch.setattr(ws, "_acceptance_mode_flag", modes, raising=False)
+        # These tests observe the NON-root, path-based chown calls; pin that
+        # branch so a root test runner does not take the #3410 fd branch.
+        monkeypatch.setattr(ws.os, "geteuid", lambda: 4242)
 
         def fake_run(cmd, **kw):
             calls.append(tuple(cmd))
@@ -1120,3 +1124,159 @@ class TestEnsureWorkspaceDirsSharedGuard:
         assert any(
             str(c[0]).split("/")[-1].startswith("chown") for c in calls
         ), "single-user/package mode has no namespace root; 'shared' is an ordinary account there"
+
+
+class TestWorkspaceDirPrivateMode:
+    """Issue #3410: <base>/<account> must be 0700, like /home/<account>.
+
+    It is the fs API's home root and the OS layer the capability contract's
+    `filesystem` dimension claims; at 0755 any other system account could read
+    a user's whole workspace from a terminal or webui session. Shared projects
+    live at <base>/shared/<name>, outside every home, so sharing is unaffected.
+    """
+
+    @pytest.fixture()
+    def stubbed(self, monkeypatch):
+        from app.utils import workspace as ws
+
+        monkeypatch.setattr(ws, "run_as_root_if_needed", lambda cmd: _FakeProc(0, ""))
+        monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
+        monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: False)
+        # uid/gid lookup fails -> the chown block is skipped entirely; the mode
+        # normalization must still run (it is at function level, not nested).
+        monkeypatch.setattr(ws.subprocess, "run", lambda cmd, **kw: _FakeProc(1, ""))
+        return ws
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_new_workspace_dirs_are_private(self, stubbed, tmp_path):
+        base = tmp_path / "workspace"
+        base.mkdir()
+        stubbed._ensure_workspace_dirs("alice", str(base))
+        assert (base / "alice").is_dir()
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o700"
+        assert oct((base / "alice" / ".qwen").stat().st_mode & 0o777) == "0o700"
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_pre_existing_0755_dirs_converge_on_restart(self, stubbed, tmp_path):
+        base = tmp_path / "workspace"
+        (base / "alice" / ".qwen").mkdir(parents=True)
+        (base / "alice").chmod(0o755)
+        (base / "alice" / ".qwen").chmod(0o755)
+        stubbed._ensure_workspace_dirs("alice", str(base))
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o700"
+        assert oct((base / "alice" / ".qwen").stat().st_mode & 0o777) == "0o700"
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_shared_namespace_root_is_never_chmodded(self, stubbed, tmp_path):
+        """The 3770 namespace root must not be taken to 0700 by this pass.
+
+        The guard at the top of _ensure_workspace_dirs is gated on
+        _is_docker_multi_user_mode(), which went stale when #3393 made the
+        package installer provision <base>/shared too — so this normalization
+        must carry its own skip rather than depend on that guard firing.
+        """
+        base = tmp_path / "workspace"
+        (base / "shared").mkdir(parents=True)
+        (base / "shared").chmod(0o3770)
+        stubbed._ensure_workspace_dirs("shared", str(base))
+        assert oct((base / "shared").stat().st_mode & 0o7777) == "0o3770"
+
+    @pytest.mark.security
+    @pytest.mark.issue(3410)
+    def test_non_root_leaves_a_directory_it_does_not_own_alone_quietly(
+        self, stubbed, tmp_path, monkeypatch, caplog
+    ):
+        """#3410 review: a package home belongs to the account, not to this process.
+
+        chmod could only fail there (EPERM), and it logged a warning on every call.
+        """
+        base = tmp_path / "workspace"
+        (base / "alice" / ".qwen").mkdir(parents=True)
+        (base / "alice").chmod(0o755)
+        monkeypatch.setattr(stubbed.os, "geteuid", lambda: os.getuid() + 4242)
+        with caplog.at_level(logging.WARNING, logger=stubbed.logger.name):
+            stubbed._ensure_workspace_dirs("alice", str(base))
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o755"
+        assert not [r for r in caplog.records if "chmod" in r.getMessage()]
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+class TestWorkspaceDirRootNormalization:
+    """#3410 review: as root, ownership and mode go through a no-follow fd.
+
+    The account controls <workspace>/.qwen and can swap it for a symlink; the
+    path-based chown/chmod made root re-own or re-mode whatever it pointed at.
+    """
+
+    @pytest.fixture()
+    def as_root(self, monkeypatch):
+        from app.utils import workspace as ws
+
+        path_calls: list[list[str]] = []
+        chowned: list[int] = []
+        monkeypatch.setattr(ws.os, "geteuid", lambda: 0)
+        monkeypatch.setattr(ws, "_is_docker_multi_user_mode", lambda: False)
+        monkeypatch.setattr(ws, "_is_wrapper_available", lambda w: False)
+        monkeypatch.setattr(
+            ws, "run_as_root_if_needed", lambda cmd: path_calls.append(cmd) or _FakeProc(0, "")
+        )
+        # The account resolves to THIS process's ids: fchown is then a permitted
+        # no-op and the "owned by the account" chmod rule applies to the tmp dirs.
+        uid, gid = os.getuid(), os.getgid()
+        monkeypatch.setattr(
+            ws.subprocess,
+            "run",
+            lambda cmd, **kw: _FakeProc(0, f"{uid if '-u' in cmd else gid}\n"),
+        )
+        real_fchown = os.fchown
+
+        def recording_fchown(fd, owner, group):
+            chowned.append(os.fstat(fd).st_ino)
+            return real_fchown(fd, owner, group)
+
+        monkeypatch.setattr(ws.os, "fchown", recording_fchown)
+        return ws, chowned, path_calls
+
+    def test_a_qwen_symlink_is_never_followed(self, as_root, tmp_path):
+        ws, chowned, path_calls = as_root
+        home = tmp_path / "workspace" / "alice"
+        home.mkdir(parents=True)
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        victim.chmod(0o755)
+        (home / ".qwen").symlink_to(victim)
+        ws._ensure_workspace_dirs("alice", str(tmp_path / "workspace"))
+        assert oct(victim.stat().st_mode & 0o777) == "0o755"
+        assert victim.stat().st_ino not in chowned
+        assert (home / ".qwen").is_symlink()
+        # The account's own directory is still normalized, by descriptor.
+        assert home.stat().st_ino in chowned
+        assert oct(home.stat().st_mode & 0o777) == "0o700"
+        assert path_calls == []
+
+    def test_account_owned_dirs_converge_to_0700(self, as_root, tmp_path):
+        ws, chowned, _ = as_root
+        base = tmp_path / "workspace"
+        (base / "alice" / ".qwen").mkdir(parents=True)
+        (base / "alice").chmod(0o755)
+        (base / "alice" / ".qwen").chmod(0o755)
+        ws._ensure_workspace_dirs("alice", str(base))
+        assert oct((base / "alice").stat().st_mode & 0o777) == "0o700"
+        assert oct((base / "alice" / ".qwen").stat().st_mode & 0o777) == "0o700"
+        assert len(chowned) == 2
+
+    def test_a_directory_owned_by_someone_else_keeps_its_mode(self, as_root, tmp_path, monkeypatch):
+        """The entrypoint's rule: only chmod what belongs to the account."""
+        ws, _, _ = as_root
+        other = os.getuid() + 4242
+        monkeypatch.setattr(ws.subprocess, "run", lambda cmd, **kw: _FakeProc(0, f"{other}\n"))
+        monkeypatch.setattr(ws.os, "fchown", lambda fd, owner, group: None)  # ownership unchanged
+        base = tmp_path / "workspace"
+        (base / "bob").mkdir(parents=True)
+        (base / "bob").chmod(0o755)
+        ws._ensure_workspace_dirs("bob", str(base))
+        assert oct((base / "bob").stat().st_mode & 0o777) == "0o755"

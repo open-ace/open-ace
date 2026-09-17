@@ -14,16 +14,19 @@ build a throwaway workspace tree there and clean it up in teardown.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import shutil
 import sys
+import threading
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-project_root = str(Path(__file__).resolve().parent.parent.parent)
+project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -31,94 +34,102 @@ if project_root not in sys.path:
 # Pre-load app.routes.fs directly from its file, bypassing the package
 # __init__.py. The package init imports the full route registry (admin, auth,
 # …), which triggers app.repositories.database → scripts/shared, a module with
-# a pre-existing surrogate-char bug on this dev machine unrelated to this PR.
-# By loading fs.py as a standalone module first, subsequent
-# `from app.routes.fs import …` calls hit sys.modules and skip __init__.py.
-# In CI (where scripts/shared imports cleanly) this pre-load is a harmless
-# no-op because the module is already cached.
+# a pre-existing surrogate-char bug on some dev machines unrelated to this PR.
+# The REAL import is attempted first: stubbing sys.modules unconditionally
+# would leak `__path__ = []` packages into the process and break later test
+# modules that import `from app.services import …` normally (standalone runs
+# of this file were the crash; mixed-order runs were the poisoning). Only when
+# the real import fails does the file-load fallback below install its stubs.
 # ---------------------------------------------------------------------------
 import importlib.util  # noqa: E402
 
-if "app.routes.fs" not in sys.modules:
-    # Provide just enough of the app.* tree for fs.py's own imports to resolve.
-    for _pkg in [
-        "app",
-        "app.routes",
-        "app.repositories",
-        "app.repositories.user_repo",
-        "app.utils",
-        "app.utils.workspace",
-        "app.auth",
-        "app.auth.decorators",
-        "app.services",
-        "app.services.webui_manager",
-    ]:
-        if _pkg not in sys.modules:
-            sys.modules[_pkg] = type(sys)(_pkg)
-            # Mark as a package so `from app.routes.x import y` works without
-            # triggering __init__.
-            if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
-                sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
+try:
+    import app.routes.fs  # noqa: F401
+except Exception:  # pragma: no cover - dev-machine-specific import failure
+    if "app.routes.fs" not in sys.modules:
+        # Provide just enough of the app.* tree for fs.py's own imports to resolve.
+        for _pkg in [
+            "app",
+            "app.routes",
+            "app.repositories",
+            "app.repositories.user_repo",
+            "app.utils",
+            "app.utils.workspace",
+            "app.auth",
+            "app.auth.decorators",
+            "app.services",
+            "app.services.webui_manager",
+        ]:
+            if _pkg not in sys.modules:
+                sys.modules[_pkg] = type(sys)(_pkg)
+                # Mark as a package so `from app.routes.x import y` works without
+                # triggering __init__.
+                if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
+                    sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
 
-    # user_repo stub
-    class _UR:
-        def get_user_by_id(self, _):
-            return None
+        # user_repo stub
+        class _UR:
+            def get_user_by_id(self, _):
+                return None
 
-    sys.modules["app.repositories.user_repo"].UserRepository = _UR
+        sys.modules["app.repositories.user_repo"].UserRepository = _UR
 
-    # auth.decorators — symbols fs._authenticate_user imports lazily.
-    _ad = sys.modules["app.auth.decorators"]
-    _ad._extract_token = lambda: None  # type: ignore[attr-defined]
-    _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
-    _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
+        # auth.decorators — symbols fs._authenticate_user imports lazily.
+        _ad = sys.modules["app.auth.decorators"]
+        _ad._extract_token = lambda: None  # type: ignore[attr-defined]
+        _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
+        _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
 
-    sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
+        sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
 
-    # tests/conftest.py autouse _clear_cache imports these unconditionally;
-    # stub them so the fixture doesn't crash (and so it's a true no-op).
-    _cache_mod = type(sys)("app.utils.cache")
+        # tests/conftest.py autouse _clear_cache imports these unconditionally;
+        # stub them so the fixture doesn't crash (and so it's a true no-op).
+        _cache_mod = type(sys)("app.utils.cache")
 
-    class _Cache:
-        def clear(self):
-            pass
+        class _Cache:
+            def clear(self):
+                pass
 
-    _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
-    sys.modules["app.utils.cache"] = _cache_mod
-    _auth_svc = type(sys)("app.services.auth_service")
-    _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
-    sys.modules["app.services.auth_service"] = _auth_svc
+        _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
+        sys.modules["app.utils.cache"] = _cache_mod
+        _auth_svc = type(sys)("app.services.auth_service")
+        _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
+        sys.modules["app.services.auth_service"] = _auth_svc
 
-    # Use the REAL workspace base-dir helpers + wrapper constants.
-    _ws = sys.modules["app.utils.workspace"]
-    _rspec = importlib.util.spec_from_file_location(
-        "_real_workspace_for_test", str(Path(project_root) / "app/utils/workspace.py")
-    )
-    _rw = importlib.util.module_from_spec(_rspec)
-    _rspec.loader.exec_module(_rw)
-    _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
-    _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
-    _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
-    _ws.OPENACE_RM_WRAPPER = _rw.OPENACE_RM_WRAPPER
-    _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
-    _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
-    _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
+        # Use the REAL workspace base-dir helpers + wrapper constants.
+        _ws = sys.modules["app.utils.workspace"]
+        _rspec = importlib.util.spec_from_file_location(
+            "_real_workspace_for_test", str(Path(project_root) / "app/utils/workspace.py")
+        )
+        _rw = importlib.util.module_from_spec(_rspec)
+        _rspec.loader.exec_module(_rw)
+        _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
+        _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
+        _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+        _ws.OPENACE_RM_WRAPPER = _rw.OPENACE_RM_WRAPPER
+        _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
+        _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
+        _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
 
-    # Now load fs.py as app.routes.fs without touching __init__.py.
-    _fs_spec = importlib.util.spec_from_file_location(
-        "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
-    )
-    assert _fs_spec is not None and _fs_spec.loader is not None
-    _fs_mod = importlib.util.module_from_spec(_fs_spec)
-    sys.modules["app.routes.fs"] = _fs_mod
-    _fs_spec.loader.exec_module(_fs_mod)
+        # Now load fs.py as app.routes.fs without touching __init__.py.
+        _fs_spec = importlib.util.spec_from_file_location(
+            "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
+        )
+        assert _fs_spec is not None and _fs_spec.loader is not None
+        _fs_mod = importlib.util.module_from_spec(_fs_spec)
+        sys.modules["app.routes.fs"] = _fs_mod
+        _fs_spec.loader.exec_module(_fs_mod)
 
 
 @pytest.fixture
 def workspace(tmp_path_factory):
     """A throwaway workspace dir under the real home (non-blacklisted)."""
     # tmp_path is under /var on macOS (blacklisted). Use a home-relative dir.
-    ws = Path.home() / ".ace_fs_test_ws_routes"
+    # The uuid suffix is load-bearing: CI runs `pytest -n auto`, which spreads
+    # one module's tests across workers — a fixed name made two workers rmtree
+    # each other's tree mid-test (the same hazard the `tree` fixture below
+    # documents).
+    ws = Path.home() / f".ace_fs_test_ws_routes_{uuid.uuid4().hex[:8]}"
     if ws.exists():
         shutil.rmtree(ws, ignore_errors=True)
     ws.mkdir(parents=True, exist_ok=True)
@@ -219,6 +230,13 @@ class TestUpload:
         assert body["success"] is True
         assert body["size"] == len(b"hello world")
         assert (user_home / "report.txt").read_bytes() == b"hello world"
+        # #3410 review: the temp+rename write pins uploads to 0600 on every
+        # branch (root mkstemp-equivalent, direct 0o600 create, wrapper
+        # mktemp) — a refactor that quietly drops the mode argument stays red
+        # here.
+        import stat as _stat
+
+        assert _stat.S_IMODE((user_home / "report.txt").stat().st_mode) == 0o600
 
     def test_rejects_path_outside_home(self, client):
         # /etc is blacklisted AND outside the user's home subtree.
@@ -384,11 +402,18 @@ class TestBrowseIncludeFiles:
         assert f1["is_readable"] is True
 
 
+def _pw_entry(uid: int = 1001, gid: int = 1002):
+    """Stand-in for ``pwd.getpwnam`` (#3410: the uid lookup no longer forks ``id``)."""
+    import pwd
+
+    return pwd.struct_passwd(("alice", "x", uid, gid, "", "/home/alice", "/bin/bash"))
+
+
 class TestChownHelper:
     """Unit tests for _chown_to_user covering all three branches.
 
-    These mock subprocess/os primitives so we can exercise the root / wrapper
-    / sudo-fallback paths without needing a real multi-user OS.
+    These mock the pwd lookup and subprocess/os primitives so we can exercise
+    the root / wrapper / sudo-fallback paths without a real multi-user OS.
     """
 
     def test_no_system_account_is_noop_success(self):
@@ -400,35 +425,16 @@ class TestChownHelper:
     def test_uid_lookup_failure_returns_false(self):
         from app.routes.fs import _chown_to_user
 
-        def fake_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 1  # user does not exist
-            r.stdout = ""
-            return r
-
-        with patch("app.routes.fs.subprocess.run", side_effect=fake_run):
+        with patch("app.routes.fs.pwd.getpwnam", side_effect=KeyError("ghost")):
             assert _chown_to_user("/p", "ghost") is False
 
     def test_root_uses_os_chown(self):
         from app.routes.fs import _chown_to_user
 
-        def fake_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 0
-            if "id" in cmd and "-u" in cmd:
-                r.stdout = "1001\n"
-            elif "id" in cmd and "-g" in cmd:
-                r.stdout = "1002\n"
-            return r
-
         with (
             patch("app.routes.fs.os.geteuid", return_value=0),
             patch("app.routes.fs.os.chown") as chown_mock,
-            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
         ):
             assert _chown_to_user("/p", "alice") is True
         chown_mock.assert_called_once_with("/p", 1001, 1002)
@@ -436,51 +442,35 @@ class TestChownHelper:
     def test_root_chown_raises_returns_false(self):
         from app.routes.fs import _chown_to_user
 
-        def fake_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 0
-            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
-            return r
-
         with (
             patch("app.routes.fs.os.geteuid", return_value=0),
             patch("app.routes.fs.os.chown", side_effect=PermissionError("denied")),
-            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
         ):
             assert _chown_to_user("/p", "alice") is False
 
     def test_non_root_uses_wrapper_when_available(self):
         from app.routes.fs import _chown_to_user
 
-        def fake_id_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 0
-            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
-            return r
-
-        # First two calls are the id -u/-g lookups; the third is the wrapper.
-        calls = {"n": 0}
-
         def fake_run(cmd, **kwargs):
             from unittest.mock import MagicMock
 
-            calls["n"] += 1
             r = MagicMock()
             r.returncode = 0
-            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            r.stdout = ""
             r.stderr = ""
             return r
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
             patch("app.routes.fs._is_wrapper_available", return_value=True),
-            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_run) as run_mock,
         ):
             assert _chown_to_user("/p", "alice") is True
+        # The ONLY subprocess is the wrapper itself, fed the looked-up ids.
+        run_mock.assert_called_once()
+        assert run_mock.call_args.args[0][1:] == ["1001:1002", "/p"]
 
     def test_wrapper_nonzero_return_returns_false(self):
         from app.routes.fs import _chown_to_user
@@ -489,22 +479,38 @@ class TestChownHelper:
             from unittest.mock import MagicMock
 
             r = MagicMock()
-            # id lookups succeed, but wrapper fails.
-            if "id" in cmd:
-                r.returncode = 0
-                r.stdout = "1001\n" if "-u" in cmd else "1002\n"
-            else:
-                r.returncode = 1  # wrapper exit code
-                r.stdout = ""
-                r.stderr = "wrapper denied"
+            r.returncode = 1  # wrapper exit code
+            r.stdout = ""
+            r.stderr = "wrapper denied"
             return r
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
             patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
             patch("app.routes.fs.subprocess.run", side_effect=fake_run),
         ):
             assert _chown_to_user("/p", "alice") is False
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+def test_uid_lookup_is_one_getpwnam_and_never_parses_the_name_as_an_option():
+    """#3410 review: ``id -u <name>`` read a leading ``-`` as an option.
+
+    ``validate_username`` admits a name like ``-r``; ``id -u -r`` then printed
+    the CALLER's real uid. The lookup is now a single ``getpwnam`` that treats
+    the name as data and forks nothing.
+    """
+    from app.routes.fs import _resolve_uid_gid
+
+    with (
+        patch("app.routes.fs.pwd.getpwnam", side_effect=KeyError("-r")) as lookup,
+        patch("app.routes.fs.subprocess.run") as run_mock,
+    ):
+        assert _resolve_uid_gid("-r") is None
+    lookup.assert_called_once_with("-r")
+    run_mock.assert_not_called()
 
 
 class TestUploadRootBranch:
@@ -544,7 +550,13 @@ class TestUploadRootBranch:
             # temp→chown→replace branch.
             patch("app.routes.fs.os.geteuid", return_value=0),
             # Stub chown to succeed (the actual os.chown would need root).
-            patch("app.routes.fs._chown_to_user", return_value=True),
+            # #3410: the root branch now uses the fd form.
+            patch("app.routes.fs._fchown_to_user", return_value=True),
+            # STANDING RULE (#3410): every helper the ROOT branch calls must
+            # be patched here. `_resolve_uid_gid` shells out to `id -u
+            # testuser`, which fails on CI and on any dev box — the route would
+            # then 400 on the ownership gate before doing anything else.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
             # Bypass the sudo-based writable check (no real "testuser" OS user
             # exists on the dev machine).
             patch(
@@ -569,6 +581,10 @@ class TestUploadRootBranch:
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
         assert (user_home / "f.txt").read_bytes() == b"hello"
+        # #3410: same 0600 contract as the direct branch (temp+rename).
+        import stat as _stat
+
+        assert _stat.S_IMODE((user_home / "f.txt").stat().st_mode) == 0o600
 
     def test_root_upload_chown_failure_rolls_back(self, workspace):
         """When _chown_to_user fails, the upload must fail AND no file is left."""
@@ -595,7 +611,12 @@ class TestUploadRootBranch:
             patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
             patch("app.routes.fs.os.geteuid", return_value=0),
             # chown fails — upload must abort and clean up the temp file.
-            patch("app.routes.fs._chown_to_user", return_value=False),
+            patch("app.routes.fs._fchown_to_user", return_value=False),
+            # STANDING RULE (#3410): every helper the ROOT branch calls must
+            # be patched here. `_resolve_uid_gid` shells out to `id -u
+            # testuser`, which fails on CI and on any dev box — the route would
+            # then 400 on the ownership gate before doing anything else.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
             patch(
                 "app.routes.fs.get_directory_info",
                 return_value={
@@ -926,19 +947,11 @@ class TestChownSudoFallbackFailure:
     """
 
     def test_sudo_chown_nonzero_returns_false(self):
-        from app.routes.fs import _chown_to_user
-
-        def fake_id_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 0
-            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
-            return r
-
         # Non-root, no wrapper → sudo chown fallback path. Make it return
         # returncode=1 (failure).
         from subprocess import CompletedProcess
+
+        from app.routes.fs import _chown_to_user
 
         failed = CompletedProcess(
             args=["sudo", "chown", "1001:1002", "/p"], returncode=1, stderr="denied"
@@ -947,33 +960,26 @@ class TestChownSudoFallbackFailure:
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
             patch("app.routes.fs._is_wrapper_available", return_value=False),
-            patch("app.routes.fs.subprocess.run", side_effect=fake_id_run),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
             patch("app.routes.fs.run_as_root_if_needed", return_value=failed),
         ):
             assert _chown_to_user("/p", "alice") is False
 
     def test_sudo_chown_success_returns_true(self):
-        from app.routes.fs import _chown_to_user
-
-        def fake_id_run(cmd, **kwargs):
-            from unittest.mock import MagicMock
-
-            r = MagicMock()
-            r.returncode = 0
-            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
-            return r
-
         from subprocess import CompletedProcess
+
+        from app.routes.fs import _chown_to_user
 
         ok = CompletedProcess(args=["chown", "..."], returncode=0)
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
             patch("app.routes.fs._is_wrapper_available", return_value=False),
-            patch("app.routes.fs.subprocess.run", side_effect=fake_id_run),
-            patch("app.routes.fs.run_as_root_if_needed", return_value=ok),
+            patch("app.routes.fs.pwd.getpwnam", return_value=_pw_entry()),
+            patch("app.routes.fs.run_as_root_if_needed", return_value=ok) as chown_mock,
         ):
             assert _chown_to_user("/p", "alice") is True
+        chown_mock.assert_called_once_with(["chown", "1001:1002", "/p"])
 
 
 class TestDownloadDeleteSudoBranch:
@@ -1017,8 +1023,30 @@ class TestDownloadDeleteSudoBranch:
             # Non-root process: forces the sudo code path.
             patch("app.routes.fs.os.geteuid", return_value=1000),
             patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            # #3410: deletes need an account-scoped openace-rm (fail-closed gate).
+            patch("app.routes.fs._rm_wrapper_is_account_scoped", return_value=True),
         ):
             yield app.test_client()
+
+    @pytest.mark.security
+    @pytest.mark.regression
+    @pytest.mark.issue(3410)
+    def test_delete_refuses_when_the_installed_rm_wrapper_is_outdated(self, sudo_client, workspace):
+        """#3410 review: a pre-#3410 openace-rm ran its final rm as root."""
+        _, user_home = workspace
+        target = user_home / "keep.txt"
+        target.write_bytes(b"x")
+        with (
+            patch("app.routes.fs._rm_wrapper_is_account_scoped", return_value=False),
+            patch("app.routes.fs.run_as_user") as run_as_user_mock,
+            patch("app.routes.fs.subprocess.run") as run_mock,
+        ):
+            resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
+        assert resp.status_code == 500
+        assert "reinstall" in resp.get_json()["error"].lower()
+        run_as_user_mock.assert_not_called()
+        run_mock.assert_not_called()
+        assert target.exists()
 
     def _mock_run_as_user(self, is_file=True, is_readable=True, size=11, rm_ok=True):
         """Build a side_effect faking test/stat/rm calls from run_as_user."""
@@ -1150,8 +1178,8 @@ class TestDownloadDeleteSudoBranch:
             return CompletedProcess(args=cmd, returncode=1)
 
         def fake_subprocess(cmd, *args, **kwargs):
-            # Mock openace-rm wrapper call: sudo /usr/local/bin/openace-rm <user> <path>
-            if len(cmd) > 1 and "openace-rm" in cmd[1]:
+            # Mock openace-rm wrapper call: sudo -n /usr/local/bin/openace-rm <user> <path>
+            if any("openace-rm" in part for part in cmd):
                 return CompletedProcess(args=cmd, returncode=0, stderr="")
             return CompletedProcess(args=cmd, returncode=1)
 
@@ -1172,9 +1200,10 @@ class TestDownloadDeleteSudoBranch:
         # Verify openace-rm was called with target user and path
         rm_calls = [c for c in run_mock.call_args_list if "openace-rm" in str(c)]
         assert len(rm_calls) == 1
-        # cmd[0] is the list argument: ["sudo", "/usr/local/bin/openace-rm", user, path]
+        # cmd[0] is the list argument: ["sudo", "-n", "/usr/local/bin/openace-rm", user, path]
         call_args = rm_calls[0][0][0]
-        assert "openace-rm" in call_args[1]
+        assert call_args[:2] == ["sudo", "-n"]
+        assert "openace-rm" in call_args[2]
 
     def test_delete_not_a_file_uses_test_f(self, sudo_client, workspace):
         """Delete also benefits from the test -f check: a path that the
@@ -1226,7 +1255,7 @@ class TestDownloadDeleteSudoBranch:
 
         def fake_subprocess(cmd, *args, **kwargs):
             # Mock openace-rm wrapper call - fails with permission denied
-            if len(cmd) > 1 and "openace-rm" in cmd[1]:
+            if any("openace-rm" in part for part in cmd):
                 # Return code 2 = invalid path or access denied
                 return CompletedProcess(
                     args=cmd, returncode=2, stderr="Path validation failed: outside allowed roots"
@@ -1329,6 +1358,10 @@ class TestUploadNonRootMultiUserBranch:
             patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
             # Wrapper is installed.
             patch("app.routes.fs._is_wrapper_available", return_value=True),
+            # #3410: ...and carries the symlink-refusal capability marker.
+            # /usr/local/bin/openace-write-as does not exist on CI, so without
+            # this the route fails closed with a 500 before spawning anything.
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
             # Bypass the sudo-based writable pre-check (no real "testuser" OS
             # user exists on the dev machine).
             patch(
@@ -1487,3 +1520,944 @@ class TestUploadNonRootMultiUserBranch:
         assert "openace-write-as" in resp.get_json()["error"]
         # Must not have spawned the wrapper at all.
         popen_mock.assert_not_called()
+
+
+class _RootBranchHarness:
+    """Shared #3410 fixtures: a unique tree under the real home + a root env.
+
+    Not collected (no ``Test`` prefix); the symlink test classes inherit it.
+    """
+
+    @pytest.fixture
+    def tree(self):
+        # Own unique root (not the `workspace` fixture): this file runs under
+        # `pytest -n auto` in the python-core lane with --maxfail=1, so a
+        # cross-worker collision costs the lane.
+        # is_valid_path blacklists /var (macOS tmp resolves under /private/var),
+        # so anchor under the real home rather than tmp_path.
+        ws_root = Path.home() / f".ace_fs_3410_{uuid.uuid4().hex[:8]}"
+        (ws_root / "testuser").mkdir(parents=True)
+        (ws_root / "victim").mkdir(parents=True)
+        (ws_root / "victim" / "secret.txt").write_text("VICTIM-ORIGINAL")
+        yield ws_root, ws_root / "testuser", ws_root / "victim" / "secret.txt"
+        shutil.rmtree(ws_root, ignore_errors=True)
+
+    def _app(self, system_account="testuser"):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []  # app-scope only (see `app` fixture)
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": system_account}
+
+        return app
+
+    @contextlib.contextmanager
+    def _root_env(self, ws_root, home):
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            patch("app.routes.fs._fchown_to_user", return_value=True),
+            # STANDING RULE (#3410 review): every helper the ROOT branch calls
+            # must be patched here. `_resolve_uid_gid` shells out to
+            # `id -u testuser`, which fails on CI and on any dev box — the
+            # route would then 400 on the ownership gate BEFORE reaching the
+            # symlink check, and the symlink tests would pass vacuously.
+            # os.fstat is deliberately NOT patched (patching os.geteuid touches
+            # only that attribute), so the expected uid must be the real
+            # process uid that owns the test-created directory.
+            patch("app.routes.fs._resolve_uid_gid", return_value=(os.getuid(), os.getgid())),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            yield
+
+    @contextlib.contextmanager
+    def _wrapper_env(self, ws_root, home, popen):
+        """Package non-root multi-user: the upload goes to openace-write-as."""
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.os.path.islink", return_value=False),
+            patch("app.routes.fs.subprocess.Popen", side_effect=popen),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            yield
+
+    def _upload(self, client, path, filename, payload=b"PWNED"):
+        return client.post(
+            "/api/fs/upload",
+            data={"file": (io.BytesIO(payload), filename), "path": str(path)},
+            content_type="multipart/form-data",
+        )
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+class TestUploadSymlinkEscape(_RootBranchHarness):
+    """#3410: the upload target must never be resolved through a symlink.
+
+    The attacker owns their home, so they can plant a symlink whose NAME is the
+    name they are about to upload and whose TARGET is another user's file.
+    Before the fix ``realpath(join(resolved_dir, safe_name))`` resolved to the
+    victim path and the final guard only re-checked the workspace base dirs
+    (not the home subtree), so the root branch's ``os.replace`` overwrote it.
+    """
+
+    def test_root_branch_symlink_to_other_user_is_rejected(self, tree):
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        # The distinct symlink refusal, not a generic invalid-path 400 (the
+        # wrapper branch maps exit 5 to this same message).
+        assert "symbolic link" in resp.get_json()["error"]
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+        # The attacker's own dirent is untouched and still a symlink.
+        assert os.path.islink(str(home / "secret.txt"))
+        assert list(home.glob(".openace-upload-*")) == []
+
+    def test_root_branch_does_not_disclose_the_symlink_target(self, tree):
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert str(victim) not in resp.get_data(as_text=True)
+
+    def test_root_branch_symlinked_parent_dir_is_rejected(self, tree):
+        """A symlinked intermediate directory must not be traversed either."""
+        ws_root, home, victim = tree
+        os.symlink(str(victim.parent), str(home / "linkdir"))
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home / "linkdir", "secret.txt")
+        assert resp.status_code == 400
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_root_branch_symlink_outside_workspace_is_rejected(self, tree):
+        ws_root, home, _ = tree
+        outside = ws_root.parent / f"{ws_root.name}-outside.txt"
+        outside.write_text("OUTSIDE-ORIGINAL")
+        try:
+            os.symlink(str(outside), str(home / "out.txt"))
+            with self._root_env(ws_root, home):
+                resp = self._upload(self._app().test_client(), home, "out.txt")
+            assert resp.status_code == 400
+            assert outside.read_text() == "OUTSIDE-ORIGINAL"
+        finally:
+            outside.unlink(missing_ok=True)
+
+    def test_root_branch_overwrites_a_plain_file_normally(self, tree):
+        ws_root, home, victim = tree
+        (home / "notes.txt").write_text("OLD")
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "notes.txt", payload=b"NEW")
+        assert resp.status_code == 200
+        assert (home / "notes.txt").read_bytes() == b"NEW"
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_root_branch_uploads_into_own_subdirectory(self, tree):
+        ws_root, home, _ = tree
+        sub = home / "docs" / "2026"
+        sub.mkdir(parents=True)
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), sub, "ok.txt", payload=b"OK")
+        assert resp.status_code == 200
+        assert (sub / "ok.txt").read_bytes() == b"OK"
+
+    def test_root_branch_refuses_a_home_root_not_owned_by_the_account(self, tree):
+        """#3410: the anchor assertion needs POSITIVE coverage.
+
+        Every other root-branch test patches `_resolve_uid_gid` to the process
+        uid so the gate passes; this one makes it disagree, which is the only
+        test that proves the gate is wired at all.
+        """
+        ws_root, home, _ = tree
+        with (
+            self._root_env(ws_root, home),
+            patch(
+                "app.routes.fs._resolve_uid_gid",
+                return_value=(os.getuid() + 4242, os.getgid()),
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "x.txt", payload=b"NOPE")
+        assert resp.status_code == 400
+        assert not (home / "x.txt").exists()
+        assert list(home.glob(".openace-upload-*")) == []
+
+    def test_direct_branch_rejects_a_directory_target(self, tree):
+        ws_root, home, _ = tree
+        (home / "notes.txt").mkdir()
+        with self._root_env(ws_root, home):
+            resp = self._upload(self._app().test_client(), home, "notes.txt")
+        assert resp.status_code == 400
+        assert "directory" in resp.get_json()["error"].lower()
+        assert (home / "notes.txt").is_dir()
+        # Nothing moved INTO it.
+        assert list((home / "notes.txt").iterdir()) == []
+
+    def test_direct_branch_symlink_is_rejected(self, tree):
+        """Single-user / non-root: the process already owns the home."""
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+        ):
+            resp = self._upload(self._app(system_account=None).test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        assert "symbolic link" in resp.get_json()["error"]
+        assert victim.read_text() == "VICTIM-ORIGINAL"
+
+    def test_wrapper_branch_passes_the_in_home_path_not_the_resolved_one(self, tree):
+        """Package non-root multi-user.
+
+        The web process is a service account that CANNOT traverse the target
+        user's 0700 home, so the route's own ``islink`` probe cannot see the
+        symlink (it returns False on EACCES) — the wrapper is the enforcement
+        point. What the route must guarantee is that the path it hands over is
+        the IN-HOME joined path, never the realpath-escaped one.
+        """
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "secret.txt"))
+        seen = {}
+
+        class _Proc:
+            returncode = 0
+
+            def __init__(self):
+                self.stdin = io.BytesIO()
+
+            def communicate(self, timeout=None):
+                return b"", b""
+
+        def _popen(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return _Proc()
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.os.path.islink", return_value=False),  # simulate EACCES probe
+            patch("app.routes.fs.subprocess.Popen", side_effect=_popen),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            self._upload(self._app().test_client(), home, "secret.txt")
+        assert seen["cmd"][-1] == str(home / "secret.txt")  # NOT str(victim)
+
+    def test_wrapper_branch_islink_probe_true_short_circuits_to_400(self, tree):
+        """The route's own best-effort islink probe, when it CAN see the link
+        (e.g. a same-fs deployment where the service account can traverse),
+        answers the same symlink 400 WITHOUT spawning the wrapper."""
+        ws_root, home, _ = tree
+        os.symlink("/etc/hosts", str(home / "probe-link.txt"))
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.subprocess.Popen") as popen_mock,
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "probe-link.txt")
+        assert resp.status_code == 400
+        assert "symbolic link" in resp.get_json()["error"]
+        popen_mock.assert_not_called()
+
+    def test_wrapper_branch_maps_exit_5_to_a_symlink_rejection(self, tree):
+        """The wrapper's symlink refusal must surface as 400, not a bare 403."""
+        ws_root, home, _ = tree
+
+        class _Proc:
+            returncode = 5
+
+            def __init__(self):
+                self.stdin = io.BytesIO()
+
+            def communicate(self, timeout=None):
+                return b"", b"ERROR: Target is a symbolic link; refusing to write through it"
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=True),
+            patch("app.routes.fs.os.path.islink", return_value=False),
+            patch("app.routes.fs.subprocess.Popen", side_effect=lambda cmd, **kw: _Proc()),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "secret.txt")
+        assert resp.status_code == 400
+        assert "symbolic link" in resp.get_json()["error"].lower()
+
+    def test_wrapper_branch_refuses_when_the_installed_wrapper_is_outdated(self, tree):
+        """#3410: fail closed rather than let the contract over-claim."""
+        ws_root, home, _ = tree
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs._write_as_wrapper_enforces_symlink_refusal", return_value=False),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            resp = self._upload(self._app().test_client(), home, "plain.txt", payload=b"OK")
+        assert resp.status_code == 500
+        assert "reinstall" in resp.get_json()["error"].lower()
+
+    def test_wrapper_branch_early_refusal_stays_400_when_stdin_is_broken(self, tree):
+        """#3410 review: a refused upload must not turn into a 500.
+
+        When the wrapper exits before reading the body, stdin is a broken pipe.
+        Closing it by hand re-raised that (BrokenPipeError -> 500);
+        communicate() owns flushing and closing stdin and ignores it.
+        """
+        ws_root, home, _ = tree
+
+        class _BrokenStdin:
+            def _broken(self, *args):
+                raise BrokenPipeError("Broken pipe")
+
+            write = flush = close = _broken
+
+        class _Proc:
+            returncode = 5
+
+            def __init__(self):
+                self.stdin = _BrokenStdin()
+
+            def communicate(self, timeout=None):
+                return b"", b"ERROR: Target is a symbolic link; refusing to write through it"
+
+            def terminate(self):
+                pass
+
+            def kill(self):
+                pass
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        with self._wrapper_env(ws_root, home, lambda cmd, **kw: _Proc()):
+            resp = self._upload(
+                self._app().test_client(), home, "secret.txt", payload=b"x" * (70 * 1024)
+            )
+        assert resp.status_code == 400
+        assert "symbolic link" in resp.get_json()["error"].lower()
+
+    def test_root_branch_checks_the_home_root_owner_not_the_leaf_directory(self, tree):
+        """#3410 review: the ownership assertion is made on the ANCHOR fd.
+
+        A subdirectory owned by someone else inside a correctly owned home is
+        ordinary and must be accepted; a home ROOT with a foreign owner must
+        be refused. Only ``os.fstat``'s uid is faked, keyed by inode.
+        """
+        ws_root, home, _ = tree
+        sub = home / "owned-by-someone-else"
+        sub.mkdir()
+        real_fstat = os.fstat
+
+        def foreign_owner_for(inode):
+            def fake_fstat(fd):
+                st = real_fstat(fd)
+                if st.st_ino != inode:
+                    return st
+                fields = list(st)
+                fields[4] += 4242  # st_uid
+                return os.stat_result(fields)
+
+            return fake_fstat
+
+        with (
+            self._root_env(ws_root, home),
+            patch("app.routes.fs.os.fstat", side_effect=foreign_owner_for(sub.stat().st_ino)),
+        ):
+            leaf = self._upload(self._app().test_client(), sub, "leaf.txt", payload=b"LEAF")
+        assert leaf.status_code == 200
+        assert (sub / "leaf.txt").read_bytes() == b"LEAF"
+
+        with (
+            self._root_env(ws_root, home),
+            patch("app.routes.fs.os.fstat", side_effect=foreign_owner_for(home.stat().st_ino)),
+        ):
+            anchor = self._upload(self._app().test_client(), sub, "anchor.txt", payload=b"NO")
+        assert anchor.status_code == 400
+        assert not (sub / "anchor.txt").exists()
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+class TestReadPathRootRace(_RootBranchHarness):
+    """#3410 review round 1: download/delete-file/search on the ROOT branch.
+
+    They validated a realpath'd path and then acted on it BY PATH, so a user
+    who swapped a component for a symlink right after validation made root
+    read, delete or list another user's files. Each race test performs that
+    swap exactly where the attacker wins: when the route's validation helper
+    returns.
+    """
+
+    @pytest.fixture
+    def docs(self, tree):
+        _, home, victim = tree
+        (home / "docs").mkdir()
+        (home / "docs" / "note.txt").write_text("MINE")
+        (victim.parent / "note.txt").write_text("VICTIM-SECRET")
+        (victim.parent / "needle-victim.txt").write_text("VICTIM-SECRET")
+        return home / "docs"
+
+    @contextlib.contextmanager
+    def _after_validation(self, helper, swap):
+        import app.routes.fs as fsm
+
+        real = getattr(fsm, helper)
+
+        def validate_then_swap(*args, **kwargs):
+            result = real(*args, **kwargs)
+            swap()
+            return result
+
+        with patch.object(fsm, helper, side_effect=validate_then_swap):
+            yield
+
+    @staticmethod
+    def _swap_for_symlink(path, target):
+        def swap():
+            path.rename(path.with_name(path.name + ".orig"))
+            os.symlink(str(target), str(path))
+
+        return swap
+
+    @contextlib.contextmanager
+    def _foreign_home_owner(self):
+        with patch(
+            "app.routes.fs._resolve_uid_gid", return_value=(os.getuid() + 4242, os.getgid())
+        ):
+            yield
+
+    def _download(self, path, app=None):
+        client = (app or self._app()).test_client()
+        return client.get("/api/fs/download", query_string={"path": str(path)})
+
+    def _delete(self, path, app=None):
+        client = (app or self._app()).test_client()
+        return client.post("/api/fs/delete-file", json={"path": str(path)})
+
+    def _search(self, root, query, app=None):
+        client = (app or self._app()).test_client()
+        return client.get("/api/fs/search", query_string={"path": str(root), "q": query})
+
+    # --- download -----------------------------------------------------------
+
+    def test_download_streams_a_plain_file(self, tree, docs):
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home):
+            resp = self._download(docs / "note.txt")
+        assert resp.status_code == 200
+        assert resp.data == b"MINE"
+        assert resp.headers["Content-Length"] == "4"
+
+    def test_download_parent_swapped_after_validation_is_refused(self, tree, docs):
+        ws_root, home, victim = tree
+        swap = self._swap_for_symlink(docs, victim.parent)
+        with self._root_env(ws_root, home), self._after_validation("_resolve_file_in_home", swap):
+            resp = self._download(docs / "note.txt")
+        assert resp.status_code == 400
+        assert b"VICTIM" not in resp.get_data()
+
+    def test_download_file_swapped_for_a_symlink_after_validation_is_refused(self, tree, docs):
+        ws_root, home, victim = tree
+        swap = self._swap_for_symlink(docs / "note.txt", victim)
+        with self._root_env(ws_root, home), self._after_validation("_resolve_file_in_home", swap):
+            resp = self._download(docs / "note.txt")
+        assert resp.status_code == 400
+        assert b"VICTIM" not in resp.get_data()
+
+    def test_download_refuses_a_fifo_without_blocking(self, tree):
+        """O_NONBLOCK: opening a FIFO planted under the name must not hang a worker."""
+        ws_root, home, _ = tree
+        fifo = home / "pipe.txt"
+        os.mkfifo(str(fifo))
+        result = {}
+        # Patches are applied in THIS thread around the worker's whole
+        # lifetime (patching inside a worker thread leaks into other tests).
+        with self._root_env(ws_root, home):
+            worker = threading.Thread(
+                target=lambda: result.setdefault("resp", self._download(fifo)), daemon=True
+            )
+            worker.start()
+            worker.join(10)
+            if worker.is_alive():
+                # Release the blocked open() so the worker can finish, then fail.
+                os.close(os.open(str(fifo), os.O_WRONLY | os.O_NONBLOCK))
+                worker.join(5)
+                pytest.fail("download blocked in open() on a FIFO")
+        assert result["resp"].status_code == 400
+
+    def test_download_refuses_a_directory_target(self, tree, docs):
+        """A directory named as the download target answers 400, not a stream
+        of nothing or a 500 from reading a directory fd."""
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home):
+            resp = self._download(docs)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Not a file"
+
+    def test_download_refuses_a_home_root_not_owned_by_the_account(self, tree, docs):
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home), self._foreign_home_owner():
+            resp = self._download(docs / "note.txt")
+        assert resp.status_code == 400
+        assert b"MINE" not in resp.get_data()
+
+    # --- delete-file --------------------------------------------------------
+
+    def test_delete_removes_a_plain_file(self, tree, docs):
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home):
+            resp = self._delete(docs / "note.txt")
+        assert resp.status_code == 200
+        assert not (docs / "note.txt").exists()
+
+    def test_delete_parent_swapped_after_validation_is_refused(self, tree, docs):
+        ws_root, home, victim = tree
+        swap = self._swap_for_symlink(docs, victim.parent)
+        with self._root_env(ws_root, home), self._after_validation("_resolve_file_in_home", swap):
+            resp = self._delete(docs / "note.txt")
+        assert resp.status_code == 400
+        assert (victim.parent / "note.txt").read_text() == "VICTIM-SECRET"
+
+    def test_delete_target_swapped_for_a_directory_is_refused(self, tree, docs):
+        ws_root, home, _ = tree
+        target = docs / "note.txt"
+
+        def swap():
+            target.unlink()
+            target.mkdir()
+
+        with self._root_env(ws_root, home), self._after_validation("_resolve_file_in_home", swap):
+            resp = self._delete(target)
+        assert resp.status_code == 400
+        assert target.is_dir()
+
+    def test_delete_refuses_a_home_root_not_owned_by_the_account(self, tree, docs):
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home), self._foreign_home_owner():
+            resp = self._delete(docs / "note.txt")
+        assert resp.status_code == 400
+        assert (docs / "note.txt").read_text() == "MINE"
+
+    # --- search -------------------------------------------------------------
+
+    def test_search_root_swapped_after_validation_is_refused(self, tree, docs):
+        ws_root, home, victim = tree
+        swap = self._swap_for_symlink(docs, victim.parent)
+        with (
+            self._root_env(ws_root, home),
+            self._after_validation("_resolve_user_owned_path", swap),
+        ):
+            resp = self._search(docs, "needle")
+        assert resp.status_code == 400
+        assert "needle-victim" not in resp.get_data(as_text=True)
+
+    def test_search_does_not_enter_a_directory_swapped_during_the_walk(self, tree, docs):
+        """Even a by-path symlink probe the attacker wins (islink -> False) must not matter."""
+        import app.routes.fs as fsm
+
+        ws_root, home, victim = tree
+        real_visible = fsm._entry_visible
+        swapped = []
+
+        def visible_then_swap(name):
+            if name == "docs" and not swapped:
+                swapped.append(name)
+                self._swap_for_symlink(docs, victim.parent)()
+            return real_visible(name)
+
+        with (
+            self._root_env(ws_root, home),
+            patch.object(fsm, "_entry_visible", side_effect=visible_then_swap),
+            patch("app.routes.fs.os.path.islink", return_value=False),
+        ):
+            resp = self._search(home, "needle")
+        assert swapped == ["docs"]
+        assert resp.status_code == 200
+        assert resp.get_json()["results"] == []
+
+    def test_search_skips_symlinks_instead_of_following_them(self, tree):
+        """Type, size and readability of a link all live on its target."""
+        ws_root, home, victim = tree
+        os.symlink(str(victim), str(home / "linked-secret.txt"))
+        (home / "linked-plain.txt").write_text("ok")
+        with self._root_env(ws_root, home):
+            resp = self._search(home, "linked")
+        assert resp.status_code == 200
+        assert [r["name"] for r in resp.get_json()["results"]] == ["linked-plain.txt"]
+
+    def test_search_refuses_a_home_root_not_owned_by_the_account(self, tree, docs):
+        ws_root, home, _ = tree
+        with self._root_env(ws_root, home), self._foreign_home_owner():
+            resp = self._search(home, "note")
+        assert resp.status_code == 400
+
+    # --- unmapped user whose username is another user's account -------------
+
+    def _unmapped_app(self, username="testuser"):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []  # app-scope only (see `app` fixture)
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 7, "username": username}  # no system_account
+
+        return app
+
+    @contextlib.contextmanager
+    def _users(self, rows):
+        import app.routes.fs as fsm
+
+        # create=True: this module's _UR stub has no get_all_users.
+        with patch.object(fsm.user_repo, "get_all_users", return_value=rows, create=True):
+            yield
+
+    def test_unmapped_user_named_like_another_users_account_gets_no_home(self, tree, docs):
+        """#3410 review: ``<base>/<username>`` is then ANOTHER user's home."""
+        ws_root, home, _ = tree
+        app = self._unmapped_app()
+        rows = [
+            {"id": 7, "username": "testuser", "system_account": None},
+            {"id": 9, "username": "alice", "system_account": "testuser"},
+        ]
+        with self._root_env(ws_root, home), self._users(rows):
+            download = self._download(docs / "note.txt", app)
+            delete = self._delete(docs / "note.txt", app)
+            search = self._search(home, "note", app)
+            upload = self._upload(app.test_client(), docs, "planted.txt")
+            browse = app.test_client().get("/api/fs/browse", query_string={"path": str(home)})
+        assert [r.status_code for r in (download, delete, search, upload, browse)] == [400] * 5
+        assert b"MINE" not in download.get_data()
+        assert sorted(p.name for p in docs.iterdir()) == ["note.txt"]
+
+    def test_unmapped_user_without_a_collision_keeps_access(self, tree, docs):
+        ws_root, home, _ = tree
+        rows = [
+            {"id": 7, "username": "testuser", "system_account": None},
+            {"id": 9, "username": "alice", "system_account": "alice"},
+        ]
+        with self._root_env(ws_root, home), self._users(rows):
+            resp = self._download(docs / "note.txt", self._unmapped_app())
+        assert resp.status_code == 200
+        assert resp.data == b"MINE"
+
+    def test_an_account_named_shared_gets_no_home(self, tree):
+        """#3410 review: <base>/shared is the shared-project namespace root.
+
+        Usernames also arrive from SSO and org sync, and nothing reserves this
+        one, so an unmapped user named ``shared`` would otherwise act as root
+        inside every tenant's shared projects.
+        """
+        ws_root, _, _ = tree
+        namespace = ws_root / "shared"
+        (namespace / "team-proj").mkdir(parents=True)
+        (namespace / "team-proj" / "plan.txt").write_text("TEAM-PLAN")
+        app = self._unmapped_app(username="shared")
+        with self._root_env(ws_root, namespace), self._users([]):
+            download = self._download(namespace / "team-proj" / "plan.txt", app)
+            delete = self._delete(namespace / "team-proj" / "plan.txt", app)
+            search = self._search(namespace, "plan", app)
+            upload = self._upload(app.test_client(), namespace / "team-proj", "planted.txt")
+            browse = app.test_client().get("/api/fs/browse", query_string={"path": str(namespace)})
+        assert [r.status_code for r in (download, delete, search, upload, browse)] == [400] * 5
+        assert b"TEAM-PLAN" not in download.get_data()
+        assert sorted(p.name for p in (namespace / "team-proj").iterdir()) == ["plan.txt"]
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+@pytest.mark.parametrize(
+    "user",
+    [
+        {"id": 3, "username": "shared"},
+        {"id": 3, "username": "someone", "system_account": "shared"},
+    ],
+)
+def test_the_shared_namespace_name_never_yields_a_home_root(user):
+    from app.routes.fs import _home_roots_for_user
+
+    with patch("app.routes.fs.get_workspace_base_dirs", return_value=["/a", "/b"]):
+        assert _home_roots_for_user(user) == []
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+def test_write_lock_accepts_every_base_dirs_home_root():
+    """#3410: the /fs per-file paths must not use single-base get_home_directory().
+
+    ``get_workspace_base_dir()`` returns the RAW env value, so on
+    ``WORKSPACE_BASE_DIR=/a,/b`` the old helper produced the literal
+    ``"/a,/b/<account>"`` — a path no lock can ever match, which 400'd
+    upload/download/delete/search on every multi-base deployment. #3376 fixed
+    exactly this for browse; these endpoints now share that root set.
+    """
+    from app.routes.fs import _home_roots_for_write, _primary_home_root
+
+    user = {"id": 1, "username": "alice", "system_account": "alice"}
+    with (
+        patch("app.routes.fs.get_workspace_base_dirs", return_value=["/a", "/b"]),
+        patch("app.routes.fs.get_workspace_base_dir", return_value="/a,/b"),
+        # Without this, _home_roots_for_write reaches get_home_directory ->
+        # run_as_user("alice", ["test", "-e", ...]) — a real `sudo -u` with
+        # timeout=10 and no exception handling, which can PROMPT on a
+        # developer machine and raise TimeoutExpired out of the test.
+        patch("app.routes.fs.get_home_directory", return_value="/a,/b/alice"),
+    ):
+        roots = _home_roots_for_write(user)
+        # The REPORTING helper must agree with the lock — this is the assertion
+        # that actually fails on the pre-#3410 code.
+        primary = _primary_home_root(user)
+    assert os.path.realpath("/a/alice") in roots
+    assert os.path.realpath("/b/alice") in roots
+    assert primary == os.path.realpath("/a/alice")
+
+
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+def test_api_home_reports_a_root_the_lock_accepts(client, workspace):
+    """#3410 smoke check: /api/fs/home must not report a path upload rejects.
+
+    Single-base fixture, so this passes before and after the change — the
+    multi-base regression is pinned by
+    ``test_write_lock_accepts_every_base_dirs_home_root``.
+    """
+    _, user_home = workspace
+    resp = client.get("/api/fs/home")
+    assert resp.status_code == 200
+    assert resp.get_json()["homePath"] == str(user_home)
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+class TestReadPathSymlinkLock:
+    """#3410 evidence for the `enforced` claim: download/delete/search too.
+
+    These pin behavior that is already correct — ``_resolve_file_in_home``
+    realpaths BEFORE the home check, so a symlink out of the home resolves to
+    a path the lock rejects. The upload fix would be half a story without
+    them: the contract declares a symlink policy for all eight operations.
+    """
+
+    def test_download_through_symlink_to_other_user_is_rejected(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "secret.txt").write_text("VICTIM")
+        os.symlink(str(other / "secret.txt"), str(user_home / "link.txt"))
+        resp = client.get("/api/fs/download", query_string={"path": str(user_home / "link.txt")})
+        assert resp.status_code == 400
+
+    def test_delete_through_symlink_to_other_user_is_rejected(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "secret.txt").write_text("VICTIM")
+        os.symlink(str(other / "secret.txt"), str(user_home / "link2.txt"))
+        resp = client.post("/api/fs/delete-file", json={"path": str(user_home / "link2.txt")})
+        assert resp.status_code == 400
+        assert (other / "secret.txt").read_text() == "VICTIM"
+
+    def test_search_does_not_descend_into_a_symlinked_directory(self, client, workspace):
+        ws_root, user_home = workspace
+        other = ws_root / "otheruser"
+        other.mkdir(exist_ok=True)
+        (other / "needle-target.txt").write_text("VICTIM")
+        os.symlink(str(other), str(user_home / "linkdir"))
+        resp = client.get(
+            "/api/fs/search", query_string={"path": str(user_home), "q": "needle-target"}
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["results"] == []
+
+    def test_search_still_reports_an_in_home_symlink_for_a_non_root_process(
+        self, client, workspace
+    ):
+        """Skipping links is ROOT-only: a non-root process IS the account."""
+        _, user_home = workspace
+        (user_home / "real-report.txt").write_text("12345")
+        os.symlink(str(user_home / "real-report.txt"), str(user_home / "alias-report.txt"))
+        # geteuid pinned so the test holds under a root runner too (under
+        # `sudo pytest` the real euid is 0 and links would be skipped).
+        with patch("app.routes.fs.os.geteuid", return_value=1000):
+            resp = client.get("/api/fs/search", query_string={"path": str(user_home), "q": "alias"})
+        assert resp.status_code == 200
+        (entry,) = resp.get_json()["results"]
+        assert (entry["name"], entry["type"], entry["size"]) == ("alias-report.txt", "file", 5)
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+def test_write_as_wrapper_capability_sentinel_is_in_sync():
+    """The route's capability marker must match the shipped wrapper (#3410).
+
+    A drift here silently disables the fail-closed gate that keeps the
+    ``filesystem_api: enforced`` claim true on package non-root deployments.
+    """
+    from app.routes.fs import _WRITE_AS_CAPABILITY_SENTINEL
+
+    repo_root = Path(project_root)
+    wrapper = repo_root / "scripts" / "openace-write-as.sh"
+    text = wrapper.read_text()
+    assert _WRITE_AS_CAPABILITY_SENTINEL in text
+    # The refusal runs as the target user, on the parent-resolved path.
+    assert 'if as_target test -L "$RESOLVED_PATH"' in text
+    assert 'readlink -f "$TARGET_PATH"' not in text
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+def test_rm_wrapper_capability_sentinel_is_in_sync():
+    """The delete-side marker must match the shipped openace-rm (#3410 review)."""
+    from app.routes.fs import _RM_CAPABILITY_SENTINEL
+
+    repo_root = Path(project_root)
+    text = (repo_root / "scripts" / "openace-rm.sh").read_text()
+    assert _RM_CAPABILITY_SENTINEL in text
+    assert 'if as_target rm "${RM_OPTIONS[@]}" -- "$TARGET_PATH"' in text
+    # No root-run rm is left anywhere in the script.
+    assert 'if rm "${RM_OPTIONS[@]}"' not in text
+
+
+@pytest.mark.security
+@pytest.mark.issue(3410)
+class TestWriteAsCapabilityProbe:
+    """#3410: the probe that decides whether the installed wrapper enforces."""
+
+    def _probe(self, path):
+        import app.routes.fs as fsm
+
+        fsm._reset_write_as_capability_cache()
+        try:
+            with patch.object(fsm, "OPENACE_WRITE_AS_WRAPPER", str(path)):
+                return fsm._write_as_wrapper_enforces_symlink_refusal()
+        finally:
+            fsm._reset_write_as_capability_cache()
+
+    def test_true_when_the_sentinel_is_present(self, tmp_path):
+        from app.routes.fs import _WRITE_AS_CAPABILITY_SENTINEL
+
+        f = tmp_path / "openace-write-as"
+        f.write_text(f"#!/bin/bash\n# {_WRITE_AS_CAPABILITY_SENTINEL}\n")
+        assert self._probe(f) is True
+
+    def test_false_for_a_pre_3410_wrapper(self, tmp_path):
+        f = tmp_path / "openace-write-as"
+        f.write_text('#!/bin/bash\ntee "$RESOLVED_PATH"\n')
+        assert self._probe(f) is False
+
+    def test_false_when_the_wrapper_is_absent(self, tmp_path):
+        assert self._probe(tmp_path / "nope") is False
+
+    def test_rm_probe_reads_its_own_marker(self, tmp_path):
+        """The two wrappers share a memo; keys must not collide (#3410 review)."""
+        import app.routes.fs as fsm
+
+        write_as = tmp_path / "openace-write-as"
+        write_as.write_text(f"# {fsm._WRITE_AS_CAPABILITY_SENTINEL}\n")
+        rm_old = tmp_path / "openace-rm"
+        rm_old.write_text('#!/bin/bash\nrm "$2"\n')
+        fsm._reset_write_as_capability_cache()
+        try:
+            with (
+                patch.object(fsm, "OPENACE_WRITE_AS_WRAPPER", str(write_as)),
+                patch.object(fsm, "OPENACE_RM_WRAPPER", str(rm_old)),
+            ):
+                assert fsm._write_as_wrapper_enforces_symlink_refusal() is True
+                assert fsm._rm_wrapper_is_account_scoped() is False
+                rm_old.write_text(f"# {fsm._RM_CAPABILITY_SENTINEL}\n")
+                assert fsm._rm_wrapper_is_account_scoped() is True
+        finally:
+            fsm._reset_write_as_capability_cache()

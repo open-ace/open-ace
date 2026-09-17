@@ -497,6 +497,26 @@ def merge_max_instances(max_instances: int = 3) -> None:
 # ── HTTP helper (stdlib urllib — no pip install on the runner) ───────────
 
 
+def _multipart(files: dict[str, tuple[str, bytes]], form: dict[str, str]) -> tuple[bytes, str]:
+    """Build a multipart/form-data body (stdlib only — no requests here)."""
+    boundary = "----openace-acceptance-" + os.urandom(8).hex()
+    parts: list[bytes] = []
+    for key, value in (form or {}).items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n'
+            f"{value}\r\n".encode()
+        )
+    for key, (filename, content) in (files or {}).items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"; '
+            f'filename="{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
+            + content
+            + b"\r\n"
+        )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
 def http(
     method: str,
     path: str,
@@ -504,12 +524,18 @@ def http(
     token: str | None = None,
     body: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
+    files: dict[str, tuple[str, bytes]] | None = None,
+    form: dict[str, str] | None = None,
     timeout: int = 60,
 ) -> tuple[int, dict[str, Any] | list[Any] | str, dict[str, str]]:
     """Perform one HTTP request; returns (status, parsed-body, headers).
 
     Non-2xx is NOT an error — acceptance assertions decide what each call
     must return. Network-level failures raise.
+
+    *files* / *form* (Issue #3410) send a multipart/form-data body instead of
+    JSON — ``/api/fs/upload`` is the only multipart endpoint the acceptance
+    drives. They are mutually exclusive with *body*.
     """
     url = f"{BASE_URL}{path}"
     if params:
@@ -518,7 +544,12 @@ def http(
         url += "?" + urlencode(params)
     data = None
     headers = {"Accept": "application/json"}
-    if body is not None:
+    if files or form:
+        if body is not None:
+            raise AcceptanceError("http(): pass either body= or files=/form=, not both")
+        data, content_type = _multipart(files or {}, form or {})
+        headers["Content-Type"] = content_type
+    elif body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
     if token:
@@ -1259,6 +1290,110 @@ def item_b_cross_user_access_matrix(sc: Scenario) -> None:
         status == 400,
         f"status={status}",
         response=body,
+    )
+
+    # Issue #3410: fs upload must not write THROUGH a symlink. This stack runs
+    # as root, which is the exact branch the escalation lived in — a successful
+    # escape would overwrite bob's file outright, not merely be denied by DAC.
+    compose_exec(SERVICE, "echo VICTIM-ORIGINAL > /workspace/bob/acc-secret.txt", timeout=15)
+    compose_exec(
+        SERVICE,
+        "ln -sfn /workspace/bob/acc-secret.txt /workspace/alice/acc-secret.txt",
+        timeout=15,
+    )
+    status, body, _ = http(
+        "POST",
+        "/api/fs/upload",
+        token=alice_token,
+        files={"file": ("acc-secret.txt", b"PWNED")},
+        form={"path": "/workspace/alice"},
+    )
+    rec.check(
+        "b",
+        "alice upload through symlink to bob -> rejected",
+        status == 400,
+        f"status={status}",
+        response=body,
+    )
+    content = compose_exec(
+        SERVICE, "cat /workspace/bob/acc-secret.txt", timeout=15, check=False
+    ).stdout.strip()
+    rec.check(
+        "b",
+        "bob's file unchanged after the symlink upload attempt",
+        content == "VICTIM-ORIGINAL",
+        f"content={content!r}",
+    )
+    status, body, _ = http(
+        "POST",
+        "/api/fs/upload",
+        token=alice_token,
+        files={"file": ("acc-plain.txt", b"OK")},
+        form={"path": "/workspace/alice"},
+    )
+    rec.check(
+        "b",
+        "alice plain upload into her own home -> 200",
+        status == 200,
+        f"status={status}",
+        response=body,
+    )
+    status, body, _ = http(
+        "POST",
+        "/api/fs/create-directory",
+        token=alice_token,
+        body={"path": "/workspace/bob/acc-evil"},
+    )
+    rec.check(
+        "b",
+        "alice create-directory in bob's home -> 400",
+        status == 400,
+        f"status={status}",
+        response=body,
+    )
+    # Issue #3410: <base>/<account> must be private at the OS layer too — at
+    # 0755 any other account could read the whole workspace from a shell.
+    mode = compose_exec(SERVICE, "stat -c %a /workspace/bob", timeout=15).stdout.strip()
+    rec.check("b", "/workspace/bob is 0700", mode == "700", f"mode={mode}")
+    proc = compose_exec(SERVICE, "ls /workspace/bob", user="alice", timeout=15, check=False)
+    rec.check(
+        "b",
+        "alice shell ls /workspace/bob -> EACCES",
+        proc.returncode != 0 and "Permission denied" in proc.stderr,
+        f"rc={proc.returncode} stderr={proc.stderr.strip()[:120]!r}",
+    )
+
+    # Issue #3410 review: login provisioning sets the owner and mode of
+    # <account>/.qwen as root. alice owns /workspace/alice, so she can swap her
+    # .qwen for a symlink; a path-based chown/chmod would then re-own and
+    # re-mode bob's directory at her next login. The root branch now works
+    # through a descriptor that refuses to follow the link.
+    target = "/workspace/bob/acc-qwen-target"
+    compose_exec(SERVICE, f"mkdir -p {target} && chmod 755 {target}", user="bob", timeout=15)
+    stat_cmd = f"stat -c '%U %a' {target}"
+    before = compose_exec(SERVICE, stat_cmd, timeout=15).stdout.strip()
+    compose_exec(
+        SERVICE,
+        f"rm -rf /workspace/alice/.qwen && ln -s {target} /workspace/alice/.qwen",
+        user="alice",
+        timeout=15,
+    )
+    try:
+        login("alice", r.user_passwords["alice"])
+    finally:
+        after = compose_exec(SERVICE, stat_cmd, timeout=15).stdout.strip()
+        compose_exec(
+            SERVICE,
+            "rm -f /workspace/alice/.qwen && mkdir -m 700 /workspace/alice/.qwen",
+            user="alice",
+            timeout=15,
+            check=False,
+        )
+    rec.check(
+        "b",
+        "alice .qwen symlink to bob's dir is not followed at login",
+        before == "bob 755" and after == before,
+        f"before={before!r} after={after!r}",
     )
 
 
