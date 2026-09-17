@@ -12,6 +12,7 @@ import logging
 import os
 import platform
 import re
+import stat
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -607,10 +608,29 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     # 获取 UID/GID（id 命令不需要 sudo，任何用户都可以执行）
     uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
     gid_result = subprocess.run(["id", "-g", system_account], capture_output=True, text=True)
-
+    ids: tuple[int, int] | None = None
     if uid_result.returncode == 0 and gid_result.returncode == 0:
-        uid = int(uid_result.stdout.strip())
-        gid = int(gid_result.stdout.strip())
+        ids = (int(uid_result.stdout.strip()), int(gid_result.stdout.strip()))
+
+    if os.geteuid() == 0:
+        # Issue #3410 review: as root, set ownership and mode through ONE
+        # descriptor per directory instead of by path. <workspace>/.qwen lives
+        # inside the account's own directory, so the account can replace it
+        # with a symlink; a path-based chown (openace-chown resolves the path
+        # and then chowns the target) or chmod made root re-own or re-mode
+        # whatever the link pointed at — another user's file, or any file on
+        # the host. The `shared` chmod skip is explained below.
+        for directory in [workspace_dir, qwen_dir]:
+            _normalize_workspace_dir_as_root(
+                directory,
+                ids,
+                nofollow=directory == qwen_dir,
+                chmod=system_account != "shared",
+            )
+        return
+
+    if ids is not None:
+        uid, gid = ids
 
         # 设置所有权（通过 wrapper 或 sudo）
         # Issue #1855: 优先使用安全 wrapper，wrapper 内部做路径校验和审计日志
@@ -626,10 +646,13 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                 if result.returncode != 0:
                     logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
 
-    # Issue #3410: normalize the mode to 0700 so volumes created before this
-    # change converge on the next boot. Deliberately at FUNCTION level, not
-    # nested inside the uid/gid block above — the normalization must run even
-    # when the uid lookup fails (openace-mkdir creates 0755 and has no -m).
+    # Issue #3410: normalize the mode to 0700 so directories created before
+    # this change converge. Deliberately at FUNCTION level, not nested inside
+    # the uid/gid block above — the normalization must also run when the uid
+    # lookup fails. A non-root process can only change a directory it owns
+    # (#3410 review); a directory the account owns (a package deployment's
+    # /home/<account>, or one openace-mkdir created as the account) keeps the
+    # mode the installer gave it — trying only logged EPERM on every call.
     #
     # The `shared` skip mirrors the namespace-root guard at the top of this
     # function and deliberately does NOT rely on it: that guard is gated on
@@ -643,11 +666,69 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     # change; spotted while fixing #3410.
     if system_account != "shared":
         for directory in [workspace_dir, qwen_dir]:
+            _chmod_private_if_owned(directory, os.geteuid(), nofollow=directory == qwen_dir)
+
+
+def _open_dir_fd(directory: str, *, nofollow: bool) -> int | None:
+    """O_DIRECTORY fd for *directory*, or None (logged) when it cannot be opened.
+
+    *nofollow* refuses a symlink at the final component: use it for any entry
+    the account itself can replace.
+    """
+    flags = os.O_RDONLY | os.O_DIRECTORY | (os.O_NOFOLLOW if nofollow else 0)
+    try:
+        return os.open(directory, flags)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        logger.warning(f"Not normalizing {directory}: {e}")
+        return None
+
+
+def _chmod_fd_private(fd: int, directory: str, owner_uid: int) -> None:
+    """Set *fd* to mode 0700 when it is owned by *owner_uid* and not 0700 yet."""
+    st = os.fstat(fd)
+    if st.st_uid != owner_uid or stat.S_IMODE(st.st_mode) == 0o700:
+        return
+    try:
+        os.fchmod(fd, 0o700)
+    except OSError as e:
+        logger.warning(f"Cannot chmod 0700 {directory}: {e}")
+
+
+def _normalize_workspace_dir_as_root(
+    directory: str, ids: tuple[int, int] | None, *, nofollow: bool, chmod: bool
+) -> None:
+    """Root only: chown to *ids* and chmod 0700 through one descriptor.
+
+    The chmod only applies to a directory owned by the account (the
+    entrypoint's rule), or by root when the account has no uid yet.
+    """
+    fd = _open_dir_fd(directory, nofollow=nofollow)
+    if fd is None:
+        return
+    try:
+        if ids is not None:
             try:
-                if os.path.isdir(directory):
-                    os.chmod(directory, 0o700)
+                os.fchown(fd, ids[0], ids[1])
+                logger.info(f"Set owner of {directory} to {ids[0]}:{ids[1]}")
             except OSError as e:
-                logger.warning(f"Cannot chmod 0700 {directory}: {e}")
+                logger.warning(f"Cannot chown {directory} to {ids[0]}:{ids[1]}: {e}")
+        if chmod:
+            _chmod_fd_private(fd, directory, ids[0] if ids is not None else 0)
+    finally:
+        os.close(fd)
+
+
+def _chmod_private_if_owned(directory: str, euid: int, *, nofollow: bool) -> None:
+    """Non-root: chmod 0700 only a directory this process owns."""
+    fd = _open_dir_fd(directory, nofollow=nofollow)
+    if fd is None:
+        return
+    try:
+        _chmod_fd_private(fd, directory, euid)
+    finally:
+        os.close(fd)
 
 
 def ensure_user_workspace(system_account: str, tenant_id: int | None = None) -> bool:

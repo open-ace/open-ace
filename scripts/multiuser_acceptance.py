@@ -1363,6 +1363,39 @@ def item_b_cross_user_access_matrix(sc: Scenario) -> None:
         f"rc={proc.returncode} stderr={proc.stderr.strip()[:120]!r}",
     )
 
+    # Issue #3410 review: login provisioning sets the owner and mode of
+    # <account>/.qwen as root. alice owns /workspace/alice, so she can swap her
+    # .qwen for a symlink; a path-based chown/chmod would then re-own and
+    # re-mode bob's directory at her next login. The root branch now works
+    # through a descriptor that refuses to follow the link.
+    target = "/workspace/bob/acc-qwen-target"
+    compose_exec(SERVICE, f"mkdir -p {target} && chmod 755 {target}", user="bob", timeout=15)
+    stat_cmd = f"stat -c '%U %a' {target}"
+    before = compose_exec(SERVICE, stat_cmd, timeout=15).stdout.strip()
+    compose_exec(
+        SERVICE,
+        f"rm -rf /workspace/alice/.qwen && ln -s {target} /workspace/alice/.qwen",
+        user="alice",
+        timeout=15,
+    )
+    try:
+        login("alice", r.user_passwords["alice"])
+    finally:
+        after = compose_exec(SERVICE, stat_cmd, timeout=15).stdout.strip()
+        compose_exec(
+            SERVICE,
+            "rm -f /workspace/alice/.qwen && mkdir -m 700 /workspace/alice/.qwen",
+            user="alice",
+            timeout=15,
+            check=False,
+        )
+    rec.check(
+        "b",
+        "alice .qwen symlink to bob's dir is not followed at login",
+        before == "bob 755" and after == before,
+        f"before={before!r} after={after!r}",
+    )
+
 
 def item_c_environment_isolation(sc: Scenario) -> None:
     """(c) no other user's key/token in env; A's tools cannot enter B's area."""
