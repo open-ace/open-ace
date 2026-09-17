@@ -230,6 +230,8 @@ browse/check-path 可读共享项目,但单文件写/下载仍限本人 home,放
    `entry_point_details.filesystem_api.residuals` 中机器可读,**不参与准入判定**。
    未映射用户的用户名若恰是另一用户的 `system_account`,root 进程下该用户**没有
    任何 home 根**(所有 `/api/fs` 操作都会被拒)——两者会指向同一个 OS 账户与目录。
+   名为 `shared` 的账户(无论来自 `system_account` 还是用户名,后者也可能由 SSO /
+   组织同步产生)同样没有 home 根:`<base>/shared` 是共享项目命名空间根,不是 home。
 5. `os_user` 共享宿主内核:`resources` / `network_egress` / `kernel` 三维度仍
    `unsupported`(§2 边界声明)。
 

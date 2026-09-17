@@ -354,7 +354,9 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
             "O_NOFOLLOW from the home root, whose owner it asserts; package non-root "
             "deployments delegate to wrappers that probe, write and delete as that "
             "account. browse, check-path and create-directory run as the target "
-            "account for every user with a system_account."
+            "account for every user with a system_account. An account named "
+            "'shared' has no home root at all: <workspace base>/shared is the "
+            "shared-project namespace root."
         ),
         "limitations": [],
         "residuals": [

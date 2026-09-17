@@ -20,7 +20,7 @@ from typing import IO, Any, cast
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
-from app.utils.path_guard import is_valid_path, shared_project_path_error
+from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME, is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
     OPENACE_RM_WRAPPER,
@@ -595,15 +595,28 @@ def _home_roots_for_user(user) -> list[str]:
     nor username get NO root (empty list) instead of the process home: an
     identity-less user has no home subtree to browse.
 
-    Issue #3410 review: on a ROOT process, a user WITHOUT a system_account
-    whose username is another user's system_account gets no root either. Their
-    username-derived ``<base>/<username>`` IS that user's home, and root would
-    act inside it on their behalf. No ownership check can tell the two apart:
-    both names resolve to the same OS account.
+    Issue #3410 review: two more accounts get no root.
+    - An account named ``shared`` (system_account or username): ``<base>/shared``
+      is the shared-project NAMESPACE ROOT, holding every tenant's shared
+      projects, not a home. Usernames come from SSO and org sync too, and
+      nothing reserves this one.
+    - On a ROOT process, a user WITHOUT a system_account whose username is
+      another user's system_account. Their username-derived
+      ``<base>/<username>`` IS that user's home, and root would act inside it
+      on their behalf. No ownership check can tell the two apart: both names
+      resolve to the same OS account.
     """
     user = user or {}
     account = user.get("system_account") or user.get("username")
     if not account:
+        return []
+    if account == SHARED_NAMESPACE_DIRNAME:
+        logger.warning(
+            "No /fs home for user %s: '%s' is the shared-project namespace root; "
+            "rename the account",
+            user.get("id"),
+            account,
+        )
         return []
     if (
         not user.get("system_account")

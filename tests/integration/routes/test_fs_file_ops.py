@@ -2116,7 +2116,7 @@ class TestReadPathRootRace(_RootBranchHarness):
 
     # --- unmapped user whose username is another user's account -------------
 
-    def _unmapped_app(self):
+    def _unmapped_app(self, username="testuser"):
         from flask import Flask, g
 
         from app.routes.fs import fs_bp
@@ -2128,7 +2128,7 @@ class TestReadPathRootRace(_RootBranchHarness):
 
         @app.before_request
         def _set_user():
-            g.user = {"id": 7, "username": "testuser"}  # no system_account
+            g.user = {"id": 7, "username": username}  # no system_account
 
         return app
 
@@ -2168,6 +2168,45 @@ class TestReadPathRootRace(_RootBranchHarness):
             resp = self._download(docs / "note.txt", self._unmapped_app())
         assert resp.status_code == 200
         assert resp.data == b"MINE"
+
+    def test_an_account_named_shared_gets_no_home(self, tree):
+        """#3410 review: <base>/shared is the shared-project namespace root.
+
+        Usernames also arrive from SSO and org sync, and nothing reserves this
+        one, so an unmapped user named ``shared`` would otherwise act as root
+        inside every tenant's shared projects.
+        """
+        ws_root, _, _ = tree
+        namespace = ws_root / "shared"
+        (namespace / "team-proj").mkdir(parents=True)
+        (namespace / "team-proj" / "plan.txt").write_text("TEAM-PLAN")
+        app = self._unmapped_app(username="shared")
+        with self._root_env(ws_root, namespace), self._users([]):
+            download = self._download(namespace / "team-proj" / "plan.txt", app)
+            delete = self._delete(namespace / "team-proj" / "plan.txt", app)
+            search = self._search(namespace, "plan", app)
+            upload = self._upload(app.test_client(), namespace / "team-proj", "planted.txt")
+            browse = app.test_client().get("/api/fs/browse", query_string={"path": str(namespace)})
+        assert [r.status_code for r in (download, delete, search, upload, browse)] == [400] * 5
+        assert b"TEAM-PLAN" not in download.get_data()
+        assert sorted(p.name for p in (namespace / "team-proj").iterdir()) == ["plan.txt"]
+
+
+@pytest.mark.security
+@pytest.mark.regression
+@pytest.mark.issue(3410)
+@pytest.mark.parametrize(
+    "user",
+    [
+        {"id": 3, "username": "shared"},
+        {"id": 3, "username": "someone", "system_account": "shared"},
+    ],
+)
+def test_the_shared_namespace_name_never_yields_a_home_root(user):
+    from app.routes.fs import _home_roots_for_user
+
+    with patch("app.routes.fs.get_workspace_base_dirs", return_value=["/a", "/b"]):
+        assert _home_roots_for_user(user) == []
 
 
 @pytest.mark.regression
