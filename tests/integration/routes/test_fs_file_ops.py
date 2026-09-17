@@ -230,9 +230,10 @@ class TestUpload:
         assert body["success"] is True
         assert body["size"] == len(b"hello world")
         assert (user_home / "report.txt").read_bytes() == b"hello world"
-        # #3410 review: the temp+rename write pins uploads to 0600 (the
-        # compatibility table's declared change); a refactor that quietly
-        # drops the mode argument stays red here.
+        # #3410 review: the temp+rename write pins uploads to 0600 on every
+        # branch (root mkstemp-equivalent, direct 0o600 create, wrapper
+        # mktemp) — a refactor that quietly drops the mode argument stays red
+        # here.
         import stat as _stat
 
         assert _stat.S_IMODE((user_home / "report.txt").stat().st_mode) == 0o600

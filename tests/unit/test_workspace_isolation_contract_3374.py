@@ -562,6 +562,11 @@ class TestEntryPointDetails:
             assert d["scope"] == "remote_machine"
             assert d["covered_by_isolation_level"] is False
             assert "machine_assignment_acl" in d["access_control"]
+        # The operation list must track the REAL route surface: cli-start is
+        # POST /api/remote/terminal/cli/start (same machine ACL + session
+        # ownership as the web terminal) and drifted out once already.
+        term_ops = {op["name"] for op in data["entry_point_details"]["terminal"]["operations"]}
+        assert term_ops == {"start", "cli-start", "attach", "status", "stop", "ws"}
 
     def test_no_snapshot_emits_the_reserved_disabled_status(self, monkeypatch):
         """`disabled` is reserved for a kill switch Open ACE does not have yet."""
