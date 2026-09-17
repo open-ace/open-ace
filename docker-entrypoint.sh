@@ -1449,6 +1449,14 @@ def create_system_user(username, uid=None):
         try:
             if os.stat(user_workspace).st_uid == pwd.getpwnam(username).pw_uid:
                 os.chmod(user_workspace, 0o700)
+            else:
+                # A restored volume with a stale uid: loud, like every other
+                # skip around here — a silent one leaves it 0755 and wrong-
+                # owned through every boot until the account's first login.
+                print(f'  WARNING: {user_workspace} is owned by uid '
+                      f'{os.stat(user_workspace).st_uid}, not {username} '
+                      f'({pwd.getpwnam(username).pw_uid}); skipping mode '
+                      f'normalization (chown it or re-pin the uid)')
         except (OSError, KeyError) as e:
             print(f'  WARNING: cannot chmod 0700 {user_workspace}: {e}')
 

@@ -205,8 +205,12 @@ class TestWriteAs:
         assert target.read_bytes() == b"hello"
         assert _temps(sandbox) == []
         commands = [line.split(" ", 1)[0] for line in _calls(sandbox)]
-        for expected in ("test", "readlink", "mktemp", "tee", "mv", "rm"):
+        for expected in ("test", "readlink", "mktemp", "tee", "mv"):
             assert expected in commands, (expected, commands)
+        # The success path needs no cleanup fork: the mv renamed the temp file,
+        # and the EXIT trap's rm is skipped when TMP_PATH was cleared — one
+        # runuser/PAM session saved per successful upload.
+        assert "rm" not in commands, commands
 
     def test_paths_outside_the_prefix_are_refused_before_any_probe(self, sandbox):
         """Finding 7: the refusal code must not reveal what an outside path is."""

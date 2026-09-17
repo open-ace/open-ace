@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,70 +45,78 @@ if os.name == "nt":
             _stub.getgrgid = lambda g: type("g", (), {"gr_gid": g, "gr_name": "root"})()
             sys.modules[_mod_name] = _stub
 
-if "app.routes.fs" not in sys.modules:
-    for _pkg in [
-        "app",
-        "app.routes",
-        "app.repositories",
-        "app.repositories.user_repo",
-        "app.utils",
-        "app.utils.workspace",
-        "app.auth",
-        "app.auth.decorators",
-        "app.services",
-        "app.services.webui_manager",
-    ]:
-        if _pkg not in sys.modules:
-            sys.modules[_pkg] = type(sys)(_pkg)
-            if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
-                sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
+    # Real import first: stubbing sys.modules unconditionally leaks
+    # __path__=[] packages into the process and breaks later test modules that
+    # import app.* normally in mixed-order runs (same guard as
+    # test_fs_file_ops.py).
+    try:
+        import app.routes.fs  # noqa: F401
+    except Exception:  # pragma: no cover - dev-machine-specific import failure
+        if "app.routes.fs" not in sys.modules:
+            for _pkg in [
+                "app",
+                "app.routes",
+                "app.repositories",
+                "app.repositories.user_repo",
+                "app.utils",
+                "app.utils.workspace",
+                "app.auth",
+                "app.auth.decorators",
+                "app.services",
+                "app.services.webui_manager",
+            ]:
+                if _pkg not in sys.modules:
+                    sys.modules[_pkg] = type(sys)(_pkg)
+                    if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
+                        sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
 
-    class _UR:
-        def get_user_by_id(self, _):
-            return None
+            class _UR:
+                def get_user_by_id(self, _):
+                    return None
 
-    sys.modules["app.repositories.user_repo"].UserRepository = _UR
+            sys.modules["app.repositories.user_repo"].UserRepository = _UR
 
-    _ad = sys.modules["app.auth.decorators"]
-    _ad._extract_token = lambda: None  # type: ignore[attr-defined]
-    _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
-    _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
+            _ad = sys.modules["app.auth.decorators"]
+            _ad._extract_token = lambda: None  # type: ignore[attr-defined]
+            _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
+            _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
 
-    sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
+            sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
 
-    _cache_mod = type(sys)("app.utils.cache")
+            _cache_mod = type(sys)("app.utils.cache")
 
-    class _Cache:
-        def clear(self):
-            pass
+            class _Cache:
+                def clear(self):
+                    pass
 
-    _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
-    sys.modules["app.utils.cache"] = _cache_mod
-    _auth_svc = type(sys)("app.services.auth_service")
-    _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
-    sys.modules["app.services.auth_service"] = _auth_svc
+            _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
+            sys.modules["app.utils.cache"] = _cache_mod
+            _auth_svc = type(sys)("app.services.auth_service")
+            _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
+            sys.modules["app.services.auth_service"] = _auth_svc
 
-    _ws = sys.modules["app.utils.workspace"]
-    _rspec = importlib.util.spec_from_file_location(
-        "_real_workspace_for_test_path_val", str(Path(project_root) / "app/utils/workspace.py")
-    )
-    _rw = importlib.util.module_from_spec(_rspec)
-    _rspec.loader.exec_module(_rw)
-    _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
-    _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
-    _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
-    _ws.OPENACE_RM_WRAPPER = _rw.OPENACE_RM_WRAPPER
-    _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
-    _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
-    _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
+            _ws = sys.modules["app.utils.workspace"]
+            _rspec = importlib.util.spec_from_file_location(
+                "_real_workspace_for_test_path_val",
+                str(Path(project_root) / "app/utils/workspace.py"),
+            )
+            _rw = importlib.util.module_from_spec(_rspec)
+            _rspec.loader.exec_module(_rw)
+            _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
+            _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
+            _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+            _ws.OPENACE_RM_WRAPPER = _rw.OPENACE_RM_WRAPPER
+            _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
+            _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
+            _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
 
-    _fs_spec = importlib.util.spec_from_file_location(
-        "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
-    )
-    assert _fs_spec is not None and _fs_spec.loader is not None
-    _fs_mod = importlib.util.module_from_spec(_fs_spec)
-    sys.modules["app.routes.fs"] = _fs_mod
-    _fs_spec.loader.exec_module(_fs_mod)
+            _fs_spec = importlib.util.spec_from_file_location(
+                "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
+            )
+            assert _fs_spec is not None and _fs_spec.loader is not None
+            _fs_mod = importlib.util.module_from_spec(_fs_spec)
+            sys.modules["app.routes.fs"] = _fs_mod
+            _fs_spec.loader.exec_module(_fs_mod)
 
 
 @pytest.fixture
@@ -123,7 +132,10 @@ def workspace(tmp_path):
         ws.mkdir()
         yield ws
     else:
-        ws = Path.home() / ".ace_fs_test_path_val"
+        # uuid suffix: CI runs `pytest -n auto`, which can spread this
+        # module's tests across workers — a fixed name made two workers
+        # rmtree each other's tree mid-test.
+        ws = Path.home() / f".ace_fs_test_path_val_{uuid.uuid4().hex[:8]}"
         if ws.exists():
             shutil.rmtree(ws, ignore_errors=True)
         ws.mkdir(parents=True, exist_ok=True)

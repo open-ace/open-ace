@@ -161,7 +161,12 @@ TMP_PATH=$(as_target mktemp "${RESOLVED_PARENT:-$(dirname "$RESOLVED_PATH")}/.op
     exit 4
 }
 cleanup_tmp() {
-    as_target rm -f "$TMP_PATH" 2>/dev/null || true
+    # Empty after a successful rename: the EXIT trap then costs no runuser
+    # fork, and a file the user later recreates at the temp name cannot be
+    # deleted by it either.
+    if [ -n "$TMP_PATH" ]; then
+        as_target rm -f "$TMP_PATH" 2>/dev/null || true
+    fi
 }
 trap cleanup_tmp EXIT
 trap 'cleanup_tmp; exit 130' INT
@@ -169,6 +174,7 @@ trap 'cleanup_tmp; exit 143' TERM
 
 if runuser -u "$TARGET_USER" -- tee "$TMP_PATH" > /dev/null \
    && as_target mv -fT "$TMP_PATH" "$RESOLVED_PATH"; then
+    TMP_PATH=""
     log_audit "caller=$(whoami) target_user=${TARGET_USER} path=${RESOLVED_PATH} result=success"
     exit 0
 else

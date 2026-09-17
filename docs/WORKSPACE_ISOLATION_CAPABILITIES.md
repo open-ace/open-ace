@@ -266,7 +266,7 @@ wrapper 齐备)同样可以验证并强制 os_user。
 unsupported——**不会**静默降级到共享账户后宣称支持;该形态下默认启动路径保持
 既有行为,显式 `required_isolation=os_user` 得到结构化拒绝。
 
-## 6. sandboxed 等级部署要求与诚实声明(policy revision 2026-09-12.2)
+## 6. sandboxed 等级部署要求与诚实声明(语义最后变更于 2026-09-12.2;所有快照一律报告当前 POLICY_REVISION)
 
 `sandboxed` = WebUI 进程运行于 OpenSandbox pod:每用户每实例一个独立 pod、
 digest-pinned 且在 image_allowlist 的专属 webui 镜像、deny-default 出口;浏览器

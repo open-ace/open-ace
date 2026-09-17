@@ -2145,8 +2145,10 @@ def api_delete_file():
             assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
             # 【安全加固 Issue #2181】使用 openace-rm 安全 wrapper 替代 rm 通配
             # openace-rm 验证：目标用户、路径白名单、symlink 逃逸、owner 匹配、危险选项拒绝
+            # -n 与 upload 分支同口径：sudoers 配错时 fail fast，而不是在
+            # 密码提示上挂满 30s 超时。
             result = subprocess.run(
-                ["sudo", OPENACE_RM_WRAPPER, effective, target_path],
+                ["sudo", "-n", OPENACE_RM_WRAPPER, effective, target_path],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -2271,11 +2273,15 @@ def _search_tree_direct(
         return st
 
     walker = os.fwalk(os.curdir, dir_fd=root_fd)
+    # Only the early returns below mean "matches were cut off"; a walk that
+    # completes with exactly max_results matches found nothing more to cut.
+    hit_cap = False
     try:
         for dirpath, dirnames, filenames, dir_fd in walker:
             if len(results) >= max_results:
                 # More of the tree is left unread; stop walking it.
-                return results, True, None
+                hit_cap = True
+                break
             rel_dir = os.path.normpath(dirpath)
             depth = 0 if rel_dir == os.curdir else rel_dir.count(os.sep) + 1
             if depth >= max_depth:
@@ -2300,7 +2306,8 @@ def _search_tree_direct(
 
             for d in found_dirs if want_dirs else []:
                 if len(results) >= max_results:
-                    return results, True, None
+                    hit_cap = True
+                    break
                 rel = os.path.normpath(os.path.join(rel_dir, d))
                 results.append(
                     {
@@ -2311,10 +2318,13 @@ def _search_tree_direct(
                         "is_readable": True,
                     }
                 )
+            if hit_cap:
+                break
 
             for f, size in found_files if want_files else []:
                 if len(results) >= max_results:
-                    return results, True, None
+                    hit_cap = True
+                    break
                 rel = os.path.normpath(os.path.join(rel_dir, f))
                 results.append(
                     {
@@ -2326,6 +2336,8 @@ def _search_tree_direct(
                         "is_readable": True,
                     }
                 )
+            if hit_cap:
+                break
     finally:
         # fwalk is a generator (typeshed calls it an Iterator): closing it now
         # releases the directory fds it still holds after an early return.
@@ -2333,7 +2345,7 @@ def _search_tree_direct(
         if close is not None:
             close()
 
-    return results, len(results) >= max_results, None
+    return results, hit_cap, None
 
 
 def _search_tree_sudo(
@@ -2411,6 +2423,7 @@ def _search_tree_sudo(
         except ValueError:
             size = 0
         if len(results) >= max_results:
+            # More of the find output is left unread; matches were cut off.
             return results, True, None
         entry: dict[str, Any] = {
             "name": name,
@@ -2423,7 +2436,9 @@ def _search_tree_sudo(
             entry["size"] = size
         results.append(entry)
 
-    return results, len(results) >= max_results, None
+    # The find output was fully consumed: nothing was cut off, even when the
+    # match count lands exactly on max_results (same rule as the direct walk).
+    return results, False, None
 
 
 @fs_bp.route("/fs/search", methods=["GET"])

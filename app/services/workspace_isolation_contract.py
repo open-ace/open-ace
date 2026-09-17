@@ -363,9 +363,10 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
             {
                 "code": "shared_project_roots_are_cross_user_by_design",
                 "message": (
-                    "browse/check-path also admit the tenant's explicitly shared "
-                    "project roots; those are cross-user on purpose and fenced by "
-                    "a per-tenant OS group, not by the home lock."
+                    "browse/check-path/create-directory also admit the tenant's "
+                    "explicitly shared project roots; those are cross-user on "
+                    "purpose and fenced by a per-tenant OS group, not by the "
+                    "home lock."
                 ),
             },
             {
@@ -416,7 +417,9 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
         "covered_by_isolation_level": False,
         "operations": [
             {"name": name, "roots": [], "symlink_policy": _SYMLINK_NA}
-            for name in ("start", "attach", "status", "stop", "ws")
+            # cli-start = POST /api/remote/terminal/cli/start (SSH/local-CLI
+            # session; same machine ACL + session ownership as the web flow).
+            for name in ("start", "cli-start", "attach", "status", "stop", "ws")
         ],
         "access_control": [
             "machine_assignment_acl",
