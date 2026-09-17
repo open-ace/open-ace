@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Route tests for the recursive name-search endpoint (Issue #1923).
 
-Mirrors the stubbing pattern in test_fs_file_ops.py: pre-stub app.* packages
-so fs.py can be loaded without triggering the full app/__init__.py import
-chain, then register only fs_bp against an isolated Flask app.
+Same pattern as test_fs_file_ops.py: try the real app.routes.fs import
+first; only when it fails (dev machines where the package init cannot
+import) fall back to stubbing app.* and file-loading fs.py, then register
+only fs_bp against an isolated Flask app.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,10 +25,6 @@ project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# ---------------------------------------------------------------------------
-# Same module pre-stubbing as test_fs_file_ops.py (idempotent — harmless if
-# test_fs_file_ops.py already ran and stubbed everything).
-# ---------------------------------------------------------------------------
 import importlib.util  # noqa: E402
 
 # Real import first (same guard as test_fs_file_ops.py): stubbing
@@ -106,8 +104,11 @@ def workspace(tmp_path_factory):
     is_valid_path blacklists /root, /tmp, /var, etc. When tests run as root
     (HOME=/root), Path.home() is also blacklisted, so we use the project
     directory itself (under /tools, non-blacklisted) as the workspace parent.
+    The uuid suffix is load-bearing: `pytest -n auto` spreads one module's
+    tests across workers — a fixed name made two workers rmtree each other's
+    tree mid-test (same hazard the sibling fs test files document).
     """
-    ws = Path(project_root) / ".test-ws-search"
+    ws = Path(project_root) / f".test-ws-search-{uuid.uuid4().hex[:8]}"
     if ws.exists():
         shutil.rmtree(ws, ignore_errors=True)
     ws.mkdir(parents=True, exist_ok=True)
