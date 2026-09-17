@@ -28,13 +28,16 @@ from typing import Any
 
 # Revision 5 (2026-09-16.1, Issue #3410): entry-point matrix RECALIBRATED and
 # made machine-readable.
-#  - filesystem_api: partial -> enforced. The /fs write paths no longer derive
-#    their target through realpath() (the #3410 cross-user symlink overwrite: a
-#    user planted <own home>/x -> <other user>/x and the root branch wrote
-#    through it); every write now descends from the home root with O_NOFOLLOW
-#    and renames inside a directory fd. create-directory gained the home lock
-#    it never had, the per-file paths use the same per-base home roots browse
-#    does, and <base>/<account> is now 0700 like /home/<account>.
+#  - filesystem_api: partial -> enforced. The /fs per-file paths no longer act
+#    on a realpath()'d path (the #3410 cross-user symlink overwrite: a user
+#    planted <own home>/x -> <other user>/x and the root branch wrote through
+#    it). A root process now reaches upload/download/delete-file/search targets
+#    by descending from the home root with O_NOFOLLOW directory fds, and the
+#    package non-root wrappers (openace-write-as, openace-rm) probe, write and
+#    delete AS the target account, gated on their capability markers.
+#    create-directory gained the home lock it never had, the per-file paths use
+#    the same per-base home roots browse does, and <base>/<account> is now 0700
+#    like /home/<account>.
 #  - terminal / vscode: partial -> remote_machine_scope. Their old "partial"
 #    reasons (terminal tokens not bound to the session owner; VS Code owner =
 #    machine creator) were FIXED by #3376 / PR #3380 and the matrix was never
@@ -249,9 +252,14 @@ ENTRY_POINT_SCOPES = (
 )
 
 # Symlink policy tokens for a single operation.
-_SYMLINK_NEVER_BELOW_HOME = "never_followed_below_home_root"
+# The requested path is resolved and rejected if it lands outside the declared
+# roots, AND below the home root no symlink is ever followed by a process with
+# more privilege than the target account (#3410 review): a root process
+# descends through O_NOFOLLOW directory fds; every other branch runs as that
+# account, which can only reach what its own shell could.
+_SYMLINK_NO_ELEVATED_FOLLOW = "never_followed_with_elevated_privilege"
+# The requested path is resolved and rejected if it lands outside the roots.
 _SYMLINK_RESOLVED_THEN_CHECKED = "resolved_then_rejected_if_outside"
-_SYMLINK_NOT_WALKED = "not_followed_during_walk"
 _SYMLINK_NA = "not_applicable"
 
 # Root tokens an operation admits.
@@ -318,37 +326,35 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
                 "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
             },
             {"name": "home", "roots": list(_ROOTS_HOME), "symlink_policy": _SYMLINK_NA},
+        ]
+        + [
             {
-                "name": "upload",
+                "name": name,
                 "roots": list(_ROOTS_HOME),
-                "symlink_policy": _SYMLINK_NEVER_BELOW_HOME,
-            },
-            {
-                "name": "download",
-                "roots": list(_ROOTS_HOME),
-                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
-            },
-            {
-                "name": "delete-file",
-                "roots": list(_ROOTS_HOME),
-                "symlink_policy": _SYMLINK_RESOLVED_THEN_CHECKED,
-            },
-            {
-                "name": "search",
-                "roots": list(_ROOTS_HOME),
-                "symlink_policy": _SYMLINK_NOT_WALKED,
-            },
+                "symlink_policy": _SYMLINK_NO_ELEVATED_FOLLOW,
+            }
+            for name in ("upload", "download", "delete-file", "search")
         ],
-        "access_control": ["home_subtree_lock", "shared_project_acl", "os_account_dac"],
+        "access_control": [
+            "home_subtree_lock",
+            "shared_project_acl",
+            "os_account_dac",
+            "nofollow_fd_descent",
+        ],
         "boundary": (
             "Every /api/fs operation is locked to the roots its row declares: the "
             "caller's own per-base home roots (<workspace base>/<account>), plus "
             "the tenant's explicitly shared project roots for browse/check-path, "
             "plus the workspace root itself and its first-level children that are "
-            "not another user's home root for check-path/create-directory. Reads "
-            "resolve symlinks and reject anything landing outside that set; writes "
-            "never traverse a symlink below the home root (Issue #3410) and "
-            "execute as the target OS account."
+            "not another user's home root for check-path/create-directory. Every "
+            "requested path is resolved and rejected if it lands outside that set. "
+            "upload, download, delete-file and search then never follow a symlink "
+            "with more privilege than the target account (Issue #3410): a root "
+            "process reaches the target through directory fds opened with "
+            "O_NOFOLLOW from the home root, whose owner it asserts; package non-root "
+            "deployments delegate to wrappers that probe, write and delete as that "
+            "account. browse, check-path and create-directory run as the target "
+            "account for every user with a system_account."
         ),
         "limitations": [],
         "residuals": [
@@ -361,23 +367,29 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
                 ),
             },
             {
-                "code": "read_paths_validate_by_path",
+                "code": "account_scoped_wrappers_required_for_package_non_root",
                 "message": (
-                    "download/delete-file/search validate a resolved path and then "
-                    "act on it; a local attacker who can already write inside the "
-                    "user's own home can race that window. Write paths do not have "
-                    "this window (they operate on a directory fd)."
+                    "On package non-root multi-user deployments uploads and deletes "
+                    "go through the openace-write-as and openace-rm wrappers, which "
+                    "probe, write and delete as the target account. This is a "
+                    "residual rather than a limitation because the route checks each "
+                    "installed wrapper's capability marker and REFUSES the operation "
+                    "(500, fail closed) when it predates the hardening, so the entry "
+                    "never silently degrades."
                 ),
             },
             {
-                "code": "write_as_wrapper_required_for_package_non_root",
+                "code": "unmapped_users_act_as_the_web_process",
                 "message": (
-                    "On package non-root multi-user deployments the openace-write-as "
-                    "wrapper is the symlink enforcement point for uploads. This is a "
-                    "residual rather than a limitation because the route verifies the "
-                    "installed wrapper's capability marker and REFUSES the upload "
-                    "(500, fail closed) when it predates the hardening — the entry "
-                    "never silently degrades to an unenforced write."
+                    "A user without a system_account works inside the "
+                    "username-derived <base>/<username> as the web process: uploads "
+                    "are not chowned, and on a root process browse, check-path and "
+                    "create-directory act on that path by name. Such a user cannot "
+                    "start a local workspace (the launcher answers "
+                    "identity_mapping_missing), so it has no workspace shell to plant "
+                    "symlinks with; the per-file operations still never follow one; "
+                    "and a username that is another user's system_account gets no "
+                    "home at all. Map every user to a system_account."
                 ),
             },
         ],
@@ -480,6 +492,19 @@ _SANDBOX_UNWIRED_LIMITATION = {
     ),
 }
 _SANDBOX_UNWIRED_ENTRIES = ("filesystem_api", "terminal", "vscode")
+# The os_user boundary/residuals of filesystem_api describe the HOST /fs tree,
+# which a sandboxed user's files are not in (#3410 review); terminal/vscode keep
+# their own text, which is about the remote machine and still true.
+_SANDBOXED_ENTRY_OVERRIDES: dict[str, dict[str, Any]] = {
+    "filesystem_api": {
+        "boundary": (
+            "The /api/fs executor runs on the control-plane host and is not wired "
+            "to the user's sandbox pod; a sandboxed user's files live inside the "
+            "pod and are browsed through the WebUI's own file view."
+        ),
+        "residuals": [],
+    },
+}
 
 ENTRY_POINT_DETAILS_SANDBOXED: dict[str, dict[str, Any]] = {
     name: (
@@ -489,7 +514,10 @@ ENTRY_POINT_DETAILS_SANDBOXED: dict[str, dict[str, Any]] = {
             **detail,
             "status": ENTRY_POINT_STATUS_SANDBOX_UNWIRED,
             "covered_by_isolation_level": False,
-            "limitations": [_SANDBOX_UNWIRED_LIMITATION],
+            # Keep the entry's own gaps (terminal/vscode: remote scope) and add
+            # the sandbox one; replacing them dropped the remote-scope caveat.
+            "limitations": [*detail["limitations"], _SANDBOX_UNWIRED_LIMITATION],
+            **_SANDBOXED_ENTRY_OVERRIDES.get(name, {}),
         }
     )
     for name, detail in ENTRY_POINT_DETAILS.items()

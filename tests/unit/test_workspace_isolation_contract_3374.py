@@ -1,5 +1,12 @@
 """Unit tests for the local workspace isolation capability contract (Issue #3374)."""
 
+import contextlib
+import io
+import json
+import re
+import sys
+from pathlib import Path
+
 import pytest
 
 from app.services import workspace_isolation_contract as wic
@@ -532,10 +539,20 @@ class TestEntryPointDetails:
             "search",
         }
         by_name = {op["name"]: op for op in d["operations"]}
-        assert by_name["upload"]["roots"] == ["home"]
-        assert by_name["upload"]["symlink_policy"] == "never_followed_below_home_root"
+        # #3410 review: the per-file operations never follow a symlink with
+        # more privilege than the account; the rest resolve and reject.
+        for name in ("upload", "download", "delete-file", "search"):
+            assert by_name[name]["roots"] == ["home"], name
+            assert by_name[name]["symlink_policy"] == "never_followed_with_elevated_privilege"
+        for name in ("browse", "check-path", "create-directory"):
+            assert by_name[name]["symlink_policy"] == "resolved_then_rejected_if_outside"
         assert by_name["browse"]["roots"] == ["home", "shared_projects"]
         assert "workspace_root_first_level_non_home" in by_name["create-directory"]["roots"]
+        assert [r["code"] for r in d["residuals"]] == [
+            "shared_project_roots_are_cross_user_by_design",
+            "account_scoped_wrappers_required_for_package_non_root",
+            "unmapped_users_act_as_the_web_process",
+        ]
 
     def test_remote_entries_are_scoped_not_partial(self, monkeypatch):
         data = _supported(monkeypatch)
@@ -551,13 +568,25 @@ class TestEntryPointDetails:
         for data in (_supported(monkeypatch), _sandboxed()):
             assert wic.ENTRY_POINT_STATUS_DISABLED not in data["entry_points"].values()
 
-    def test_sandboxed_entries_are_reported_unwired(self):
+    def test_sandboxed_entries_are_reported_unwired(self, monkeypatch):
         data = _sandboxed()
+        os_user = _supported(monkeypatch)["entry_point_details"]
         for name in ("filesystem_api", "terminal", "vscode"):
             d = data["entry_point_details"][name]
             assert d["status"] == "sandboxed_entry_not_wired"
             assert d["covered_by_isolation_level"] is False
-            assert [x["code"] for x in d["limitations"]] == ["sandboxed_entry_not_wired"]
+            # The entry's own gaps survive; the sandbox gap is appended (#3410 review).
+            assert [x["code"] for x in d["limitations"]] == [
+                *(x["code"] for x in os_user[name]["limitations"]),
+                "sandboxed_entry_not_wired",
+            ]
+        remote = data["entry_point_details"]["terminal"]["limitations"]
+        assert "remote_execution_not_isolated_by_this_level" in [x["code"] for x in remote]
+        # The host /fs text does not describe a sandboxed user's files.
+        fs = data["entry_point_details"]["filesystem_api"]
+        assert fs["boundary"] != os_user["filesystem_api"]["boundary"]
+        assert "pod" in fs["boundary"]
+        assert fs["residuals"] == []
 
     def test_public_payload_cannot_corrupt_the_module_constants(self, monkeypatch):
         data = _supported(monkeypatch)
@@ -582,55 +611,58 @@ class TestEntryPointDetails:
 class TestDocumentedAdmissionPredicate:
     """The §7 doc example must be executable, not prose that rots on a bump.
 
-    Keep this predicate and the snippet in
-    docs/WORKSPACE_ISOLATION_CAPABILITIES.md §7 identical — if you change one,
-    change the other.
+    These tests RUN the fenced snippet from
+    docs/WORKSPACE_ISOLATION_CAPABILITIES.md §7 (#3410 review: a re-implemented
+    copy could drift from the doc unnoticed).
     """
 
-    NEEDED = ("webui", "filesystem_api", "session_history")
-    KNOWN = {
-        "enforced",
-        "partial",
-        "remote_machine_scope",
-        "separate_contract",
-        "sandboxed_entry_not_wired",
-        "disabled",
-    }
-    REVIEWED_REVISIONS = {"2026-09-16.1"}
+    DOC = Path(__file__).resolve().parents[2] / "docs" / "WORKSPACE_ISOLATION_CAPABILITIES.md"
 
-    def _accept(self, c):
-        if c.get("local_workspace_multi_user") != "supported":
-            return False
-        if c.get("isolation_level") != "os_user":
-            return False
-        if c.get("policy_revision") not in self.REVIEWED_REVISIONS:
-            return False
-        if not {"identity", "filesystem", "environment", "process"} <= set(c.get("enforced", [])):
-            return False
-        if not all(s in self.KNOWN for s in c.get("entry_points", {}).values()):
-            return False
-        details = c.get("entry_point_details", {})
-        return all(
-            details.get(e, {}).get("status") == "enforced"
-            and details.get(e, {}).get("covered_by_isolation_level")
-            and not details.get(e, {}).get("limitations")
-            for e in self.NEEDED
+    @classmethod
+    def _snippet(cls) -> str:
+        match = re.search(
+            r"python3 - caps\.json <<'PY'\n(.*?)\nPY\n", cls.DOC.read_text(encoding="utf-8"), re.S
         )
+        assert match, "the §7 admission snippet is missing from the doc"
+        return match.group(1)
 
-    def test_os_user_snapshot_is_accepted(self, monkeypatch):
-        assert self._accept(_supported(monkeypatch)) is True
+    def _accept(self, caps, tmp_path, monkeypatch) -> bool:
+        path = tmp_path / "caps.json"
+        path.write_text(json.dumps(caps), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["-", str(path)])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exec(compile(self._snippet(), "docs §7 snippet", "exec"), {"__name__": "__main__"})
+        verdict = out.getvalue().strip()
+        assert verdict in ("ACCEPT", "REJECT"), verdict
+        return verdict == "ACCEPT"
 
-    def test_sandboxed_snapshot_is_rejected(self, monkeypatch):
-        assert self._accept(_sandboxed()) is False
+    def test_os_user_snapshot_is_accepted(self, tmp_path, monkeypatch):
+        assert self._accept(_supported(monkeypatch), tmp_path, monkeypatch) is True
 
-    def test_unsupported_snapshot_is_rejected(self, monkeypatch):
-        assert self._accept(_unsupported(monkeypatch)) is False
+    def test_sandboxed_snapshot_is_rejected(self, tmp_path, monkeypatch):
+        assert self._accept(_sandboxed(), tmp_path, monkeypatch) is False
 
-    def test_unknown_revision_is_rejected(self, monkeypatch):
+    def test_unsupported_snapshot_is_rejected(self, tmp_path, monkeypatch):
+        assert self._accept(_unsupported(monkeypatch), tmp_path, monkeypatch) is False
+
+    def test_unknown_revision_is_rejected(self, tmp_path, monkeypatch):
         data = dict(_supported(monkeypatch), policy_revision="9999-01-01.9")
-        assert self._accept(data) is False
+        assert self._accept(data, tmp_path, monkeypatch) is False
 
-    def test_unknown_entry_status_is_rejected(self, monkeypatch):
+    def test_unknown_entry_status_is_rejected(self, tmp_path, monkeypatch):
         data = _supported(monkeypatch)
         data["entry_points"] = dict(data["entry_points"], terminal="brand_new_token")
-        assert self._accept(data) is False
+        assert self._accept(data, tmp_path, monkeypatch) is False
+
+    def test_a_limitation_on_a_needed_entry_is_rejected(self, tmp_path, monkeypatch):
+        data = _supported(monkeypatch)
+        data["entry_point_details"]["filesystem_api"]["limitations"] = [
+            {"code": "x", "message": "a real gap"}
+        ]
+        assert self._accept(data, tmp_path, monkeypatch) is False
+
+    def test_residuals_do_not_gate_admission(self, tmp_path, monkeypatch):
+        data = _supported(monkeypatch)
+        assert data["entry_point_details"]["filesystem_api"]["residuals"]
+        assert self._accept(data, tmp_path, monkeypatch) is True

@@ -31,11 +31,13 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
       "scope": "local_workspace",
       "covered_by_isolation_level": true,
       "operations": [
-        {"name": "upload", "roots": ["home"], "symlink_policy": "never_followed_below_home_root"},
+        {"name": "upload", "roots": ["home"],
+         "symlink_policy": "never_followed_with_elevated_privilege"},
         {"name": "browse", "roots": ["home", "shared_projects"],
          "symlink_policy": "resolved_then_rejected_if_outside"}
       ],
-      "access_control": ["home_subtree_lock", "shared_project_acl", "os_account_dac"],
+      "access_control": ["home_subtree_lock", "shared_project_acl", "os_account_dac",
+                         "nofollow_fd_descent"],
       "boundary": "...",
       "limitations": [],
       "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
@@ -68,7 +70,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
   入口矩阵描述的是多用户隔离的覆盖面,unsupported(单用户/未验证/降级)部署
   不携带该矩阵,避免"无隔离"与"webui: enforced"同帧自相矛盾。该矩阵为静态
   审计结论,随 `policy_revision` 版本化;各入口与代码的 conformance 绑定为
-  后续工作(§7)。
+  后续工作(§8)。
 - `policy_revision`:契约语义版本;推导逻辑或入口矩阵变化时递增。
 
 ## 2. 隔离等级语义
@@ -164,7 +166,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | 入口 | 状态 | scope | 覆盖范围与证据 |
 |---|---|---|---|
 | webui(聊天工具) | enforced | local_workspace | 每用户独立实例/UID/端口/token;停止与 token 撤销按 user_id 隔离 |
-| filesystem_api | enforced | local_workspace | 八个 `/api/fs` 操作逐个声明 roots 与符号链接策略(见下表与 `entry_point_details`);写路径自 home 根逐段 `O_NOFOLLOW` 下降并在目录 fd 内 `renameat`(#3410),读路径 realpath 后越界即拒;`create-directory` 与 check-path 同可创建集;单文件路径锁与 browse 同口径(逐 base home 根);`<base>/<account>` 0700 |
+| filesystem_api | enforced | local_workspace | 八个 `/api/fs` 操作逐个声明 roots 与符号链接策略(见下表与 `entry_point_details`);所有请求路径先 realpath,落到声明根之外即拒;upload/download/delete-file/search 在 root 进程下自 home 根逐段 `O_NOFOLLOW` 以目录 fd 下降后再写入(`renameat`)、读取、删除(`unlinkat`)或遍历(`fwalk`),包安装非 root 形态则委托给以目标账户身份探测/写入/删除的 wrapper(#3410);`create-directory` 与 check-path 同可创建集;单文件路径锁与 browse 同口径(逐 base home 根);`<base>/<account>` 0700 |
 | session_history | enforced | local_workspace | 应用层所有权闸门 + 租户 fail-closed |
 | terminal | remote_machine_scope | remote_machine | **远端机器能力**:本入口不分配本地路径/账户/令牌;治理方为 machine assignment ACL + 会话所有者 + 租户(#3376)。本地隔离等级不覆盖远端机器自身的用户隔离 |
 | vscode | remote_machine_scope | remote_machine | 同上(code-server);owner=请求者(#3376 `VSCodeOwnerStore`),proxy/WS 同闸门 |
@@ -179,10 +181,22 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `check-path` | home, shared_projects, workspace_root, workspace_root_first_level_non_home | resolved_then_rejected_if_outside |
 | `create-directory` | 同 `check-path` | resolved_then_rejected_if_outside |
 | `home` | home | not_applicable |
-| `upload` | home | **never_followed_below_home_root** |
-| `download` | home | resolved_then_rejected_if_outside |
-| `delete-file` | home | resolved_then_rejected_if_outside |
-| `search` | home | not_followed_during_walk |
+| `upload` | home | **never_followed_with_elevated_privilege** |
+| `download` | home | **never_followed_with_elevated_privilege** |
+| `delete-file` | home | **never_followed_with_elevated_privilege** |
+| `search` | home | **never_followed_with_elevated_privilege** |
+
+两个策略词的含义:
+
+- `resolved_then_rejected_if_outside`:请求路径先 realpath,落到该行 roots 之外即拒。
+  browse/check-path/create-directory 对有 `system_account` 的用户以目标账户身份执行
+  (`sudo -u`),因此其后的访问受该账户自身权限约束。
+- `never_followed_with_elevated_privilege`:在上一条的基础上,**home 根之下的任何
+  符号链接都不会被权限高于目标账户的进程跟随**。root 进程先以 `fstat` 断言 home 根
+  属于目标账户,再自 home 根逐段 `O_NOFOLLOW` 打开目录 fd,写入/读取/删除/遍历都
+  相对该 fd 完成(遍历时跳过符号链接本身);单用户进程本身就是该账户;包安装非 root
+  形态委托给 `openace-write-as`/`openace-rm`,二者在校验用户与路径前缀之后的每一次
+  文件系统探测、写入与删除都经 `runuser` 以目标账户身份执行。
 
 `workspace_root_first_level_non_home` 指 base dir 的**一级**子目录且**不是任何用户的
 home 根**(`_check_path_rejection_reason` 规则 3);写入口不包含 shared_projects——
@@ -191,27 +205,42 @@ browse/check-path 可读共享项目,但单文件写/下载仍限本人 home,放
 **部署前提(`filesystem_api: enforced` 的证据边界)**:
 
 1. workspace base dir 必须 root 所有且非用户可写(`docker-entrypoint.sh` 以 root
-   `mkdir -p` 建为 `root:root 0755`,`/home` 为 `chmod 755`)。写路径的信任锚是
-   `realpath(<base>/<account>)`,其**下**不跟随任何符号链接;`<base>/<account>`
-   本身允许是符号链接(运维挂大卷的常见做法),root 分支另以 `fstat` 断言该锚
-   属于目标账户。
-2. **包安装非 root 多用户形态必须重装 `openace-write-as`**(≥ 本次版本):该形态下
-   web 进程无法穿越 0700 home,符号链接/目录拒绝由 wrapper 强制(exit 5 / exit 6),
-   路由把它们翻译成 400。**若 wrapper 版本过旧**(缺少能力标记
-   `openace-write-as-capability: symlink-refusal=1`),路由直接
-   **fail-closed 拒绝上传(500,错误信息给出重装指引)**——因此 `enforced` 声明对
-   所有部署都成立:要么 wrapper 强制,要么上传根本不发生。
-3. 三项已声明 residual(共享项目根按设计跨用户、读路径按路径校验存在 TOCTOU 窗口、
-   上述 wrapper 前提)在 `entry_point_details.filesystem_api.residuals` 中机器可读,
-   **不参与准入判定**。
-4. `os_user` 共享宿主内核:`resources` / `network_egress` / `kernel` 三维度仍
+   `mkdir -p` 建为 `root:root 0755`,`/home` 为 `chmod 755`)。单文件操作的信任锚是
+   `realpath(<base>/<account>)`,其**下**不以高于目标账户的权限跟随任何符号链接,
+   root 分支另以 `fstat` 断言该锚属于目标账户。账户目录本身会被解析,但**不能借此
+   把 home 挪到任意卷**:请求路径先 realpath,再与**按配置原样**的 base 前缀比较,
+   解析后落在所有已配置 base 之外的 home 会被直接拒绝。要挂载大卷,请让
+   `<base>/<account>` 指向某个已配置 base 之内的位置,或把卷路径加入
+   `WORKSPACE_BASE_DIR`。
+2. **包安装非 root 多用户形态必须重装 `openace-write-as` 与 `openace-rm`**(≥ 本次
+   版本,重跑 `scripts/install-central/package-method/install.sh` 即可):该形态下
+   web 进程无法穿越 0700 home,上传与删除由这两个 wrapper 以目标账户身份完成;
+   符号链接/目录拒绝(exit 5 / exit 6)由路由翻译成 400。**若已安装的 wrapper 版本
+   过旧**(缺少能力标记 `openace-write-as-capability: symlink-refusal=1` 或
+   `openace-rm-capability: account-scoped=1`),路由直接 **fail-closed 拒绝对应的
+   上传或删除(500,错误信息给出重装指引)**——因此 `enforced` 声明对所有部署都
+   成立:要么 wrapper 以目标账户执行,要么操作根本不发生。
+3. `<base>/<account>` 为 0700:Docker 形态下新目录以 0700 创建,既有卷在容器启动
+   (entrypoint)与登录供给(root 进程,经不跟随符号链接的描述符)时收敛到 0700,
+   且只改属于该账户的目录。包安装形态的 `/home/<account>` 权限由 `useradd`
+   (`HOME_MODE`)决定;自定义 base 时目录由 `openace-mkdir` 以目标账户身份按默认
+   umask 创建,服务账户无权修改,请运维自行将既有账户目录设为 0700。
+4. 三项已声明 residual(共享项目根按设计跨用户、包安装形态的 wrapper 前提、未映射
+   `system_account` 的用户以 web 进程身份在 `<base>/<username>` 内工作)在
+   `entry_point_details.filesystem_api.residuals` 中机器可读,**不参与准入判定**。
+   未映射用户的用户名若恰是另一用户的 `system_account`,root 进程下该用户**没有
+   任何 home 根**(所有 `/api/fs` 操作都会被拒)——两者会指向同一个 OS 账户与目录。
+5. `os_user` 共享宿主内核:`resources` / `network_egress` / `kernel` 三维度仍
    `unsupported`(§2 边界声明)。
 
 **sandboxed 部署下的矩阵取值(#3378 起)**:矩阵按等级
 输出——`webui` 随 `sandboxed` 等级进入 pod(`enforced`);`terminal`/`vscode`/
 `filesystem_api` 输出 **`sandboxed_entry_not_wired`**(执行体仍在控制面宿主上,
 未接线到用户的沙箱实例),对 sandboxed 用户的 `/fs` host 树亦不可用——其文件在
-pod 内,由 webui 自带的 in-pod 文件浏览承载;`session_history` 仍 `enforced`
+pod 内,由 webui 自带的 in-pod 文件浏览承载。这三个入口在 sandboxed 快照中保留各自
+原有的 `limitations`(terminal/vscode 的远端范围说明)并追加
+`sandboxed_entry_not_wired`;`filesystem_api` 的 `boundary` 改为说明未接线,且不再
+携带只描述 host 树的 residuals。`session_history` 仍 `enforced`
 (per-pod 快照存储);`autonomous` 仍 `separate_contract`。os_user/none 快照的
 矩阵取值见上表(#3410 重标定);`filesystem_api` 在 sandboxed 下与 os_user 下的取值
 不同是**刻意**的——本地强制不等于已接线到 pod。
@@ -497,8 +526,10 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
    这三条在 2026-09-13 合入后,矩阵与本节文字一直未更新,导致接入方把已修好的缺口
    当作现存风险(#3410 的起因之一)。当前边界以 §4 与 `entry_point_details` 为准。
 2. 文件接口跨用户符号链接写入 — **已于 #3410 关闭**(见 §4 与 CHANGELOG)。
-   同批关闭的还有:`create-directory` 缺失的 home 子树锁、多 base 部署下
-   `/api/fs` 单文件路径与 `/api/fs/home` 的全线 400、`<base>/<account>` 0755。
+   同批关闭的还有:download/delete-file/search 在 root 进程下"先校验、再按路径操作"
+   的竞态窗口、包安装形态 `openace-rm` 以 root 执行的删除、`create-directory`
+   缺失的 home 子树锁、多 base 部署下 `/api/fs` 单文件路径与 `/api/fs/home` 的
+   全线 400、`<base>/<account>` 0755。
 3. *(编号保留,原条目已关闭)*
 4. WebUI `token_secret` 未持久化时重启导致已发 token 失效的加固。
 5. 交互工作区 `sandboxed` 等级:#3378 已交付(§6);遗留 follow-up:真实集群
@@ -506,10 +537,14 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
    沙箱接线、webui 历史 quota/GC、多 web 副本下的 token 校验/实例管理
    (reconcile 已心跳互斥,但 pod 归属仍是单进程内存态)。
 6. 多用户模式真实 Linux 端到端隔离验收(并发用户 + 越权尝试矩阵)——已由 #3379
-   交付基线;#3410 追加了上传符号链接矩阵、跨用户 `create-directory` 与
-   `<base>/<account>` 0700 探针(`scripts/multiuser_acceptance.py` item b)。
+   交付基线;#3410 追加了上传符号链接矩阵、跨用户 `create-directory`、
+   `<base>/<account>` 0700 与"登录供给不跟随 `.qwen` 符号链接"探针
+   (`scripts/multiuser_acceptance.py` item b)。
 7. **入口禁用开关(kill switch)缺失**:契约保留 `disabled` 状态,但当前**没有任何
    部署形态会输出它**——服务端尚无"强制关闭 terminal/vscode/filesystem_api 入口"
    的配置项(单元测试 `test_no_snapshot_emits_the_reserved_disabled_status` 钉住
    这一点)。需要"仅本地工作台"形态的部署,目前通过不授予远端机器(machine
    assignment)实现,并由 `entry_point_details[*].scope` 让接入方机器可判。
+8. **入口矩阵与代码的 conformance 绑定**:`entry_points`/`entry_point_details` 是
+   随 `policy_revision` 版本化的静态审计结论,尚无自动检查把每个操作的声明与其实现
+   绑定;声明与实现的一致性目前由评审与 `tests/` 中的对应用例保证。
