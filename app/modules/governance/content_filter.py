@@ -168,6 +168,7 @@ class ContentFilter:
         # Database rules integration
         self.governance_repo = governance_repo
         self._rules_cache: list[dict[str, Any]] | None = None
+        self._tenant_rules_cache: dict[tuple[int | None], list[dict[str, Any]]] = {}
         self._cache_valid: bool = False
 
         # Compiled regex cache for database rules (LRU cache)
@@ -300,37 +301,104 @@ class ContentFilter:
 
         return validated
 
-    def _load_rules_from_db(self) -> list[dict[str, Any]]:
+    def _load_rules_from_db(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
         """
-        Load filter rules from database.
+        Load filter rules from database with enhanced filtering.
+
+        Filters:
+        - is_test = FALSE (exclude test rules)
+        - approval_status = 'approved' (only approved rules)
+        - is_enabled = TRUE (only enabled rules)
+        - tenant_id = NULL or tenant_id (global + tenant-specific rules)
+        - valid_from/valid_until (only rules within validity period)
+
+        Args:
+            tenant_id: Optional tenant ID for tenant-specific rules.
+                      None loads only global rules (tenant_id IS NULL).
 
         Returns:
-            List of enabled filter rules.
+            List of enabled, approved, non-test filter rules.
         """
         if self.governance_repo is None:
             return []
 
         # Fast path: check cache validity without lock
-        if self._cache_valid and self._rules_cache is not None:
-            return self._rules_cache
+        cache_key = (tenant_id,)
+        with self._cache_lock:
+            if self._cache_valid and cache_key in self._tenant_rules_cache:
+                return self._tenant_rules_cache[cache_key]
 
         # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            enabled_rules = [r for r in rules if r.get("is_enabled", True)]
+
+            # Apply filters
+            from datetime import datetime, timezone
+
+            now = datetime.now(timezone.utc)
+            enabled_rules = []
+
+            for r in rules:
+                # Must be enabled
+                if not r.get("is_enabled", True):
+                    continue
+
+                # Exclude test rules
+                if r.get("is_test", False):
+                    continue
+
+                # Only approved rules
+                approval_status = r.get("approval_status", "approved")
+                if approval_status != "approved":
+                    continue
+
+                # Tenant isolation
+                rule_tenant_id = r.get("tenant_id")
+                if tenant_id is not None:
+                    # If tenant_id specified, include global rules (NULL) or matching tenant rules
+                    if rule_tenant_id is not None and rule_tenant_id != tenant_id:
+                        continue
+                else:
+                    # If no tenant_id, only global rules
+                    if rule_tenant_id is not None:
+                        continue
+
+                # Validity period check
+                valid_from = r.get("valid_from")
+                valid_until = r.get("valid_until")
+
+                if valid_from is not None and now < valid_from:
+                    continue
+                if valid_until is not None and now > valid_until:
+                    continue
+
+                enabled_rules.append(r)
+
+            # Sort by priority (ascending) then by created_at (descending)
+            enabled_rules.sort(
+                key=lambda x: (x.get("priority", 100), x.get("created_at", "")), reverse=False
+            )
+            # Reverse created_at within same priority
+            from itertools import groupby
+
+            sorted_rules = []
+            for _, group in groupby(enabled_rules, key=lambda x: x.get("priority", 100)):
+                sorted_rules.extend(
+                    sorted(list(group), key=lambda x: x.get("created_at", ""), reverse=True)
+                )
+            enabled_rules = sorted_rules
+
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
 
         # Update cache with lock protection
         with self._cache_lock:
-            # Double-check: another thread may have updated while we were loading
-            if self._cache_valid and self._rules_cache is not None:
-                return self._rules_cache
-            self._rules_cache = enabled_rules
-            self._cache_valid = True
+            self._tenant_rules_cache[cache_key] = enabled_rules
 
-        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+        logger.debug(
+            f"Loaded {len(enabled_rules)} filter rules from database (tenant_id={tenant_id})"
+        )
         return enabled_rules
 
     def _get_compiled_pattern(
@@ -793,9 +861,22 @@ class ContentFilter:
 
         # Log if enabled
         if self.log_matches and matched_rules:
-            logger.warning(
+            # Determine log level based on rule source
+            # System rules: INFO level (reduce noise)
+            # User rules: WARNING level (important)
+            has_system_rules = any(r.get("source") == "system" for r in matched_rules)
+            has_user_rules = any(r.get("source") != "system" for r in matched_rules)
+
+            if has_user_rules:
+                log_level = logging.WARNING
+            else:
+                log_level = logging.INFO
+
+            logger.log(
+                log_level,
                 f"Content filter matched: {len(matched_rules)} rules, "
-                f"risk={overall_risk}, action={overall_action}, passed={passed}"
+                f"risk={overall_risk}, action={overall_action}, passed={passed}, "
+                f"sources={[r.get('source', 'manual') for r in matched_rules]}",
             )
 
         # Generate message and suggestion

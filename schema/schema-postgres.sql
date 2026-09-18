@@ -665,7 +665,19 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    is_test boolean DEFAULT false,
+    source text DEFAULT 'manual'::text,
+    tenant_id integer,
+    approval_status text DEFAULT 'approved'::text,
+    priority integer DEFAULT 100,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    created_by integer,
+    valid_from timestamp without time zone,
+    valid_until timestamp without time zone,
+    CONSTRAINT chk_system_rule_immutable CHECK ((source <> 'system'::text) OR (is_test = false)),
+    CONSTRAINT chk_approval_status_valid CHECK (approval_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text]))
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq
@@ -677,6 +689,23 @@ CREATE SEQUENCE content_filter_rules_id_seq
     CACHE 1;
 
 ALTER SEQUENCE content_filter_rules_id_seq OWNED BY content_filter_rules.id;
+
+CREATE TABLE filter_rule_trigger_stats (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    trigger_count bigint DEFAULT 0,
+    last_triggered_at timestamp without time zone
+);
+
+CREATE SEQUENCE filter_rule_trigger_stats_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_trigger_stats_id_seq OWNED BY filter_rule_trigger_stats.id;
 CREATE TABLE daily_messages (
     id integer NOT NULL,
     date character varying NOT NULL,
@@ -3542,6 +3571,18 @@ CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflo
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
+
+CREATE INDEX idx_content_filter_rules_tenant_id ON content_filter_rules USING btree (tenant_id);
+
+CREATE INDEX idx_content_filter_rules_is_test ON content_filter_rules USING btree (is_test);
+
+CREATE INDEX idx_content_filter_rules_source ON content_filter_rules USING btree (source);
+
+CREATE INDEX idx_content_filter_rules_approval_status ON content_filter_rules USING btree (approval_status);
+
+CREATE INDEX idx_content_filter_rules_priority ON content_filter_rules USING btree (priority);
+
+CREATE INDEX idx_filter_rule_trigger_stats_rule_id ON filter_rule_trigger_stats USING btree (rule_id);
 
 
 --
