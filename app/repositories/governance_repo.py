@@ -1219,3 +1219,161 @@ class GovernanceRepository:
             "fix_suggestion": fix_suggestion,
             "checked_at": checked_at,
         }
+
+    # =========================================================================
+    # Enhanced Content Filter Rules (Issue #2550)
+    # =========================================================================
+
+    def mark_rule_as_test(self, rule_id: int, is_test: bool) -> bool:
+        """
+        Mark a filter rule as test or production rule.
+
+        Args:
+            rule_id: Rule ID.
+            is_test: Whether this is a test rule.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            self.db.execute(
+                "UPDATE content_filter_rules SET is_test = ? WHERE id = ?",
+                (1 if is_test else 0, rule_id)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to mark rule {rule_id} as test: {e}")
+            return False
+
+    def approve_filter_rule(self, rule_id: int, user_id: int) -> bool:
+        """
+        Approve a pending filter rule.
+
+        Args:
+            rule_id: Rule ID.
+            user_id: Approving user ID.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            from datetime import datetime, timezone
+            
+            approved_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            self.db.execute(
+                """
+                UPDATE content_filter_rules 
+                SET approval_status = 'approved', 
+                    approved_by = ?, 
+                    approved_at = ?
+                WHERE id = ?
+                """,
+                (user_id, approved_at, rule_id)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to approve rule {rule_id}: {e}")
+            return False
+
+    def reject_filter_rule(self, rule_id: int, user_id: int) -> bool:
+        """
+        Reject a pending filter rule.
+
+        Args:
+            rule_id: Rule ID.
+            user_id: Rejecting user ID.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            self.db.execute(
+                "UPDATE content_filter_rules SET approval_status = 'rejected' WHERE id = ?",
+                (rule_id,)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reject rule {rule_id}: {e}")
+            return False
+
+    def increment_trigger_count(self, rule_id: int) -> bool:
+        """
+        Increment trigger count for a filter rule.
+
+        Args:
+            rule_id: Rule ID.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            from datetime import datetime, timezone
+            
+            triggered_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            
+            # Check if stats record exists
+            existing = self.db.fetch_one(
+                "SELECT id FROM filter_rule_trigger_stats WHERE rule_id = ?",
+                (rule_id,)
+            )
+            
+            if existing:
+                # Update existing record
+                self.db.execute(
+                    """
+                    UPDATE filter_rule_trigger_stats 
+                    SET trigger_count = trigger_count + 1,
+                        last_triggered_at = ?
+                    WHERE rule_id = ?
+                    """,
+                    (triggered_at, rule_id)
+                )
+            else:
+                # Create new record
+                self.db.execute(
+                    """
+                    INSERT INTO filter_rule_trigger_stats 
+                    (rule_id, trigger_count, last_triggered_at)
+                    VALUES (?, 1, ?)
+                    """,
+                    (rule_id, triggered_at)
+                )
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to increment trigger count for rule {rule_id}: {e}")
+            return False
+
+    def get_trigger_stats(self, rule_id: int | None = None) -> list[dict] | dict | None:
+        """
+        Get trigger statistics for filter rules.
+
+        Args:
+            rule_id: Optional rule ID. If None, returns stats for all rules.
+
+        Returns:
+            List of stats dicts or single stats dict.
+        """
+        try:
+            if rule_id:
+                return self.db.fetch_one(
+                    """
+                    SELECT s.*, r.pattern, r.description
+                    FROM filter_rule_trigger_stats s
+                    JOIN content_filter_rules r ON s.rule_id = r.id
+                    WHERE s.rule_id = ?
+                    """,
+                    (rule_id,)
+                )
+            else:
+                return self.db.fetch_all(
+                    """
+                    SELECT s.*, r.pattern, r.description
+                    FROM filter_rule_trigger_stats s
+                    JOIN content_filter_rules r ON s.rule_id = r.id
+                    ORDER BY s.trigger_count DESC
+                    """
+                )
+        except Exception as e:
+            logger.error(f"Failed to get trigger stats: {e}")
+            return None
