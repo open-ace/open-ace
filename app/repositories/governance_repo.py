@@ -1238,7 +1238,7 @@ class GovernanceRepository:
         try:
             self.db.execute(
                 "UPDATE content_filter_rules SET is_test = ? WHERE id = ?",
-                (1 if is_test else 0, rule_id)
+                (1 if is_test else 0, rule_id),
             )
             return True
         except Exception as e:
@@ -1258,17 +1258,17 @@ class GovernanceRepository:
         """
         try:
             from datetime import datetime, timezone
-            
+
             approved_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             self.db.execute(
                 """
-                UPDATE content_filter_rules 
-                SET approval_status = 'approved', 
-                    approved_by = ?, 
+                UPDATE content_filter_rules
+                SET approval_status = 'approved',
+                    approved_by = ?,
                     approved_at = ?
                 WHERE id = ?
                 """,
-                (user_id, approved_at, rule_id)
+                (user_id, approved_at, rule_id),
             )
             return True
         except Exception as e:
@@ -1289,7 +1289,7 @@ class GovernanceRepository:
         try:
             self.db.execute(
                 "UPDATE content_filter_rules SET approval_status = 'rejected' WHERE id = ?",
-                (rule_id,)
+                (rule_id,),
             )
             return True
         except Exception as e:
@@ -1308,37 +1308,36 @@ class GovernanceRepository:
         """
         try:
             from datetime import datetime, timezone
-            
+
             triggered_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            
+
             # Check if stats record exists
             existing = self.db.fetch_one(
-                "SELECT id FROM filter_rule_trigger_stats WHERE rule_id = ?",
-                (rule_id,)
+                "SELECT id FROM filter_rule_trigger_stats WHERE rule_id = ?", (rule_id,)
             )
-            
+
             if existing:
                 # Update existing record
                 self.db.execute(
                     """
-                    UPDATE filter_rule_trigger_stats 
+                    UPDATE filter_rule_trigger_stats
                     SET trigger_count = trigger_count + 1,
                         last_triggered_at = ?
                     WHERE rule_id = ?
                     """,
-                    (triggered_at, rule_id)
+                    (triggered_at, rule_id),
                 )
             else:
                 # Create new record
                 self.db.execute(
                     """
-                    INSERT INTO filter_rule_trigger_stats 
+                    INSERT INTO filter_rule_trigger_stats
                     (rule_id, trigger_count, last_triggered_at)
                     VALUES (?, 1, ?)
                     """,
-                    (rule_id, triggered_at)
+                    (rule_id, triggered_at),
                 )
-            
+
             return True
         except Exception as e:
             logger.error(f"Failed to increment trigger count for rule {rule_id}: {e}")
@@ -1363,17 +1362,15 @@ class GovernanceRepository:
                     JOIN content_filter_rules r ON s.rule_id = r.id
                     WHERE s.rule_id = ?
                     """,
-                    (rule_id,)
+                    (rule_id,),
                 )
             else:
-                return self.db.fetch_all(
-                    """
+                return self.db.fetch_all("""
                     SELECT s.*, r.pattern, r.description
                     FROM filter_rule_trigger_stats s
                     JOIN content_filter_rules r ON s.rule_id = r.id
                     ORDER BY s.trigger_count DESC
-                    """
-                )
+                    """)
         except Exception as e:
             logger.error(f"Failed to get trigger stats: {e}")
             return None

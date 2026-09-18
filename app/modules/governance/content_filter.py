@@ -331,27 +331,27 @@ class ContentFilter:
         # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            
+
             # Apply filters
             from datetime import datetime, timezone
-            
+
             now = datetime.now(timezone.utc)
             enabled_rules = []
-            
+
             for r in rules:
                 # Must be enabled
                 if not r.get("is_enabled", True):
                     continue
-                
+
                 # Exclude test rules
                 if r.get("is_test", False):
                     continue
-                
+
                 # Only approved rules
                 approval_status = r.get("approval_status", "approved")
                 if approval_status != "approved":
                     continue
-                
+
                 # Tenant isolation
                 rule_tenant_id = r.get("tenant_id")
                 if tenant_id is not None:
@@ -362,27 +362,32 @@ class ContentFilter:
                     # If no tenant_id, only global rules
                     if rule_tenant_id is not None:
                         continue
-                
+
                 # Validity period check
                 valid_from = r.get("valid_from")
                 valid_until = r.get("valid_until")
-                
+
                 if valid_from is not None and now < valid_from:
                     continue
                 if valid_until is not None and now > valid_until:
                     continue
-                
+
                 enabled_rules.append(r)
-            
+
             # Sort by priority (ascending) then by created_at (descending)
-            enabled_rules.sort(key=lambda x: (x.get("priority", 100), x.get("created_at", "")), reverse=False)
+            enabled_rules.sort(
+                key=lambda x: (x.get("priority", 100), x.get("created_at", "")), reverse=False
+            )
             # Reverse created_at within same priority
             from itertools import groupby
+
             sorted_rules = []
             for _, group in groupby(enabled_rules, key=lambda x: x.get("priority", 100)):
-                sorted_rules.extend(sorted(list(group), key=lambda x: x.get("created_at", ""), reverse=True))
+                sorted_rules.extend(
+                    sorted(list(group), key=lambda x: x.get("created_at", ""), reverse=True)
+                )
             enabled_rules = sorted_rules
-            
+
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
@@ -391,7 +396,9 @@ class ContentFilter:
         with self._cache_lock:
             self._tenant_rules_cache[cache_key] = enabled_rules
 
-        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database (tenant_id={tenant_id})")
+        logger.debug(
+            f"Loaded {len(enabled_rules)} filter rules from database (tenant_id={tenant_id})"
+        )
         return enabled_rules
 
     def _get_compiled_pattern(
@@ -859,17 +866,17 @@ class ContentFilter:
             # User rules: WARNING level (important)
             has_system_rules = any(r.get("source") == "system" for r in matched_rules)
             has_user_rules = any(r.get("source") != "system" for r in matched_rules)
-            
+
             if has_user_rules:
                 log_level = logging.WARNING
             else:
                 log_level = logging.INFO
-            
+
             logger.log(
                 log_level,
                 f"Content filter matched: {len(matched_rules)} rules, "
                 f"risk={overall_risk}, action={overall_action}, passed={passed}, "
-                f"sources={[r.get('source', 'manual') for r in matched_rules]}"
+                f"sources={[r.get('source', 'manual') for r in matched_rules]}",
             )
 
         # Generate message and suggestion

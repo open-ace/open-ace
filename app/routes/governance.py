@@ -1337,21 +1337,21 @@ def api_approve_filter_rule(rule_id):
         JSON response with success status.
     """
     from app.repositories.governance_repo import governance_repo
-    
+
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
     if existing is None:
         return jsonify({"error": "Filter rule not found"}), 404
-    
+
     # Check if rule is already approved
     if existing.get("approval_status") == "approved":
         return jsonify({"error": "Rule is already approved"}), 400
-    
+
     # Approve the rule
     success = governance_repo.approve_filter_rule(rule_id, g.user_id)
     if not success:
         return jsonify({"error": "Failed to approve rule"}), 500
-    
+
     # Log the action
     client_info = get_client_info()
     audit_logger.log_action(
@@ -1367,11 +1367,8 @@ def api_approve_filter_rule(rule_id):
         },
         **client_info,
     )
-    
-    return jsonify({
-        "success": True,
-        "message": f"Filter rule {rule_id} approved successfully"
-    })
+
+    return jsonify({"success": True, "message": f"Filter rule {rule_id} approved successfully"})
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>/reject", methods=["POST"])
@@ -1386,17 +1383,17 @@ def api_reject_filter_rule(rule_id):
         JSON response with success status.
     """
     from app.repositories.governance_repo import governance_repo
-    
+
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
     if existing is None:
         return jsonify({"error": "Filter rule not found"}), 404
-    
+
     # Reject the rule
     success = governance_repo.reject_filter_rule(rule_id, g.user_id)
     if not success:
         return jsonify({"error": "Failed to reject rule"}), 500
-    
+
     # Log the action
     client_info = get_client_info()
     audit_logger.log_action(
@@ -1412,11 +1409,8 @@ def api_reject_filter_rule(rule_id):
         },
         **client_info,
     )
-    
-    return jsonify({
-        "success": True,
-        "message": f"Filter rule {rule_id} rejected"
-    })
+
+    return jsonify({"success": True, "message": f"Filter rule {rule_id} rejected"})
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>/test", methods=["PUT"])
@@ -1434,24 +1428,24 @@ def api_mark_rule_as_test(rule_id):
         JSON response with success status.
     """
     from app.repositories.governance_repo import governance_repo
-    
+
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
     if existing is None:
         return jsonify({"error": "Filter rule not found"}), 404
-    
+
     # Check if rule is a system rule
     if existing.get("source") == "system":
         return jsonify({"error": "Cannot modify system rule"}), 403
-    
+
     data = request.get_json() or {}
     is_test = data.get("is_test", False)
-    
+
     # Mark as test/production
     success = governance_repo.mark_rule_as_test(rule_id, is_test)
     if not success:
         return jsonify({"error": "Failed to update rule"}), 500
-    
+
     # Log the action
     client_info = get_client_info()
     audit_logger.log_action(
@@ -1467,11 +1461,13 @@ def api_mark_rule_as_test(rule_id):
         },
         **client_info,
     )
-    
-    return jsonify({
-        "success": True,
-        "message": f"Filter rule {rule_id} marked as {'test' if is_test else 'production'}"
-    })
+
+    return jsonify(
+        {
+            "success": True,
+            "message": f"Filter rule {rule_id} marked as {'test' if is_test else 'production'}",
+        }
+    )
 
 
 @governance_bp.route("/filter-rules/stats", methods=["GET"])
@@ -1483,9 +1479,9 @@ def api_get_filter_rule_stats():
         JSON response with trigger statistics.
     """
     from app.repositories.governance_repo import governance_repo
-    
+
     rule_id = request.args.get("rule_id", type=int)
-    
+
     if rule_id:
         stats = governance_repo.get_trigger_stats(rule_id)
         if stats is None:
