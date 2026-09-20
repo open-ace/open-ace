@@ -384,7 +384,7 @@ class ContentFilter:
             sorted_rules = []
             for _, group in groupby(enabled_rules, key=lambda x: x.get("priority", 100)):
                 sorted_rules.extend(
-                    sorted(list(group), key=lambda x: x.get("created_at", ""), reverse=True)
+                    sorted(group, key=lambda x: x.get("created_at", ""), reverse=True)
                 )
             enabled_rules = sorted_rules
 
@@ -864,7 +864,6 @@ class ContentFilter:
             # Determine log level based on rule source
             # System rules: INFO level (reduce noise)
             # User rules: WARNING level (important)
-            has_system_rules = any(r.get("source") == "system" for r in matched_rules)
             has_user_rules = any(r.get("source") != "system" for r in matched_rules)
 
             if has_user_rules:
