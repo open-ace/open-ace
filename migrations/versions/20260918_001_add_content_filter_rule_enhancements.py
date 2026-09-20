@@ -105,23 +105,25 @@ def upgrade() -> None:
         )
     """)
 
-    # 创建触发统计表
-    op.create_table(
-        "filter_rule_trigger_stats",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "rule_id",
-            sa.Integer(),
-            sa.ForeignKey("content_filter_rules.id", ondelete="CASCADE"),
-            unique=True,
-            nullable=False,
-        ),
-        sa.Column("trigger_count", sa.BigInteger(), server_default="0"),
-        sa.Column("last_triggered_at", sa.DateTime(), nullable=True),
-    )
-    op.create_index(
-        "idx_filter_rule_trigger_stats_rule_id", "filter_rule_trigger_stats", ["rule_id"]
-    )
+    # 创建触发统计表（条件检查）
+    existing_tables = set(inspector.get_table_names())
+    if "filter_rule_trigger_stats" not in existing_tables:
+        op.create_table(
+            "filter_rule_trigger_stats",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column(
+                "rule_id",
+                sa.Integer(),
+                sa.ForeignKey("content_filter_rules.id", ondelete="CASCADE"),
+                unique=True,
+                nullable=False,
+            ),
+            sa.Column("trigger_count", sa.BigInteger(), server_default="0"),
+            sa.Column("last_triggered_at", sa.DateTime(), nullable=True),
+        )
+        op.create_index(
+            "idx_filter_rule_trigger_stats_rule_id", "filter_rule_trigger_stats", ["rule_id"]
+        )
 
 
 def downgrade():
