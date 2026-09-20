@@ -1,7 +1,7 @@
 """add content filter rule enhancements
 
 Revision ID: 20260918_001
-Revises: 20260827_001_add_feishu_verification_status
+Revises: 20260911_002_add_users_system_uid
 Create Date: 2026-09-18
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers
 revision = "20260918_001"
-down_revision = "20260827_001_add_feishu_verification_status"
+down_revision = "20260911_002_add_users_system_uid"
 branch_labels = None
 depends_on = None
 
