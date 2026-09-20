@@ -1336,7 +1336,6 @@ def api_approve_filter_rule(rule_id):
     Returns:
         JSON response with success status.
     """
-    from app.repositories.governance_repo import governance_repo
 
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
@@ -1382,7 +1381,6 @@ def api_reject_filter_rule(rule_id):
     Returns:
         JSON response with success status.
     """
-    from app.repositories.governance_repo import governance_repo
 
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
@@ -1427,7 +1425,6 @@ def api_mark_rule_as_test(rule_id):
     Returns:
         JSON response with success status.
     """
-    from app.repositories.governance_repo import governance_repo
 
     # Check if rule exists
     existing = governance_repo.get_filter_rule(rule_id)
@@ -1478,7 +1475,6 @@ def api_get_filter_rule_stats():
     Returns:
         JSON response with trigger statistics.
     """
-    from app.repositories.governance_repo import governance_repo
 
     rule_id = request.args.get("rule_id", type=int)
 
