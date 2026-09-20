@@ -665,7 +665,19 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    is_test boolean DEFAULT false NOT NULL,
+    source character varying(20) DEFAULT 'manual'::character varying NOT NULL,
+    tenant_id integer,
+    approval_status character varying(20) DEFAULT 'approved'::character varying NOT NULL,
+    priority integer DEFAULT 100 NOT NULL,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    created_by integer,
+    valid_from timestamp without time zone,
+    valid_until timestamp without time zone,
+    CONSTRAINT chk_approval_status_valid CHECK (((approval_status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying])::text[]))),
+    CONSTRAINT chk_system_rule_immutable CHECK ((((source)::text <> 'system'::text) OR (is_test = false)))
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq
@@ -889,6 +901,22 @@ CREATE SEQUENCE fencing_token_seq
     NO MAXVALUE
     CACHE 1;
 
+CREATE TABLE filter_rule_trigger_stats (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    trigger_count bigint DEFAULT '0'::bigint,
+    last_triggered_at timestamp without time zone
+);
+
+CREATE SEQUENCE filter_rule_trigger_stats_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_trigger_stats_id_seq OWNED BY filter_rule_trigger_stats.id;
 CREATE TABLE hourly_stats (
     date character varying(10) NOT NULL,
     hour integer NOT NULL,
@@ -2650,6 +2678,8 @@ ALTER TABLE ONLY encryption_keys ALTER COLUMN key_id SET DEFAULT nextval('encryp
 
 ALTER TABLE ONLY feishu_settings ALTER COLUMN id SET DEFAULT nextval('feishu_settings_id_seq'::regclass);
 
+ALTER TABLE ONLY filter_rule_trigger_stats ALTER COLUMN id SET DEFAULT nextval('filter_rule_trigger_stats_id_seq'::regclass);
+
 ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
 
 ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
@@ -2891,6 +2921,12 @@ ALTER TABLE ONLY encryption_keys
 
 ALTER TABLE ONLY feishu_settings
     ADD CONSTRAINT feishu_settings_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY filter_rule_trigger_stats
+    ADD CONSTRAINT filter_rule_trigger_stats_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY filter_rule_trigger_stats
+    ADD CONSTRAINT filter_rule_trigger_stats_rule_id_key UNIQUE (rule_id);
 
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_pkey PRIMARY KEY (id);
@@ -3451,89 +3487,113 @@ CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING b
 --
 --
 
+CREATE INDEX idx_content_filter_rules_approval_status ON content_filter_rules USING btree (approval_status);
+
+CREATE INDEX idx_content_filter_rules_is_test ON content_filter_rules USING btree (is_test);
+
+
+--
+--
+
+CREATE INDEX idx_content_filter_rules_priority ON content_filter_rules USING btree (priority);
+
+CREATE INDEX idx_content_filter_rules_source ON content_filter_rules USING btree (source);
+
+
+--
+--
+
+CREATE INDEX idx_content_filter_rules_tenant_id ON content_filter_rules USING btree (tenant_id);
+
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
+
+
+--
+--
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_deregister_failures_created ON deregister_failures USING btree (created_at);
+
+
+--
+--
 
 CREATE INDEX idx_deregister_failures_machine ON deregister_failures USING btree (machine_id);
 
-
---
---
-
 CREATE INDEX idx_deregister_failures_status ON deregister_failures USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
 
-
---
---
-
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
+
+
+--
+--
 
 CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys USING btree (key_fingerprint);
 
-
---
---
-
 CREATE INDEX idx_encryption_keys_status ON encryption_keys USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
+
+CREATE INDEX idx_filter_rule_trigger_stats_rule_id ON filter_rule_trigger_stats USING btree (rule_id);
 
 
 --
@@ -4348,6 +4408,9 @@ ALTER TABLE ONLY backfill_logs
 
 ALTER TABLE ONLY consistency_violations
     ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY filter_rule_trigger_stats
+    ADD CONSTRAINT filter_rule_trigger_stats_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES content_filter_rules(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY permission_checkpoints
     ADD CONSTRAINT fk_permission_checkpoints_task FOREIGN KEY (task_id) REFERENCES permission_tasks(task_id) ON DELETE CASCADE;
