@@ -9,7 +9,6 @@ SQLite remain unchanged.
 
 from alembic import op
 
-
 revision = "20260918_002_normalize_audit_log_success"
 down_revision = "20260918_001"
 branch_labels = None
