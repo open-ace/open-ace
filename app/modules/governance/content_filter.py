@@ -598,6 +598,7 @@ class ContentFilter:
         return total % 10 == 0
 
     _DATE_LIKE = re.compile(r"\+?\d{4}([-\s/.]\d{1,2}){0,2}\Z")
+    _NON_DIGIT = re.compile(r"\D")
 
     @classmethod
     def _is_compact_date(cls, value: str) -> bool:
@@ -652,6 +653,24 @@ class ContentFilter:
         """
         stripped = value.strip()
         return bool(cls._DATE_LIKE.match(stripped)) or cls._is_compact_date(stripped)
+
+    @classmethod
+    def _is_short_number(cls, value: str) -> bool:
+        """True if *value* is too short to be an international phone number.
+
+        Compact numbers without a leading ``+`` and with fewer than 7 digits
+        are exit codes, ports, counters or versions in ordinary prompts
+        (``Exit 137``, ``port 8080``, ``v2.5``), not subscriber numbers;
+        E.164 numbers carry at least 7 digits. Space/dash-separated groups
+        keep the looser interpretation (``86 138`` reads like a phone
+        fragment), and an explicit ``+`` prefix always does.
+        """
+        stripped = value.strip()
+        if stripped.startswith("+"):
+            return False
+        if any(c.isspace() for c in stripped):
+            return False
+        return len(cls._NON_DIGIT.sub("", stripped)) < 7
 
     def check_content(
         self,
@@ -763,13 +782,18 @@ class ContentFilter:
             matches = compiled_pattern.findall(content)
             # Post-match false-positive suppression (#2499): autonomous prompts
             # legitimately contain 15-digit commit SHAs / timestamp-IDs (matched
-            # as credit cards → critical → block) and dates like 2026-08-12
-            # (matched as international phones). Drop those before they enter
-            # matched_rules / escalate risk — real cards/phones are unaffected.
+            # as credit cards → critical → block), dates like 2026-08-12 and
+            # bare short numbers like exit codes or ports (matched as
+            # international phones). Drop those before they enter matched_rules
+            # / escalate risk — real cards/phones are unaffected.
             if matches and pattern_name in ("pii_credit_card", "pii_credit_card_amex"):
                 matches = [m for m in matches if self._luhn_check(m)]
             elif matches and pattern_name == "pii_phone_intl":
-                matches = [m for m in matches if not self._looks_like_date(m)]
+                matches = [
+                    m
+                    for m in matches
+                    if not self._looks_like_date(m) and not self._is_short_number(m)
+                ]
             if matches:
                 risk = self.risk_mapping.get(pattern_name, "medium")
                 matched_rules.append(
