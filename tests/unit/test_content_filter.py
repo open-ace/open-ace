@@ -1042,9 +1042,14 @@ class TestNoTenantUserBehavior:
 
     @pytest.mark.regression
     def test_phone_intl_bare_port_not_flagged(self):
-        """A bare port like 8080 is not an international phone number."""
+        """A bare port like 51820 is not an international phone number.
+
+        Deliberately not a 4-digit port: ``8080`` is already suppressed by the
+        #2499 ``_DATE_LIKE`` heuristic, which matches any bare 4-digit string,
+        so such a test would pass without ``_is_short_number`` and prove nothing.
+        """
         cf = ContentFilter(config={"redact_pii": True})
-        result = cf.check_content("listening on port 8080")
+        result = cf.check_content("listening on port 51820")
         assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
 
     @pytest.mark.regression

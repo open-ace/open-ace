@@ -660,10 +660,27 @@ class ContentFilter:
 
         Compact numbers without a leading ``+`` and with fewer than 7 digits
         are exit codes, ports, counters or versions in ordinary prompts
-        (``Exit 137``, ``port 8080``, ``v2.5``), not subscriber numbers;
+        (``Exit 137``, ``port 51820``, ``v2.5``), not subscriber numbers;
         E.164 numbers carry at least 7 digits. Space/dash-separated groups
         keep the looser interpretation (``86 138`` reads like a phone
         fragment), and an explicit ``+`` prefix always does.
+
+        The whitespace carve-out is load-bearing, not an oversight: the pattern
+        splits ``+86 138 0013 8000`` into fragments, and suppressing short
+        space-separated groups such as ``86 138`` would lose real international
+        numbers. The cost is that two space-separated counters
+        (``HTTP 502 12 times``) stay a false positive — narrowing that needs a
+        different pattern, not a tighter suppressor.
+
+        This only narrows what enters ``matched_rules``. ``_redact_matches``
+        re-runs the raw pattern over the whole text, so a suppressed value is
+        still rewritten whenever a sibling match of the same pattern survives
+        (``Exit 137 and call 13800138000`` still stores ``Exit 137-***-****``).
+        Closing that needs the redaction pass to work from spans decided on the
+        original content. Guarding the ``sub`` callback with this predicate is
+        NOT a fix and was tried and rejected: it under-redacts real numbers,
+        shipping ``123456`` verbatim from ``+44 7911 123456`` while the audit
+        record still claims the value was redacted.
         """
         stripped = value.strip()
         if stripped.startswith("+"):
