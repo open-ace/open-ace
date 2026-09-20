@@ -6,44 +6,76 @@ Create Date: 2026-09-18
 
 """
 
+from __future__ import annotations
+
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers
-revision = "20260918_001"
-down_revision = "20260911_002_add_users_system_uid"
-branch_labels = None
-depends_on = None
+revision: str = "20260918_001"
+down_revision: str | None = "20260911_002_add_users_system_uid"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
-def upgrade():
-    # 新增字段
+def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {index["name"] for index in inspector.get_indexes(table_name)}
+
+
+def upgrade() -> None:
+    """Add content filter rule enhancements with idempotent column additions."""
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    
+    columns = _column_names(inspector, "content_filter_rules")
+    
+    # 新增字段（条件检查）
     with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("is_test", sa.Boolean(), nullable=False, server_default="0"))
-        batch_op.add_column(
-            sa.Column("source", sa.String(20), nullable=False, server_default="manual")
-        )
-        batch_op.add_column(sa.Column("tenant_id", sa.Integer(), nullable=True))
-        batch_op.add_column(
-            sa.Column("approval_status", sa.String(20), nullable=False, server_default="approved")
-        )
-        batch_op.add_column(
-            sa.Column("priority", sa.Integer(), nullable=False, server_default="100")
-        )
-        batch_op.add_column(sa.Column("approved_by", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("approved_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("created_by", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("valid_from", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("valid_until", sa.DateTime(), nullable=True))
-
+        if "is_test" not in columns:
+            batch_op.add_column(sa.Column("is_test", sa.Boolean(), nullable=False, server_default="0"))
+        if "source" not in columns:
+            batch_op.add_column(
+                sa.Column("source", sa.String(20), nullable=False, server_default="manual")
+            )
+        if "tenant_id" not in columns:
+            batch_op.add_column(sa.Column("tenant_id", sa.Integer(), nullable=True))
+        if "approval_status" not in columns:
+            batch_op.add_column(
+                sa.Column("approval_status", sa.String(20), nullable=False, server_default="approved")
+            )
+        if "priority" not in columns:
+            batch_op.add_column(
+                sa.Column("priority", sa.Integer(), nullable=False, server_default="100")
+            )
+        if "approved_by" not in columns:
+            batch_op.add_column(sa.Column("approved_by", sa.Integer(), nullable=True))
+        if "approved_at" not in columns:
+            batch_op.add_column(sa.Column("approved_at", sa.DateTime(), nullable=True))
+        if "created_by" not in columns:
+            batch_op.add_column(sa.Column("created_by", sa.Integer(), nullable=True))
+        if "valid_from" not in columns:
+            batch_op.add_column(sa.Column("valid_from", sa.DateTime(), nullable=True))
+        if "valid_until" not in columns:
+            batch_op.add_column(sa.Column("valid_until", sa.DateTime(), nullable=True))
+    
     # 创建索引
-    op.create_index("idx_content_filter_rules_tenant_id", "content_filter_rules", ["tenant_id"])
-    op.create_index("idx_content_filter_rules_is_test", "content_filter_rules", ["is_test"])
-    op.create_index("idx_content_filter_rules_source", "content_filter_rules", ["source"])
-    op.create_index(
-        "idx_content_filter_rules_approval_status", "content_filter_rules", ["approval_status"]
-    )
-    op.create_index("idx_content_filter_rules_priority", "content_filter_rules", ["priority"])
+    indexes = _index_names(inspector, "content_filter_rules")
+    if "idx_content_filter_rules_tenant_id" not in indexes:
+        op.create_index("idx_content_filter_rules_tenant_id", "content_filter_rules", ["tenant_id"])
+    if "idx_content_filter_rules_is_test" not in indexes:
+        op.create_index("idx_content_filter_rules_is_test", "content_filter_rules", ["is_test"])
+    if "idx_content_filter_rules_source" not in indexes:
+        op.create_index("idx_content_filter_rules_source", "content_filter_rules", ["source"])
+    if "idx_content_filter_rules_approval_status" not in indexes:
+        op.create_index(
+            "idx_content_filter_rules_approval_status", "content_filter_rules", ["approval_status"]
+        )
+    if "idx_content_filter_rules_priority" not in indexes:
+        op.create_index("idx_content_filter_rules_priority", "content_filter_rules", ["priority"])
 
     # 新增约束
     with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
