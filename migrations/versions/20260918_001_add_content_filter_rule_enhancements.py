@@ -30,13 +30,15 @@ def upgrade() -> None:
     """Add content filter rule enhancements with idempotent column additions."""
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-    
+
     columns = _column_names(inspector, "content_filter_rules")
-    
+
     # 新增字段（条件检查）
     with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
         if "is_test" not in columns:
-            batch_op.add_column(sa.Column("is_test", sa.Boolean(), nullable=False, server_default="0"))
+            batch_op.add_column(
+                sa.Column("is_test", sa.Boolean(), nullable=False, server_default="0")
+            )
         if "source" not in columns:
             batch_op.add_column(
                 sa.Column("source", sa.String(20), nullable=False, server_default="manual")
@@ -45,7 +47,9 @@ def upgrade() -> None:
             batch_op.add_column(sa.Column("tenant_id", sa.Integer(), nullable=True))
         if "approval_status" not in columns:
             batch_op.add_column(
-                sa.Column("approval_status", sa.String(20), nullable=False, server_default="approved")
+                sa.Column(
+                    "approval_status", sa.String(20), nullable=False, server_default="approved"
+                )
             )
         if "priority" not in columns:
             batch_op.add_column(
@@ -61,7 +65,7 @@ def upgrade() -> None:
             batch_op.add_column(sa.Column("valid_from", sa.DateTime(), nullable=True))
         if "valid_until" not in columns:
             batch_op.add_column(sa.Column("valid_until", sa.DateTime(), nullable=True))
-    
+
     # 创建索引
     indexes = _index_names(inspector, "content_filter_rules")
     if "idx_content_filter_rules_tenant_id" not in indexes:
