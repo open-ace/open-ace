@@ -18,9 +18,17 @@ depends_on = None
 def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
+    # The lock is taken before the column-type probe on purpose. The probe and
+    # the rewrite are separate statements under READ COMMITTED, so two
+    # containers running `alembic upgrade head` at once (docker-entrypoint.sh
+    # does this per container) can both observe 'integer'; the loser then runs
+    # its USING clause against an already-converted column and aborts the whole
+    # upgrade with "operator does not exist: boolean = integer". Locking first
+    # makes the loser observe 'boolean' and no-op, as intended.
     op.execute("""
         DO $$
         BEGIN
+            LOCK TABLE audit_logs IN ACCESS EXCLUSIVE MODE;
             IF EXISTS (
                 SELECT 1
                 FROM information_schema.columns

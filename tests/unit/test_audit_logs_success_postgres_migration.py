@@ -43,6 +43,12 @@ def test_upgrade_normalizes_legacy_postgresql_integer_success(monkeypatch):
     assert "WHEN success = 0 THEN FALSE" in sql
     assert "ALTER COLUMN success SET DEFAULT TRUE" in sql
 
+    # The lock must precede the probe, or two concurrent `alembic upgrade head`
+    # runs can both see 'integer' and the loser's USING clause hits an
+    # already-BOOLEAN column. Asserted on shape rather than by racing two
+    # connections: a threaded race test would be timing-dependent in CI.
+    assert sql.index("LOCK TABLE audit_logs IN ACCESS EXCLUSIVE MODE") < sql.index("IF EXISTS")
+
 
 def test_upgrade_leaves_sqlite_integer_boolean_storage_unchanged(monkeypatch):
     migration = _load_migration()
