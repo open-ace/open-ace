@@ -225,6 +225,55 @@ class GovernanceRepository:
             logger.error(f"Error creating filter rule: {e}")
             return None
 
+    def create_filter_rule_idempotent(
+        self,
+        pattern: str,
+        rule_type: str = "keyword",
+        severity: str = "medium",
+        action: str = "warn",
+        description: str | None = None,
+        is_enabled: bool = True,
+    ) -> tuple[dict | None, bool]:
+        """
+        Create a filter rule (idempotent).
+
+        If a rule with the same pattern already exists, returns the existing
+        record with is_new=False instead of creating a duplicate.
+
+        Args:
+            pattern: Pattern to match.
+            rule_type: Type of pattern (keyword, regex, pii).
+            severity: Severity level (low, medium, high).
+            action: Action to take (warn, block, redact).
+            description: Optional description.
+            is_enabled: Whether rule is enabled.
+
+        Returns:
+            Tuple[Optional[Dict], bool]: (rule record, is_new).
+                is_new is True if a new record was created,
+                False if the pattern already existed.
+        """
+        # Check if pattern already exists
+        existing = self.get_filter_rule_by_pattern(pattern)
+        if existing:
+            return existing, False
+
+        # Create new rule
+        rule_id = self.create_filter_rule(
+            pattern=pattern,
+            rule_type=rule_type,
+            severity=severity,
+            action=action,
+            description=description,
+            is_enabled=is_enabled,
+        )
+
+        if rule_id:
+            new_rule = self.get_filter_rule(rule_id)
+            return new_rule, True
+
+        return None, False
+
     def update_filter_rule(
         self,
         rule_id: int,
