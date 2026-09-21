@@ -558,6 +558,33 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
+    def revoke_proxy_token_jti(self, jti: str) -> bool:
+        """Revoke one proxy token by its jti.
+
+        Leaves the session's other live tokens untouched: used when a
+        just-minted exchange token must be withdrawn without disturbing the
+        identity's in-flight tokens.
+        """
+        if not isinstance(jti, str) or not jti:
+            return False
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE proxy_token_jtis SET revoked_at = {_param()} WHERE jti = {_param()}",
+                (datetime.now().isoformat(), jti),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("Failed to revoke proxy token jti: %s", e)
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def revoke_proxy_tokens_for_session(
         self, session_id: str, reason: str = "session_revoked"
     ) -> int:
@@ -1928,6 +1955,7 @@ class APIKeyProxyService:
         tenant_id: int,
         provider: str,
         expires_minutes: int | None = None,
+        expires_seconds: int | None = None,
         session_type: str = "agent",
         extra_payload: dict[str, Any] | None = None,
     ) -> str:
@@ -1958,12 +1986,20 @@ class APIKeyProxyService:
                 "single_use" if raw_payload.pop("single_use", False) else "multi_use",
             )
         )
-        effective_ttl = (
-            expires_minutes
-            if expires_minutes is not None
-            else self._get_default_proxy_token_ttl_minutes(session_type)
-        )
-        expires_at = datetime.now() + timedelta(minutes=effective_ttl)
+        # expires_seconds gives sub-minute precision for callers (the
+        # external token exchange) whose advertised expiry must match the
+        # minted token exactly; minutes remain the default interface.
+        if expires_seconds is not None:
+            if not isinstance(expires_seconds, int) or isinstance(expires_seconds, bool):
+                raise ValueError("expires_seconds must be an integer")
+            expires_at = datetime.now() + timedelta(seconds=expires_seconds)
+        else:
+            effective_ttl = (
+                expires_minutes
+                if expires_minutes is not None
+                else self._get_default_proxy_token_ttl_minutes(session_type)
+            )
+            expires_at = datetime.now() + timedelta(minutes=effective_ttl)
         payload = {
             "user_id": user_id,
             "session_id": session_id,

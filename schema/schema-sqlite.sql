@@ -575,6 +575,12 @@ CREATE TABLE encryption_keys (
  last_used_at TIMESTAMP
 );
 
+CREATE TABLE external_identity_nonces (
+ issuer text NOT NULL,
+ nonce text NOT NULL,
+ expires_at INTEGER NOT NULL
+);
+
 CREATE TABLE feishu_settings (
  app_id TEXT NOT NULL,
  app_secret_enc text NOT NULL,
@@ -1795,6 +1801,8 @@ CREATE UNIQUE INDEX web_user_auth_sessions_session_token_key ON web_user_auth_se
 
 CREATE UNIQUE INDEX workflow_milestones_milestone_id_key ON workflow_milestones (milestone_id);
 
+CREATE UNIQUE INDEX external_identity_nonces_key ON external_identity_nonces (issuer, nonce);
+
 CREATE INDEX idx_agent_approvals_run_id ON agent_approvals (run_id);
 
 CREATE INDEX idx_agent_approvals_session_id ON agent_approvals (session_id);
@@ -1944,6 +1952,8 @@ CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys (key_fingerprint
 CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
+
+CREATE INDEX idx_external_identity_nonces_expires ON external_identity_nonces (expires_at);
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 

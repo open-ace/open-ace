@@ -533,7 +533,7 @@ class TestGetActionCategories:
                 assert "label" in action
                 assert "i18n_key" in action
 
-    def test_get_action_categories_total_actions_is_72(self):
+    def test_get_action_categories_total_actions_is_73(self):
         """Test the total action count, including notification integration actions."""
         from app.modules.governance.audit_logger import get_action_categories
 
@@ -547,7 +547,7 @@ class TestGetActionCategories:
         # Issue #3275: Added 3 project_user management actions (66 -> 69)
         # Issue #3273: Added 2 tool_account_mapping verification actions (69 -> 71)
         # PR #3423: Added PROXY_KEY_ECHO_BLOCKED (71 -> 72)
-        assert total_actions == 72, f"Expected 72 actions, got {total_actions}"
+        assert total_actions == 73, f"Expected 73 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""

@@ -853,6 +853,12 @@ CREATE SEQUENCE encryption_keys_key_id_seq
     CACHE 1;
 
 ALTER SEQUENCE encryption_keys_key_id_seq OWNED BY encryption_keys.key_id;
+CREATE TABLE external_identity_nonces (
+    issuer text NOT NULL,
+    nonce text NOT NULL,
+    expires_at bigint NOT NULL
+);
+
 CREATE TABLE feishu_settings (
     app_id character varying(255) NOT NULL,
     app_secret_enc text NOT NULL,
@@ -3237,303 +3243,311 @@ ALTER TABLE ONLY workflow_milestones
 ALTER TABLE ONLY workflow_milestones
     ADD CONSTRAINT workflow_milestones_pkey PRIMARY KEY (id);
 
+CREATE UNIQUE INDEX external_identity_nonces_key ON external_identity_nonces USING btree (issuer, nonce);
+
+
+--
+--
+
 CREATE INDEX idx_agent_approvals_run_id ON agent_approvals USING btree (run_id);
-
-
---
---
 
 CREATE INDEX idx_agent_approvals_session_id ON agent_approvals USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_approvals_status ON agent_approvals USING btree (status);
-
-
---
---
 
 CREATE UNIQUE INDEX idx_agent_runs_session_id ON agent_runs USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_agent_runs_user_id ON agent_runs USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_daily_usage_synced ON agent_sessions USING btree (daily_usage_synced) WHERE (daily_usage_synced = false);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions USING btree (remote_machine_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions USING btree (tenant_id, user_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens USING btree (machine_id, pending_revoke, revoke_after);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
-
-
---
---
 
 CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
-
-
---
---
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_aggregation_history_type_date ON aggregation_history USING btree (type, start_date, end_date);
-
-
---
---
 
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_alerts_history_sent_at ON alerts_history USING btree (sent_at);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_history_tenant ON alerts_history USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_alerts_history_type ON alerts_history USING btree (alert_type);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
-
-
---
---
 
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
-
-
---
---
 
 CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_expires ON archive_files USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_archive_files_tenant ON archive_files USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
-
-
---
---
 
 CREATE INDEX idx_audit_logs_tenant_id ON audit_logs USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs USING btree (tenant_id, "timestamp");
-
-
---
---
 
 CREATE INDEX idx_audit_logs_timestamp ON audit_logs USING btree ("timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
-
-
---
---
 
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
 
+
+--
+--
+
 CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_bl_mapping ON backfill_logs USING btree (mapping_id);
 
+
+--
+--
+
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
-
-
---
---
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
 
+
+--
+--
+
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
-
-
---
---
 
 CREATE INDEX idx_consistency_violations_status ON consistency_violations USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
 
+
+--
+--
+
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_deregister_failures_created ON deregister_failures USING btree (created_at);
 
+
+--
+--
+
 CREATE INDEX idx_deregister_failures_machine ON deregister_failures USING btree (machine_id);
-
-
---
---
 
 CREATE INDEX idx_deregister_failures_status ON deregister_failures USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
-
-
---
---
 
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
 
+
+--
+--
+
 CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys USING btree (key_fingerprint);
-
-
---
---
 
 CREATE INDEX idx_encryption_keys_status ON encryption_keys USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
+
+CREATE INDEX idx_external_identity_nonces_expires ON external_identity_nonces USING btree (expires_at);
 
 
 --
