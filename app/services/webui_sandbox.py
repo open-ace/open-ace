@@ -629,10 +629,12 @@ class SandboxedWebuiLauncher:
             if user:
                 from app.routes.fs import get_home_directory
 
-                home_dir = get_home_directory(user)
+                home_dir = str(get_home_directory(user))
                 # Ensure the path is under /workspace for OpenSandbox validation
                 if not home_dir.startswith("/workspace"):
-                    system_account = user.get("system_account") or user.get("username") or f"user-{user_id}"
+                    system_account = (
+                        user.get("system_account") or user.get("username") or f"user-{user_id}"
+                    )
                     home_dir = f"/workspace/{system_account}"
                 return home_dir
         except Exception as exc:  # noqa: BLE001 - database not available in tests

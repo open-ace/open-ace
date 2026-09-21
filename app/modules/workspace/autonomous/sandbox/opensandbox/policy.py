@@ -801,11 +801,13 @@ def build_create_request(
                     pvc_spec["storage"] = vol.storage_size
                 if vol.storage_class:
                     pvc_spec["storageClassName"] = vol.storage_class
-                volumes_list.append({
-                    "name": vol.name,
-                    "mountPath": vol.mount_path,
-                    "pvc": pvc_spec,
-                })
+                volumes_list.append(
+                    {
+                        "name": vol.name,
+                        "mountPath": vol.mount_path,
+                        "pvc": pvc_spec,
+                    }
+                )
         if volumes_list:
             body["volumes"] = volumes_list
 
