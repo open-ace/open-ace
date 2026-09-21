@@ -103,8 +103,9 @@ def downgrade() -> None:
 
     columns = _column_names(inspector, "content_filter_rules")
 
-    # 重新添加字段
+    # 重新添加字段和约束（在同一个 batch_alter_table 中）
     with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
+        # 添加字段
         if "is_test" not in columns:
             batch_op.add_column(
                 sa.Column("is_test", sa.Boolean(), nullable=False, server_default="0")
@@ -136,6 +137,14 @@ def downgrade() -> None:
         if "valid_until" not in columns:
             batch_op.add_column(sa.Column("valid_until", sa.DateTime(), nullable=True))
 
+        # 添加约束（在同一批次中）
+        batch_op.create_check_constraint(
+            "chk_system_rule_immutable", "source != 'system' OR is_test = FALSE"
+        )
+        batch_op.create_check_constraint(
+            "chk_approval_status_valid", "approval_status IN ('pending', 'approved', 'rejected')"
+        )
+
     # 重新创建索引
     indexes = _index_names(inspector, "content_filter_rules")
     if "idx_content_filter_rules_tenant_id" not in indexes:
@@ -150,15 +159,6 @@ def downgrade() -> None:
         )
     if "idx_content_filter_rules_priority" not in indexes:
         op.create_index("idx_content_filter_rules_priority", "content_filter_rules", ["priority"])
-
-    # 重新创建约束
-    with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
-        batch_op.create_check_constraint(
-            "chk_system_rule_immutable", "source != 'system' OR is_test = FALSE"
-        )
-        batch_op.create_check_constraint(
-            "chk_approval_status_valid", "approval_status IN ('pending', 'approved', 'rejected')"
-        )
 
     # 重新创建触发统计表
     existing_tables = set(inspector.get_table_names())
