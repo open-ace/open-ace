@@ -742,7 +742,10 @@ class SandboxedWebuiLauncher:
                 f"webui sandbox create request refused: {exc}",
                 reason_code="sandbox_create_failed",
             ) from exc
-        body["env"].update(self._build_pod_env(user_id, callback_url, proxy_token))
+        # Pass pre-fetched user_home to avoid duplicate database queries
+        body["env"].update(
+            self._build_pod_env(user_id, callback_url, proxy_token, user_home=user_home)
+        )
 
         try:
             record = api.create_sandbox(body)
@@ -804,7 +807,14 @@ class SandboxedWebuiLauncher:
             )
         return token, expiry, ttl_minutes
 
-    def _build_pod_env(self, user_id: int, callback_url: str, proxy_token: str) -> dict[str, str]:
+    def _build_pod_env(
+        self,
+        user_id: int,
+        callback_url: str,
+        proxy_token: str,
+        *,
+        user_home: str | None = None,
+    ) -> dict[str, str]:
         """Build the webui-specific env merged over build_create_request's base env.
 
         Same key set the local per-user path builds in
@@ -815,6 +825,13 @@ class SandboxedWebuiLauncher:
 
         Issue #3417: Adds ALLOWED_WORKSPACE_ROOTS with the user's home directory
         to allow the webui to create projects in the mounted workspace volume.
+
+        Args:
+            user_id: User ID for workspace context
+            callback_url: Control-plane URL for LLM proxy
+            proxy_token: Proxy token for authentication
+            user_home: Pre-fetched user home directory path to avoid duplicate
+                database queries. If None, will fetch from database.
         """
         openace_api_url = callback_url.rstrip("/")
         env: dict[str, str] = {
@@ -825,7 +842,9 @@ class SandboxedWebuiLauncher:
         }
 
         # Issue #3417: Add user's home directory to allowed workspace roots
-        user_home = self._get_user_home_directory(user_id)
+        # Use pre-fetched user_home to avoid duplicate database queries
+        if user_home is None:
+            user_home = self._get_user_home_directory(user_id)
         existing_roots = os.environ.get("ALLOWED_WORKSPACE_ROOTS", "")
         if existing_roots:
             env["ALLOWED_WORKSPACE_ROOTS"] = f"{existing_roots},{user_home}"

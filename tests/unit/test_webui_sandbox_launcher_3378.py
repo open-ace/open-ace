@@ -846,3 +846,170 @@ def test_token_minting_uses_webui_session_type():
     assert mint["session_type"] == "webui"
     assert mint["session_id"] == "webui:7"
     assert mint["extra_payload"] == {"scope": "local", "tool_name": "qwen-code"}
+
+
+# ── PVC volume boundary conditions (Issue #3417 review) ───────────────
+
+
+def test_pvc_volume_empty_storage_size_uses_default():
+    """Empty storage_size should omit the field, letting OpenSandbox use its
+    default (1Gi in the current implementation)."""
+    from app.modules.workspace.autonomous.sandbox.types import (
+        RuntimeSpec,
+        SandboxSpec,
+        VolumeSpec,
+    )
+
+    fake = FakeOpenSandboxApi()
+    launcher, _svc = _launcher(fake)
+    _launch(launcher, user_id=7)
+    body = fake.created_bodies[0]
+
+    vol = body["volumes"][0]
+    # Default storage_size from launcher is "1Gi"
+    assert vol["pvc"]["storage"] == "1Gi"
+
+    # If storage_size is empty string, it should be omitted from spec
+    # (but our launcher always provides a default, so this tests that
+    # the policy.py conversion omits empty fields correctly)
+    empty_size_spec = VolumeSpec(
+        name="test-vol",
+        mount_path="/workspace/test",
+        kind="persistent",
+        pvc_claim_name="test-claim",
+        storage_size="",  # empty
+    )
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(empty_size_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # storage field should not be present when storage_size is empty
+    assert "storage" not in result_body["volumes"][0]["pvc"]
+
+
+def test_pvc_volume_empty_storage_class_uses_cluster_default():
+    """Empty storage_class should omit the field, letting Kubernetes use the
+    cluster's default StorageClass."""
+    from app.modules.workspace.autonomous.sandbox.types import VolumeSpec
+
+    fake = FakeOpenSandboxApi()
+    launcher, _svc = _launcher(fake)
+    _launch(launcher, user_id=7)
+    body = fake.created_bodies[0]
+
+    vol = body["volumes"][0]
+    # storage_class is empty in our test config, should not be in spec
+    assert "storageClassName" not in vol["pvc"]
+
+
+def test_ephemeral_volume_kind_skips_pvc_processing():
+    """Non-persistent volume kind should not create a PVC spec."""
+    from app.modules.workspace.autonomous.sandbox.types import (
+        RuntimeSpec,
+        SandboxSpec,
+        VolumeSpec,
+    )
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+
+    ephemeral_spec = VolumeSpec(
+        name="ephemeral-vol",
+        mount_path="/workspace/ephemeral",
+        kind="ephemeral",  # not persistent
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(ephemeral_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # Ephemeral volumes should not be included in the volumes list
+    assert "volumes" not in result_body or len(result_body.get("volumes", [])) == 0
+
+
+def test_pvc_volume_empty_claim_name_skips_volume():
+    """Empty pvc_claim_name should skip the volume entirely (validation at
+    policy.py level)."""
+    from app.modules.workspace.autonomous.sandbox.types import (
+        RuntimeSpec,
+        SandboxSpec,
+        VolumeSpec,
+    )
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+
+    no_claim_spec = VolumeSpec(
+        name="no-claim-vol",
+        mount_path="/workspace/no-claim",
+        kind="persistent",
+        pvc_claim_name="",  # empty claim name
+        storage_size="5Gi",
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(no_claim_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # Volume with empty claim name should not be included
+    assert "volumes" not in result_body or len(result_body.get("volumes", [])) == 0
+
+
+def test_pvc_volume_with_all_fields():
+    """Volume with all PVC fields specified should include all in the spec."""
+    from app.modules.workspace.autonomous.sandbox.types import (
+        RuntimeSpec,
+        SandboxSpec,
+        VolumeSpec,
+    )
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+
+    full_spec = VolumeSpec(
+        name="full-pvc-vol",
+        mount_path="/workspace/full",
+        kind="persistent",
+        pvc_claim_name="full-claim",
+        storage_size="10Gi",
+        storage_class="fast-ssd",
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(full_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    assert "volumes" in result_body
+    vol = result_body["volumes"][0]
+    assert vol["name"] == "full-pvc-vol"
+    assert vol["mountPath"] == "/workspace/full"
+    assert vol["pvc"]["claimName"] == "full-claim"
+    assert vol["pvc"]["storage"] == "10Gi"
+    assert vol["pvc"]["storageClassName"] == "fast-ssd"
