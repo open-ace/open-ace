@@ -958,6 +958,7 @@ def _finalize_upstream_response(
     request_path: str = "",
     requested_model: str | None = None,
     tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
+    echo_guard_secret: bytes | None = None,
 ) -> Response:
     """Stream or return an upstream response, recording LLM usage on completion.
 
@@ -967,9 +968,15 @@ def _finalize_upstream_response(
     the usage is recorded after the stream drains; otherwise immediately.
 
     Issue #2184: Added request_path, requested_model, and request_id extraction
-    for multi-provider usage recording with proper protocol detection.
+        for multi-provider usage recording with proper protocol detection.
     Issue #3080: Added response time tracking.
     Issue #3201: Added tenant_id parameter for performance recording.
+
+    ``echo_guard_secret`` enables the key-echo guard: streamed chunks are held
+    back by a key-sized window and scanned, non-streaming bodies checked whole,
+    so a provider/relay that echoes the resolved API key can never hand it to
+    the caller. On detection the stream aborts without [DONE] (or a
+    sanitized 502 for non-streaming) and the event is audited.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
@@ -1015,8 +1022,11 @@ def _finalize_upstream_response(
         total_content = b""
         first_chunk = True
         drained = False
+        upstream_iter = _resp.iter_content(chunk_size=4096)
+        if echo_guard_secret:
+            upstream_iter = _key_echo_guard(upstream_iter, echo_guard_secret)
         try:
-            for chunk in _resp.iter_content(chunk_size=4096):
+            for chunk in upstream_iter:
                 total_content += chunk
                 # Issue #3080: Record first response on first chunk
                 if first_chunk and recorder:
@@ -1027,6 +1037,17 @@ def _finalize_upstream_response(
                     first_chunk = False
                 yield chunk
             drained = True
+        except _KeyEchoDetected:
+            # The provider/relay echoed the resolved key. Headers are already
+            # sent, so the stream terminates here without [DONE] — clients
+            # treat that as failure — and the usage-recording finally
+            # below still charges the delivered prefix.
+            logger.error(
+                "LLM proxy: key echo detected in stream (session=%s)",
+                session_id[:8] if session_id else "unknown",
+            )
+            _audit_key_echo_block(session_id, user_id, tenant_id, streaming=True)
+            return
         finally:
             # Usage must be recorded even when the stream is cut short. A
             # client that reads every content delta and then drops the
@@ -1089,6 +1110,29 @@ def _finalize_upstream_response(
         )
 
     content = resp.content
+    if echo_guard_secret and echo_guard_secret in content:
+        # The whole body is in hand, so nothing was released: reject it
+        # outright with a sanitized error instead of a mid-stream abort.
+        logger.error(
+            "LLM proxy: key echo detected in non-streaming response (session=%s)",
+            session_id[:8] if session_id else "unknown",
+        )
+        _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+        try:
+            resp.close()
+        except Exception:
+            logger.debug("Failed to close upstream response after key-echo block", exc_info=True)
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "Upstream response rejected by content policy",
+                        "type": "proxy_error",
+                    }
+                }
+            ),
+            502,
+        )
     try:
         _record_llm_usage(
             content,
@@ -1148,6 +1192,69 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
             jsonify({"error": {"message": "Upstream gateway error", "type": "proxy_error"}}),
             502,
         )
+
+
+class _KeyEchoDetected(Exception):
+    """A provider/relay response echoed the resolved API key material."""
+
+
+def _audit_key_echo_block(
+    session_id: str | None, user_id: int | None, tenant_id: int | None, streaming: bool
+) -> None:
+    """Audit a key-echo detection without persisting any response content."""
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        AuditLogger().log_action(
+            action=AuditAction.PROXY_KEY_ECHO_BLOCKED,
+            user_id=user_id or 0,
+            resource_type="llm_proxy",
+            severity="critical",
+            details={
+                "session_id": (session_id or "")[:16],
+                "tenant_id": tenant_id or 0,
+                "streaming": bool(streaming),
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to audit key-echo block: %s", e)
+
+
+def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
+    """Yield upstream chunks minus a hold-back window sized to the key.
+
+    A per-chunk substring check alone is defeated by a key split across chunk
+    boundaries, and a hostile relay controls the chunking; a rolling detector
+    that scans only what it is about to yield still leaks the key's prefix,
+    because the chunks carrying it were already yielded. So nothing is
+    released until it can no longer be part of a match: the whole pending
+    buffer (held tail + new data) is checked before each yield, and the last
+    ``len(secret) - 1`` bytes stay held back until more data or stream end
+    proves them safe.
+
+    On detection the stream aborts — headers are already sent, so there is no
+    status code to change — and the event is audited. Clients must treat a
+    stream that ends without [DONE] as failed.
+    """
+    if not secret:
+        yield from chunks
+        return
+    hold = max(len(secret) - 1, 0)
+    pending = b""
+    for chunk in chunks:
+        pending += chunk
+        if secret in pending:
+            raise _KeyEchoDetected() from None
+        if hold:
+            yield pending[:-hold]
+            pending = pending[-hold:]
+        else:
+            yield pending
+            pending = b""
+    if pending:
+        if secret in pending:
+            raise _KeyEchoDetected() from None
+        yield pending
 
 
 def _is_autonomous_request(token_payload: dict | None) -> bool:
@@ -1713,9 +1820,57 @@ def handle_llm_proxy_request(
         return content_filter_result
     # Note: redact handling would require modifying request body, which is
     # complex for streaming. For now, we just log and continue for warn/redact.
+    # Deny-on-redact: a redact verdict returns the redacted text here (a str),
+    # but this handler forwards the original body — so for callers that
+    # require raw text never to reach the provider (external issuers carry
+    # redact_policy="deny" in their token), a redact verdict denies the call.
+    if (
+        isinstance(content_filter_result, str)
+        and isinstance(token_payload, dict)
+        and token_payload.get("redact_policy") == "deny"
+    ):
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "Content requires redaction, which this caller's policy denies",
+                        "type": "content_redaction_denied",
+                    }
+                }
+            ),
+            403,
+        )
     # ── end content filter check ─────────────────────────────────────────
 
     requested_model = _extract_requested_model()
+
+    # Model allow-list: external tokens pin the models their issuer may call.
+    # Without this the external caller could reach any model the pooled key
+    # resolves to; fail closed when the claim is absent or the request names
+    # no model at all.
+    if isinstance(token_payload, dict) and token_payload.get("session_type") == "external":
+        allowed_models = token_payload.get("allowed_models")
+        if (
+            not isinstance(allowed_models, list)
+            or not requested_model
+            or requested_model not in allowed_models
+        ):
+            logger.warning(
+                "LLM proxy: external model policy rejected model=%s (user_id=%s)",
+                requested_model or "<none>",
+                user_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": "Model not allowed for this caller",
+                            "type": "model_not_allowed",
+                        }
+                    }
+                ),
+                403,
+            )
 
     # ── Model-gateway seam (single, removable) ───────────────────────────
     # When the LiteLLM-compatible gateway is enabled, route this request through
@@ -2141,6 +2296,16 @@ def handle_llm_proxy_request(
                 request_path=path,
                 requested_model=requested_model,
                 tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
+                echo_guard_secret=(
+                    # External callers receive upstream bytes directly, so a
+                    # relay echoing the Authorization header would hand them
+                    # the pool key; guard the response with the resolved key.
+                    api_key.encode("utf-8")
+                    if isinstance(token_payload, dict)
+                    and token_payload.get("session_type") == "external"
+                    and api_key
+                    else None
+                ),
             )
 
         except Exception as exc:

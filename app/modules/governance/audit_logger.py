@@ -130,6 +130,9 @@ class AuditAction(Enum):
     ALLOWLIST_ENTRY_INVALID = "allowlist_entry_invalid"
     IP_RESOLVED_MISMATCH = "ip_resolved_mismatch"
     SSRF_CONFIG_RESET = "ssrf_config_reset"  # Issue #3328: Reset SSRF config to default
+    # A provider/relay response echoed the resolved API key material; the
+    # response (or stream) was blocked so the key never reaches the caller.
+    PROXY_KEY_ECHO_BLOCKED = "proxy_key_echo_blocked"
 
     # Usage report actions (Issue #1891)
     USAGE_REPORT_ACCEPTED = "usage_report_accepted"
@@ -1121,6 +1124,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "ssrf_config_reset",
                     "label": "SSRF Config Reset",
                     "i18n_key": "actionSSRFConfigReset",
+                },
+                {
+                    "value": "proxy_key_echo_blocked",
+                    "label": "Proxy Key Echo Blocked",
+                    "i18n_key": "actionProxyKeyEchoBlocked",
                 },
             ],
         },
