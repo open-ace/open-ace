@@ -196,6 +196,23 @@ def _upstream(content=b'{"ok":true}', content_type="application/json", chunks=No
     return resp
 
 
+_SSRF_PATH = "app.utils.llm_proxy_url_validator.validate_llm_proxy_url"
+
+
+def _hermetic_200_patches():
+    """Patch DNS-dependent URL validation so 200-path tests are hermetic.
+
+    validate_llm_proxy_url resolves the target host; in sandboxes without
+    external DNS that resolution fails and the SSRF guard 403-blocks a URL
+    the test means to allow.
+    """
+    from unittest.mock import MagicMock
+
+    ok = MagicMock()
+    ok.is_ok = True
+    return patch(_SSRF_PATH, lambda *a, **k: ok)
+
+
 class TestRedactPolicyAndModelAllowList:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
@@ -227,7 +244,7 @@ class TestRedactPolicyAndModelAllowList:
         mock_get_proxy.return_value = _proxy_mock(token)
         mock_quota_cls.return_value = SimpleNamespace(check_quota=lambda *a, **k: {"allowed": True})
         mock_http.return_value = _upstream()
-        with patch(_FILTER_PATH, return_value="REDACTED-CONTENT"):
+        with patch(_FILTER_PATH, return_value="REDACTED-CONTENT"), _hermetic_200_patches():
             client = _remote_app().test_client()
             resp = client.post(
                 "/api/remote/llm-proxy",
@@ -277,12 +294,13 @@ class TestRedactPolicyAndModelAllowList:
         mock_get_proxy.return_value = _proxy_mock(dict(_EXTERNAL_TOKEN))
         mock_quota_cls.return_value = SimpleNamespace(check_quota=lambda *a, **k: {"allowed": True})
         mock_http.return_value = _upstream()
-        client = _remote_app().test_client()
-        resp = client.post(
-            "/api/remote/llm-proxy",
-            json={"model": "glm-5", "messages": []},
-            headers={"Authorization": "Bearer tok"},
-        )
+        with _hermetic_200_patches():
+            client = _remote_app().test_client()
+            resp = client.post(
+                "/api/remote/llm-proxy",
+                json={"model": "glm-5", "messages": []},
+                headers={"Authorization": "Bearer tok"},
+            )
         assert resp.status_code == 200
 
     @patch(_HTTP_PATH)
@@ -486,3 +504,86 @@ class TestKeyEchoGuardBufferedPath:
             assert audit.call_count == 1
             assert _echo_guard_blocks(b"clean body", _KEY, "s", 1, 1) is False
             assert _echo_guard_blocks(b"anything", None, "s", 1, 1) is False
+
+
+class TestBufferedPathFragmentVector:
+    def test_buffered_half_key_fragment_blocks(self):
+        """Two buffered responses carrying key[:9] / key[9:] must not pass.
+
+        The buffered checks originally tested only the full contiguous key,
+        leaving buffered paths (non-streaming and /responses conversion)
+        with no fragment threshold at all.
+        """
+        from app.modules.workspace.llm_proxy_handler import _echo_guard_blocks
+
+        half = _KEY[: len(_KEY) // 2]
+        with patch("app.modules.workspace.llm_proxy_handler._audit_key_echo_block") as audit:
+            assert _echo_guard_blocks(half, _KEY, "s", 1, 1) is True
+            assert audit.call_count == 1
+
+    def test_non_streaming_half_key_fragment_returns_sanitized_502(self, flask_app):
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        half = _KEY[: len(_KEY) // 2]
+        upstream = MagicMock()
+        upstream.status_code = 200
+        upstream.content = b'{"content":"' + half + b'"}'
+        upstream.headers = {"Content-Type": "application/json"}
+        upstream.iter_content.return_value = [upstream.content]
+        with patch("app.modules.workspace.llm_proxy_handler._audit_key_echo_block") as audit:
+            with flask_app.test_request_context("/"):
+                outcome = _finalize_upstream_response(
+                    upstream,
+                    b'{"model":"glm-5"}',
+                    session_id="ext-1",
+                    user_id=1,
+                    provider="openai",
+                    content_type="application/json",
+                    tenant_id=1,
+                    echo_guard_secret=_KEY,
+                )
+        _, status = outcome if isinstance(outcome, tuple) else (outcome, outcome.status_code)
+        assert status == 502
+        assert audit.call_count == 1
+        assert upstream.close.called
+
+    def test_gateway_external_stream_echo_aborts_and_audits(self, flask_app):
+        """Wiring: an external token's gateway-streamed echo aborts + audits."""
+        from app.modules.workspace.llm_proxy_handler import _forward_via_gateway
+
+        class Plan:
+            target_url = "https://gw.example.com/v1/chat/completions"
+            path = "v1/chat/completions"
+            gateway_key = _KEY.decode()
+            headers = {}
+            ssrf_blocked = False
+            is_responses = False
+
+            @staticmethod
+            def body_transformer(data):
+                return data
+
+        upstream = MagicMock()
+        upstream.status_code = 200
+        upstream.headers = {"Content-Type": "text/event-stream"}
+        upstream.iter_content.return_value = [b"data: " + _KEY + b"\n\n"]
+        with (
+            patch("requests.request", return_value=upstream),
+            patch("app.modules.workspace.llm_proxy_handler._audit_key_echo_block") as audit,
+        ):
+            with flask_app.test_request_context(
+                "/", method="POST", data=b"{}", content_type="application/json"
+            ):
+                response = _forward_via_gateway(
+                    Plan(),
+                    session_id="ext-1",
+                    user_id=1,
+                    provider="openai",
+                    tenant_id=1,
+                    requested_model="glm-5",
+                    token_payload={"session_type": "external"},
+                )
+                body = b"".join(response.response)
+        assert _KEY not in body
+        assert b"[DONE]" not in body
+        assert audit.call_count == 1

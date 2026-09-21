@@ -1120,14 +1120,12 @@ def _finalize_upstream_response(
         )
 
     content = resp.content
-    if echo_guard_secret and echo_guard_secret in content:
+    if echo_guard_secret and _echo_guard_blocks(
+        content, echo_guard_secret, session_id, user_id, tenant_id
+    ):
         # The whole body is in hand, so nothing was released: reject it
         # outright with a sanitized error instead of a mid-stream abort.
-        logger.error(
-            "LLM proxy: key echo detected in non-streaming response (session=%s)",
-            session_id[:8] if session_id else "unknown",
-        )
-        _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+        # _echo_guard_blocks already logged and audited the detection.
         try:
             resp.close()
         except Exception:
@@ -1244,7 +1242,9 @@ def _echo_guard_blocks(
     (the /responses SSE conversion), where a mid-stream hold-back cannot
     apply because the conversion rebuilds the payload from parsed JSON.
     """
-    if not secret or not content or secret not in content:
+    if not secret or not content:
+        return False
+    if secret not in content and not _key_echo_fragment(content, secret, max(4, len(secret) // 2)):
         return False
     logger.error(
         "LLM proxy: key echo detected in buffered response (session=%s)",
