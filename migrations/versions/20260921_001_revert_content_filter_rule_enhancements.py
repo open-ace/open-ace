@@ -50,7 +50,7 @@ def upgrade() -> None:
     if "idx_content_filter_rules_priority" in indexes:
         op.drop_index("idx_content_filter_rules_priority", "content_filter_rules")
 
-    # 删除新增约束（仅 PostgreSQL 需要，SQLite 在删除字段时会自动移除约束）
+    # 删除新增约束（仅 PostgreSQL 需要）
     conn = op.get_bind()
     if conn.dialect.name == "postgresql":
         # PostgreSQL: 使用 DROP CONSTRAINT IF EXISTS
@@ -67,28 +67,26 @@ def upgrade() -> None:
             )
         )
 
-    # 删除新增字段（条件检查）
-    with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
-        if "is_test" in columns:
-            batch_op.drop_column("is_test")
-        if "source" in columns:
-            batch_op.drop_column("source")
-        if "tenant_id" in columns:
-            batch_op.drop_column("tenant_id")
-        if "approval_status" in columns:
-            batch_op.drop_column("approval_status")
-        if "priority" in columns:
-            batch_op.drop_column("priority")
-        if "approved_by" in columns:
-            batch_op.drop_column("approved_by")
-        if "approved_at" in columns:
-            batch_op.drop_column("approved_at")
-        if "created_by" in columns:
-            batch_op.drop_column("created_by")
-        if "valid_from" in columns:
-            batch_op.drop_column("valid_from")
-        if "valid_until" in columns:
-            batch_op.drop_column("valid_until")
+    # 删除新增字段（条件检查：只在字段存在时才删除）
+    fields_to_drop = [
+        "is_test",
+        "source",
+        "tenant_id",
+        "approval_status",
+        "priority",
+        "approved_by",
+        "approved_at",
+        "created_by",
+        "valid_from",
+        "valid_until",
+    ]
+    fields_present = [f for f in fields_to_drop if f in columns]
+
+    if fields_present:
+        # 只有在需要删除字段时才创建 batch_alter_table
+        with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
+            for field in fields_present:
+                batch_op.drop_column(field)
 
     # 删除触发统计表（条件检查）
     if "filter_rule_trigger_stats" in tables:
