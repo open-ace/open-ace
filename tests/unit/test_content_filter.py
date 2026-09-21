@@ -1028,3 +1028,33 @@ class TestNoTenantUserBehavior:
         # Should use builtin keywords only
         keyword_matches = [r for r in result.matched_rules if r.get("type") == "sensitive_keyword"]
         assert all(r.get("source") == "builtin" for r in keyword_matches)
+
+    # =========================================================================
+    # Bare short numbers are not international phones (exit codes / ports)
+    # =========================================================================
+
+    @pytest.mark.regression
+    def test_phone_intl_bare_exit_code_not_flagged(self):
+        """A bare exit code like 137 is not an international phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Exit 137 alone does not prove OOM")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_bare_port_not_flagged(self):
+        """A bare port like 51820 is not an international phone number.
+
+        Deliberately not a 4-digit port: ``8080`` is already suppressed by the
+        #2499 ``_DATE_LIKE`` heuristic, which matches any bare 4-digit string,
+        so such a test would pass without ``_is_short_number`` and prove nothing.
+        """
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("listening on port 51820")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_subscriber_number_without_plus_still_flagged(self):
+        """A >=7-digit subscriber number without a plus sign is still detected."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Call 13800138000 now")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
