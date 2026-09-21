@@ -442,13 +442,17 @@ class TestTokenExchangeSessionAndAudit:
         # Capture the jti the route parses out of the minted token.
         real_generate = exchange_app.minted
 
-        from base64 import b64encode as _b64e
+        # _decode_proxy_token verifies the signature, so the minted token
+        # must be real: mint through a real service bound to the fixture db.
+        real_mint_api = _bound_api(exchange_app.api.db_path)
 
-        fake_payload = _b64e(json.dumps({"jti": "deadbeefdeadbeef"}).encode()).decode()
+        minted_tokens = []
 
         def mint_capture(**kwargs):
             real_generate.update(kwargs)
-            return f"{fake_payload}.signature"
+            token = real_mint_api.generate_proxy_token(**kwargs)
+            minted_tokens.append(token)
+            return token
 
         exchange_app.api.generate_proxy_token = mint_capture
         exchange_app.api.revoke_proxy_token_jti = fake_revoke_jti
@@ -464,7 +468,8 @@ class TestTokenExchangeSessionAndAudit:
         )
         resp = call(exchange_app.client, _BODY, _nonce())
         assert resp.status_code == 503
-        assert revoked_jtis == ["deadbeefdeadbeef"], "the route must revoke the parsed jti"
+        expected_jti = (real_mint_api._decode_proxy_token(minted_tokens[0]) or {}).get("jti")
+        assert revoked_jtis == [expected_jti], "the route must revoke the parsed jti"
         assert revoked_sessions == [], "the shared session must be left alone"
 
     def test_stopped_session_denies_exchange_explicitly(self, exchange_app):

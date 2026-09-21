@@ -6,7 +6,6 @@ the exchange; the exchange issues a short-lived scoped proxy token for the
 mapped user, which then talks to the existing LLM proxy like any other client.
 """
 
-import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -210,9 +209,7 @@ def token():
             # and revoking the whole session would kill other tasks'
             # in-flight tokens.
             try:
-                from base64 import b64decode as _b64
-
-                minted_payload = json.loads(_b64(issued.split(".")[0]))
+                minted_payload = api._decode_proxy_token(issued) or {}
                 api.revoke_proxy_token_jti(minted_payload.get("jti", ""))
             except Exception:
                 pass
