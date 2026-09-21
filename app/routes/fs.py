@@ -20,7 +20,6 @@ from typing import IO, Any, cast
 from flask import Blueprint, Response, g, jsonify, request, session, stream_with_context
 
 from app.repositories.user_repo import UserRepository
-from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME, is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
@@ -643,6 +642,9 @@ def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
         return []
 
     # Issue #3420: Choose base dirs based on isolation level
+    # Lazy import to avoid breaking E2E test isolation
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
     if isolation_level == ISOLATION_LEVEL_SANDBOXED:
         # sandboxed mode: force /workspace (OpenSandbox security policy)
         base_dirs = ["/workspace"]
