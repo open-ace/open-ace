@@ -17,9 +17,10 @@ import subprocess
 from pathlib import Path
 from typing import IO, Any, cast
 
-from flask import Blueprint, Response, g, jsonify, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, request, session, stream_with_context
 
 from app.repositories.user_repo import UserRepository
+from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME, is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
@@ -562,12 +563,15 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None, st
 
     resolved = os.path.realpath(target_dir)
 
+    # Issue #3420: Get isolation level from session
+    isolation_level = session.get('isolation_level')
+
     # Home subtree lock: must equal one of the user's per-base home roots or
     # live beneath it.
     home_root = next(
         (
             root
-            for root in _home_roots_for_write(user)
+            for root in _home_roots_for_write(user, isolation_level)
             if resolved == root or resolved.startswith(root + os.sep)
         ),
         None,
@@ -584,7 +588,7 @@ def _is_within_any_root(resolved: str, roots: list[str]) -> bool:
     return any(root and (resolved == root or resolved.startswith(root + os.sep)) for root in roots)
 
 
-def _home_roots_for_user(user) -> list[str]:
+def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
     """Per-base home roots for the user (review round 1, #3376).
 
     One root per configured workspace base dir: ``<base>/<account>`` where
@@ -605,6 +609,19 @@ def _home_roots_for_user(user) -> list[str]:
       ``<base>/<username>`` IS that user's home, and root would act inside it
       on their behalf. No ownership check can tell the two apart: both names
       resolve to the same OS account.
+
+    Issue #3420: isolation-aware home roots.
+    When isolation_level is 'sandboxed', force base dir to /workspace (OpenSandbox
+    security policy requires all mounts under /workspace). Otherwise, use
+    WORKSPACE_BASE_DIR environment variable.
+    
+    Args:
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
+            If None or not 'sandboxed', uses WORKSPACE_BASE_DIR (backward compatible).
+    
+    Returns:
+        List of home root paths for the user.
     """
     user = user or {}
     account = user.get("system_account") or user.get("username")
@@ -624,7 +641,16 @@ def _home_roots_for_user(user) -> list[str]:
         and _username_is_another_users_account(user)
     ):
         return []
-    return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in get_workspace_base_dirs()]
+    
+    # Issue #3420: Choose base dirs based on isolation level
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # sandboxed mode: force /workspace (OpenSandbox security policy)
+        base_dirs = ["/workspace"]
+    else:
+        # os_user or None: use environment variable configuration
+        base_dirs = get_workspace_base_dirs()
+    
+    return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in base_dirs]
 
 
 def _username_is_another_users_account(user: dict) -> bool:
@@ -655,7 +681,7 @@ def _username_is_another_users_account(user: dict) -> bool:
     return False
 
 
-def _home_roots_for_write(user) -> list[str]:
+def _home_roots_for_write(user, isolation_level: str | None = None) -> list[str]:
     """Home roots the /fs per-file paths lock to (Issue #3410).
 
     upload / download / delete-file / search used ``get_home_directory()`` —
@@ -671,8 +697,14 @@ def _home_roots_for_write(user) -> list[str]:
     NOTE: shared project roots are deliberately NOT included — browse and
     check-path can reach a shared project, but per-file writes and downloads
     stay home-only. Widening that is a feature, not part of #3410.
+    
+    Issue #3420: Pass isolation_level to _home_roots_for_user.
+    
+    Args:
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
     """
-    roots = _home_roots_for_user(user)
+    roots = _home_roots_for_user(user, isolation_level)
     if not roots:
         return []
     legacy = get_home_directory(user)
@@ -683,7 +715,7 @@ def _home_roots_for_write(user) -> list[str]:
     return roots
 
 
-def _primary_home_root(user) -> str | None:
+def _primary_home_root(user, isolation_level: str | None = None) -> str | None:
     """The single home path the /fs endpoints REPORT (not the lock set).
 
     ``/api/fs/home``, ``/api/fs/browse``'s ``homePath`` + not-found fallback,
@@ -696,8 +728,14 @@ def _primary_home_root(user) -> str | None:
     None for an identity-less user, so callers answer the same 400 browse
     already gives ("No home directory available for this user") instead of
     handing the UI a path every other endpoint rejects.
+    
+    Issue #3420: Pass isolation_level to _home_roots_for_write.
+    
+    Args:
+        user: User dict
+        isolation_level: Current isolation level from session (optional).
     """
-    roots = _home_roots_for_write(user)
+    roots = _home_roots_for_write(user, isolation_level)
     return roots[0] if roots else None
 
 
@@ -1112,11 +1150,17 @@ def find_writable_ancestor(
 
 @fs_bp.route("/fs/browse", methods=["GET"])
 def api_browse_directory():
-    """Browse a directory and list subdirectories (and optionally files)."""
+    """Browse a directory and list subdirectories (and optionally files).
+    
+    Issue #3420: Return isolation-aware home path.
+    """
     user = g.user
 
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
+    
+    # Issue #3420: Get isolation level from session
+    isolation_level = session.get('isolation_level')
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
@@ -1135,7 +1179,8 @@ def api_browse_directory():
         # root instead of get_home_directory()'s single-base (or process-home
         # fallback) value. An identity-less user has no home root at all and
         # must be rejected rather than dropped into the process home.
-        home_roots = _home_roots_for_user(user)
+        # Issue #3420: pass isolation_level
+        home_roots = _home_roots_for_user(user, isolation_level)
         if not home_roots:
             return (
                 jsonify({"error": "No home directory available for this user"}),
@@ -1168,7 +1213,8 @@ def api_browse_directory():
         # Return home directory as fallback. Issue #3410: the per-base root,
         # not the single-base get_home_directory() (which yields the literal
         # "/a,/b/<account>" on a comma-separated WORKSPACE_BASE_DIR).
-        home = _primary_home_root(user)
+        # Issue #3420: pass isolation_level
+        home = _primary_home_root(user, isolation_level)
         if home is None:
             return jsonify({"error": "No home directory available for this user"}), 400
         # Provide helpful note: directory will be created when project is set up
@@ -1205,7 +1251,8 @@ def api_browse_directory():
         parent = None
 
     # Issue #3410: report the per-base root the lock actually accepts.
-    home_path = _primary_home_root(user)
+    # Issue #3420: pass isolation_level
+    home_path = _primary_home_root(user, isolation_level)
     if home_path is None:
         return jsonify({"error": "No home directory available for this user"}), 400
 
@@ -1529,15 +1576,25 @@ def api_check_path():
 
 @fs_bp.route("/fs/home", methods=["GET"])
 def api_get_home():
-    """Get user's home directory."""
+    """Get user's home directory.
+    
+    Issue #3420: Return isolation-aware home path.
+    Reads isolation_level from session to determine correct home path:
+    - sandboxed: /workspace/{account}
+    - os_user: WORKSPACE_BASE_DIR/{account}
+    """
     user = g.user
 
     system_account = user.get("system_account") if user else None
+    
+    # Issue #3420: Get isolation level from session
+    isolation_level = session.get('isolation_level')
+    
     # Issue #3410: this is how the Personal Files UI FINDS the home, so it must
     # report a path the /fs lock accepts — the single-base get_home_directory()
     # returned "/a,/b/<account>" on a multi-base deployment and broke the page
     # end to end.
-    home = _primary_home_root(user)
+    home = _primary_home_root(user, isolation_level)
     if home is None:
         return jsonify({"error": "No home directory available for this user"}), 400
     dir_info = get_directory_info(home, system_account)

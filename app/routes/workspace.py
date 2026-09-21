@@ -2463,6 +2463,12 @@ def get_user_webui_url():
                 port = port_match.group(1)
                 url = f"/webui/{port}/"
 
+        # Issue #3420: Store isolation level in session for /fs/* APIs
+        # This allows /api/fs/home and other endpoints to return isolation-aware paths
+        from flask import session
+
+        session['isolation_level'] = isolation_snapshot.isolation_level
+
         return jsonify(
             {
                 "success": True,
