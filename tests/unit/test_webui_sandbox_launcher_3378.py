@@ -913,13 +913,12 @@ def test_pvc_volume_empty_storage_class_uses_cluster_default():
 
 def test_ephemeral_volume_kind_skips_pvc_processing():
     """Non-persistent volume kind should not create a PVC spec."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
     from app.modules.workspace.autonomous.sandbox.types import (
         RuntimeSpec,
         SandboxSpec,
         VolumeSpec,
     )
-
-    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
 
     ephemeral_spec = VolumeSpec(
         name="ephemeral-vol",
@@ -945,13 +944,12 @@ def test_ephemeral_volume_kind_skips_pvc_processing():
 def test_pvc_volume_empty_claim_name_skips_volume():
     """Empty pvc_claim_name should skip the volume entirely (validation at
     policy.py level)."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
     from app.modules.workspace.autonomous.sandbox.types import (
         RuntimeSpec,
         SandboxSpec,
         VolumeSpec,
     )
-
-    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
 
     no_claim_spec = VolumeSpec(
         name="no-claim-vol",
@@ -978,13 +976,12 @@ def test_pvc_volume_empty_claim_name_skips_volume():
 
 def test_pvc_volume_with_all_fields():
     """Volume with all PVC fields specified should include all in the spec."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
     from app.modules.workspace.autonomous.sandbox.types import (
         RuntimeSpec,
         SandboxSpec,
         VolumeSpec,
     )
-
-    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
 
     full_spec = VolumeSpec(
         name="full-pvc-vol",
