@@ -496,7 +496,14 @@ def _stream_usage_fallback(
     """
     if "text/event-stream" not in content_type or not total_content:
         return None
-    estimate = max(1, len(total_content) // 4)
+    # Count only `data:` payload lines: raw byte counting would multiply the
+    # charge 30-50x, since a one-token delta rides ~120-200 wire bytes of SSE
+    # and JSON framing. Payload bytes still include JSON keys, so the result
+    # keeps erring high — conservative for a quota fallback.
+    payload = sum(
+        len(line) - 6 for line in total_content.split(b"\n") if line.startswith(b"data: ")
+    )
+    estimate = max(1, payload // 4)
     if request_body:
         try:
             limit = json.loads(request_body)
@@ -520,6 +527,7 @@ def _record_llm_usage(
     request_id: str | None = None,
     model: str | None = None,
     fallback_output_tokens: int | None = None,
+    stream_completed: bool | None = None,
 ) -> None:
     """Extract and record token usage and messages from LLM responses.
 
@@ -582,8 +590,47 @@ def _record_llm_usage(
             except json.JSONDecodeError:
                 pass
 
-        # Handle missing usage
-        if evidence is None:
+        # Handle missing or unusable streaming usage. Two cases must both
+        # charge the estimate, or a client that reads every content delta and
+        # disconnects before the stream ends gets a full generation for free:
+        # (a) no usage evidence at all — OpenAI streams only carry `usage` on
+        #     the final chunk, and a disconnected stream never reaches it;
+        # (b) evidence from a stream that did NOT complete — OpenAI's
+        #     stream_options.include_usage carries `"usage": null` on every
+        #     non-final chunk (a zero-token evidence), and Anthropic's
+        #     message_start reports input tokens with output ~ 0 long before
+        #     the message_delta totals. A partial event is not a chargeable
+        #     total, so the estimate merges with whatever input was seen.
+        # A stream that completed is trusted as parsed. Non-streaming callers
+        # pass no fallback and keep the old zero-charge behavior (their
+        # content is complete before recording; no bypass window exists).
+        if is_sse and fallback_output_tokens and (evidence is None or stream_completed is False):
+            if evidence is None:
+                log_usage_missing(
+                    session_id=session_id,
+                    provider=provider,
+                    protocol=protocol,
+                    request_id=request_id,
+                    chunks_seen=len(content.split(b"\n")) if is_sse else 1,
+                )
+                increment_metric(
+                    "llm_proxy_usage_parse_errors_total",
+                    {"provider": provider, "reason": "missing_usage"},
+                )
+                evidence = UsageEvidence(
+                    output_tokens=fallback_output_tokens,
+                    provider=provider,
+                    model=model,
+                    raw_usage={"estimated": True, "reason": "missing_usage"},
+                )
+            else:
+                evidence.output_tokens = max(evidence.output_tokens, fallback_output_tokens)
+                evidence.raw_usage = {
+                    **(evidence.raw_usage or {}),
+                    "estimated": True,
+                    "reason": "incomplete_stream_usage",
+                }
+        elif evidence is None:
             log_usage_missing(
                 session_id=session_id,
                 provider=provider,
@@ -595,21 +642,7 @@ def _record_llm_usage(
                 "llm_proxy_usage_parse_errors_total",
                 {"provider": provider, "reason": "missing_usage"},
             )
-            # Streaming callers opt into an estimate charge: a client can read
-            # every content delta and drop the connection before the final
-            # chunk that carries `usage` — the generation was delivered, so
-            # zero usage would be a client-controllable quota bypass rather
-            # than an under-count. Non-streaming callers keep the old
-            # zero-charge behavior (their content is complete before
-            # recording, so no bypass window exists).
-            if not fallback_output_tokens:
-                return
-            evidence = UsageEvidence(
-                output_tokens=fallback_output_tokens,
-                provider=getattr(parser, "provider", ""),
-                model=model,
-                raw_usage={"estimated": True, "reason": "missing_usage"},
-            )
+            return
 
         # Get session for tenant_id
         from app.modules.workspace.session_manager import get_session_manager
@@ -922,6 +955,7 @@ def _finalize_upstream_response(
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
         first_chunk = True
+        drained = False
         try:
             for chunk in _resp.iter_content(chunk_size=4096):
                 total_content += chunk
@@ -933,17 +967,24 @@ def _finalize_upstream_response(
                         logger.debug(f"Failed to record first response: {e}")
                     first_chunk = False
                 yield chunk
+            drained = True
         finally:
             # Usage must be recorded even when the stream is cut short. A
             # client that reads every content delta and then drops the
             # connection just before the final chunk (which carries `usage`
             # and [DONE]) receives the full generation while zero usage is
             # recorded — a client-controllable quota bypass, not an
-            # under-count. When the drained stream never yielded a usage
-            # block, the fallback estimate (streamed bytes, capped by the
-            # requested max_tokens) is charged instead. Closing the response
-            # in the same finally stops provider-side generation and billing
-            # instead of leaving connection release to garbage collection.
+            # under-count. When the drained stream never yielded a final
+            # usage event, the fallback estimate (streamed bytes, capped by
+            # the requested max_tokens) is charged instead. The upstream
+            # response is closed BEFORE recording — total_content is already
+            # buffered — so provider-side generation and billing stop
+            # immediately instead of racing the database writes.
+            try:
+                _resp.close()
+            except Exception:
+                logger.debug("Failed to close upstream response", exc_info=True)
+            completion_status = "success" if drained else "cancelled"
             try:
                 _record_llm_usage(
                     total_content,
@@ -958,11 +999,12 @@ def _finalize_upstream_response(
                     fallback_output_tokens=_stream_usage_fallback(
                         total_content, _body, _content_type
                     ),
+                    stream_completed=drained,
                 )
                 # Issue #3080: Record request complete
                 if recorder:
                     try:
-                        recorder.record_request_complete(perf_request_id, status="success")
+                        recorder.record_request_complete(perf_request_id, status=completion_status)
                     except Exception as e:
                         logger.debug(f"Failed to record request complete: {e}")
             except Exception as exc:
@@ -973,11 +1015,6 @@ def _finalize_upstream_response(
                         recorder.record_request_complete(perf_request_id, status="failed")
                     except Exception as e:
                         logger.debug(f"Failed to record request failure: {e}")
-            finally:
-                try:
-                    _resp.close()
-                except Exception:
-                    logger.debug("Failed to close upstream response", exc_info=True)
 
     response_headers = {}
     for key, value in resp.headers.items():
