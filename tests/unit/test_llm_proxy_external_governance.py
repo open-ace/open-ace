@@ -130,23 +130,31 @@ class TestExternalPrincipalLiveness:
         )
 
     def test_active_user_active_tenant(self):
-        assert self._alive([(True, None, "active")]) is True
+        assert self._alive([(True, None, "active", None)]) is True
 
     def test_deactivated_user_rejected(self):
-        assert self._alive([(False, None, "active")]) is False
+        assert self._alive([(False, None, "active", None)]) is False
 
     def test_deleted_user_rejected(self):
-        assert self._alive([(True, "2026-01-01 00:00:00", "active")]) is False
+        assert self._alive([(True, "2026-01-01 00:00:00", "active", None)]) is False
 
     def test_inactive_tenant_rejected(self):
-        assert self._alive([(True, None, "suspended")]) is False
+        assert self._alive([(True, None, "suspended", None)]) is False
+
+    def test_soft_deleted_tenant_rejected(self):
+        # Tenant soft-deletion sets only deleted_at; status stays "active".
+        assert self._alive([(True, None, "active", "2026-01-01 00:00:00")]) is False
+
+    def test_trial_tenant_is_alive(self):
+        # "trial" is a live platform state, not a deactivation.
+        assert self._alive([(True, None, "trial", None)]) is True
 
     def test_missing_row_rejected(self):
         assert self._alive([None]) is False
 
     def test_missing_identifiers_rejected(self):
-        assert self._alive([(True, None, "active")], user_id=None) is False
-        assert self._alive([(True, None, "active")], tenant_id=None) is False
+        assert self._alive([(True, None, "active", None)], user_id=None) is False
+        assert self._alive([(True, None, "active", None)], tenant_id=None) is False
 
     def test_db_error_fails_closed(self):
         conn = MagicMock()
@@ -399,3 +407,82 @@ class TestKeyEchoGuard:
             status = result.status_code
         assert status == 200
         assert b"ok" in result.get_data()
+
+
+class TestKeyEchoGuardCrossStreamReconstruction:
+    """Two colluding requests must not each release half the key.
+
+    A relay can end one stream with key[:-1] and serve another consisting of
+    key[1:]; before the flush fix, the end-of-stream release handed the
+    caller n-1 key bytes per stream.
+    """
+
+    def test_key_prefix_tail_aborts(self):
+        stream = [_KEY[:-1]]
+        with pytest.raises(Exception):
+            assert list(_key_echo_guard(iter(stream), _KEY))
+
+    def test_key_suffix_stream_aborts(self):
+        stream = [_KEY[1:]]
+        with pytest.raises(Exception):
+            assert list(_key_echo_guard(iter(stream), _KEY))
+
+    def test_half_key_interior_fragment_aborts(self):
+        half = _KEY[: len(_KEY) // 2 + 1]
+        stream = [b"junk " + half + b" tail"]
+        with pytest.raises(Exception):
+            assert list(_key_echo_guard(iter(stream), _KEY))
+
+    def test_short_benign_overlap_is_not_key_material(self):
+        # A short run (here 5 bytes, under the half-key threshold) that
+        # happens to sit inside the key stays out of contract and passes.
+        stream = [b"answer uses key-a wording"]
+        out = b"".join(_key_echo_guard(iter(stream), _KEY))
+        assert b"key-a" in out
+
+    def test_benign_tail_still_passes_through(self):
+        # Newlines and framing are not key material: byte-exact passthrough.
+        stream = [b"response text", b"data: [DONE]\n\n"]
+        out = b"".join(_key_echo_guard(iter(stream), _KEY))
+        assert out == b"response textdata: [DONE]\n\n"
+
+
+class TestKeyEchoGuardHeaderVector:
+    def test_key_echo_in_forwarded_header_is_dropped(self, flask_app):
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        upstream = MagicMock()
+        upstream.status_code = 200
+        upstream.content = b'{"ok":true}'
+        upstream.headers = {
+            "Content-Type": "application/json",
+            "x-request-id": _KEY.decode(),
+        }
+        upstream.iter_content.return_value = [b'{"ok":true}']
+        with patch("app.modules.workspace.llm_proxy_handler._audit_key_echo_block") as audit:
+            with flask_app.test_request_context("/"):
+                outcome = _finalize_upstream_response(
+                    upstream,
+                    b'{"model":"glm-5"}',
+                    session_id="ext-1",
+                    user_id=1,
+                    provider="openai",
+                    content_type="application/json",
+                    tenant_id=1,
+                    echo_guard_secret=_KEY,
+                )
+        result, status = outcome if isinstance(outcome, tuple) else (outcome, outcome.status_code)
+        assert status == 200
+        assert "x-request-id" not in result.headers
+        assert audit.call_count == 1
+
+
+class TestKeyEchoGuardBufferedPath:
+    def test_buffered_body_containing_key_blocks(self):
+        from app.modules.workspace.llm_proxy_handler import _echo_guard_blocks
+
+        with patch("app.modules.workspace.llm_proxy_handler._audit_key_echo_block") as audit:
+            assert _echo_guard_blocks(b'{"content":"' + _KEY + b'"}', _KEY, "s", 1, 1) is True
+            assert audit.call_count == 1
+            assert _echo_guard_blocks(b"clean body", _KEY, "s", 1, 1) is False
+            assert _echo_guard_blocks(b"anything", None, "s", 1, 1) is False

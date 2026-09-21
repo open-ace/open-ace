@@ -2262,7 +2262,7 @@ class APIKeyProxyService:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT u.is_active, u.deleted_at, t.status "
+                "SELECT u.is_active, u.deleted_at, t.status, t.deleted_at "
                 f"FROM users u JOIN tenants t ON t.id = u.tenant_id "
                 f"WHERE u.id = {_param()} AND u.tenant_id = {_param()}",
                 (user_id, tenant_id),
@@ -2280,7 +2280,17 @@ class APIKeyProxyService:
         is_active = row[0] if isinstance(row, (list, tuple)) else self._row_get(row, "is_active")
         deleted_at = row[1] if isinstance(row, (list, tuple)) else self._row_get(row, "deleted_at")
         tenant_status = row[2] if isinstance(row, (list, tuple)) else self._row_get(row, "status")
-        return bool(is_active) and not deleted_at and tenant_status == "active"
+        tenant_deleted = (
+            row[3] if isinstance(row, (list, tuple)) else self._row_get(row, "deleted_at")
+        )
+        # Tenant soft-deletion only sets deleted_at (status stays 'active'),
+        # so it must be checked explicitly; 'trial' is a live platform state.
+        return (
+            bool(is_active)
+            and not deleted_at
+            and not tenant_deleted
+            and tenant_status in ("active", "trial")
+        )
 
     def _session_allows_proxy_token_with_conn(
         self,

@@ -1099,6 +1099,16 @@ def _finalize_upstream_response(
     response_headers = {}
     for key, value in resp.headers.items():
         if key.lower() in ("content-type", "x-request-id", "openai-organization"):
+            # A hostile relay can echo the resolved key in a response header;
+            # headers are sent before any body byte is scanned, so under the
+            # echo guard a header carrying the secret is dropped outright.
+            if echo_guard_secret and echo_guard_secret in str(value).encode("utf-8"):
+                logger.error(
+                    "LLM proxy: key echo detected in response header (session=%s)",
+                    session_id[:8] if session_id else "unknown",
+                )
+                _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+                continue
             response_headers[key] = value
 
     if "text/event-stream" in content_type:
@@ -1220,6 +1230,45 @@ def _audit_key_echo_block(
         logger.error("Failed to audit key-echo block: %s", e)
 
 
+def _echo_guard_blocks(
+    content: bytes | None,
+    secret: bytes | None,
+    session_id: str | None,
+    user_id: int | None,
+    tenant_id: int | None,
+) -> bool:
+    """Whole-body key-echo check for fully buffered response paths.
+
+    Logs and audits a detection; the caller returns a sanitized 502. Used
+    where the entire upstream body is in hand before anything is emitted
+    (the /responses SSE conversion), where a mid-stream hold-back cannot
+    apply because the conversion rebuilds the payload from parsed JSON.
+    """
+    if not secret or not content or secret not in content:
+        return False
+    logger.error(
+        "LLM proxy: key echo detected in buffered response (session=%s)",
+        session_id[:8] if session_id else "unknown",
+    )
+    _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+    return True
+
+
+def _key_echo_fragment(pending: bytes, secret: bytes, threshold: int) -> bool:
+    """Whether pending contains a long-enough run of key material.
+
+    A colluding relay can smuggle the key in fragments: one stream ending in
+    key[:-1], another serving key[1:], or two streams each carrying half.
+    Any window at least half the key long that lies inside the secret is
+    treated as key material — for a random key the false-positive odds of a
+    half-key window matching benign text are negligible, while shorter
+    fragments stay out of contract (documented residual).
+    """
+    if len(pending) < threshold:
+        return False
+    return any(pending[i : i + threshold] in secret for i in range(len(pending) - threshold + 1))
+
+
 def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
     """Yield upstream chunks minus a hold-back window sized to the key.
 
@@ -1230,7 +1279,9 @@ def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
     released until it can no longer be part of a match: the whole pending
     buffer (held tail + new data) is checked before each yield, and the last
     ``len(secret) - 1`` bytes stay held back until more data or stream end
-    proves them safe.
+    proves them safe. In addition, a run of key material at least half the
+    key long anywhere in the buffer aborts the stream — otherwise a relay
+    could deliver the key as fragments across two requests.
 
     On detection the stream aborts — headers are already sent, so there is no
     status code to change — and the event is audited. Clients must treat a
@@ -1240,10 +1291,11 @@ def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
         yield from chunks
         return
     hold = max(len(secret) - 1, 0)
+    threshold = max(4, len(secret) // 2)
     pending = b""
     for chunk in chunks:
         pending += chunk
-        if secret in pending:
+        if secret in pending or _key_echo_fragment(pending, secret, threshold):
             raise _KeyEchoDetected() from None
         if hold:
             yield pending[:-hold]
@@ -1252,7 +1304,7 @@ def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
             yield pending
             pending = b""
     if pending:
-        if secret in pending:
+        if secret in pending or _key_echo_fragment(pending, secret, threshold):
             raise _KeyEchoDetected() from None
         yield pending
 
@@ -1452,6 +1504,7 @@ def _forward_via_gateway(
     provider: str,
     tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
     requested_model: str | None = None,
+    token_payload: dict | None = None,
 ) -> Response | tuple[Response, int]:
     """Execute a single gateway attempt and return the finalized response.
 
@@ -1509,6 +1562,27 @@ def _forward_via_gateway(
         # Mirror the direct path: a converted /responses request gets its
         # chat-completions response re-wrapped into a Responses-API SSE stream.
         if getattr(plan, "is_responses", False) and resp.status_code == 200:
+            _gw_echo_secret = (
+                plan.gateway_key.encode("utf-8")
+                if isinstance(token_payload, dict)
+                and token_payload.get("session_type") == "external"
+                and plan.gateway_key
+                else None
+            )
+            if _gw_echo_secret and _echo_guard_blocks(
+                resp.content, _gw_echo_secret, session_id, user_id, tenant_id
+            ):
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Upstream response rejected by content policy",
+                                "type": "proxy_error",
+                            }
+                        }
+                    ),
+                    502,
+                )
             sse_response = _emit_responses_sse(resp, body)
             if sse_response is not None:
                 return sse_response
@@ -1522,6 +1596,15 @@ def _forward_via_gateway(
             request_path=plan.path,
             requested_model=requested_model,
             tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
+            echo_guard_secret=(
+                # The gateway path resolves its own key; guard external
+                # responses with it exactly like the direct path.
+                plan.gateway_key.encode("utf-8")
+                if isinstance(token_payload, dict)
+                and token_payload.get("session_type") == "external"
+                and plan.gateway_key
+                else None
+            ),
         )
     except Exception as exc:
         logger.error("LLM proxy gateway error: %s", exc)
@@ -1910,6 +1993,7 @@ def handle_llm_proxy_request(
             provider=provider,
             tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
             requested_model=requested_model,
+            token_payload=token_payload if isinstance(token_payload, dict) else None,
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
@@ -2283,6 +2367,27 @@ def handle_llm_proxy_request(
                     continue
 
             if converted_from_responses and resp.status_code == 200:
+                _echo_secret = (
+                    api_key.encode("utf-8")
+                    if isinstance(token_payload, dict)
+                    and token_payload.get("session_type") == "external"
+                    and api_key
+                    else None
+                )
+                if _echo_secret and _echo_guard_blocks(
+                    resp.content, _echo_secret, session_id, user_id, tenant_id
+                ):
+                    return (
+                        jsonify(
+                            {
+                                "error": {
+                                    "message": "Upstream response rejected by content policy",
+                                    "type": "proxy_error",
+                                }
+                            }
+                        ),
+                        502,
+                    )
                 sse_response = _emit_responses_sse(resp, body)
                 if sse_response is not None:
                     return sse_response
