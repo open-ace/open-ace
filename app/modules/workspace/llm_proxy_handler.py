@@ -1102,7 +1102,9 @@ def _finalize_upstream_response(
             # A hostile relay can echo the resolved key in a response header;
             # headers are sent before any body byte is scanned, so under the
             # echo guard a header carrying the secret is dropped outright.
-            if echo_guard_secret and echo_guard_secret in str(value).encode("utf-8"):
+            if _echo_guard_active(echo_guard_secret) and (echo_guard_secret or b"") in str(
+                value
+            ).encode("utf-8"):
                 logger.error(
                     "LLM proxy: key echo detected in response header (session=%s)",
                     session_id[:8] if session_id else "unknown",
@@ -1228,6 +1230,18 @@ def _audit_key_echo_block(
         logger.error("Failed to audit key-echo block: %s", e)
 
 
+# Keys shorter than this are not secrets worth guarding (local
+# OpenAI-compatible servers commonly use EMPTY / none / dummy), and a short
+# key is far more likely to appear in ordinary output than to be an echo:
+# "The queue is EMPTY after the job finishes." must not abort a stream.
+ECHO_GUARD_MIN_SECRET_BYTES = 16
+
+
+def _echo_guard_active(secret: bytes | None) -> bool:
+    """Whether the key-echo guard applies to this secret at all."""
+    return secret is not None and len(secret) >= ECHO_GUARD_MIN_SECRET_BYTES
+
+
 def _echo_guard_blocks(
     content: bytes | None,
     secret: bytes | None,
@@ -1235,16 +1249,14 @@ def _echo_guard_blocks(
     user_id: int | None,
     tenant_id: int | None,
 ) -> bool:
-    """Whole-body key-echo check for fully buffered response paths.
+    """Whole-body verbatim key-echo check for fully buffered response paths.
 
     Logs and audits a detection; the caller returns a sanitized 502. Used
     where the entire upstream body is in hand before anything is emitted
     (the /responses SSE conversion), where a mid-stream hold-back cannot
     apply because the conversion rebuilds the payload from parsed JSON.
     """
-    if not secret or not content:
-        return False
-    if secret not in content and not _key_echo_fragment(content, secret, max(4, len(secret) // 2)):
+    if not _echo_guard_active(secret) or not content or (secret or b"") not in content:
         return False
     logger.error(
         "LLM proxy: key echo detected in buffered response (session=%s)",
@@ -1254,57 +1266,41 @@ def _echo_guard_blocks(
     return True
 
 
-def _key_echo_fragment(pending: bytes, secret: bytes, threshold: int) -> bool:
-    """Whether pending contains a long-enough run of key material.
-
-    A colluding relay can smuggle the key in fragments: one stream ending in
-    key[:-1], another serving key[1:], or two streams each carrying half.
-    Any window at least half the key long that lies inside the secret is
-    treated as key material — for a random key the false-positive odds of a
-    half-key window matching benign text are negligible, while shorter
-    fragments stay out of contract (documented residual).
-    """
-    if len(pending) < threshold:
-        return False
-    return any(pending[i : i + threshold] in secret for i in range(len(pending) - threshold + 1))
-
-
 def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
     """Yield upstream chunks minus a hold-back window sized to the key.
 
-    A per-chunk substring check alone is defeated by a key split across chunk
-    boundaries, and a hostile relay controls the chunking; a rolling detector
-    that scans only what it is about to yield still leaks the key's prefix,
-    because the chunks carrying it were already yielded. So nothing is
-    released until it can no longer be part of a match: the whole pending
-    buffer (held tail + new data) is checked before each yield, and the last
-    ``len(secret) - 1`` bytes stay held back until more data or stream end
-    proves them safe. In addition, a run of key material at least half the
-    key long anywhere in the buffer aborts the stream — otherwise a relay
-    could deliver the key as fragments across two requests.
+    Defense-in-depth against ACCIDENTAL verbatim echoes — a provider error
+    body or debugging relay reflecting the Authorization header. A per-chunk
+    substring check alone misses a key split across chunk boundaries, so the
+    whole pending buffer (held tail + new data) is checked before each
+    release and the last ``len(secret) - 1`` bytes stay held back until more
+    data or stream end proves them safe: no byte of a contiguous occurrence
+    is ever released.
 
-    On detection the stream aborts — headers are already sent, so there is no
-    status code to change — and the event is audited. Clients must treat a
-    stream that ends without [DONE] as failed.
+    This guard cannot stop an ADVERSARIAL upstream: a relay that streams the
+    key a few characters per delta, or encodes it, never shows a contiguous
+    match on the wire. The control against a hostile upstream is the
+    operator's egress allowlist (OPENACE_LLM_PROXY_ALLOWED_HOSTS); external
+    issuers' upstreams must be allowlisted hosts. Keys shorter than
+    ECHO_GUARD_MIN_SECRET_BYTES skip the guard entirely.
+
+    On detection the stream aborts — headers are already sent, so there is
+    no status code to change — and the event is audited. Clients must treat
+    a stream that ends without [DONE] as failed.
     """
-    if not secret:
+    if not _echo_guard_active(secret):
         yield from chunks
         return
-    hold = max(len(secret) - 1, 0)
-    threshold = max(4, len(secret) // 2)
+    hold = len(secret) - 1
     pending = b""
     for chunk in chunks:
         pending += chunk
-        if secret in pending or _key_echo_fragment(pending, secret, threshold):
+        if secret in pending:
             raise _KeyEchoDetected() from None
-        if hold:
-            yield pending[:-hold]
-            pending = pending[-hold:]
-        else:
-            yield pending
-            pending = b""
+        yield pending[:-hold]
+        pending = pending[-hold:]
     if pending:
-        if secret in pending or _key_echo_fragment(pending, secret, threshold):
+        if secret in pending:
             raise _KeyEchoDetected() from None
         yield pending
 
@@ -1371,11 +1367,87 @@ def _build_safe_content_details(
     return details
 
 
+def _external_request_texts(body: Any) -> str | None:
+    """Collect every text-bearing field an external caller composes.
+
+    An external server writes the WHOLE request, so "scan role:user only"
+    — reasonable for ACE's own chat UIs where that is the untrusted input —
+    is opt-out by construction: tool results (where a diagnosis flow puts
+    its logs), system prompts, Responses-API input and legacy prompt fields
+    would all pass unchecked. Returns None when the shape cannot be parsed:
+    the caller rejects the request rather than forwarding it unscanned.
+    """
+    if not isinstance(body, dict):
+        return None
+    texts: list[str] = []
+
+    def add(value: Any) -> None:
+        if isinstance(value, str):
+            texts.append(value)
+
+    def add_parts(value: Any) -> None:
+        if isinstance(value, list):
+            for part in value:
+                if isinstance(part, dict):
+                    add(part.get("text"))
+                    add(part.get("input_text"))
+                elif isinstance(part, str):
+                    texts.append(part)
+
+    messages = body.get("messages")
+    if messages is not None:
+        if not isinstance(messages, list):
+            return None
+        for message in messages:
+            if not isinstance(message, dict):
+                return None
+            content = message.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        return None
+                    add(part.get("text"))
+            else:
+                add(content)
+            for call in message.get("tool_calls") or []:
+                if isinstance(call, dict):
+                    function = call.get("function")
+                    if isinstance(function, dict):
+                        add(function.get("arguments"))
+    add(body.get("system"))
+    add_parts(body.get("system"))
+    add(body.get("instructions"))
+    prompt = body.get("prompt")
+    if isinstance(prompt, str):
+        texts.append(prompt)
+    else:
+        add_parts(prompt)
+    external_input = body.get("input")
+    if isinstance(external_input, str):
+        texts.append(external_input)
+    elif isinstance(external_input, list):
+        for item in external_input:
+            if isinstance(item, dict):
+                content = item.get("content")
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict):
+                            add(part.get("text"))
+                else:
+                    add(content)
+            elif isinstance(item, str):
+                texts.append(item)
+    if not any(key in body for key in ("messages", "system", "input", "instructions", "prompt")):
+        return None
+    return " ".join(texts)
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
     request_body: bytes | None,
     tenant_id: int | None = None,
+    external_texts: str | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -1418,11 +1490,16 @@ def _check_content_filter(
                 elif isinstance(content, str):
                     user_contents.append(content)
 
-        if not user_contents:
-            return None
+        if external_texts is not None:
+            # External callers compose the entire request; the scan covers
+            # every text-bearing field (see _external_request_texts).
+            combined_content = external_texts
+        else:
+            if not user_contents:
+                return None
 
-        # Join all user messages for filtering check
-        combined_content = " ".join(user_contents)
+            # Join all user messages for filtering check
+            combined_content = " ".join(user_contents)
 
         from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
@@ -1896,11 +1973,37 @@ def handle_llm_proxy_request(
             )
             # username remains None, do not block the request
 
+        _external = (
+            isinstance(token_payload, dict) and token_payload.get("session_type") == "external"
+        )
+        _external_texts = None
+        if _external:
+            # An external server composes the whole request; the scan must
+            # cover every text-bearing field, and a body whose shape cannot
+            # be parsed is rejected rather than forwarded unscanned.
+            try:
+                _external_body = json.loads(request.get_data())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                _external_body = None
+            _external_texts = _external_request_texts(_external_body)
+            if _external_texts is None:
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Request body is not a scannable shape",
+                                "type": "invalid_request",
+                            }
+                        }
+                    ),
+                    400,
+                )
         content_filter_result = _check_content_filter(
             user_id=user_id,
             username=username,
             request_body=request.get_data(),
             tenant_id=tenant_id,
+            external_texts=_external_texts,
         )
     if isinstance(content_filter_result, tuple):
         # Block: return error response

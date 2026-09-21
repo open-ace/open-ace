@@ -2261,8 +2261,12 @@ class APIKeyProxyService:
             return False
         try:
             cursor = conn.cursor()
+            # Aliased columns: two plain ``deleted_at`` columns collide on
+            # dict-style rows (RealDictCursor keeps the last, sqlite3.Row the
+            # first), silently dropping one of the two soft-delete checks.
             cursor.execute(
-                "SELECT u.is_active, u.deleted_at, t.status, t.deleted_at "
+                "SELECT u.is_active, u.deleted_at AS user_deleted_at, "
+                "t.status AS tenant_status, t.deleted_at AS tenant_deleted_at "
                 f"FROM users u JOIN tenants t ON t.id = u.tenant_id "
                 f"WHERE u.id = {_param()} AND u.tenant_id = {_param()}",
                 (user_id, tenant_id),
@@ -2277,17 +2281,18 @@ class APIKeyProxyService:
             return False
         if not row:
             return False
-        is_active = row[0] if isinstance(row, (list, tuple)) else self._row_get(row, "is_active")
-        deleted_at = row[1] if isinstance(row, (list, tuple)) else self._row_get(row, "deleted_at")
-        tenant_status = row[2] if isinstance(row, (list, tuple)) else self._row_get(row, "status")
-        tenant_deleted = (
-            row[3] if isinstance(row, (list, tuple)) else self._row_get(row, "deleted_at")
-        )
+        if isinstance(row, (list, tuple)):
+            is_active, user_deleted, tenant_status, tenant_deleted = row[:4]
+        else:
+            is_active = self._row_get(row, "is_active")
+            user_deleted = self._row_get(row, "user_deleted_at")
+            tenant_status = self._row_get(row, "tenant_status")
+            tenant_deleted = self._row_get(row, "tenant_deleted_at")
         # Tenant soft-deletion only sets deleted_at (status stays 'active'),
         # so it must be checked explicitly; 'trial' is a live platform state.
         return (
             bool(is_active)
-            and not deleted_at
+            and not user_deleted
             and not tenant_deleted
             and tenant_status in ("active", "trial")
         )
