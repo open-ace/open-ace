@@ -497,3 +497,263 @@ class TestKeyEchoGuardBufferedPath:
             assert audit.call_count == 1
             assert _echo_guard_blocks(b"clean body", _KEY, "s", 1, 1) is False
             assert _echo_guard_blocks(b"anything", None, "s", 1, 1) is False
+
+
+class TestExternalScanVerdicts:
+    """Verdict tests, not extraction tests: a card number in each position of
+    the reviewer's table must reach a BLOCK through the real
+    _check_content_filter, including bodies with no `messages` array.
+    """
+
+    CARD = "4111-1111-1111-1111"
+
+    def _blocking_filter(self):
+        from types import SimpleNamespace as NS
+
+        def result(action, message):
+            return NS(
+                action=action,
+                message=message,
+                matched_rules=[],
+                suggestion=None,
+                risk_level="high" if action == "block" else "low",
+                rule_names=[],
+                categories=[],
+                sensitive_types=[],
+                sample_matches=[],
+            )
+
+        def check_content(text, tenant_config=None):
+            if self.CARD in (text or ""):
+                return result("block", "card number detected")
+            return result("allow", "")
+
+        return NS(check_content=check_content)
+
+    def _post_external(self, body):
+        client = _remote_app().test_client()
+        return client.post(
+            "/api/remote/llm-proxy",
+            json=body,
+            headers={"Authorization": "Bearer tok"},
+        )
+
+    def _blocked(self, monkeypatch, body):
+        from app.modules.workspace import llm_proxy_handler as handler
+
+        monkeypatch.setattr(handler, "get_content_filter", lambda: self._blocking_filter())
+        with (
+            patch(_PROXY_PATH, return_value=_proxy_mock(dict(_EXTERNAL_TOKEN))),
+            patch(
+                _QUOTA_PATH,
+                lambda: SimpleNamespace(check_quota=lambda *a, **k: {"allowed": True}),
+            ),
+            _hermetic_200_patches(),
+            patch(_HTTP_PATH, return_value=_upstream()) as http,
+        ):
+            resp = self._post_external(body)
+        return resp, http
+
+    def test_responses_input_string_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {"model": "glm-5", "input": f"log line mentions {self.CARD}"},
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_legacy_prompt_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {"model": "glm-5", "prompt": f"prompt text with {self.CARD}"},
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_instructions_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {"model": "glm-5", "instructions": f"follow {self.CARD}"},
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_anthropic_tool_result_string_content_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "messages": [
+                    {"role": "user", "content": "check the tool log"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "t1", "name": "bjobs"}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "t1",
+                                "content": f"bjobs output: {self.CARD}",
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_anthropic_tool_result_block_list_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "t1",
+                                "content": [{"type": "text", "text": f"log: {self.CARD}"}],
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_anthropic_tool_use_input_object_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "t1",
+                                "name": "grep",
+                                "input": {"pattern": self.CARD},
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_responses_function_call_output_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "c1",
+                        "output": f"result: {self.CARD}",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_responses_function_call_arguments_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "name": "grep",
+                        "arguments": json.dumps({"pattern": self.CARD}),
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_openai_tool_result_role_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "messages": [
+                    {"role": "user", "content": "run the tool"},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "bjobs", "arguments": "{}"},
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "c1", "content": f"output {self.CARD}"},
+                ],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_system_message_blocked(self, monkeypatch):
+        resp, http = self._blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "system": f"policy note {self.CARD}",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+        assert resp.status_code == 403, "card must be blocked"
+        assert resp.get_json()["error"]["type"] == "content_blocked"
+        assert not http.called, "blocked requests never reach the upstream"
+
+    def test_non_external_user_only_scope_unchanged(self, monkeypatch):
+        """Non-external callers keep the user-only scope by verdict."""
+        from app.modules.workspace import llm_proxy_handler as handler
+
+        token = dict(_EXTERNAL_TOKEN)
+        token.pop("session_type")
+        token.pop("redact_policy")
+        token.pop("allowed_models")
+        monkeypatch.setattr(handler, "get_content_filter", lambda: self._blocking_filter())
+        with (
+            patch(_PROXY_PATH, return_value=_proxy_mock(token)),
+            patch(
+                _QUOTA_PATH,
+                lambda: SimpleNamespace(check_quota=lambda *a, **k: {"allowed": True}),
+            ),
+            _hermetic_200_patches(),
+            patch(_HTTP_PATH, return_value=_upstream()),
+        ):
+            resp = self._post_external(
+                {
+                    "model": "gpt-4",
+                    "system": f"card only here {self.CARD}",
+                    "messages": [{"role": "user", "content": "clean message"}],
+                }
+            )
+        assert resp.status_code == 200, "system-only card passes for non-external"

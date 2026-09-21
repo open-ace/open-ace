@@ -1367,77 +1367,69 @@ def _build_safe_content_details(
     return details
 
 
+# Keys whose string values are structural metadata (model names, roles,
+# identifiers), never caller-authored content: excluded from the external
+# whole-request scan. A denylist fails CLOSED — when a provider adds a new
+# content-bearing shape, its strings are scanned unless explicitly excluded
+# here — which is the direction the external contract needs. An allowlist
+# of shapes would fail open on every provider addition.
+_EXTERNAL_SCAN_STRUCTURAL_KEYS = frozenset(
+    {
+        "model",
+        "role",
+        "type",
+        "id",
+        "tool_call_id",
+        "tool_use_id",
+        "call_id",
+        "name",
+        "object",
+        # Binary payloads, not text: image/audio data URIs and inline sources.
+        "url",
+        "data",
+    }
+)
+# Object-valued argument payloads (Anthropic tool_use.input): serialized as
+# text instead of walked, so nested structural keys never mask their values.
+_EXTERNAL_SCAN_SERIALIZED_KEYS = frozenset({"input", "arguments"})
+
+
 def _external_request_texts(body: Any) -> str | None:
-    """Collect every text-bearing field an external caller composes.
+    """Collect every text-bearing leaf an external caller composes.
 
     An external server writes the WHOLE request, so "scan role:user only"
     — reasonable for ACE's own chat UIs where that is the untrusted input —
     is opt-out by construction: tool results (where a diagnosis flow puts
-    its logs), system prompts, Responses-API input and legacy prompt fields
-    would all pass unchecked. Returns None when the shape cannot be parsed:
-    the caller rejects the request rather than forwarding it unscanned.
+    its logs), tool-use inputs, system prompts, Responses-API input and
+    legacy prompt fields would all pass unchecked. Every string leaf is
+    collected except the structural denylist above. Returns None when the
+    shape cannot be parsed: the caller rejects the request rather than
+    forwarding it unscanned.
     """
     if not isinstance(body, dict):
         return None
     texts: list[str] = []
 
-    def add(value: Any) -> None:
-        if isinstance(value, str):
-            texts.append(value)
+    def walk(node: Any, key: str | None) -> None:
+        if isinstance(node, dict):
+            if key in _EXTERNAL_SCAN_SERIALIZED_KEYS:
+                texts.append(json.dumps(node, sort_keys=True, separators=(",", ":")))
+                return
+            for child_key, value in node.items():
+                walk(value, child_key)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, key)
+        elif isinstance(node, str):
+            if key is None or key not in _EXTERNAL_SCAN_STRUCTURAL_KEYS:
+                texts.append(node)
 
-    def add_parts(value: Any) -> None:
-        if isinstance(value, list):
-            for part in value:
-                if isinstance(part, dict):
-                    add(part.get("text"))
-                    add(part.get("input_text"))
-                elif isinstance(part, str):
-                    texts.append(part)
-
-    messages = body.get("messages")
-    if messages is not None:
-        if not isinstance(messages, list):
-            return None
-        for message in messages:
-            if not isinstance(message, dict):
-                return None
-            content = message.get("content")
-            if isinstance(content, list):
-                for part in content:
-                    if not isinstance(part, dict):
-                        return None
-                    add(part.get("text"))
-            else:
-                add(content)
-            for call in message.get("tool_calls") or []:
-                if isinstance(call, dict):
-                    function = call.get("function")
-                    if isinstance(function, dict):
-                        add(function.get("arguments"))
-    add(body.get("system"))
-    add_parts(body.get("system"))
-    add(body.get("instructions"))
-    prompt = body.get("prompt")
-    if isinstance(prompt, str):
-        texts.append(prompt)
-    else:
-        add_parts(prompt)
-    external_input = body.get("input")
-    if isinstance(external_input, str):
-        texts.append(external_input)
-    elif isinstance(external_input, list):
-        for item in external_input:
-            if isinstance(item, dict):
-                content = item.get("content")
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict):
-                            add(part.get("text"))
-                else:
-                    add(content)
-            elif isinstance(item, str):
-                texts.append(item)
-    if not any(key in body for key in ("messages", "system", "input", "instructions", "prompt")):
+    walk(body, None)
+    if not any(
+        leaf_key in body for leaf_key in ("messages", "system", "input", "instructions", "prompt")
+    ):
+        # A chat request without any conversational field is not a shape we
+        # recognize: reject rather than scan nothing.
         return None
     return " ".join(texts)
 
@@ -1469,32 +1461,35 @@ def _check_content_filter(
 
     try:
         req_data = json.loads(request_body)
-        messages = req_data.get("messages", [])
-        if not isinstance(messages, list) or not messages:
-            return None
-
-        # Extract user messages for content filter check
-        user_contents = []
-        for msg in reversed(messages):
-            if not isinstance(msg, dict):
-                continue
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    # Handle multi-part content
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                    user_contents.append(" ".join(text_parts))
-                elif isinstance(content, str):
-                    user_contents.append(content)
-
         if external_texts is not None:
             # External callers compose the entire request; the scan covers
-            # every text-bearing field (see _external_request_texts).
+            # every text-bearing field (see _external_request_texts). This
+            # branch runs BEFORE the messages gate below: Responses-API
+            # (input/instructions), legacy prompt and messages-less bodies
+            # carry no `messages` array and must not pass on that account.
             combined_content = external_texts
         else:
+            messages = req_data.get("messages", [])
+            if not isinstance(messages, list) or not messages:
+                return None
+
+            # Extract user messages for content filter check
+            user_contents = []
+            for msg in reversed(messages):
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Handle multi-part content
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                        user_contents.append(" ".join(text_parts))
+                    elif isinstance(content, str):
+                        user_contents.append(content)
+
             if not user_contents:
                 return None
 
