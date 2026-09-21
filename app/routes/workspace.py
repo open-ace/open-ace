@@ -2467,7 +2467,7 @@ def get_user_webui_url():
         # This allows /api/fs/home and other endpoints to return isolation-aware paths
         from flask import session
 
-        session['isolation_level'] = isolation_snapshot.isolation_level
+        session["isolation_level"] = isolation_snapshot.isolation_level
 
         return jsonify(
             {

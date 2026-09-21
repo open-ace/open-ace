@@ -564,7 +564,7 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None, st
     resolved = os.path.realpath(target_dir)
 
     # Issue #3420: Get isolation level from session
-    isolation_level = session.get('isolation_level')
+    isolation_level = session.get("isolation_level")
 
     # Home subtree lock: must equal one of the user's per-base home roots or
     # live beneath it.
@@ -614,12 +614,12 @@ def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
     When isolation_level is 'sandboxed', force base dir to /workspace (OpenSandbox
     security policy requires all mounts under /workspace). Otherwise, use
     WORKSPACE_BASE_DIR environment variable.
-    
+
     Args:
         user: User dict with system_account/username.
         isolation_level: Current isolation level from session (optional).
             If None or not 'sandboxed', uses WORKSPACE_BASE_DIR (backward compatible).
-    
+
     Returns:
         List of home root paths for the user.
     """
@@ -641,7 +641,7 @@ def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
         and _username_is_another_users_account(user)
     ):
         return []
-    
+
     # Issue #3420: Choose base dirs based on isolation level
     if isolation_level == ISOLATION_LEVEL_SANDBOXED:
         # sandboxed mode: force /workspace (OpenSandbox security policy)
@@ -649,7 +649,7 @@ def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
     else:
         # os_user or None: use environment variable configuration
         base_dirs = get_workspace_base_dirs()
-    
+
     return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in base_dirs]
 
 
@@ -697,9 +697,9 @@ def _home_roots_for_write(user, isolation_level: str | None = None) -> list[str]
     NOTE: shared project roots are deliberately NOT included — browse and
     check-path can reach a shared project, but per-file writes and downloads
     stay home-only. Widening that is a feature, not part of #3410.
-    
+
     Issue #3420: Pass isolation_level to _home_roots_for_user.
-    
+
     Args:
         user: User dict with system_account/username.
         isolation_level: Current isolation level from session (optional).
@@ -728,9 +728,9 @@ def _primary_home_root(user, isolation_level: str | None = None) -> str | None:
     None for an identity-less user, so callers answer the same 400 browse
     already gives ("No home directory available for this user") instead of
     handing the UI a path every other endpoint rejects.
-    
+
     Issue #3420: Pass isolation_level to _home_roots_for_write.
-    
+
     Args:
         user: User dict
         isolation_level: Current isolation level from session (optional).
@@ -1151,16 +1151,16 @@ def find_writable_ancestor(
 @fs_bp.route("/fs/browse", methods=["GET"])
 def api_browse_directory():
     """Browse a directory and list subdirectories (and optionally files).
-    
+
     Issue #3420: Return isolation-aware home path.
     """
     user = g.user
 
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
-    
+
     # Issue #3420: Get isolation level from session
-    isolation_level = session.get('isolation_level')
+    isolation_level = session.get("isolation_level")
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
@@ -1577,7 +1577,7 @@ def api_check_path():
 @fs_bp.route("/fs/home", methods=["GET"])
 def api_get_home():
     """Get user's home directory.
-    
+
     Issue #3420: Return isolation-aware home path.
     Reads isolation_level from session to determine correct home path:
     - sandboxed: /workspace/{account}
@@ -1586,10 +1586,10 @@ def api_get_home():
     user = g.user
 
     system_account = user.get("system_account") if user else None
-    
+
     # Issue #3420: Get isolation level from session
-    isolation_level = session.get('isolation_level')
-    
+    isolation_level = session.get("isolation_level")
+
     # Issue #3410: this is how the Personal Files UI FINDS the home, so it must
     # report a path the /fs lock accepts — the single-base get_home_directory()
     # returned "/a,/b/<account>" on a multi-base deployment and broke the page
