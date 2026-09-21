@@ -50,7 +50,7 @@ def upgrade() -> None:
     if "idx_content_filter_rules_priority" in indexes:
         op.drop_index("idx_content_filter_rules_priority", "content_filter_rules")
 
-    # 删除新增约束（使用原生 SQL，支持 IF EXISTS）
+    # 删除新增约束（必须在删除字段之前，否则约束会引用不存在的字段）
     conn = op.get_bind()
     if conn.dialect.name == "postgresql":
         # PostgreSQL: 使用 DROP CONSTRAINT IF EXISTS
@@ -66,6 +66,17 @@ def upgrade() -> None:
                 "DROP CONSTRAINT IF EXISTS chk_approval_status_valid"
             )
         )
+    else:
+        # SQLite/其他：使用 batch_alter_table 先删除约束
+        with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
+            try:
+                batch_op.drop_constraint("chk_system_rule_immutable", type_="check")
+            except Exception:
+                pass
+            try:
+                batch_op.drop_constraint("chk_approval_status_valid", type_="check")
+            except Exception:
+                pass
 
     # 删除新增字段（条件检查）
     with op.batch_alter_table("content_filter_rules", schema=None) as batch_op:
