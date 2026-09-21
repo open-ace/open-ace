@@ -450,19 +450,7 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP,
- is_test INTEGER DEFAULT 0 NOT NULL,
- source TEXT DEFAULT 'manual' NOT NULL,
- tenant_id integer,
- approval_status TEXT DEFAULT 'approved' NOT NULL,
- priority integer DEFAULT 100 NOT NULL,
- approved_by integer,
- approved_at TIMESTAMP,
- created_by integer,
- valid_from TIMESTAMP,
- valid_until TIMESTAMP,
-    CONSTRAINT chk_approval_status_valid CHECK ((approval_status IN ('pending', 'approved', 'rejected'))),
-    CONSTRAINT chk_system_rule_immutable CHECK ((((source) <> 'system') OR (is_test = false)))
+ updated_at TIMESTAMP
 );
 
 CREATE TABLE daily_messages (
@@ -605,13 +593,6 @@ CREATE TABLE feishu_settings (
  last_test_error_summary text,
  verified_config_fingerprint TEXT,
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
-);
-
-CREATE TABLE filter_rule_trigger_stats (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- rule_id integer NOT NULL,
- trigger_count INTEGER DEFAULT '0',
- last_triggered_at TIMESTAMP
 );
 
 CREATE TABLE hourly_stats (
@@ -1724,8 +1705,6 @@ CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (repo
 
 CREATE UNIQUE INDEX encryption_keys_key_fingerprint_key ON encryption_keys (key_fingerprint);
 
-CREATE UNIQUE INDEX filter_rule_trigger_stats_rule_id_key ON filter_rule_trigger_stats (rule_id);
-
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
@@ -1922,16 +1901,6 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations (status
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations (tenant_id);
 
-CREATE INDEX idx_content_filter_rules_approval_status ON content_filter_rules (approval_status);
-
-CREATE INDEX idx_content_filter_rules_is_test ON content_filter_rules (is_test);
-
-CREATE INDEX idx_content_filter_rules_priority ON content_filter_rules (priority);
-
-CREATE INDEX idx_content_filter_rules_source ON content_filter_rules (source);
-
-CREATE INDEX idx_content_filter_rules_tenant_id ON content_filter_rules (tenant_id);
-
 CREATE INDEX idx_daily_messages_orphan ON daily_messages (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages (tenant_id, date);
@@ -1975,8 +1944,6 @@ CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys (key_fingerprint
 CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
-
-CREATE INDEX idx_filter_rule_trigger_stats_rule_id ON filter_rule_trigger_stats (rule_id);
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 

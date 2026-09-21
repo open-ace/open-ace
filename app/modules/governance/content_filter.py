@@ -168,7 +168,6 @@ class ContentFilter:
         # Database rules integration
         self.governance_repo = governance_repo
         self._rules_cache: list[dict[str, Any]] | None = None
-        self._tenant_rules_cache: dict[tuple[int | None], list[dict[str, Any]]] = {}
         self._cache_valid: bool = False
 
         # Compiled regex cache for database rules (LRU cache)
@@ -301,104 +300,37 @@ class ContentFilter:
 
         return validated
 
-    def _load_rules_from_db(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
+    def _load_rules_from_db(self) -> list[dict[str, Any]]:
         """
-        Load filter rules from database with enhanced filtering.
-
-        Filters:
-        - is_test = FALSE (exclude test rules)
-        - approval_status = 'approved' (only approved rules)
-        - is_enabled = TRUE (only enabled rules)
-        - tenant_id = NULL or tenant_id (global + tenant-specific rules)
-        - valid_from/valid_until (only rules within validity period)
-
-        Args:
-            tenant_id: Optional tenant ID for tenant-specific rules.
-                      None loads only global rules (tenant_id IS NULL).
+        Load filter rules from database.
 
         Returns:
-            List of enabled, approved, non-test filter rules.
+            List of enabled filter rules.
         """
         if self.governance_repo is None:
             return []
 
         # Fast path: check cache validity without lock
-        cache_key = (tenant_id,)
-        with self._cache_lock:
-            if self._cache_valid and cache_key in self._tenant_rules_cache:
-                return self._tenant_rules_cache[cache_key]
+        if self._cache_valid and self._rules_cache is not None:
+            return self._rules_cache
 
         # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-
-            # Apply filters
-            from datetime import datetime, timezone
-
-            now = datetime.now(timezone.utc)
-            enabled_rules = []
-
-            for r in rules:
-                # Must be enabled
-                if not r.get("is_enabled", True):
-                    continue
-
-                # Exclude test rules
-                if r.get("is_test", False):
-                    continue
-
-                # Only approved rules
-                approval_status = r.get("approval_status", "approved")
-                if approval_status != "approved":
-                    continue
-
-                # Tenant isolation
-                rule_tenant_id = r.get("tenant_id")
-                if tenant_id is not None:
-                    # If tenant_id specified, include global rules (NULL) or matching tenant rules
-                    if rule_tenant_id is not None and rule_tenant_id != tenant_id:
-                        continue
-                else:
-                    # If no tenant_id, only global rules
-                    if rule_tenant_id is not None:
-                        continue
-
-                # Validity period check
-                valid_from = r.get("valid_from")
-                valid_until = r.get("valid_until")
-
-                if valid_from is not None and now < valid_from:
-                    continue
-                if valid_until is not None and now > valid_until:
-                    continue
-
-                enabled_rules.append(r)
-
-            # Sort by priority (ascending) then by created_at (descending)
-            enabled_rules.sort(
-                key=lambda x: (x.get("priority", 100), x.get("created_at", "")), reverse=False
-            )
-            # Reverse created_at within same priority
-            from itertools import groupby
-
-            sorted_rules = []
-            for _, group in groupby(enabled_rules, key=lambda x: x.get("priority", 100)):
-                sorted_rules.extend(
-                    sorted(group, key=lambda x: x.get("created_at", ""), reverse=True)
-                )
-            enabled_rules = sorted_rules
-
+            enabled_rules = [r for r in rules if r.get("is_enabled", True)]
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
 
         # Update cache with lock protection
         with self._cache_lock:
-            self._tenant_rules_cache[cache_key] = enabled_rules
+            # Double-check: another thread may have updated while we were loading
+            if self._cache_valid and self._rules_cache is not None:
+                return self._rules_cache
+            self._rules_cache = enabled_rules
+            self._cache_valid = True
 
-        logger.debug(
-            f"Loaded {len(enabled_rules)} filter rules from database (tenant_id={tenant_id})"
-        )
+        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
         return enabled_rules
 
     def _get_compiled_pattern(
@@ -660,27 +592,10 @@ class ContentFilter:
 
         Compact numbers without a leading ``+`` and with fewer than 7 digits
         are exit codes, ports, counters or versions in ordinary prompts
-        (``Exit 137``, ``port 51820``, ``v2.5``), not subscriber numbers;
+        (``Exit 137``, ``port 8080``, ``v2.5``), not subscriber numbers;
         E.164 numbers carry at least 7 digits. Space/dash-separated groups
         keep the looser interpretation (``86 138`` reads like a phone
         fragment), and an explicit ``+`` prefix always does.
-
-        The whitespace carve-out is load-bearing, not an oversight: the pattern
-        splits ``+86 138 0013 8000`` into fragments, and suppressing short
-        space-separated groups such as ``86 138`` would lose real international
-        numbers. The cost is that two space-separated counters
-        (``HTTP 502 12 times``) stay a false positive — narrowing that needs a
-        different pattern, not a tighter suppressor.
-
-        This only narrows what enters ``matched_rules``. ``_redact_matches``
-        re-runs the raw pattern over the whole text, so a suppressed value is
-        still rewritten whenever a sibling match of the same pattern survives
-        (``Exit 137 and call 13800138000`` still stores ``Exit 137-***-****``).
-        Closing that needs the redaction pass to work from spans decided on the
-        original content. Guarding the ``sub`` callback with this predicate is
-        NOT a fix and was tried and rejected: it under-redacts real numbers,
-        shipping ``123456`` verbatim from ``+44 7911 123456`` while the audit
-        record still claims the value was redacted.
         """
         stripped = value.strip()
         if stripped.startswith("+"):
@@ -902,21 +817,9 @@ class ContentFilter:
 
         # Log if enabled
         if self.log_matches and matched_rules:
-            # Determine log level based on rule source
-            # System rules: INFO level (reduce noise)
-            # User rules: WARNING level (important)
-            has_user_rules = any(r.get("source") != "system" for r in matched_rules)
-
-            if has_user_rules:
-                log_level = logging.WARNING
-            else:
-                log_level = logging.INFO
-
-            logger.log(
-                log_level,
+            logger.warning(
                 f"Content filter matched: {len(matched_rules)} rules, "
-                f"risk={overall_risk}, action={overall_action}, passed={passed}, "
-                f"sources={[r.get('source', 'manual') for r in matched_rules]}",
+                f"risk={overall_risk}, action={overall_action}, passed={passed}"
             )
 
         # Generate message and suggestion

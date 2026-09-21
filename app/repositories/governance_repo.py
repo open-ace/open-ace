@@ -57,42 +57,6 @@ class GovernanceRepository:
 
         return rules
 
-    def get_filter_rule(self, rule_id: int) -> dict | None:
-        """
-        Get a specific filter rule.
-
-        Args:
-            rule_id: Rule ID.
-
-        Returns:
-            Optional[Dict]: Rule data or None.
-        """
-        query = "SELECT * FROM content_filter_rules WHERE id = ?"
-        rule = self.db.fetch_one(query, (rule_id,))
-
-        if rule:
-            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
-
-        return rule
-
-    def get_filter_rule_by_pattern(self, pattern: str) -> dict | None:
-        """
-        Get a filter rule by pattern.
-
-        Args:
-            pattern: Pattern to search for.
-
-        Returns:
-            Optional[Dict]: Rule data or None.
-        """
-        query = "SELECT * FROM content_filter_rules WHERE pattern = ?"
-        rule = self.db.fetch_one(query, (pattern,))
-
-        if rule:
-            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
-
-        return rule
-
     def get_filter_rules_paginated(
         self,
         limit: int = 100,
@@ -153,6 +117,42 @@ class GovernanceRepository:
             rule["is_enabled"] = bool(rule.get("is_enabled", 1))
 
         return rules, total
+
+    def get_filter_rule(self, rule_id: int) -> dict | None:
+        """
+        Get a specific filter rule.
+
+        Args:
+            rule_id: Rule ID.
+
+        Returns:
+            Optional[Dict]: Rule data or None.
+        """
+        query = "SELECT * FROM content_filter_rules WHERE id = ?"
+        rule = self.db.fetch_one(query, (rule_id,))
+
+        if rule:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rule
+
+    def get_filter_rule_by_pattern(self, pattern: str) -> dict | None:
+        """
+        Get a filter rule by pattern.
+
+        Args:
+            pattern: Pattern to search for.
+
+        Returns:
+            Optional[Dict]: Rule data or None.
+        """
+        query = "SELECT * FROM content_filter_rules WHERE pattern = ?"
+        rule = self.db.fetch_one(query, (pattern,))
+
+        if rule:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rule
 
     def create_filter_rule(
         self,
@@ -812,6 +812,85 @@ class GovernanceRepository:
         }
 
     # =========================================================================
+    # Upload Auth Status (Issue #3327)
+    # =========================================================================
+
+    def get_upload_auth_status(self) -> dict[str, Any]:
+        """
+        Get upload authentication status.
+
+        Issue #3327: Returns upload auth status without exposing the key value.
+
+        Returns:
+            Dict with upload auth status information, including:
+            - upload_auth_enabled: bool
+            - key_length: int | None
+            - config_source: str
+            - security_mode: str
+            - is_valid: bool
+            - validation_error: str | None
+            - fix_suggestion: str | None
+            - checked_at: str
+        """
+        from app.utils.security_env import get_upload_auth_key
+        from app.utils.security_mode import get_security_mode, is_weak_secret_value
+
+        # Get security mode
+        try:
+            mode = get_security_mode()
+            security_mode = mode.value
+        except Exception:
+            security_mode = "unknown"
+
+        # Get upload auth key (may raise RuntimeError in production with weak key)
+        upload_auth_key = None
+        validation_error = None
+        fix_suggestion = None
+        is_valid = True
+
+        # Call get_upload_auth_key() - will raise RuntimeError in production with weak key
+        # We don't catch it here, let it propagate to the API layer
+        upload_auth_key = get_upload_auth_key()
+
+        # Determine status
+        if upload_auth_key is None:
+            # Key not set or weak key in development mode
+            upload_auth_enabled = False
+            key_length = None
+
+            # Check if this is due to weak key
+            raw_key = os.environ.get("UPLOAD_AUTH_KEY")
+            if raw_key and is_weak_secret_value(raw_key):
+                is_valid = False
+                validation_error = "密钥使用不安全的占位符值"
+                fix_suggestion = (
+                    '请生成强密钥：python3 -c "import secrets; print(secrets.token_hex(32))"，'
+                    "并在 .env 或 Kubernetes ConfigMap 中设置 UPLOAD_AUTH_KEY"
+                )
+            elif not validation_error:
+                # Key not set
+                fix_suggestion = "请参考部署文档配置 UPLOAD_AUTH_KEY 环境变量"
+        else:
+            # Key is set and valid
+            upload_auth_enabled = True
+            key_length = len(upload_auth_key)
+            is_valid = True
+
+        # Get current timestamp
+        checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        return {
+            "upload_auth_enabled": upload_auth_enabled,
+            "key_length": key_length,
+            "config_source": "environment_variable",
+            "security_mode": security_mode,
+            "is_valid": is_valid,
+            "validation_error": validation_error,
+            "fix_suggestion": fix_suggestion,
+            "checked_at": checked_at,
+        }
+
+    # =========================================================================
     # Tenant Sensitive Keywords (Issue #2789)
     # =========================================================================
 
@@ -1144,233 +1223,3 @@ class GovernanceRepository:
         except Exception as e:
             logger.error(f"Error incrementing tenant keywords version: {e}")
             return False
-
-    def get_upload_auth_status(self) -> dict[str, Any]:
-        """
-        Get upload authentication status.
-
-        Issue #3327: Returns upload auth status without exposing the key value.
-
-        Returns:
-            Dict with upload auth status information, including:
-            - upload_auth_enabled: bool
-            - key_length: int | None
-            - config_source: str
-            - security_mode: str
-            - is_valid: bool
-            - validation_error: str | None
-            - fix_suggestion: str | None
-            - checked_at: str
-        """
-        from app.utils.security_env import get_upload_auth_key
-        from app.utils.security_mode import get_security_mode, is_weak_secret_value
-
-        # Get security mode
-        try:
-            mode = get_security_mode()
-            security_mode = mode.value
-        except Exception:
-            security_mode = "unknown"
-
-        # Get upload auth key (may raise RuntimeError in production with weak key)
-        upload_auth_key = None
-        validation_error = None
-        fix_suggestion = None
-        is_valid = True
-
-        # Call get_upload_auth_key() - will raise RuntimeError in production with weak key
-        # We don't catch it here, let it propagate to the API layer
-        upload_auth_key = get_upload_auth_key()
-
-        # Determine status
-        if upload_auth_key is None:
-            # Key not set or weak key in development mode
-            upload_auth_enabled = False
-            key_length = None
-
-            # Check if this is due to weak key
-            raw_key = os.environ.get("UPLOAD_AUTH_KEY")
-            if raw_key and is_weak_secret_value(raw_key):
-                is_valid = False
-                validation_error = "密钥使用不安全的占位符值"
-                fix_suggestion = (
-                    '请生成强密钥：python3 -c "import secrets; print(secrets.token_hex(32))"，'
-                    "并在 .env 或 Kubernetes ConfigMap 中设置 UPLOAD_AUTH_KEY"
-                )
-            elif not validation_error:
-                # Key not set
-                fix_suggestion = "请参考部署文档配置 UPLOAD_AUTH_KEY 环境变量"
-        else:
-            # Key is set and valid
-            upload_auth_enabled = True
-            key_length = len(upload_auth_key)
-            is_valid = True
-
-        # Get current timestamp
-        checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-        return {
-            "upload_auth_enabled": upload_auth_enabled,
-            "key_length": key_length,
-            "config_source": "environment_variable",
-            "security_mode": security_mode,
-            "is_valid": is_valid,
-            "validation_error": validation_error,
-            "fix_suggestion": fix_suggestion,
-            "checked_at": checked_at,
-        }
-
-    # =========================================================================
-    # Enhanced Content Filter Rules (Issue #2550)
-    # =========================================================================
-
-    def mark_rule_as_test(self, rule_id: int, is_test: bool) -> bool:
-        """
-        Mark a filter rule as test or production rule.
-
-        Args:
-            rule_id: Rule ID.
-            is_test: Whether this is a test rule.
-
-        Returns:
-            bool: True if successful.
-        """
-        try:
-            self.db.execute(
-                "UPDATE content_filter_rules SET is_test = ? WHERE id = ?",
-                (1 if is_test else 0, rule_id),
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to mark rule {rule_id} as test: {e}")
-            return False
-
-    def approve_filter_rule(self, rule_id: int, user_id: int) -> bool:
-        """
-        Approve a pending filter rule.
-
-        Args:
-            rule_id: Rule ID.
-            user_id: Approving user ID.
-
-        Returns:
-            bool: True if successful.
-        """
-        try:
-            from datetime import datetime, timezone
-
-            approved_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            self.db.execute(
-                """
-                UPDATE content_filter_rules
-                SET approval_status = 'approved',
-                    approved_by = ?,
-                    approved_at = ?
-                WHERE id = ?
-                """,
-                (user_id, approved_at, rule_id),
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to approve rule {rule_id}: {e}")
-            return False
-
-    def reject_filter_rule(self, rule_id: int, user_id: int) -> bool:
-        """
-        Reject a pending filter rule.
-
-        Args:
-            rule_id: Rule ID.
-            user_id: Rejecting user ID.
-
-        Returns:
-            bool: True if successful.
-        """
-        try:
-            self.db.execute(
-                "UPDATE content_filter_rules SET approval_status = 'rejected' WHERE id = ?",
-                (rule_id,),
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to reject rule {rule_id}: {e}")
-            return False
-
-    def increment_trigger_count(self, rule_id: int) -> bool:
-        """
-        Increment trigger count for a filter rule.
-
-        Args:
-            rule_id: Rule ID.
-
-        Returns:
-            bool: True if successful.
-        """
-        try:
-            from datetime import datetime, timezone
-
-            triggered_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-
-            # Check if stats record exists
-            existing = self.db.fetch_one(
-                "SELECT id FROM filter_rule_trigger_stats WHERE rule_id = ?", (rule_id,)
-            )
-
-            if existing:
-                # Update existing record
-                self.db.execute(
-                    """
-                    UPDATE filter_rule_trigger_stats
-                    SET trigger_count = trigger_count + 1,
-                        last_triggered_at = ?
-                    WHERE rule_id = ?
-                    """,
-                    (triggered_at, rule_id),
-                )
-            else:
-                # Create new record
-                self.db.execute(
-                    """
-                    INSERT INTO filter_rule_trigger_stats
-                    (rule_id, trigger_count, last_triggered_at)
-                    VALUES (?, 1, ?)
-                    """,
-                    (rule_id, triggered_at),
-                )
-
-            return True
-        except Exception as e:
-            logger.error(f"Failed to increment trigger count for rule {rule_id}: {e}")
-            return False
-
-    def get_trigger_stats(self, rule_id: int | None = None) -> list[dict] | dict | None:
-        """
-        Get trigger statistics for filter rules.
-
-        Args:
-            rule_id: Optional rule ID. If None, returns stats for all rules.
-
-        Returns:
-            List of stats dicts or single stats dict.
-        """
-        try:
-            if rule_id:
-                return self.db.fetch_one(
-                    """
-                    SELECT s.*, r.pattern, r.description
-                    FROM filter_rule_trigger_stats s
-                    JOIN content_filter_rules r ON s.rule_id = r.id
-                    WHERE s.rule_id = ?
-                    """,
-                    (rule_id,),
-                )
-            else:
-                return self.db.fetch_all("""
-                    SELECT s.*, r.pattern, r.description
-                    FROM filter_rule_trigger_stats s
-                    JOIN content_filter_rules r ON s.rule_id = r.id
-                    ORDER BY s.trigger_count DESC
-                    """)
-        except Exception as e:
-            logger.error(f"Failed to get trigger stats: {e}")
-            return None
