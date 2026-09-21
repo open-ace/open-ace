@@ -8,6 +8,7 @@ API routes for enterprise governance features:
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
@@ -497,6 +498,64 @@ def api_add_keyword():
 # ============================================================================
 
 
+# Valid enum values for filter rules
+VALID_RULE_TYPES = {"keyword", "regex", "pii"}
+VALID_SEVERITIES = {"low", "medium", "high"}
+VALID_ACTIONS = {"warn", "block", "redact"}
+
+
+def _validate_filter_rule_input(
+    pattern: str,
+    rule_type: str,
+    severity: str,
+    action: str,
+) -> tuple[bool, str]:
+    """
+    Validate filter rule input parameters.
+
+    Returns:
+        Tuple of (is_valid, error_message).
+    """
+    # Validate pattern length
+    if len(pattern) > 1000:
+        return False, "Pattern too long (max 1000 chars)"
+
+    # Validate enum values
+    if rule_type not in VALID_RULE_TYPES:
+        return (
+            False,
+            f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}",
+        )
+
+    if severity not in VALID_SEVERITIES:
+        return (
+            False,
+            f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}",
+        )
+
+    if action not in VALID_ACTIONS:
+        return (
+            False,
+            f"Invalid action '{action}'. Must be one of: {', '.join(sorted(VALID_ACTIONS))}",
+        )
+
+    # Validate regex pattern if type is 'regex'
+    if rule_type == "regex":
+        try:
+            # Check for ReDoS patterns
+            if re.search(r"\+.*\+", pattern) or re.search(r"\*.*\*", pattern):
+                return False, "Nested quantifiers not allowed (ReDoS risk)"
+
+            if re.search(r"\([^)]*\|[^)]*\)[+*]", pattern):
+                return False, "Alternation with quantifiers not allowed (ReDoS risk)"
+
+            re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            return False, f"Invalid regex pattern: {e}"
+
+    return True, ""
+
+
 @governance_bp.route("/filter-rules", methods=["GET"])
 @admin_required
 def api_get_filter_rules():
@@ -522,6 +581,11 @@ def api_create_filter_rule():
 
     if not pattern:
         return jsonify({"error": "Pattern is required"}), 400
+
+    # Validate input
+    is_valid, error_msg = _validate_filter_rule_input(pattern, rule_type, severity, action)
+    if not is_valid:
+        return jsonify({"error": error_msg}), 400
 
     rule_id = governance_repo.create_filter_rule(
         pattern=pattern,
