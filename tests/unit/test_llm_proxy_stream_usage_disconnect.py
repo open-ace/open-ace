@@ -456,3 +456,33 @@ class TestPartialStreamUsageEvidence:
         )
         assert session.total_output_tokens == 9, "a final usage event charges itself"
         assert session.total_input_tokens == 7
+
+
+class TestResponsesApiStreamEstimate:
+    def test_string_deltas_count(self):
+        """Responses-API events carry text as a plain string delta."""
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        events = [
+            {"type": "response.output_text.delta", "delta": "hello "},
+            {"type": "response.output_text.delta", "delta": "world "},
+        ] * 250
+        stream = b"".join(
+            b"data: " + json.dumps(e, separators=(",", ":")).encode() + b"\n\n" for e in events
+        )
+        estimate = _stream_usage_fallback(stream, None, "text/event-stream")
+        delivered = 3000 // 6  # 500 six-byte deltas ~ one token each
+        assert delivered <= estimate <= 2 * delivered
+
+    def test_done_events_do_not_double_count(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        stream = b"".join(
+            [
+                b'data: {"type":"response.output_text.delta","delta":"abc"}\n\n',
+                b'data: {"type":"response.output_text.done","text":"abc"}\n\n',
+                b'data: {"type":"response.completed","response":{"output":[{"content":[{"text":"abc"}]}]}}\n\n',
+            ]
+        )
+        estimate = _stream_usage_fallback(stream, None, "text/event-stream")
+        assert estimate == 1, "done/completed events repeat text and must not count"

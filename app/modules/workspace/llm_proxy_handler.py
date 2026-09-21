@@ -496,6 +496,13 @@ def _stream_text_bytes(payload: object) -> int:
         if isinstance(node, dict):
             total = 0
             delta = node.get("delta")
+            if isinstance(delta, str):
+                # Responses-API events carry the generated text as a plain
+                # string delta (response.output_text.delta, function_call_
+                # arguments.delta, reasoning-summary deltas). The completed/
+                # done events repeat the full text under other keys, which
+                # the walker deliberately never collects.
+                total += len(delta.encode("utf-8"))
             if isinstance(delta, dict):
                 for field in ("content", "reasoning_content", "text", "thinking", "partial_json"):
                     value = delta.get(field)
