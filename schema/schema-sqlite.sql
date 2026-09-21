@@ -450,19 +450,7 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP,
- is_test INTEGER DEFAULT 0 NOT NULL,
- source TEXT DEFAULT 'manual' NOT NULL,
- tenant_id integer,
- approval_status TEXT DEFAULT 'approved' NOT NULL,
- priority integer DEFAULT 100 NOT NULL,
- approved_by integer,
- approved_at TIMESTAMP,
- created_by integer,
- valid_from TIMESTAMP,
- valid_until TIMESTAMP,
-    CONSTRAINT chk_approval_status_valid CHECK ((approval_status IN ('pending', 'approved', 'rejected'))),
-    CONSTRAINT chk_system_rule_immutable CHECK ((((source) <> 'system') OR (is_test = false)))
+ updated_at TIMESTAMP
 );
 
 CREATE TABLE daily_messages (
@@ -577,16 +565,6 @@ CREATE TABLE email_notification_logs (
  next_retry_at TIMESTAMP
 );
 
-CREATE TABLE encryption_keys (
- key_id INTEGER PRIMARY KEY AUTOINCREMENT,
- key_fingerprint TEXT NOT NULL,
- status TEXT NOT NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- rotated_at TIMESTAMP,
- config_version INTEGER NOT NULL,
- last_used_at TIMESTAMP
-);
-
 CREATE TABLE feishu_settings (
  app_id TEXT NOT NULL,
  app_secret_enc text NOT NULL,
@@ -599,19 +577,7 @@ CREATE TABLE feishu_settings (
  created_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- verification_status TEXT,
- last_tested_at TIMESTAMP,
- last_test_error_code TEXT,
- last_test_error_summary text,
- verified_config_fingerprint TEXT,
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
-);
-
-CREATE TABLE filter_rule_trigger_stats (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- rule_id integer NOT NULL,
- trigger_count INTEGER DEFAULT '0',
- last_triggered_at TIMESTAMP
 );
 
 CREATE TABLE hourly_stats (
@@ -1000,47 +966,6 @@ CREATE TABLE remote_runtime_outputs (
  expires_at TIMESTAMP
 );
 
-CREATE TABLE request_performance (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- request_id text NOT NULL,
- session_id text,
- conversation_id text,
- tenant_id integer NOT NULL,
- tool_name text NOT NULL,
- host_name text DEFAULT 'localhost',
- user_id integer,
- started_at TIMESTAMP NOT NULL,
- first_response_at TIMESTAMP,
- completed_at TIMESTAMP,
- ttft_ms integer,
- tool_call_duration_ms integer DEFAULT 0,
- total_duration_ms integer,
- status text DEFAULT 'success' NOT NULL,
- sample_type text DEFAULT 'streaming',
- model text,
- tool_call_count integer DEFAULT 0,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE response_time_stats (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- date text NOT NULL,
- tool_name text NOT NULL,
- host_name text DEFAULT 'localhost',
- tenant_id integer NOT NULL,
- avg_ms real,
- p50_ms integer,
- p95_ms integer,
- min_ms integer,
- max_ms integer,
- tool_call_avg_ms real,
- tool_call_ratio real,
- sample_count integer DEFAULT 0 NOT NULL,
- success_count integer DEFAULT 0 NOT NULL,
- failed_count integer DEFAULT 0 NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE retention_evidence (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  execution_id TEXT NOT NULL,
@@ -1163,22 +1088,6 @@ CREATE TABLE security_settings (
  description text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE session_daily_usage (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- session_id text NOT NULL,
- user_id integer,
- tenant_id integer,
- date text NOT NULL,
- tokens integer DEFAULT 0 NOT NULL,
- requests integer DEFAULT 0 NOT NULL,
- input_tokens integer DEFAULT 0 NOT NULL,
- output_tokens integer DEFAULT 0 NOT NULL,
- cache_read_tokens integer DEFAULT 0,
- cache_write_tokens integer DEFAULT 0,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE session_messages (
@@ -1366,8 +1275,8 @@ CREATE TABLE tenant_quotas (
  tenant_id integer NOT NULL,
  daily_token_limit INTEGER DEFAULT 1000000,
  monthly_token_limit INTEGER DEFAULT 30000000,
- daily_request_limit INTEGER DEFAULT 10000,
- monthly_request_limit INTEGER DEFAULT 300000,
+ daily_request_limit integer DEFAULT 10000,
+ monthly_request_limit integer DEFAULT 300000,
  max_users integer DEFAULT 100,
  max_sessions_per_user integer DEFAULT 5,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1583,10 +1492,7 @@ CREATE TABLE user_tool_accounts (
  observed_message_count integer,
  created_by integer,
  tenant_id integer,
- version integer,
- verification_status TEXT,
- verification_result text,
- verified_at TIMESTAMP
+ version integer
 );
 
 CREATE TABLE users (
@@ -1599,10 +1505,10 @@ CREATE TABLE users (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_login TIMESTAMP,
  role TEXT DEFAULT 'user',
- daily_token_quota INTEGER,
- monthly_token_quota INTEGER,
- daily_request_quota INTEGER,
- monthly_request_quota INTEGER,
+ daily_token_quota integer,
+ monthly_token_quota integer,
+ daily_request_quota integer,
+ monthly_request_quota integer,
  deleted_at TIMESTAMP,
  system_account text,
  tenant_id integer,
@@ -1610,8 +1516,6 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
- tokens_valid_after TIMESTAMP,
- system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
@@ -1637,11 +1541,6 @@ CREATE TABLE webhook_deliveries (
  last_error_at TIMESTAMP,
  created_at TIMESTAMP NOT NULL,
  updated_at TIMESTAMP NOT NULL,
- receiver_identity_hash TEXT,
- cooldown_key TEXT,
- cooldown_expires_at TIMESTAMP,
- delivery_claim_token TEXT,
- delivery_claim_expires_at TIMESTAMP,
     CONSTRAINT ck_webhook_deliveries_status CHECK ((status IN ('pending', 'in_flight', 'delivered', 'dead')))
 );
 
@@ -1722,10 +1621,6 @@ CREATE UNIQUE INDEX autonomous_workflows_workflow_id_key ON autonomous_workflows
 
 CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (report_id);
 
-CREATE UNIQUE INDEX encryption_keys_key_fingerprint_key ON encryption_keys (key_fingerprint);
-
-CREATE UNIQUE INDEX filter_rule_trigger_stats_rule_id_key ON filter_rule_trigger_stats (rule_id);
-
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
@@ -1739,10 +1634,6 @@ CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (t
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
 
 CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
-
-CREATE UNIQUE INDEX request_performance_request_id_key ON request_performance (request_id);
-
-CREATE UNIQUE INDEX response_time_stats_date_tool_name_host_name_tenant_id_key ON response_time_stats (date, tool_name, host_name, tenant_id);
 
 CREATE UNIQUE INDEX retention_executions_execution_id_key ON retention_executions (execution_id);
 
@@ -1793,8 +1684,6 @@ CREATE UNIQUE INDEX uq_mapping_rule_user_pattern ON tool_account_mapping_rules (
 CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id, date, period);
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
-
-CREATE UNIQUE INDEX uq_session_daily_usage_session_date ON session_daily_usage (session_id, date);
 
 CREATE UNIQUE INDEX uq_tenant_keyword ON tenant_sensitive_keywords (tenant_id, normalized_keyword);
 
@@ -1922,16 +1811,6 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations (status
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations (tenant_id);
 
-CREATE INDEX idx_content_filter_rules_approval_status ON content_filter_rules (approval_status);
-
-CREATE INDEX idx_content_filter_rules_is_test ON content_filter_rules (is_test);
-
-CREATE INDEX idx_content_filter_rules_priority ON content_filter_rules (priority);
-
-CREATE INDEX idx_content_filter_rules_source ON content_filter_rules (source);
-
-CREATE INDEX idx_content_filter_rules_tenant_id ON content_filter_rules (tenant_id);
-
 CREATE INDEX idx_daily_messages_orphan ON daily_messages (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages (tenant_id, date);
@@ -1970,13 +1849,7 @@ CREATE INDEX idx_email_logs_user_id ON email_notification_logs (user_id);
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs (user_id, sent_at);
 
-CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys (key_fingerprint);
-
-CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
-
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
-
-CREATE INDEX idx_filter_rule_trigger_stats_rule_id ON filter_rule_trigger_stats (rule_id);
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
@@ -2136,16 +2009,6 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expir
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
-CREATE INDEX idx_request_performance_date ON request_performance (started_at);
-
-CREATE INDEX idx_request_performance_tenant ON request_performance (tenant_id);
-
-CREATE INDEX idx_request_performance_tool ON request_performance (tool_name, started_at);
-
-CREATE INDEX idx_response_time_stats_date ON response_time_stats (date);
-
-CREATE INDEX idx_response_time_stats_tenant ON response_time_stats (tenant_id, date);
-
 CREATE INDEX idx_retention_evidence_execution ON retention_evidence (execution_id);
 
 CREATE INDEX idx_retention_evidence_tenant ON retention_evidence (tenant_id);
@@ -2183,12 +2046,6 @@ CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
-
-CREATE INDEX idx_session_daily_usage_date ON session_daily_usage (date);
-
-CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage (tenant_id);
-
-CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage (user_id, date);
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
 
@@ -2331,12 +2188,6 @@ CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHER
 CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
-
-CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries (cooldown_key, status, cooldown_expires_at);
-
-CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries (cooldown_expires_at);
-
-CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries (receiver_identity_hash);
 
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries (status, next_retry_at);
 

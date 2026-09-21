@@ -665,19 +665,7 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone,
-    is_test boolean DEFAULT false NOT NULL,
-    source character varying(20) DEFAULT 'manual'::character varying NOT NULL,
-    tenant_id integer,
-    approval_status character varying(20) DEFAULT 'approved'::character varying NOT NULL,
-    priority integer DEFAULT 100 NOT NULL,
-    approved_by integer,
-    approved_at timestamp without time zone,
-    created_by integer,
-    valid_from timestamp without time zone,
-    valid_until timestamp without time zone,
-    CONSTRAINT chk_approval_status_valid CHECK (((approval_status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying])::text[]))),
-    CONSTRAINT chk_system_rule_immutable CHECK ((((source)::text <> 'system'::text) OR (is_test = false)))
+    updated_at timestamp without time zone
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq
@@ -846,25 +834,6 @@ CREATE SEQUENCE email_notification_logs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE email_notification_logs_id_seq OWNED BY email_notification_logs.id;
-CREATE TABLE encryption_keys (
-    key_id integer NOT NULL,
-    key_fingerprint character varying(64) NOT NULL,
-    status character varying(20) NOT NULL,
-    created_at timestamp without time zone DEFAULT now() NOT NULL,
-    rotated_at timestamp without time zone,
-    config_version bigint NOT NULL,
-    last_used_at timestamp without time zone
-);
-
-CREATE SEQUENCE encryption_keys_key_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE encryption_keys_key_id_seq OWNED BY encryption_keys.key_id;
 CREATE TABLE feishu_settings (
     app_id character varying(255) NOT NULL,
     app_secret_enc text NOT NULL,
@@ -877,11 +846,6 @@ CREATE TABLE feishu_settings (
     created_by integer,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    verification_status character varying(32),
-    last_tested_at timestamp without time zone,
-    last_test_error_code character varying(64),
-    last_test_error_summary text,
-    verified_config_fingerprint character varying(128),
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
 );
 
@@ -901,22 +865,6 @@ CREATE SEQUENCE fencing_token_seq
     NO MAXVALUE
     CACHE 1;
 
-CREATE TABLE filter_rule_trigger_stats (
-    id integer NOT NULL,
-    rule_id integer NOT NULL,
-    trigger_count bigint DEFAULT '0'::bigint,
-    last_triggered_at timestamp without time zone
-);
-
-CREATE SEQUENCE filter_rule_trigger_stats_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE filter_rule_trigger_stats_id_seq OWNED BY filter_rule_trigger_stats.id;
 CREATE TABLE hourly_stats (
     date character varying(10) NOT NULL,
     hour integer NOT NULL,
@@ -1508,65 +1456,6 @@ CREATE SEQUENCE remote_runtime_outputs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE remote_runtime_outputs_id_seq OWNED BY remote_runtime_outputs.id;
-CREATE TABLE request_performance (
-    id integer NOT NULL,
-    request_id text NOT NULL,
-    session_id text,
-    conversation_id text,
-    tenant_id integer NOT NULL,
-    tool_name text NOT NULL,
-    host_name text DEFAULT 'localhost'::text,
-    user_id integer,
-    started_at timestamp without time zone NOT NULL,
-    first_response_at timestamp without time zone,
-    completed_at timestamp without time zone,
-    ttft_ms integer,
-    tool_call_duration_ms integer DEFAULT 0,
-    total_duration_ms integer,
-    status text DEFAULT 'success'::text NOT NULL,
-    sample_type text DEFAULT 'streaming'::text,
-    model text,
-    tool_call_count integer DEFAULT 0,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE SEQUENCE request_performance_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE request_performance_id_seq OWNED BY request_performance.id;
-CREATE TABLE response_time_stats (
-    id integer NOT NULL,
-    date text NOT NULL,
-    tool_name text NOT NULL,
-    host_name text DEFAULT 'localhost'::text,
-    tenant_id integer NOT NULL,
-    avg_ms real,
-    p50_ms integer,
-    p95_ms integer,
-    min_ms integer,
-    max_ms integer,
-    tool_call_avg_ms real,
-    tool_call_ratio real,
-    sample_count integer DEFAULT 0 NOT NULL,
-    success_count integer DEFAULT 0 NOT NULL,
-    failed_count integer DEFAULT 0 NOT NULL,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE SEQUENCE response_time_stats_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE response_time_stats_id_seq OWNED BY response_time_stats.id;
 CREATE TABLE retention_evidence (
     id integer NOT NULL,
     execution_id character varying(64) NOT NULL,
@@ -1754,31 +1643,6 @@ CREATE SEQUENCE security_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE security_settings_id_seq OWNED BY security_settings.id;
-CREATE TABLE session_daily_usage (
-    id integer NOT NULL,
-    session_id text NOT NULL,
-    user_id integer,
-    tenant_id integer,
-    date text NOT NULL,
-    tokens integer DEFAULT 0 NOT NULL,
-    requests integer DEFAULT 0 NOT NULL,
-    input_tokens integer DEFAULT 0 NOT NULL,
-    output_tokens integer DEFAULT 0 NOT NULL,
-    cache_read_tokens integer DEFAULT 0,
-    cache_write_tokens integer DEFAULT 0,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE SEQUENCE session_daily_usage_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE session_daily_usage_id_seq OWNED BY session_daily_usage.id;
 CREATE TABLE session_messages (
     id integer NOT NULL,
     session_id text NOT NULL,
@@ -2114,8 +1978,8 @@ CREATE TABLE tenant_quotas (
     tenant_id integer NOT NULL,
     daily_token_limit bigint DEFAULT 1000000,
     monthly_token_limit bigint DEFAULT 30000000,
-    daily_request_limit bigint DEFAULT 10000,
-    monthly_request_limit bigint DEFAULT 300000,
+    daily_request_limit integer DEFAULT 10000,
+    monthly_request_limit integer DEFAULT 300000,
     max_users integer DEFAULT 100,
     max_sessions_per_user integer DEFAULT 5,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -2440,10 +2304,7 @@ CREATE TABLE user_tool_accounts (
     observed_message_count integer,
     created_by integer,
     tenant_id integer,
-    version integer,
-    verification_status character varying(50),
-    verification_result text,
-    verified_at timestamp without time zone
+    version integer
 );
 
 CREATE SEQUENCE user_tool_accounts_id_seq
@@ -2465,10 +2326,10 @@ CREATE TABLE users (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     last_login timestamp without time zone,
     role character varying DEFAULT 'user'::character varying,
-    daily_token_quota bigint,
-    monthly_token_quota bigint,
-    daily_request_quota bigint,
-    monthly_request_quota bigint,
+    daily_token_quota integer,
+    monthly_token_quota integer,
+    daily_request_quota integer,
+    monthly_request_quota integer,
     deleted_at timestamp without time zone,
     system_account text,
     tenant_id integer,
@@ -2476,14 +2337,10 @@ CREATE TABLE users (
     avatar_url character varying(500),
     auto_mapping_enabled boolean DEFAULT true,
     tenant_version integer DEFAULT 1 NOT NULL,
-    tokens_valid_after timestamp without time zone,
-    system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role)::text = 'tenant_admin'::text) AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK (((role)::text = ANY ((ARRAY['platform_admin'::character varying, 'tenant_admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
-COMMENT ON COLUMN users.tokens_valid_after IS 'UTC timestamp; WebUI URL tokens minted before it are invalid. Stamped on deactivation/soft-delete, never cleared on reactivation/restore (Issue #3379 R-5).';
-COMMENT ON COLUMN users.system_uid IS 'Pinned OS uid for the account''s system user; passed to useradd -u on (re)creation so uids survive container recreation and a deactivated user''s uid is never reassigned (Issue #3390).';
 CREATE SEQUENCE users_id_seq
     AS integer
     START WITH 1
@@ -2523,11 +2380,6 @@ CREATE TABLE webhook_deliveries (
     last_error_at timestamp without time zone,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    receiver_identity_hash character varying(64),
-    cooldown_key character varying(64),
-    cooldown_expires_at timestamp without time zone,
-    delivery_claim_token character varying(64),
-    delivery_claim_expires_at timestamp without time zone,
     CONSTRAINT ck_webhook_deliveries_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_flight'::character varying, 'delivered'::character varying, 'dead'::character varying])::text[])))
 );
 
@@ -2674,11 +2526,7 @@ ALTER TABLE ONLY dingtalk_settings ALTER COLUMN id SET DEFAULT nextval('dingtalk
 
 ALTER TABLE ONLY email_notification_logs ALTER COLUMN id SET DEFAULT nextval('email_notification_logs_id_seq'::regclass);
 
-ALTER TABLE ONLY encryption_keys ALTER COLUMN key_id SET DEFAULT nextval('encryption_keys_key_id_seq'::regclass);
-
 ALTER TABLE ONLY feishu_settings ALTER COLUMN id SET DEFAULT nextval('feishu_settings_id_seq'::regclass);
-
-ALTER TABLE ONLY filter_rule_trigger_stats ALTER COLUMN id SET DEFAULT nextval('filter_rule_trigger_stats_id_seq'::regclass);
 
 ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
 
@@ -2720,10 +2568,6 @@ ALTER TABLE ONLY remote_runtime_commands ALTER COLUMN id SET DEFAULT nextval('re
 
 ALTER TABLE ONLY remote_runtime_outputs ALTER COLUMN id SET DEFAULT nextval('remote_runtime_outputs_id_seq'::regclass);
 
-ALTER TABLE ONLY request_performance ALTER COLUMN id SET DEFAULT nextval('request_performance_id_seq'::regclass);
-
-ALTER TABLE ONLY response_time_stats ALTER COLUMN id SET DEFAULT nextval('response_time_stats_id_seq'::regclass);
-
 ALTER TABLE ONLY retention_evidence ALTER COLUMN id SET DEFAULT nextval('retention_evidence_id_seq'::regclass);
 
 ALTER TABLE ONLY retention_executions ALTER COLUMN id SET DEFAULT nextval('retention_executions_id_seq'::regclass);
@@ -2737,8 +2581,6 @@ ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_perm
 ALTER TABLE ONLY scheduler_runs ALTER COLUMN id SET DEFAULT nextval('scheduler_runs_id_seq'::regclass);
 
 ALTER TABLE ONLY security_settings ALTER COLUMN id SET DEFAULT nextval('security_settings_id_seq'::regclass);
-
-ALTER TABLE ONLY session_daily_usage ALTER COLUMN id SET DEFAULT nextval('session_daily_usage_id_seq'::regclass);
 
 ALTER TABLE ONLY session_messages ALTER COLUMN id SET DEFAULT nextval('session_messages_id_seq'::regclass);
 
@@ -2913,20 +2755,8 @@ ALTER TABLE ONLY dingtalk_settings
 ALTER TABLE ONLY email_notification_logs
     ADD CONSTRAINT email_notification_logs_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY encryption_keys
-    ADD CONSTRAINT encryption_keys_key_fingerprint_key UNIQUE (key_fingerprint);
-
-ALTER TABLE ONLY encryption_keys
-    ADD CONSTRAINT encryption_keys_pkey PRIMARY KEY (key_id);
-
 ALTER TABLE ONLY feishu_settings
     ADD CONSTRAINT feishu_settings_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY filter_rule_trigger_stats
-    ADD CONSTRAINT filter_rule_trigger_stats_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY filter_rule_trigger_stats
-    ADD CONSTRAINT filter_rule_trigger_stats_rule_id_key UNIQUE (rule_id);
 
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_pkey PRIMARY KEY (id);
@@ -3021,18 +2851,6 @@ ALTER TABLE ONLY remote_runtime_commands
 ALTER TABLE ONLY remote_runtime_outputs
     ADD CONSTRAINT remote_runtime_outputs_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY request_performance
-    ADD CONSTRAINT request_performance_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY request_performance
-    ADD CONSTRAINT request_performance_request_id_key UNIQUE (request_id);
-
-ALTER TABLE ONLY response_time_stats
-    ADD CONSTRAINT response_time_stats_date_tool_name_host_name_tenant_id_key UNIQUE (date, tool_name, host_name, tenant_id);
-
-ALTER TABLE ONLY response_time_stats
-    ADD CONSTRAINT response_time_stats_pkey PRIMARY KEY (id);
-
 ALTER TABLE ONLY retention_evidence
     ADD CONSTRAINT retention_evidence_pkey PRIMARY KEY (id);
 
@@ -3068,9 +2886,6 @@ ALTER TABLE ONLY security_settings
 
 ALTER TABLE ONLY security_settings
     ADD CONSTRAINT security_settings_setting_key_key UNIQUE (setting_key);
-
-ALTER TABLE ONLY session_daily_usage
-    ADD CONSTRAINT session_daily_usage_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY session_messages
     ADD CONSTRAINT session_messages_pkey PRIMARY KEY (id);
@@ -3200,9 +3015,6 @@ ALTER TABLE ONLY quota_usage
 
 ALTER TABLE ONLY remote_runtime_outputs
     ADD CONSTRAINT uq_remote_runtime_outputs_session_index UNIQUE (session_id, event_index);
-
-ALTER TABLE ONLY session_daily_usage
-    ADD CONSTRAINT uq_session_daily_usage_session_date UNIQUE (session_id, date);
 
 ALTER TABLE ONLY smtp_settings
     ADD CONSTRAINT uq_smtp_settings_single PRIMARY KEY (id);
@@ -3487,113 +3299,81 @@ CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING b
 --
 --
 
-CREATE INDEX idx_content_filter_rules_approval_status ON content_filter_rules USING btree (approval_status);
-
-CREATE INDEX idx_content_filter_rules_is_test ON content_filter_rules USING btree (is_test);
-
-
---
---
-
-CREATE INDEX idx_content_filter_rules_priority ON content_filter_rules USING btree (priority);
-
-CREATE INDEX idx_content_filter_rules_source ON content_filter_rules USING btree (source);
-
-
---
---
-
-CREATE INDEX idx_content_filter_rules_tenant_id ON content_filter_rules USING btree (tenant_id);
-
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_deregister_failures_created ON deregister_failures USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_deregister_failures_machine ON deregister_failures USING btree (machine_id);
 
+
+--
+--
+
 CREATE INDEX idx_deregister_failures_status ON deregister_failures USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
 
-
---
---
-
-CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys USING btree (key_fingerprint);
-
-CREATE INDEX idx_encryption_keys_status ON encryption_keys USING btree (status);
-
-
---
---
-
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
-
-CREATE INDEX idx_filter_rule_trigger_stats_rule_id ON filter_rule_trigger_stats USING btree (rule_id);
 
 
 --
@@ -3913,111 +3693,79 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs USING 
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs USING btree (session_id, event_index);
 
-CREATE INDEX idx_request_performance_date ON request_performance USING btree (started_at);
-
-
---
---
-
-CREATE INDEX idx_request_performance_tenant ON request_performance USING btree (tenant_id);
-
-CREATE INDEX idx_request_performance_tool ON request_performance USING btree (tool_name, started_at);
-
-
---
---
-
-CREATE INDEX idx_response_time_stats_date ON response_time_stats USING btree (date);
-
-CREATE INDEX idx_response_time_stats_tenant ON response_time_stats USING btree (tenant_id, date);
-
-
---
---
-
 CREATE INDEX idx_retention_evidence_execution ON retention_evidence USING btree (execution_id);
+
+
+--
+--
 
 CREATE INDEX idx_retention_evidence_tenant ON retention_evidence USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence USING btree (created_at);
+
+
+--
+--
 
 CREATE INDEX idx_retention_executions_execution_id ON retention_executions USING btree (execution_id);
 
-
---
---
-
 CREATE INDEX idx_retention_executions_lock ON retention_executions USING btree (lock_acquired_at, lock_expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_retention_executions_status ON retention_executions USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_retention_executions_tenant ON retention_executions USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_retention_policies_data_type ON retention_policies USING btree (data_type);
 
-
---
---
-
 CREATE INDEX idx_retention_policies_enabled ON retention_policies USING btree (enabled);
+
+
+--
+--
 
 CREATE INDEX idx_retention_policies_tenant ON retention_policies USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
-
---
---
-
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
-
---
---
-
 CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
-
---
---
-
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
-
-CREATE INDEX idx_session_daily_usage_date ON session_daily_usage USING btree (date);
-
-
---
---
-
-CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage USING btree (tenant_id);
-
-CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage USING btree (user_id, date);
 
 
 --
@@ -4319,218 +4067,52 @@ CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (ale
 --
 --
 
-CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries USING btree (cooldown_key, status, cooldown_expires_at);
-
-CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries USING btree (cooldown_expires_at);
-
-
---
---
-
-CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries USING btree (receiver_identity_hash);
-
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries USING btree (status, next_retry_at);
-
-
---
---
 
 CREATE INDEX idx_webhook_deliveries_user ON webhook_deliveries USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
-
-
---
---
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
-
-
---
---
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
+
+--
+--
+
 CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (anomaly_id) WHERE ((anomaly_id)::text <> ''::text);
-
-
---
---
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
+
+--
+--
+
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status USING btree (anomaly_type, affected_users_hash, tenant_id);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
 
+
+--
+--
+
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
-
-
---
---
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
-
-
---
---
-
-CREATE TRIGGER trigger_set_token_version BEFORE INSERT ON agent_tokens FOR EACH ROW EXECUTE FUNCTION set_token_version_trigger();
-
-ALTER TABLE ONLY alerts_history
-    ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY anomaly_status
-    ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
-
-ALTER TABLE ONLY api_key_store
-    ADD CONSTRAINT api_key_store_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
-
-ALTER TABLE ONLY api_key_store
-    ADD CONSTRAINT api_key_store_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY archive_files
-    ADD CONSTRAINT archive_files_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY autonomous_workflows
-    ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY backfill_logs
-    ADD CONSTRAINT backfill_logs_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
-
-ALTER TABLE ONLY consistency_violations
-    ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY filter_rule_trigger_stats
-    ADD CONSTRAINT filter_rule_trigger_stats_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES content_filter_rules(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY permission_checkpoints
-    ADD CONSTRAINT fk_permission_checkpoints_task FOREIGN KEY (task_id) REFERENCES permission_tasks(task_id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY permission_tasks
-    ADD CONSTRAINT fk_permission_tasks_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY permission_tasks
-    ADD CONSTRAINT fk_permission_tasks_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY test_execution_evidence
-    ADD CONSTRAINT fk_test_evidence_command_execution FOREIGN KEY (command_execution_id) REFERENCES command_execution_evidence(id);
-
-ALTER TABLE ONLY user_daily_stats
-    ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY users
-    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY insights_reports
-    ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY legal_holds
-    ADD CONSTRAINT legal_holds_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES users(id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_machine_id_fkey FOREIGN KEY (machine_id) REFERENCES remote_machines(machine_id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY quota_alerts
-    ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY quota_usage
-    ADD CONSTRAINT quota_usage_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY recycle_bin
-    ADD CONSTRAINT recycle_bin_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY recycle_bin
-    ADD CONSTRAINT recycle_bin_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY remote_machines
-    ADD CONSTRAINT remote_machines_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
-
-ALTER TABLE ONLY remote_machines
-    ADD CONSTRAINT remote_machines_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY retention_evidence
-    ADD CONSTRAINT retention_evidence_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY retention_executions
-    ADD CONSTRAINT retention_executions_policy_id_fkey FOREIGN KEY (policy_id) REFERENCES retention_policies(id);
-
-ALTER TABLE ONLY retention_executions
-    ADD CONSTRAINT retention_executions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY retention_policies
-    ADD CONSTRAINT retention_policies_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY session_messages
-    ADD CONSTRAINT session_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id);
-
-ALTER TABLE ONLY sessions
-    ADD CONSTRAINT sessions_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY sso_identities
-    ADD CONSTRAINT sso_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY sso_providers
-    ADD CONSTRAINT sso_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY sso_sessions
-    ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_keywords_version
-    ADD CONSTRAINT tenant_keywords_version_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_migrations
-    ADD CONSTRAINT tenant_migrations_migrated_by_fkey FOREIGN KEY (migrated_by) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_migrations
-    ADD CONSTRAINT tenant_migrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_period_history
-    ADD CONSTRAINT tenant_period_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_quotas
-    ADD CONSTRAINT tenant_quotas_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_sensitive_keywords
-    ADD CONSTRAINT tenant_sensitive_keywords_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY tenant_sensitive_keywords
-    ADD CONSTRAINT tenant_sensitive_keywords_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_settings
-    ADD CONSTRAINT tenant_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_usage
-    ADD CONSTRAINT tenant_usage_new_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tool_account_conflicts
-    ADD CONSTRAINT tool_account_conflicts_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
-
-ALTER TABLE ONLY tool_account_conflicts
-    ADD CONSTRAINT tool_account_conflicts_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES users(id);
-
-ALTER TABLE ONLY tool_account_mapping_rules
-    ADD CONSTRAINT tool_account_mapping_rules_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_tool_accounts
-    ADD CONSTRAINT user_tool_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY web_user_auth_sessions
-    ADD CONSTRAINT web_user_auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY workflow_milestones
-    ADD CONSTRAINT workflow_milestones_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE;
