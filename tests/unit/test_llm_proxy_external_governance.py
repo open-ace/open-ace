@@ -757,3 +757,148 @@ class TestExternalScanVerdicts:
                 }
             )
         assert resp.status_code == 200, "system-only card passes for non-external"
+
+
+class TestDenylistRefinement:
+    """name/url/data are context-sensitive, per review: message-level name is
+    caller text (OpenAI permits a 16-digit PAN); url/data skip only binary."""
+
+    def test_message_level_name_with_card_blocked(self, monkeypatch):
+        result = self._assert_blocked(
+            monkeypatch,
+            {
+                "model": "glm-5",
+                "messages": [{"role": "user", "name": "4111111111111111", "content": "hi"}],
+            },
+        )
+        assert (
+            isinstance(result, tuple) and result[1] == 403
+        ), f"message-level name carrying a PAN must block, got {result}"
+
+    def test_function_name_is_structural_not_scanned(self, monkeypatch):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts
+
+        texts = _external_request_texts(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "read_file", "arguments": "{}"},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert "read_file" not in texts, "function names are identifiers"
+
+    def test_tool_use_block_name_structural(self, monkeypatch):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts
+
+        texts = _external_request_texts(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "tool_use", "id": "t1", "name": "grep", "input": {"q": 1}}
+                        ],
+                    }
+                ]
+            },
+        )
+        assert "grep" not in texts
+
+    def test_data_uri_skipped_but_plain_text_data_scanned(self, monkeypatch):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts
+
+        texts = _external_request_texts(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "see attachment"},
+                            {"data": "data:image/png;base64," + "A" * 400},
+                            {"data": "plain text with 4111-1111-1111-1111"},
+                        ],
+                    }
+                ]
+            },
+        )
+        assert "4111-1111-1111-1111" in texts
+        assert "AAAA" not in texts, "binary payloads must not be scanned as text"
+
+    def test_url_query_string_with_card_scanned(self, monkeypatch):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts
+
+        texts = _external_request_texts(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": "https://logs.example/get?c=4111-1111-1111-1111"
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert "4111-1111-1111-1111" in texts, "non-binary url text is content"
+
+    def _assert_blocked(self, monkeypatch, body):
+        from types import SimpleNamespace as NS
+
+        from app.modules.workspace import llm_proxy_handler as handler
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts
+
+        CARD = "4111111111111111"
+
+        def check_content(text, tenant_config=None):
+            if CARD in (text or ""):
+                return NS(
+                    action="block",
+                    message="pan",
+                    matched_rules=[],
+                    suggestion=None,
+                    risk_level="high",
+                    rule_names=[],
+                    categories=[],
+                    sensitive_types=[],
+                    sample_matches=[],
+                )
+            return NS(
+                action="allow",
+                message="",
+                matched_rules=[],
+                suggestion=None,
+                risk_level="low",
+                rule_names=[],
+                categories=[],
+                sensitive_types=[],
+                sample_matches=[],
+            )
+
+        monkeypatch.setattr(handler, "get_content_filter", lambda: NS(check_content=check_content))
+        monkeypatch.setattr(handler, "_build_safe_content_details", lambda *a, **k: {})
+        from flask import Flask
+
+        app = Flask("denylist")
+        with app.test_request_context("/"):
+            result = handler._check_content_filter(
+                user_id=1,
+                username=None,
+                request_body=json.dumps(body).encode(),
+                tenant_id=1,
+                external_texts=_external_request_texts(body),
+            )
+        return result

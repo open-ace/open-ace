@@ -1369,29 +1369,51 @@ def _build_safe_content_details(
 
 # Keys whose string values are structural metadata (model names, roles,
 # identifiers), never caller-authored content: excluded from the external
-# whole-request scan. A denylist fails CLOSED — when a provider adds a new
-# content-bearing shape, its strings are scanned unless explicitly excluded
-# here — which is the direction the external contract needs. An allowlist
-# of shapes would fail open on every provider addition.
+# whole-request scan — but only where they really are structural. ``name``
+# IS caller text at the message level (OpenAI permits up to 64 chars of
+# [A-Za-z0-9_-], which fits a 16-digit PAN, and templates render it into the
+# prompt), so it is scanned everywhere except inside the function-call
+# structures where it names the function. ``url``/``data`` carry text just
+# as often as bytes; only binary-looking values (data: URIs, base64) skip.
+# A denylist fails CLOSED — when a provider adds a new content-bearing
+# shape, its strings are scanned unless explicitly excluded here.
+# NOTE: ``name``, ``url`` and ``data`` are also in this set so the walker
+# routes them through their context-sensitive branches below instead of the
+# unconditional collect.
 _EXTERNAL_SCAN_STRUCTURAL_KEYS = frozenset(
     {
         "model",
         "role",
         "type",
         "id",
+        "name",
+        "url",
+        "data",
         "tool_call_id",
         "tool_use_id",
         "call_id",
-        "name",
         "object",
-        # Binary payloads, not text: image/audio data URIs and inline sources.
-        "url",
-        "data",
     }
 )
+# Parents inside which ``name`` is a structural function identifier.
+_EXTERNAL_NAME_STRUCTURAL_PARENTS = ("tool_use", "function_call")
 # Object-valued argument payloads (Anthropic tool_use.input): serialized as
 # text instead of walked, so nested structural keys never mask their values.
 _EXTERNAL_SCAN_SERIALIZED_KEYS = frozenset({"input", "arguments"})
+
+_BASE64_RE = None  # compiled lazily below
+
+
+def _external_binary_value(value: str) -> bool:
+    """Whether a url/data string is a binary payload rather than text."""
+    import re
+
+    global _BASE64_RE
+    if _BASE64_RE is None:
+        # Long runs of base64 alphabet with optional padding; ordinary words
+        # (including URLs with query strings) never reach this length.
+        _BASE64_RE = re.compile(r"[A-Za-z0-9+/]{256,}={0,2}\Z")
+    return value.startswith("data:") or bool(_BASE64_RE.fullmatch(value))
 
 
 def _external_request_texts(body: Any) -> str | None:
@@ -1410,19 +1432,31 @@ def _external_request_texts(body: Any) -> str | None:
         return None
     texts: list[str] = []
 
-    def walk(node: Any, key: str | None) -> None:
+    def walk(node: Any, key: str | None, name_structural: bool = False) -> None:
         if isinstance(node, dict):
             if key in _EXTERNAL_SCAN_SERIALIZED_KEYS:
                 texts.append(json.dumps(node, sort_keys=True, separators=(",", ":")))
                 return
+            # A ``name`` inside these shapes is a function identifier, not
+            # caller text: tool_use/tool_result/function_call blocks are
+            # marked by their ``type`` field, tool_calls wrap a ``function``.
+            child_name_structural = (
+                key == "function" or node.get("type") in _EXTERNAL_NAME_STRUCTURAL_PARENTS
+            )
             for child_key, value in node.items():
-                walk(value, child_key)
+                walk(value, child_key, child_name_structural)
         elif isinstance(node, list):
             for item in node:
-                walk(item, key)
+                walk(item, key, name_structural)
         elif isinstance(node, str):
             if key is None or key not in _EXTERNAL_SCAN_STRUCTURAL_KEYS:
                 texts.append(node)
+            elif key == "name":
+                if not name_structural:
+                    texts.append(node)
+            elif key in ("url", "data"):
+                if not _external_binary_value(node):
+                    texts.append(node)
 
     walk(body, None)
     if not any(
