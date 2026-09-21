@@ -97,12 +97,21 @@ class RuntimeSpec:
 
 @dataclass(frozen=True)
 class VolumeSpec:
-    """One mount a sandbox should expose (#2023)."""
+    """One mount a sandbox should expose (#2023).
+
+    PVC fields (pvc_claim_name, storage_class, storage_size) are used only
+    when kind="persistent". OpenSandbox creates the PVC dynamically if it
+    does not exist (Issue #3417).
+    """
 
     name: str
     mount_path: str
     kind: str = "ephemeral"  # ephemeral | persistent
     read_only: bool = False
+    # PVC fields for persistent volumes (Issue #3417)
+    pvc_claim_name: str = ""  # PVC name, used when kind="persistent"
+    storage_class: str = ""  # StorageClass name, empty = cluster default
+    storage_size: str = ""  # Kubernetes resource format, e.g. "1Gi", "10Gi"
 
 
 @dataclass(frozen=True)
