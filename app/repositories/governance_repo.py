@@ -136,6 +136,24 @@ class GovernanceRepository:
 
         return rule
 
+    def get_filter_rule_by_pattern(self, pattern: str) -> dict | None:
+        """
+        Get a filter rule by pattern.
+
+        Args:
+            pattern: Pattern to search for.
+
+        Returns:
+            Optional[Dict]: Rule data or None.
+        """
+        query = "SELECT * FROM content_filter_rules WHERE pattern = ?"
+        rule = self.db.fetch_one(query, (pattern,))
+
+        if rule:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rule
+
     def create_filter_rule(
         self,
         pattern: str,
