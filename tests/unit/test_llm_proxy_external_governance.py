@@ -209,7 +209,8 @@ def _hermetic_200_patches():
     from unittest.mock import MagicMock
 
     ok = MagicMock()
-    ok.is_ok = True
+    ok.allowed = True
+    ok.transient = False
     return patch(_SSRF_PATH, lambda *a, **k: ok)
 
 

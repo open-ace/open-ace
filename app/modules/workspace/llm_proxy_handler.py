@@ -1572,6 +1572,10 @@ def _forward_via_gateway(
             if _gw_echo_secret and _echo_guard_blocks(
                 resp.content, _gw_echo_secret, session_id, user_id, tenant_id
             ):
+                try:
+                    resp.close()
+                except Exception:
+                    logger.debug("Failed to close upstream after key-echo block", exc_info=True)
                 return (
                     jsonify(
                         {
@@ -2377,6 +2381,10 @@ def handle_llm_proxy_request(
                 if _echo_secret and _echo_guard_blocks(
                     resp.content, _echo_secret, session_id, user_id, tenant_id
                 ):
+                    try:
+                        resp.close()
+                    except Exception:
+                        logger.debug("Failed to close upstream after key-echo block", exc_info=True)
                     return (
                         jsonify(
                             {
