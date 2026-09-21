@@ -57,6 +57,67 @@ class GovernanceRepository:
 
         return rules
 
+    def get_filter_rules_paginated(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        rule_type: str | None = None,
+        severity: str | None = None,
+        is_enabled: bool | None = None,
+    ) -> tuple[list[dict], int]:
+        """
+        Get filter rules with pagination and filtering.
+
+        Args:
+            limit: Maximum number of records to return (default 100, max 1000).
+            offset: Number of records to skip (default 0).
+            rule_type: Optional filter by type (keyword, regex, pii).
+            severity: Optional filter by severity (low, medium, high).
+            is_enabled: Optional filter by enabled status.
+
+        Returns:
+            Tuple[List[Dict], int]: (list of rules, total count).
+        """
+        from app.repositories.database import adapt_sql
+
+        # Clamp limit
+        limit = min(max(limit, 1), 1000)
+
+        # Build query with filters
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if rule_type is not None:
+            where_clauses.append("type = ?")
+            params.append(rule_type)
+
+        if severity is not None:
+            where_clauses.append("severity = ?")
+            params.append(severity)
+
+        if is_enabled is not None:
+            where_clauses.append("is_enabled = ?")
+            is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
+            params.append(is_enabled_val)
+
+        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        # Get total count
+        count_query = f"SELECT COUNT(*) as count FROM content_filter_rules {where_clause}"
+        count_result = self.db.fetch_one(adapt_sql(count_query), tuple(params))
+        total = count_result["count"] if count_result else 0
+
+        # Get paginated results
+        params.extend([limit, offset])
+        query = f"SELECT * FROM content_filter_rules {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        rules = self.db.fetch_all(adapt_sql(query), tuple(params))
+
+        # Convert is_enabled to boolean
+        for rule in rules:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rules, total
+
     def get_filter_rule(self, rule_id: int) -> dict | None:
         """
         Get a specific filter rule.
