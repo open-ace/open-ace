@@ -8,6 +8,7 @@ byte-derived estimate capped by the requested max_tokens, and the upstream
 response is closed so provider-side generation stops.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -121,29 +122,85 @@ class TestStreamUsageOnDisconnect:
 
 
 class TestStreamUsageFallbackEstimate:
-    def test_counts_payload_bytes_at_four_per_token(self):
+    def _stream(self, deltas):
+        return b"".join(
+            b"data: " + json.dumps(delta, separators=(",", ":")).encode() + b"\n\n"
+            for delta in deltas
+        )
+
+    def _openai_delta(self, text, index):
+        # A realistic streaming envelope: per-chunk id/created/model fields
+        # are what a raw byte count charges 20-60x over.
+        return {
+            "id": "chatcmpl-abc123def456ghi789jkl",
+            "object": "chat.completion.chunk",
+            "created": 1770000000 + index,
+            "model": "glm-5",
+            "choices": [{"index": 0, "delta": {"content": text}}],
+        }
+
+    def test_realistic_envelope_charges_within_2x_of_delivered(self):
         from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
 
-        # Only `data:` payload bytes count; SSE event/blank framing does not.
-        stream = b"data: " + b"x" * 400 + b"\n\n" + b"event: ping\n\n"
+        delivered = 500  # one-token English deltas, ~4 text bytes each
+        stream = self._stream(self._openai_delta("abcd", i) for i in range(delivered))
+        estimate = _stream_usage_fallback(stream, None, "text/event-stream")
+        assert (
+            delivered <= estimate <= 2 * delivered
+        ), f"estimate {estimate} for {delivered} delivered tokens"
+
+    def test_anthropic_delta_text_counts(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        stream = self._stream([{"delta": {"type": "text_delta", "text": "x" * 300}}])
+        estimate = _stream_usage_fallback(stream, None, "text/event-stream")
+        assert estimate == 100  # 300 bytes / 3
+
+    def test_tool_call_arguments_count_as_output(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        stream = self._stream(
+            [
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "function": {"name": "read", "arguments": "x" * 300},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
         estimate = _stream_usage_fallback(stream, None, "text/event-stream")
         assert estimate == 100
 
-    def test_capped_by_requested_max_tokens(self):
+    def test_cap_is_the_maximum_across_limit_fields(self):
         from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
 
-        stream = b"data: " + b"x" * 400 + b"\n\n"
+        # The bypass vector: a tiny value in a field the upstream ignores
+        # next to the large value it honors must not cap the estimate.
+        stream = self._stream([self._openai_delta("abcd", i) for i in range(500)])
+        body = b'{"max_completion_tokens":1,"max_tokens":4096}'
+        uncapped = _stream_usage_fallback(stream, None, "text/event-stream")
+        estimate = _stream_usage_fallback(stream, body, "text/event-stream")
+        assert estimate == uncapped, (
+            "a 1-token field the upstream ignores must not cap the estimate; "
+            f"got {estimate}, uncapped {uncapped}"
+        )
+        assert estimate > 1
+
+    def test_smallest_limit_still_caps_when_it_is_the_only_one(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        stream = self._stream([self._openai_delta("abcd", i) for i in range(500)])
         estimate = _stream_usage_fallback(stream, b'{"max_tokens":50}', "text/event-stream")
         assert estimate == 50
-
-    def test_max_completion_tokens_wins_when_present(self):
-        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
-
-        stream = b"data: " + b"x" * 400 + b"\n\n"
-        estimate = _stream_usage_fallback(
-            stream, b'{"max_tokens":50,"max_completion_tokens":25}', "text/event-stream"
-        )
-        assert estimate == 25
 
     def test_none_for_non_streaming_and_empty_streams(self):
         from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback

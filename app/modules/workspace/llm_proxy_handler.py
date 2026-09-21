@@ -483,34 +483,86 @@ def _record_messages(
     return message_delta
 
 
+def _stream_text_bytes(payload: object) -> int:
+    """Sum the generated-text bytes in one parsed SSE payload, any protocol.
+
+    OpenAI chat (delta content / reasoning_content / tool-call arguments),
+    Anthropic messages (delta text / thinking / partial_json) and the
+    Responses API (output delta) all ride text inside JSON envelopes; the
+    envelope itself is what a raw byte count would charge 20-60x over.
+    """
+
+    def walk(node):
+        if isinstance(node, dict):
+            total = 0
+            delta = node.get("delta")
+            if isinstance(delta, dict):
+                for field in ("content", "reasoning_content", "text", "thinking", "partial_json"):
+                    value = delta.get(field)
+                    if isinstance(value, str):
+                        total += len(value.encode("utf-8"))
+                for call in delta.get("tool_calls") or []:
+                    if isinstance(call, dict):
+                        function = call.get("function")
+                        if isinstance(function, dict) and isinstance(
+                            function.get("arguments"), str
+                        ):
+                            total += len(function["arguments"].encode("utf-8"))
+            for key, value in node.items():
+                if key != "delta":
+                    total += walk(value)
+            return total
+        if isinstance(node, list):
+            return sum(walk(item) for item in node)
+        return 0
+
+    return int(walk(payload))
+
+
 def _stream_usage_fallback(
     total_content: bytes, request_body: bytes | None, content_type: str
 ) -> int | None:
     """Estimate the output-token charge for a stream that never carried usage.
 
     Returns ``None`` for non-streaming responses and for streams where nothing
-    was delivered. The estimate counts the streamed bytes (SSE framing and
-    JSON keys included, so it errs high) at four bytes per token, capped by
-    the request's ``max_tokens``/``max_completion_tokens`` when present — the
-    conservative bound on what the generation could cost.
+    was delivered. The estimate sums the *generated text* across SSE payloads
+    — not the wire bytes, whose JSON envelopes bloat a raw count 20-60x — at
+    three bytes per token (slightly high for English, about right for CJK).
+    Lines that do not parse fall back to payload bytes / 4. The result is
+    capped by the MAXIMUM limit the request declares across ``max_tokens``,
+    ``max_completion_tokens`` and ``max_output_tokens``: providers honor
+    different fields, the body is client-controlled, and capping by "the
+    first field present" would let a 1-token field next to the honored 4096
+    field re-open the read-then-disconnect bypass this estimate exists to
+    close.
     """
     if "text/event-stream" not in content_type or not total_content:
         return None
-    # Count only `data:` payload lines: raw byte counting would multiply the
-    # charge 30-50x, since a one-token delta rides ~120-200 wire bytes of SSE
-    # and JSON framing. Payload bytes still include JSON keys, so the result
-    # keeps erring high — conservative for a quota fallback.
-    payload = sum(
-        len(line) - 6 for line in total_content.split(b"\n") if line.startswith(b"data: ")
-    )
-    estimate = max(1, payload // 4)
+    text_bytes = 0
+    for line in total_content.split(b"\n"):
+        if not line.startswith(b"data: "):
+            continue
+        data = line[6:]
+        try:
+            text_bytes += _stream_text_bytes(json.loads(data))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Unparseable payload (non-JSON protocol, split encoding): fall
+            # back to its raw payload bytes at a conservative rate.
+            text_bytes += len(data) // 4
+    estimate = max(1, text_bytes // 3)
     if request_body:
         try:
             limit = json.loads(request_body)
             if isinstance(limit, dict):
-                requested = limit.get("max_completion_tokens", limit.get("max_tokens"))
-                if isinstance(requested, int) and not isinstance(requested, bool) and requested > 0:
-                    estimate = min(estimate, requested)
+                declared = [
+                    value
+                    for field in ("max_tokens", "max_completion_tokens", "max_output_tokens")
+                    if isinstance((value := limit.get(field)), int)
+                    and not isinstance(value, bool)
+                    and value > 0
+                ]
+                if declared:
+                    estimate = min(estimate, max(declared))
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
     return estimate
