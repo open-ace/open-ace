@@ -483,6 +483,32 @@ def _record_messages(
     return message_delta
 
 
+def _stream_usage_fallback(
+    total_content: bytes, request_body: bytes | None, content_type: str
+) -> int | None:
+    """Estimate the output-token charge for a stream that never carried usage.
+
+    Returns ``None`` for non-streaming responses and for streams where nothing
+    was delivered. The estimate counts the streamed bytes (SSE framing and
+    JSON keys included, so it errs high) at four bytes per token, capped by
+    the request's ``max_tokens``/``max_completion_tokens`` when present — the
+    conservative bound on what the generation could cost.
+    """
+    if "text/event-stream" not in content_type or not total_content:
+        return None
+    estimate = max(1, len(total_content) // 4)
+    if request_body:
+        try:
+            limit = json.loads(request_body)
+            if isinstance(limit, dict):
+                requested = limit.get("max_completion_tokens", limit.get("max_tokens"))
+                if isinstance(requested, int) and not isinstance(requested, bool) and requested > 0:
+                    estimate = min(estimate, requested)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    return estimate
+
+
 def _record_llm_usage(
     content: bytes,
     session_id: str,
@@ -493,6 +519,7 @@ def _record_llm_usage(
     request_path: str = "",
     request_id: str | None = None,
     model: str | None = None,
+    fallback_output_tokens: int | None = None,
 ) -> None:
     """Extract and record token usage and messages from LLM responses.
 
@@ -568,7 +595,21 @@ def _record_llm_usage(
                 "llm_proxy_usage_parse_errors_total",
                 {"provider": provider, "reason": "missing_usage"},
             )
-            return
+            # Streaming callers opt into an estimate charge: a client can read
+            # every content delta and drop the connection before the final
+            # chunk that carries `usage` — the generation was delivered, so
+            # zero usage would be a client-controllable quota bypass rather
+            # than an under-count. Non-streaming callers keep the old
+            # zero-charge behavior (their content is complete before
+            # recording, so no bypass window exists).
+            if not fallback_output_tokens:
+                return
+            evidence = UsageEvidence(
+                output_tokens=fallback_output_tokens,
+                provider=getattr(parser, "provider", ""),
+                model=model,
+                raw_usage={"estimated": True, "reason": "missing_usage"},
+            )
 
         # Get session for tenant_id
         from app.modules.workspace.session_manager import get_session_manager
@@ -881,42 +922,62 @@ def _finalize_upstream_response(
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
         first_chunk = True
-        for chunk in _resp.iter_content(chunk_size=4096):
-            total_content += chunk
-            # Issue #3080: Record first response on first chunk
-            if first_chunk and recorder:
-                try:
-                    recorder.record_first_response(perf_request_id)
-                except Exception as e:
-                    logger.debug(f"Failed to record first response: {e}")
-                first_chunk = False
-            yield chunk
         try:
-            _record_llm_usage(
-                total_content,
-                session_id,
-                user_id,
-                provider,
-                _content_type,
-                request_body=_body,
-                request_path=request_path,
-                request_id=request_id,
-                model=requested_model,
-            )
-            # Issue #3080: Record request complete
-            if recorder:
+            for chunk in _resp.iter_content(chunk_size=4096):
+                total_content += chunk
+                # Issue #3080: Record first response on first chunk
+                if first_chunk and recorder:
+                    try:
+                        recorder.record_first_response(perf_request_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to record first response: {e}")
+                    first_chunk = False
+                yield chunk
+        finally:
+            # Usage must be recorded even when the stream is cut short. A
+            # client that reads every content delta and then drops the
+            # connection just before the final chunk (which carries `usage`
+            # and [DONE]) receives the full generation while zero usage is
+            # recorded — a client-controllable quota bypass, not an
+            # under-count. When the drained stream never yielded a usage
+            # block, the fallback estimate (streamed bytes, capped by the
+            # requested max_tokens) is charged instead. Closing the response
+            # in the same finally stops provider-side generation and billing
+            # instead of leaving connection release to garbage collection.
+            try:
+                _record_llm_usage(
+                    total_content,
+                    session_id,
+                    user_id,
+                    provider,
+                    _content_type,
+                    request_body=_body,
+                    request_path=request_path,
+                    request_id=request_id,
+                    model=requested_model,
+                    fallback_output_tokens=_stream_usage_fallback(
+                        total_content, _body, _content_type
+                    ),
+                )
+                # Issue #3080: Record request complete
+                if recorder:
+                    try:
+                        recorder.record_request_complete(perf_request_id, status="success")
+                    except Exception as e:
+                        logger.debug(f"Failed to record request complete: {e}")
+            except Exception as exc:
+                logger.error("Failed to record LLM usage: %s", exc)
+                # Issue #3080: Record request failure
+                if recorder:
+                    try:
+                        recorder.record_request_complete(perf_request_id, status="failed")
+                    except Exception as e:
+                        logger.debug(f"Failed to record request failure: {e}")
+            finally:
                 try:
-                    recorder.record_request_complete(perf_request_id, status="success")
-                except Exception as e:
-                    logger.debug(f"Failed to record request complete: {e}")
-        except Exception as exc:
-            logger.error("Failed to record LLM usage: %s", exc)
-            # Issue #3080: Record request failure
-            if recorder:
-                try:
-                    recorder.record_request_complete(perf_request_id, status="failed")
-                except Exception as e:
-                    logger.debug(f"Failed to record request failure: {e}")
+                    _resp.close()
+                except Exception:
+                    logger.debug("Failed to close upstream response", exc_info=True)
 
     response_headers = {}
     for key, value in resp.headers.items():

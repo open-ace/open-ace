@@ -1,0 +1,259 @@
+"""Quota bypass fix: usage must be recorded when a streamed response is cut short.
+
+A client that reads every content delta and then drops the connection just
+before the final chunk (which carries `usage` and [DONE]) receives the full
+generation while zero usage is recorded. These tests pin the fix: usage
+recording runs in a `finally`, a stream without a usage block is charged a
+byte-derived estimate capped by the requested max_tokens, and the upstream
+response is closed so provider-side generation stops.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from flask import Flask
+
+
+@pytest.fixture
+def flask_app():
+    """Minimal Flask app for request-context tests."""
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    return app
+
+
+_RECORD_PATH = "app.modules.workspace.llm_proxy_handler._record_llm_usage"
+
+_SSE_NO_USAGE = b"".join(
+    [
+        b'data: {"choices":[{"delta":{"content":"The answer is 42."}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+)
+
+
+def _sse_response(chunks, headers=None):
+    response = MagicMock()
+    response.status_code = 200
+    response.headers = headers or {"Content-Type": "text/event-stream"}
+    response.iter_content.return_value = list(chunks)
+    return response
+
+
+class TestStreamUsageOnDisconnect:
+    def test_disconnect_after_deltas_records_usage_and_closes(self, flask_app):
+        """Read one delta, then drop the connection: usage still recorded."""
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        upstream = _sse_response([_SSE_NO_USAGE[:60], _SSE_NO_USAGE[60:]])
+        with patch(_RECORD_PATH) as record:
+            with flask_app.test_request_context("/"):
+                streamed = _finalize_upstream_response(
+                    upstream,
+                    b'{"model":"gpt-4.1","max_tokens":512,"stream":true}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    content_type="text/event-stream",
+                    tenant_id=1,
+                )
+                iterator = streamed.response
+                next(iterator)
+                # Client disconnect: Werkzeug closes the response iterator,
+                # which raises GeneratorExit at the suspended yield.
+                iterator.close()
+
+        assert record.call_count == 1, "usage must be recorded on disconnect"
+        fallback = record.call_args[1]["fallback_output_tokens"]
+        assert fallback is not None and fallback >= 1
+        assert fallback <= 512, "estimate must be capped by the requested max_tokens"
+        assert upstream.close.called, "upstream response must be closed"
+
+    def test_normal_drain_records_usage_and_closes(self, flask_app):
+        """A fully drained stream keeps recording usage once, and closes."""
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        upstream = _sse_response([_SSE_NO_USAGE])
+        with patch(_RECORD_PATH) as record:
+            with flask_app.test_request_context("/"):
+                streamed = _finalize_upstream_response(
+                    upstream,
+                    b'{"model":"gpt-4.1","stream":true}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    content_type="text/event-stream",
+                    tenant_id=1,
+                )
+                assert b"".join(streamed.response) == _SSE_NO_USAGE
+
+        assert record.call_count == 1
+        assert record.call_args[1]["fallback_output_tokens"] is not None
+        assert upstream.close.called
+
+    def test_upstream_error_stream_still_closes(self, flask_app):
+        """An exception from the upstream iterator must not leak the response."""
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        def exploding():
+            yield b"data: partial\n\n"
+            raise RuntimeError("upstream reset")
+
+        upstream = _sse_response([])
+        upstream.iter_content.return_value = exploding()
+        with patch(_RECORD_PATH) as record:
+            with flask_app.test_request_context("/"):
+                streamed = _finalize_upstream_response(
+                    upstream,
+                    b'{"model":"gpt-4.1","stream":true}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    content_type="text/event-stream",
+                    tenant_id=1,
+                )
+                with pytest.raises(RuntimeError):
+                    b"".join(streamed.response)
+
+        assert record.call_count == 1
+        assert upstream.close.called
+
+
+class TestStreamUsageFallbackEstimate:
+    def test_counts_streamed_bytes_at_four_per_token(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        estimate = _stream_usage_fallback(b"x" * 400, None, "text/event-stream")
+        assert estimate == 100
+
+    def test_capped_by_requested_max_tokens(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        estimate = _stream_usage_fallback(b"x" * 400, b'{"max_tokens":50}', "text/event-stream")
+        assert estimate == 50
+
+    def test_max_completion_tokens_wins_when_present(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        estimate = _stream_usage_fallback(
+            b"x" * 400, b'{"max_tokens":50,"max_completion_tokens":25}', "text/event-stream"
+        )
+        assert estimate == 25
+
+    def test_none_for_non_streaming_and_empty_streams(self):
+        from app.modules.workspace.llm_proxy_handler import _stream_usage_fallback
+
+        assert _stream_usage_fallback(b"{}", None, "application/json") is None
+        assert _stream_usage_fallback(b"", b"{}", "text/event-stream") is None
+
+
+class TestRecordLlmUsageEstimateCharge:
+    def test_stream_without_usage_charges_the_estimate(self, monkeypatch):
+        """No usage block in the stream: the fallback charge reaches the session."""
+        from app.modules.workspace.llm_proxy_handler import _record_llm_usage
+
+        class FakeSessionManager:
+            def __init__(self):
+                self.session = SimpleNamespace(
+                    message_count=0,
+                    request_count=0,
+                    total_tokens=0,
+                    total_input_tokens=0,
+                    total_output_tokens=0,
+                    tool_name="qwen-code",
+                    host_name="localhost",
+                    model=None,
+                    tenant_id=1,
+                )
+                self.calls = []
+
+            def get_session(self, session_id, include_messages=False):
+                return self.session
+
+            def update_session_fields(
+                self, session_id, fields, tenant_id=None, require_tenant=False
+            ):
+                for key, value in fields.items():
+                    setattr(self.session, key, value)
+                return True
+
+            _FIELDS = {
+                "message_delta": "message_count",
+                "request_delta": "request_count",
+                "total_tokens_delta": "total_tokens",
+                "total_input_delta": "total_input_tokens",
+                "total_output_delta": "total_output_tokens",
+            }
+
+            def increment_session_usage(self, session_id, **kwargs):
+                for delta, name in self._FIELDS.items():
+                    setattr(
+                        self.session,
+                        name,
+                        getattr(self.session, name, 0) + kwargs.get(delta, 0),
+                    )
+                return True
+
+            def append_transcript_message(self, **kwargs):
+                self.calls.append(kwargs)
+                return SimpleNamespace(_was_inserted=True)
+
+        fake_sm = FakeSessionManager()
+        monkeypatch.setattr(
+            "app.modules.workspace.session_manager.get_session_manager", lambda: fake_sm
+        )
+        monkeypatch.setattr(
+            "app.modules.governance.quota_manager.QuotaManager",
+            lambda: SimpleNamespace(record_usage=lambda **kwargs: None),
+        )
+        monkeypatch.setattr(
+            "app.repositories.daily_stats_repo.DailyStatsRepository",
+            lambda: SimpleNamespace(refresh_stats=lambda: None),
+        )
+
+        _record_llm_usage(
+            content=_SSE_NO_USAGE,
+            session_id="proxy-1",
+            user_id=3,
+            provider="openai",
+            content_type="text/event-stream",
+            request_body=b'{"model":"gpt-4.1","stream":true}',
+            fallback_output_tokens=42,
+        )
+
+        assert fake_sm.session.request_count == 1
+        assert fake_sm.session.total_output_tokens == 42
+        assert fake_sm.session.total_input_tokens == 0
+
+    def test_stream_without_usage_and_no_fallback_stays_free(self, monkeypatch):
+        """Non-streaming callers keep the old behavior: nothing charged."""
+        from app.modules.workspace.llm_proxy_handler import _record_llm_usage
+
+        recorded = []
+
+        class FakeSessionManager:
+            def get_session(self, session_id, include_messages=False):
+                return None
+
+        monkeypatch.setattr(
+            "app.modules.workspace.session_manager.get_session_manager",
+            lambda: FakeSessionManager(),
+        )
+
+        with patch(
+            "app.modules.workspace.usage_dedup.get_dedup_cache",
+            lambda: SimpleNamespace(
+                should_record=lambda *a, **k: True, mark_recorded=lambda *a, **k: None
+            ),
+        ):
+            _record_llm_usage(
+                content=b"not-json",
+                session_id="proxy-2",
+                user_id=3,
+                provider="openai",
+                content_type="application/json",
+                request_body=b"{}",
+            )
+
+        assert recorded == []
