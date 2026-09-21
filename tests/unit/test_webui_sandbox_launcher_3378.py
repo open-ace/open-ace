@@ -198,8 +198,15 @@ def test_create_body_carries_bootstrap_entrypoint_and_webui_metadata():
     assert meta["openace.generation"] == "1"  # workflow-generation key intact
 
     assert body["image"] == {"uri": _WEBUI_IMAGE}
-    # No host volume ever (D2/refusal 3): the body carries none at all.
-    assert "volumes" not in body
+    # Issue #3417: User workspace volume for persistence
+    assert "volumes" in body
+    assert len(body["volumes"]) == 1
+    vol = body["volumes"][0]
+    assert vol["name"] == "user-workspace-7"
+    assert vol["mountPath"] == "/workspace/user-7"  # fallback when no DB
+    assert "pvc" in vol
+    assert vol["pvc"]["claimName"] == "user-7-workspace"
+    assert vol["pvc"]["storage"] == "1Gi"  # default size
 
 
 def test_create_body_env_has_llm_proxy_keys_and_no_github_credentials():

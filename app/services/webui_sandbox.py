@@ -44,7 +44,7 @@ from app.modules.workspace.autonomous.sandbox.opensandbox import config as sandb
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as sandbox_policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
 from app.modules.workspace.autonomous.sandbox.provider import SandboxError
-from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec
+from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec, VolumeSpec
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApi
@@ -610,6 +610,46 @@ class SandboxedWebuiLauncher:
         """Return the effective webui proxy-token TTL (one definition, no drift)."""
         return int(self._proxy_service().effective_proxy_token_ttl_minutes("webui"))
 
+    def _get_user_home_directory(self, user_id: int) -> str:
+        """Get user's home directory for workspace volume mount (Issue #3417).
+
+        Uses the same logic as app.routes.fs.get_home_directory to ensure
+        consistency with the file system routes.
+
+        The mount path MUST be under /workspace for OpenSandbox validation.
+        In production, WORKSPACE_BASE_DIR is typically set to /workspace.
+        For tests or when not set, we default to /workspace to satisfy the
+        validation requirement.
+        """
+        try:
+            from app.repositories.user_repo import UserRepository
+
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                from app.routes.fs import get_home_directory
+
+                home_dir = get_home_directory(user)
+                # Ensure the path is under /workspace for OpenSandbox validation
+                if not home_dir.startswith("/workspace"):
+                    system_account = user.get("system_account") or user.get("username") or f"user-{user_id}"
+                    home_dir = f"/workspace/{system_account}"
+                return home_dir
+        except Exception as exc:  # noqa: BLE001 - database not available in tests
+            logger.debug("Could not fetch user %s from database: %s", user_id, exc)
+
+        # Fallback: default workspace path based on user_id under /workspace
+        # This ensures OpenSandbox validation passes (mount_path must be under /workspace)
+        return f"/workspace/user-{user_id}"
+
+    def _get_workspace_pvc_size(self) -> str:
+        """Get the configured PVC size for user workspaces (Issue #3417)."""
+        return os.environ.get("WORKSPACE_PVC_SIZE", "1Gi")
+
+    def _get_workspace_storage_class(self) -> str:
+        """Get the configured StorageClass for user workspace PVCs (Issue #3417)."""
+        return os.environ.get("WORKSPACE_STORAGE_CLASS", "")
+
     # ── launch ───────────────────────────────────────────────────────
 
     def launch(
@@ -659,6 +699,19 @@ class SandboxedWebuiLauncher:
         timeout_seconds = min(int(WEBUI_TOKEN_TTL_SECONDS), ttl_minutes * 60)
 
         token_secret = secrets.token_hex(32)
+
+        # Issue #3417: Create user workspace volume for persistence
+        user_home = self._get_user_home_directory(user_id)
+        user_workspace_volume = VolumeSpec(
+            name=f"user-workspace-{user_id}",
+            mount_path=user_home,
+            kind="persistent",
+            read_only=False,
+            pvc_claim_name=f"user-{user_id}-workspace",
+            storage_size=self._get_workspace_pvc_size(),
+            storage_class=self._get_workspace_storage_class(),
+        )
+
         spec = SandboxSpec(
             task_id=f"webui-user-{user_id}",
             project_path="/workspace",
@@ -666,6 +719,7 @@ class SandboxedWebuiLauncher:
             runtime=RuntimeSpec(
                 image=endpoint.webui_image, runtime=endpoint.runtime_class, toolchain=""
             ),
+            volumes=(user_workspace_volume,),
         )
         try:
             body = sandbox_policy_mod.build_create_request(
@@ -756,6 +810,9 @@ class SandboxedWebuiLauncher:
         included), minus everything the sandbox env denylist forbids: the merge
         filters through ``policy._ENV_NEVER`` so no control-plane write
         credential can ride along under any name.
+
+        Issue #3417: Adds ALLOWED_WORKSPACE_ROOTS with the user's home directory
+        to allow the webui to create projects in the mounted workspace volume.
         """
         openace_api_url = callback_url.rstrip("/")
         env: dict[str, str] = {
@@ -764,6 +821,15 @@ class SandboxedWebuiLauncher:
             "OPENACE_PROXY_TOKEN": proxy_token,
             "OPENACE_PROXY_URL": f"{openace_api_url}/api/workspace/llm-proxy",
         }
+
+        # Issue #3417: Add user's home directory to allowed workspace roots
+        user_home = self._get_user_home_directory(user_id)
+        existing_roots = os.environ.get("ALLOWED_WORKSPACE_ROOTS", "")
+        if existing_roots:
+            env["ALLOWED_WORKSPACE_ROOTS"] = f"{existing_roots},{user_home}"
+        else:
+            env["ALLOWED_WORKSPACE_ROOTS"] = user_home
+
         try:
             pool = self._proxy_service().get_tool_model_pool(
                 tenant_id=1,
