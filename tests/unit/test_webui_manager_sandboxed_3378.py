@@ -821,6 +821,8 @@ def test_single_user_local_request_restarts_live_sandboxed_instance(monkeypatch)
         token_secret="s" * 64,
         launcher=launcher,
         proxy=_FakeProxy(sandbox_id="sb-live", upstream_resolver=lambda: ("http://up", {})),
+        isolation_level="sandboxed",
+        user_home_path="/workspace/u3",
     )
     sandboxed.is_alive = lambda: True
     manager._single_user_instance = sandboxed
