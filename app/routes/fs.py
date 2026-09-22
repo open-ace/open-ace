@@ -535,7 +535,9 @@ def _reset_write_as_capability_cache() -> None:
     _WRAPPER_CAPABILITY_CACHE.clear()
 
 
-def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None, str]:
+def _resolve_user_owned_path(
+    target_dir: str, user, isolation_level: str | None = None
+) -> tuple[str, str | None, str]:
     """Validate and resolve a directory the user wants to operate on.
 
     Combines two guards:
@@ -561,11 +563,6 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None, st
         raise ValueError(f"Path must be under one of: {allowed}")
 
     resolved = os.path.realpath(target_dir)
-
-    # Issue #3420: isolation level will be handled per-endpoint
-    # (in api_get_home, etc.) via WebUIInstance, not session.
-    # For now, use default (None) which falls back to WORKSPACE_BASE_DIR.
-    isolation_level = None
 
     # Home subtree lock: must equal one of the user's per-base home roots or
     # live beneath it.
@@ -1163,10 +1160,19 @@ def api_browse_directory():
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
 
-    # Issue #3420: isolation level will be handled per-endpoint
-    # (in api_get_home, etc.) via WebUIInstance, not session.
-    # For now, use default (None) which falls back to WORKSPACE_BASE_DIR.
+    # Issue #3420: Get isolation level from WebUIInstance
     isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
@@ -1774,6 +1780,20 @@ def api_upload_file():
     """
     user = g.user
 
+    # Issue #3420: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     # Cheap pre-filter: reject declared-oversized requests before the body is
     # fully buffered to disk. The Content-Length header can be spoofed, so the
     # authoritative check below still uses the real byte count from seek().
@@ -1802,7 +1822,9 @@ def api_upload_file():
     # Path + home subtree lock
     target_dir = request.form.get("path", "")
     try:
-        resolved_dir, system_account, home_root = _resolve_user_owned_path(target_dir, user)
+        resolved_dir, system_account, home_root = _resolve_user_owned_path(
+            target_dir, user, isolation_level
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -2531,6 +2553,20 @@ def api_search_files():
     """
     user = g.user
 
+    # Issue #3420: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     query = (request.args.get("q", "") or "").strip()
     matcher = _build_name_matcher(query)
     if matcher is None:
@@ -2543,12 +2579,12 @@ def api_search_files():
     if not raw_root or raw_root.lower() == "home":
         # Issue #3410: per-base root — the single-base value made the default
         # (no ``path``) search 400 on a multi-base deployment.
-        default_root = _primary_home_root(user)
+        default_root = _primary_home_root(user, isolation_level)
         if default_root is None:
             return jsonify({"error": "No home directory available for this user"}), 400
         raw_root = default_root
     try:
-        root, sa, home_root = _resolve_user_owned_path(raw_root, user)
+        root, sa, home_root = _resolve_user_owned_path(raw_root, user, isolation_level)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
