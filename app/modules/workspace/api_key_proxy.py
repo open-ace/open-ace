@@ -2079,7 +2079,10 @@ class APIKeyProxyService:
                 pass
 
         if not row:
-            if session_type in {"agent", "terminal", "workflow"}:
+            # "external" tokens (issued to operator-registered external
+            # issuers) must die with their session: no row means the session
+            # was stopped or never existed, so fail closed like agent tokens.
+            if session_type in {"agent", "terminal", "workflow", "external"}:
                 logger.warning("Proxy token session not found: %s", session_id[:8])
                 return False
             return True
@@ -2181,6 +2184,20 @@ class APIKeyProxyService:
             ):
                 return None
 
+            # External tokens (operator-registered issuers) recheck their
+            # principal on every request: an admin deactivating the mapped
+            # user or tenant must cut off the external server within one
+            # request, not at token-expiry time.
+            if str(session_type) == "external" and not self._external_principal_alive_with_conn(
+                conn, user_id, payload.get("tenant_id")
+            ):
+                logger.warning(
+                    "External proxy token principal no longer active: %s (user_id=%s)",
+                    jti[:8],
+                    user_id,
+                )
+                return None
+
             if reuse_mode == "single_use":
                 if not self._consume_single_use_proxy_token_with_conn(conn, jti, now):
                     logger.warning("Single-use proxy token replay rejected: %s", jti[:8])
@@ -2232,6 +2249,53 @@ class APIKeyProxyService:
                 return dict(row)
             except Exception:
                 return None
+
+    def _external_principal_alive_with_conn(self, conn: Any, user_id: Any, tenant_id: Any) -> bool:
+        """Whether the mapped user and tenant are still active (external tokens).
+
+        Runs on every request for ``session_type == "external"`` so an admin
+        deactivation takes effect immediately instead of at token expiry.
+        Fails closed on any database error, mirroring the session-status check.
+        """
+        if user_id is None or tenant_id is None:
+            return False
+        try:
+            cursor = conn.cursor()
+            # Aliased columns: two plain ``deleted_at`` columns collide on
+            # dict-style rows (RealDictCursor keeps the last, sqlite3.Row the
+            # first), silently dropping one of the two soft-delete checks.
+            cursor.execute(
+                "SELECT u.is_active, u.deleted_at AS user_deleted_at, "
+                "t.status AS tenant_status, t.deleted_at AS tenant_deleted_at "
+                f"FROM users u JOIN tenants t ON t.id = u.tenant_id "
+                f"WHERE u.id = {_param()} AND u.tenant_id = {_param()}",
+                (user_id, tenant_id),
+            )
+            row = cursor.fetchone()
+        except Exception as e:
+            logger.warning(
+                "DB error during external principal check - failing closed: %s (user_id=%s)",
+                type(e).__name__,
+                user_id,
+            )
+            return False
+        if not row:
+            return False
+        if isinstance(row, (list, tuple)):
+            is_active, user_deleted, tenant_status, tenant_deleted = row[:4]
+        else:
+            is_active = self._row_get(row, "is_active")
+            user_deleted = self._row_get(row, "user_deleted_at")
+            tenant_status = self._row_get(row, "tenant_status")
+            tenant_deleted = self._row_get(row, "tenant_deleted_at")
+        # Tenant soft-deletion only sets deleted_at (status stays 'active'),
+        # so it must be checked explicitly; 'trial' is a live platform state.
+        return (
+            bool(is_active)
+            and not user_deleted
+            and not tenant_deleted
+            and tenant_status in ("active", "trial")
+        )
 
     def _session_allows_proxy_token_with_conn(
         self,
@@ -2285,7 +2349,10 @@ class APIKeyProxyService:
             return False
 
         if not row:
-            if session_type in {"agent", "terminal", "workflow"}:
+            # "external" tokens (issued to operator-registered external
+            # issuers) must die with their session: no row means the session
+            # was stopped or never existed, so fail closed like agent tokens.
+            if session_type in {"agent", "terminal", "workflow", "external"}:
                 logger.warning("Proxy token session not found: %s", session_id[:8])
                 return False
             return True
