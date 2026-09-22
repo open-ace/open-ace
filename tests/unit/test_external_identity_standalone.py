@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,43 @@ class IdentityProbeTest(unittest.TestCase):
         ]:
             with self.assertRaises(identity.DelegationDenied):
                 self.probe(self.headers(raw), raw)
+
+    def test_unknown_issuer_still_runs_the_keyed_comparison(self):
+        """L1: an unknown issuer must not short-circuit before hmac.compare_digest.
+
+        Regression guard for a real bug: ``audience=audiences[issuer]`` (a
+        direct dict index) raised ``KeyError`` for an unknown issuer name
+        *before* ``signature()`` was ever called, skipping the decoy HMAC
+        entirely and taking a different, faster code path than a known
+        issuer with a bad signature -- exactly the timing side channel the
+        dummy-secret comparison exists to close. Asserting the HTTP-level
+        403 (as the route test does) does not catch this, because both the
+        buggy and fixed code paths deny the request; only tracing whether
+        the keyed comparison actually ran does.
+        """
+        calls = []
+        real_signature = identity.signature
+
+        def traced(*args, **kwargs):
+            calls.append((args, kwargs))
+            return real_signature(*args, **kwargs)
+
+        with unittest.mock.patch.object(identity, "signature", traced):
+            with self.assertRaises(identity.DelegationDenied):
+                self.probe(
+                    {
+                        "X-ACE-Issuer": "no-such-issuer",
+                        "X-ACE-Time": "1800000000",
+                        "X-ACE-Nonce": "a" * 48,
+                        "X-ACE-Signature": "a" * 64,
+                    }
+                )
+        self.assertEqual(
+            len(calls),
+            1,
+            "signature() must run the keyed comparison for unknown issuers too, "
+            "against a decoy secret, so the failure path carries no timing signal",
+        )
 
     def test_membership_and_account_revocation(self):
         cases = [

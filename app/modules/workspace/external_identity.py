@@ -15,6 +15,16 @@ import secrets
 import stat
 
 _UNKNOWN_ISSUER_SECRET = secrets.token_bytes(32)
+# L1 hardening: verify_signed_request must run the keyed comparison for
+# EVERY issuer name, known or not, so the failure path never reveals which
+# issuers exist via a timing difference. That decoy computation needs some
+# audience value to build the framed string with -- it is never compared
+# against anything, so any fixed placeholder works. Do not reuse a mandatory
+# policy-schema value here: audience became a required per-issuer field, and
+# an earlier revision fed that requirement into `audiences[issuer]` (a direct
+# index) for this exact call, which raises KeyError for unknown issuers and
+# skips the decoy computation -- and the HMAC comparison -- entirely.
+_UNKNOWN_ISSUER_AUDIENCE = "openace"
 import time
 
 PATH = "/api/integrations/external/capabilities"
@@ -229,7 +239,7 @@ def verify_signed_request(
                 nonce,
                 body,
                 path=path,
-                audience=audiences[issuer],
+                audience=audiences.get(issuer, _UNKNOWN_ISSUER_AUDIENCE),
             ),
             supplied,
         ):
