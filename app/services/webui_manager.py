@@ -30,6 +30,7 @@ from gevent import lock as gevent_lock
 
 from app.utils.workspace import ensure_system_user as _ensure_user_shared
 from app.utils.workspace import run_as_root_if_needed
+from app.utils.workspace_isolation_aware import get_user_home_for_isolation
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,13 @@ class WebUIInstance:
     proxy_token: str = ""
     launcher: Any = None
     proxy: Any = None
+
+    # ── Issue #3420: isolation-aware home path ───────────────────────────
+    # Stores the isolation level and computed home path for this instance.
+    # Lifecycle matches the instance (not Flask session), ensuring the path
+    # remains correct even if session expires while the sandbox is alive.
+    isolation_level: str = "os_user"
+    user_home_path: str = ""
 
     _last_health_check: float = 0.0
     _health_check_ttl: float = 30.0  # Cache health check result for 30s
@@ -1663,6 +1671,9 @@ class WebUIManager:
             process=process,
             url=url,
             session_model_pool=model_pool,
+            # Issue #3420: single-user local mode uses os_user isolation
+            isolation_level="os_user",
+            user_home_path=get_user_home_for_isolation(system_account, "os_user"),
         )
 
         self._single_user_instance = instance
@@ -1803,6 +1814,9 @@ class WebUIManager:
             process=process,
             url=url,
             session_model_pool=model_pool,
+            # Issue #3420: multi-user local mode uses os_user isolation
+            isolation_level="os_user",
+            user_home_path=get_user_home_for_isolation(system_account, "os_user"),
         )
 
         self._instances[user_id] = instance
