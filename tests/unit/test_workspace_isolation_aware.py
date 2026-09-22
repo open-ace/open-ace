@@ -1,8 +1,9 @@
 """Unit tests for workspace_isolation_aware module (Issue #3420)."""
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestGetUserHomeForIsolation:
