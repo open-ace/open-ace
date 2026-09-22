@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import IO, Any, cast
 
-from flask import Blueprint, Response, g, jsonify, request, session, stream_with_context
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
 from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME, is_valid_path, shared_project_path_error
@@ -1581,22 +1581,31 @@ def api_get_home():
     """Get user's home directory.
 
     Issue #3420: Return isolation-aware home path.
-    Reads isolation_level from session to determine correct home path:
-    - sandboxed: /workspace/{account}
-    - os_user: WORKSPACE_BASE_DIR/{account}
+    Gets isolation level from WebUIInstance (not session) to match sandbox lifecycle.
+    Falls back to _primary_home_root() if no instance exists.
     """
-    user = g.user
+    from app.services.webui_manager import get_webui_manager
 
+    user = g.user
+    user_id = user.get("id")
     system_account = user.get("system_account") if user else None
 
-    # Issue #3420: Get isolation level from session
-    isolation_level = session.get("isolation_level")
+    # Issue #3420: Try to get home path from WebUI instance
+    home = None
+    try:
+        manager = get_webui_manager()
+        instance = manager.get_user_instance(user_id)
+        if instance and instance.isolation_level == "sandboxed":
+            # sandboxed mode: use instance's path
+            home = instance.user_home_path
+    except Exception:
+        # Instance not available, fall back to default
+        pass
 
-    # Issue #3410: this is how the Personal Files UI FINDS the home, so it must
-    # report a path the /fs lock accepts — the single-base get_home_directory()
-    # returned "/a,/b/<account>" on a multi-base deployment and broke the page
-    # end to end.
-    home = _primary_home_root(user, isolation_level)
+    # Fall back to default path calculation
+    if home is None:
+        home = _primary_home_root(user)
+
     if home is None:
         return jsonify({"error": "No home directory available for this user"}), 400
     dir_info = get_directory_info(home, system_account)
