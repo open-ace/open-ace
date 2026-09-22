@@ -92,6 +92,10 @@ AUTH_INLINE_CALLS: set[str] = {
     "validate_session",
     "get_session",
     "require_upload_auth",
+    # A call verifying this project's signed-request authentication
+    # (external service delegation) is an authentication call; the verifier
+    # rejects the request on failure, so a handler calling it is authenticated.
+    "verify_signed_request",
 }
 
 # Variable names that indicate session-based auth is being used

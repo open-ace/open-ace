@@ -134,6 +134,9 @@ class AuditAction(Enum):
     # response (or stream) was blocked so the key never reaches the caller.
     PROXY_KEY_ECHO_BLOCKED = "proxy_key_echo_blocked"
 
+    # External identity actions (operator-registered issuers)
+    EXTERNAL_TOKEN_ISSUED = "external_token_issued"
+
     # Usage report actions (Issue #1891)
     USAGE_REPORT_ACCEPTED = "usage_report_accepted"
     USAGE_REPORT_AUTH_FAILURE = "usage_report_auth_failure"
@@ -1129,6 +1132,18 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "proxy_key_echo_blocked",
                     "label": "Proxy Key Echo Blocked",
                     "i18n_key": "actionProxyKeyEchoBlocked",
+                },
+            ],
+        },
+        "external_identity": {
+            "label": "External Identity",
+            "i18n_key": "categoryExternalIdentity",
+            "resource_types": ["external_identity"],
+            "actions": [
+                {
+                    "value": "external_token_issued",
+                    "label": "External Token Issued",
+                    "i18n_key": "actionExternalTokenIssued",
                 },
             ],
         },

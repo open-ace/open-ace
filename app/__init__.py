@@ -982,6 +982,7 @@ def register_blueprints(app):
     from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
     from app.routes.encryption_keys import encryption_keys_bp
+    from app.routes.external_identity import external_identity_bp
     from app.routes.feishu_config import feishu_config_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
@@ -1018,6 +1019,7 @@ def register_blueprints(app):
     app.register_blueprint(governance_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
+    app.register_blueprint(external_identity_bp, url_prefix="/api")
     app.register_blueprint(tenant_bp)
     app.register_blueprint(sso_bp)
     app.register_blueprint(compliance_bp)
