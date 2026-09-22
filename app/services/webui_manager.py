@@ -1961,9 +1961,7 @@ class WebUIManager:
             proxy=proxy,
             url=f"{self._remove_port_from_url(base_url)}:{port}",
             isolation_level=ISOLATION_LEVEL_SANDBOXED,
-            user_home_path=get_user_home_for_isolation(
-                system_account, ISOLATION_LEVEL_SANDBOXED
-            ),
+            user_home_path=get_user_home_for_isolation(system_account, ISOLATION_LEVEL_SANDBOXED),
         )
         instance_holder.append(instance)
         self._mint_sandboxed_token(instance)
