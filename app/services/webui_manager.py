@@ -1868,6 +1868,7 @@ class WebUIManager:
         proxy port (the browser's origin), never the in-pod 3100.
         """
         from app.services.webui_sandbox import SandboxWebuiProxy
+        from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
         launcher = self._get_sandbox_launcher()
         callback_url = (getattr(self.config, "webui_callback_url", "") or "").strip()
@@ -1959,6 +1960,8 @@ class WebUIManager:
             launcher=launcher,
             proxy=proxy,
             url=f"{self._remove_port_from_url(base_url)}:{port}",
+            isolation_level=ISOLATION_LEVEL_SANDBOXED,
+            user_home_path=get_user_home_for_isolation(system_account, ISOLATION_LEVEL_SANDBOXED),
         )
         instance_holder.append(instance)
         self._mint_sandboxed_token(instance)
