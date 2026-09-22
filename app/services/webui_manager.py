@@ -108,6 +108,13 @@ class WebUIInstance:
     launcher: Any = None
     proxy: Any = None
 
+    # ── Issue #3420: isolation-aware home path ───────────────────────────
+    # Stores the isolation level and computed home path for this instance.
+    # Lifecycle matches the instance (not Flask session), ensuring the path
+    # remains correct even if session expires while the sandbox is alive.
+    isolation_level: str = "os_user"
+    user_home_path: str = ""
+
     _last_health_check: float = 0.0
     _health_check_ttl: float = 30.0  # Cache health check result for 30s
     _consecutive_health_failures: int = 0

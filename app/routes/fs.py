@@ -562,8 +562,10 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None, st
 
     resolved = os.path.realpath(target_dir)
 
-    # Issue #3420: Get isolation level from session
-    isolation_level = session.get("isolation_level")
+    # Issue #3420: isolation level will be handled per-endpoint
+    # (in api_get_home, etc.) via WebUIInstance, not session.
+    # For now, use default (None) which falls back to WORKSPACE_BASE_DIR.
+    isolation_level = None
 
     # Home subtree lock: must equal one of the user's per-base home roots or
     # live beneath it.
@@ -1161,8 +1163,10 @@ def api_browse_directory():
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
 
-    # Issue #3420: Get isolation level from session
-    isolation_level = session.get("isolation_level")
+    # Issue #3420: isolation level will be handled per-endpoint
+    # (in api_get_home, etc.) via WebUIInstance, not session.
+    # For now, use default (None) which falls back to WORKSPACE_BASE_DIR.
+    isolation_level = None
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
