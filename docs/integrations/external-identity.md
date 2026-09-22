@@ -125,10 +125,11 @@ accumulating a new row per call. That session is also the per-identity kill
 switch: if an operator stops it, further exchanges for that identity deny
 with `{"error_code": "session_stopped"}`, 403, until it is resumed. (This is
 distinct from the proxy's own pre-existing circuit breaker, which returns
-`{"error": {"type": "session_stopped"}}`, HTTP 410, if a session is stopped
-*after* a token was minted and a proxy call is then made with it — the
-exchange-time check above is the earlier, explicit denial; the proxy-time
-one is the fallback if the session is stopped mid-lease.)
+`{"error": {"message": "Session has been stopped", "type": "session_stopped"}}`,
+HTTP 410, if a session is stopped *after* a token was minted and a proxy call
+is then made with it — the exchange-time check above is the earlier, explicit
+denial; the proxy-time one is the fallback if the session is stopped
+mid-lease.)
 
 A failed audit write denies the exchange (`{"error_code": "unavailable"}`,
 503) and revokes only the just-minted token by its `jti` — it does not stop

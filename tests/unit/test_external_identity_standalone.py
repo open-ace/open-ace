@@ -104,6 +104,43 @@ class IdentityProbeTest(unittest.TestCase):
         with self.assertRaises(identity.DelegationDenied):
             self.probe()
 
+    def test_replay_rejected_across_endpoints(self):
+        """The nonce table's PK is (issuer, nonce) with no path column: a
+        nonce consumed by a validly-signed /capabilities request must also
+        deny a validly-signed /token request reusing the same nonce, not
+        only a replay against the same endpoint."""
+        nonce = "c" * 48
+        self.probe(self.headers(nonce=nonce))  # consumes `nonce` via /capabilities
+
+        token_raw = b'{"organization":"1","user":"7","login":"alice","provider":"openai"}'
+        token_headers = {
+            "X-ACE-Issuer": "test-issuer",
+            "X-ACE-Time": "1800000000",
+            "X-ACE-Nonce": nonce,
+            "X-ACE-Signature": identity.signature(
+                b"k" * 32,
+                "test-issuer",
+                "1800000000",
+                nonce,
+                token_raw,
+                path=identity.TOKEN_PATH,
+                audience="openace",
+            ),
+        }
+        with self.assertRaises(identity.DelegationDenied):
+            identity.verify_signed_request(
+                self.policy,
+                token_headers,
+                token_raw,
+                self.replay,
+                lambda _: self.account,
+                lambda _: self.tenant,
+                now=1800000000,
+                path=identity.TOKEN_PATH,
+                expected_fields={"organization", "user", "login", "provider"},
+                optional_fields={"ttl_seconds"},
+            )
+
     def test_tamper_expiry_and_wrong_audience(self):
         for headers in [
             self.headers(stamp="1799999969"),
