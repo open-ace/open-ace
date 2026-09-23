@@ -1,0 +1,73 @@
+# OpenSandbox Controller 安装脚本
+# 手动创建必要的资源
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opensandbox-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensandbox-controller
+  namespace: opensandbox-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensandbox-controller
+  template:
+    metadata:
+      labels:
+        app: opensandbox-controller
+    spec:
+      serviceAccountName: opensandbox-controller
+      containers:
+      - name: controller
+        image: docker.m.daocloud.io/opensandbox/controller:v0.2.3
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-controller
+  namespace: opensandbox-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opensandbox-controller
+rules:
+- apiGroups: ["sandbox.opensandbox.io"]
+  resources: ["batchsandboxes", "batchsandboxes/status", "batchsandboxes/finalizers"]
+  verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+- apiGroups: [""]
+  resources: ["pods", "pods/status", "secrets", "services", "persistentvolumeclaims"]
+  verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opensandbox-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opensandbox-controller
+subjects:
+- kind: ServiceAccount
+  name: opensandbox-controller
+  namespace: opensandbox-system

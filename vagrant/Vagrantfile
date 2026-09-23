@@ -1,0 +1,125 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# OpenACE gVisor 沙箱测试环境
+# 用途: 在本地创建一个完整的 Kubernetes + gVisor + OpenSandbox 环境
+
+Vagrant.configure("2") do |config|
+  # 使用 CentOS 8 Stream 作为基础镜像
+  config.vm.box = "generic/centos8s"
+  config.vm.hostname = "openace-gvisor"
+  
+  # 虚拟机资源配置
+  config.vm.provider "libvirt" do |libvirt|
+    libvirt.memory = 16384        # 16GB 内存
+    libvirt.cpus = 8              # 8 核 CPU
+    libvirt.disk_size = "100G"    # 100GB 磁盘
+    libvirt.nested = true         # 启用嵌套虚拟化 (Kata 需要)
+  end
+  
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 16384
+    vb.cpus = 8
+    vb.disk_size = "100GB"
+  end
+  
+  # 网络配置 - 使用私有网络
+  config.vm.network "private_network", type: "dhcp"
+  # 或者指定静态 IP
+  # config.vm.network "private_network", ip: "192.168.56.100"
+  
+  # 端口转发
+  config.vm.network "forwarded_port", guest: 19888, host: 19888, protocol: "tcp"  # OpenACE
+  config.vm.network "forwarded_port", guest: 6443, host: 6443, protocol: "tcp"    # Kubernetes API
+  config.vm.network "forwarded_port", guest: 30080, host: 30080, protocol: "tcp"  # OpenSandbox Gateway
+  
+  # 同步资源目录
+  config.vm.synced_folder "./resources", "/vagrant/resources", disabled: false
+  config.vm.synced_folder "./scripts", "/vagrant/scripts", disabled: false
+  
+  # Shell provisioner - 安装依赖
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+    
+    echo "=== 更新系统 ==="
+    dnf update -y
+    
+    echo "=== 安装基础工具 ==="
+    dnf install -y curl wget git vim net-tools bind-utils telnet jq
+    
+    echo "=== 关闭防火墙 ==="
+    systemctl stop firewalld
+    systemctl disable firewalld
+    
+    echo "=== 关闭 SELinux ==="
+    setenforce 0
+    sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
+    
+    echo "=== 关闭 Swap ==="
+    swapoff -a
+    sed -i '/swap/d' /etc/fstab
+    
+    echo "=== 配置内核参数 ==="
+    cat > /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+    modprobe br_netfilter
+    sysctl --system
+    
+    echo "=== 安装 containerd ==="
+    dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+    dnf install -y containerd.io
+    
+    mkdir -p /etc/containerd
+    containerd config default > /etc/containerd/config.toml
+    
+    # 配置 SystemdCgroup
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    
+    systemctl enable containerd
+    systemctl start containerd
+    
+    echo "=== 安装 gVisor ==="
+    curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" > /etc/apt/sources.list.d/gvisor.list || true
+    
+    # CentOS 使用直接下载方式
+    curl -Lo /usr/local/bin/runsc https://storage.googleapis.com/gvisor/releases/nightly/latest/runsc
+    chmod +x /usr/local/bin/runsc
+    
+    # 配置 containerd 支持 gVisor
+    cat >> /etc/containerd/config.toml <<EOF
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
+EOF
+    
+    systemctl restart containerd
+    
+    echo "=== 验证 gVisor ==="
+    runsc --version
+    
+    echo "=== 安装 Kubernetes ==="
+    cat > /etc/yum.repos.d/kubernetes.repo <<EOF
+[kubernetes]
+name=Kubernetes
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.31/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.31/rpm/repodata/repomd.xml.key
+EOF
+    
+    dnf install -y kubelet kubeadm kubectl
+    
+    echo "=== 初始化 Kubernetes (将在后续手动执行) ==="
+    echo "请运行: vagrant ssh"
+    echo "然后执行: sudo /vagrant/scripts/init-k8s.sh"
+  SHELL
+  
+  # 创建资源目录
+  config.trigger.before :up do |trigger|
+    trigger.run = {inline: "mkdir -p resources scripts"}
+  end
+end

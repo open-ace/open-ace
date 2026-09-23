@@ -1,0 +1,67 @@
+# OpenSandbox CRD 定义
+# 包含 BatchSandbox, SandboxSnapshot, Pool
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: batchsandboxes.sandbox.opensandbox.io
+spec:
+  group: sandbox.opensandbox.io
+  names:
+    kind: BatchSandbox
+    listKind: BatchSandboxList
+    plural: batchsandboxes
+    singular: batchsandbox
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sandboxsnapshots.sandbox.opensandbox.io
+spec:
+  group: sandbox.opensandbox.io
+  names:
+    kind: SandboxSnapshot
+    listKind: SandboxSnapshotList
+    plural: sandboxsnapshots
+    singular: sandboxsnapshot
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pools.sandbox.opensandbox.io
+spec:
+  group: sandbox.opensandbox.io
+  names:
+    kind: Pool
+    listKind: PoolList
+    plural: pools
+    singular: pool
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true

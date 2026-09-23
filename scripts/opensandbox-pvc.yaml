@@ -1,0 +1,25 @@
+# OpenSandbox PVC 配置（使用本地存储）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opensandbox-store-gvisor
+  namespace: open-ace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opensandbox-store-kata
+  namespace: open-ace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 5Gi
