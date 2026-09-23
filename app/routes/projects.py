@@ -224,7 +224,7 @@ def api_create_project():
             return (
                 jsonify(
                     {
-                        "error": f"In sandboxed mode, project path must be under {expected_prefix}. Provided path: {path}"
+                        "error": f"In sandboxed mode, your project must be created under {expected_prefix}. The path you provided ({path}) is not allowed."
                     }
                 ),
                 400,
