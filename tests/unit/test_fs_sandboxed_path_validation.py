@@ -52,7 +52,9 @@ class TestCheckPathRejectionReasonSandboxed:
         """In sandboxed mode, paths under /workspace/{username} should be accepted."""
         user = {"system_account": "testuser", "username": "testuser", "id": 1}
         # This path is under the user's workspace root
-        result = _check_path_rejection_reason("/workspace/testuser", user, ISOLATION_LEVEL_SANDBOXED)
+        result = _check_path_rejection_reason(
+            "/workspace/testuser", user, ISOLATION_LEVEL_SANDBOXED
+        )
         assert result is None
 
     def test_sandboxed_mode_accepts_subdirectory(self):
@@ -87,7 +89,9 @@ class TestResolveFileInHomeSandboxed:
         # Note: This test validates the path resolution logic
         # The function returns the resolved path even if file doesn't exist
         # This is correct behavior - it validates the path is in the right location
-        result = _resolve_file_in_home("/workspace/testuser/file.txt", user, ISOLATION_LEVEL_SANDBOXED)
+        result = _resolve_file_in_home(
+            "/workspace/testuser/file.txt", user, ISOLATION_LEVEL_SANDBOXED
+        )
         # Path should be resolved successfully
         resolved_path, system_account, home_root = result
         assert resolved_path == "/workspace/testuser/file.txt"
