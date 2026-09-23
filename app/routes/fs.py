@@ -814,7 +814,7 @@ def _shared_root_rejection_reason(path, home_dirs: list[str] | None = None) -> s
     return reason
 
 
-def _allowed_roots_for_user(user) -> list[str]:
+def _allowed_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
     """Roots a user may browse (Issue #3376; review rounds 1+2).
 
     Own home roots (one per workspace base dir — see ``_home_roots_for_user``)
@@ -828,8 +828,14 @@ def _allowed_roots_for_user(user) -> list[str]:
     check-path does NOT use this set directly: its exists/canCreate probes
     are one-at-a-time enumeration and are narrowed further by
     ``_check_path_rejection_reason`` (review round 2).
+
+    Issue #3427: Pass isolation_level to _home_roots_for_user for sandboxed mode.
+
+    Args:
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
     """
-    roots = _home_roots_for_user(user)
+    roots = _home_roots_for_user(user, isolation_level)
     try:
         from app.repositories.project_repo import ProjectRepository
 
@@ -850,7 +856,7 @@ def _allowed_roots_for_user(user) -> list[str]:
     return roots
 
 
-def _check_path_rejection_reason(resolved: str, user) -> str | None:
+def _check_path_rejection_reason(resolved: str, user, isolation_level: str | None = None) -> str | None:
     """check-path admissibility predicate; None = admissible (round 2, #3376).
 
     Review round 2 (#3376, 3994613308): admitting the whole workspace base
@@ -870,8 +876,15 @@ def _check_path_rejection_reason(resolved: str, user) -> str | None:
 
     Anything deeper under a base dir (``<base>/x/y``, ``<base>/<account>/...``)
     is rejected.
+
+    Issue #3427: Pass isolation_level to _allowed_roots_for_user for sandboxed mode.
+
+    Args:
+        resolved: Realpath'd path to check.
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
     """
-    if _is_within_any_root(resolved, _allowed_roots_for_user(user)):
+    if _is_within_any_root(resolved, _allowed_roots_for_user(user, isolation_level)):
         return None
     base_dirs = get_workspace_base_dirs()
     for base in base_dirs:
@@ -956,7 +969,7 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
 
 
 def _resolve_file_in_home(
-    raw_path: str, user
+    raw_path: str, user, isolation_level: str | None = None
 ) -> tuple[str, str | None, str] | tuple[None, None, None]:
     """Validate that *raw_path* resolves to a file inside the user's home subtree.
 
@@ -969,17 +982,37 @@ def _resolve_file_in_home(
     That check only VALIDATES: the direct branch then reaches the resolved
     path from the returned home root without following symlinks (#3410).
 
+    Issue #3427: In sandboxed mode, use /workspace path instead of host paths.
+    This allows the main service to validate paths that exist only in the
+    sandbox container.
+
+    Args:
+        raw_path: The path to validate.
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
+
     Returns (resolved_abs_path, system_account, matched_home_root), or
     (None, None, None) if rejected.
     """
     if not raw_path:
         return None, None, None
-    base_dirs = get_workspace_base_dirs()
+
+    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # In sandboxed mode, the path should be under /workspace
+        if not raw_path.startswith("/workspace"):
+            return None, None, None
+        base_dirs = ["/workspace"]
+    else:
+        base_dirs = get_workspace_base_dirs()
+
     if not is_valid_path(raw_path, allowed_prefixes=base_dirs):
         return None, None, None
     target = os.path.realpath(raw_path)
     home_root = next(
-        (root for root in _home_roots_for_write(user) if _is_within_any_root(target, [root])),
+        (root for root in _home_roots_for_write(user, isolation_level) if _is_within_any_root(target, [root])),
         None,
     )
     if home_root is None:
@@ -1497,14 +1530,46 @@ def api_check_path():
     """Check if a path is valid and can be used for a project."""
     user = g.user
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     data = request.get_json() or {}
     path = data.get("path")
 
     if not path:
         return jsonify({"error": "Path is required"}), 400
 
-    # Validate path format — restrict to workspace base dirs
-    base_dirs = get_workspace_base_dirs()
+    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # In sandboxed mode, the path should be under /workspace
+        if not path.startswith("/workspace"):
+            return (
+                jsonify(
+                    {
+                        "valid": False,
+                        "error": "Path must be under /workspace in sandboxed mode",
+                    }
+                ),
+                400,
+            )
+        base_dirs = ["/workspace"]
+    else:
+        # Validate path format — restrict to workspace base dirs
+        base_dirs = get_workspace_base_dirs()
+
     if not is_valid_path(path, allowed_prefixes=base_dirs):
         allowed_paths = ", ".join(base_dirs)
         return (
@@ -1528,7 +1593,8 @@ def api_check_path():
     # non-home children of a base dir (#2317: creating a project directly
     # under the workspace root stays validatable). browse keeps the stricter
     # home-roots-only set ("validatable but not enumerable").
-    reason = _check_path_rejection_reason(path, user)
+    # Issue #3427: Pass isolation_level to _check_path_rejection_reason.
+    reason = _check_path_rejection_reason(path, user, isolation_level)
     if reason is not None:
         return (
             jsonify(
@@ -1640,6 +1706,20 @@ def api_create_directory():
     """
     user = g.user
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     data = request.get_json() or {}
     dir_path = data.get("path", "")
 
@@ -1649,8 +1729,25 @@ def api_create_directory():
     if len(dir_path) > 4096:
         return jsonify({"success": False, "error": "Path too long"}), 400
 
-    # Validate path format — restrict to workspace base dir(s)
-    base_dirs = get_workspace_base_dirs()
+    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # In sandboxed mode, the path should be under /workspace
+        if not dir_path.startswith("/workspace"):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Path must be under /workspace in sandboxed mode",
+                    }
+                ),
+                400,
+            )
+        base_dirs = ["/workspace"]
+    else:
+        # Validate path format — restrict to workspace base dir(s)
+        base_dirs = get_workspace_base_dirs()
     if not is_valid_path(dir_path, allowed_prefixes=base_dirs):
         # Provide specific error message with allowed paths
         allowed_paths = ", ".join(base_dirs)
@@ -1672,7 +1769,8 @@ def api_create_directory():
     # relied on OS DAC alone. Reuse check-path's admissible set (NOT browse's):
     # the two are halves of the #2317 flow — validate a path, then create it —
     # so a path check-path reports creatable must stay creatable here.
-    reason = _check_path_rejection_reason(dir_path, user)
+    # Issue #3427: Pass isolation_level to _check_path_rejection_reason.
+    reason = _check_path_rejection_reason(dir_path, user, isolation_level)
     if reason is not None:
         return jsonify({"success": False, "error": f"{reason}. Provided path: {dir_path}"}), 400
 
@@ -2117,8 +2215,22 @@ def api_download_file():
     """
     user = g.user
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     raw_path = request.args.get("path", "")
-    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user, isolation_level)
     if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
@@ -2193,9 +2305,23 @@ def api_delete_file():
     """
     user = g.user
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user, isolation_level)
     if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 

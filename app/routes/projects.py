@@ -187,6 +187,19 @@ def api_create_project():
     system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     path = data.get("path")
     name = data.get("name")
     description = data.get("description")
@@ -205,22 +218,48 @@ def api_create_project():
 
     path = os.path.abspath(path)
 
-    # Check if path is absolute
-    if not os.path.isabs(path):
-        return jsonify({"error": "Path must be absolute"}), 400
+    # Issue #3427: Handle sandboxed mode
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
-    # Check path format based on platform
-    system = platform.system()
-    if system == "Windows":
-        if not (len(path) >= 2 and path[1] == ":"):
-            return jsonify({"error": "Invalid Windows path format"}), 400
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # In sandboxed mode, path must be under /workspace/{username}
+        username = g.user.get("username") if g.user else None
+        if not username:
+            return jsonify({"error": "Username is required for sandboxed projects"}), 400
+
+        expected_prefix = f"/workspace/{username}"
+        if not path.startswith(expected_prefix):
+            return (
+                jsonify(
+                    {
+                        "error": f"In sandboxed mode, project path must be under {expected_prefix}. Provided path: {path}"
+                    }
+                ),
+                400,
+            )
+
+        # Skip host machine directory creation in sandboxed mode
+        # Directory already exists in sandbox container
+        create_dir = False
     else:
-        if not path.startswith("/"):
-            return jsonify({"error": "Path must start with /"}), 400
+        # Non-sandboxed mode: original validation logic
 
-    # Check for path traversal
-    if ".." in path:
-        return jsonify({"error": "Path traversal not allowed"}), 400
+        # Check if path is absolute
+        if not os.path.isabs(path):
+            return jsonify({"error": "Path must be absolute"}), 400
+
+        # Check path format based on platform
+        system = platform.system()
+        if system == "Windows":
+            if not (len(path) >= 2 and path[1] == ":"):
+                return jsonify({"error": "Invalid Windows path format"}), 400
+        else:
+            if not path.startswith("/"):
+                return jsonify({"error": "Path must start with /"}), 400
+
+        # Check for path traversal
+        if ".." in path:
+            return jsonify({"error": "Path traversal not allowed"}), 400
 
     # Issue #3376 review round 1: a shared project's path extends every
     # tenant member's fs browse roots (fs._allowed_roots_for_user). Without
