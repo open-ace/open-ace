@@ -1199,19 +1199,10 @@ def api_browse_directory():
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
 
-    # Issue #3420: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    # Issue #3420/#3427: Get isolation level from WebUIInstance
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
@@ -1537,18 +1528,9 @@ def api_check_path():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     data = request.get_json() or {}
     path = data.get("path")
@@ -1713,18 +1695,9 @@ def api_create_directory():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     data = request.get_json() or {}
     dir_path = data.get("path", "")
@@ -1884,19 +1857,10 @@ def api_upload_file():
     """
     user = g.user
 
-    # Issue #3420: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    # Issue #3420/#3427: Get isolation level from WebUIInstance
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     # Cheap pre-filter: reject declared-oversized requests before the body is
     # fully buffered to disk. The Content-Length header can be spoofed, so the
@@ -2222,18 +2186,9 @@ def api_download_file():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     raw_path = request.args.get("path", "")
     target_path, system_account, home_root = _resolve_file_in_home(raw_path, user, isolation_level)
@@ -2312,18 +2267,9 @@ def api_delete_file():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
@@ -2685,19 +2631,10 @@ def api_search_files():
     """
     user = g.user
 
-    # Issue #3420: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    # Issue #3420/#3427: Get isolation level from WebUIInstance
+    from app.utils.isolation_level import get_user_isolation_level
 
-        user_id = user.get("id") if user else None
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_user_isolation_level(user)
 
     query = (request.args.get("q", "") or "").strip()
     matcher = _build_name_matcher(query)

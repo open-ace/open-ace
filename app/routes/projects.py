@@ -188,17 +188,9 @@ def api_create_project():
     data = request.get_json() or {}
 
     # Issue #3427: Get isolation level from WebUIInstance
-    isolation_level = None
-    try:
-        from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_isolation_level_from_webui
 
-        if user_id:
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(user_id)
-            if instance:
-                isolation_level = instance.isolation_level
-    except Exception:
-        pass
+    isolation_level = get_isolation_level_from_webui(user_id)
 
     path = data.get("path")
     name = data.get("name")
