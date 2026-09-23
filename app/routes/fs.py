@@ -856,7 +856,9 @@ def _allowed_roots_for_user(user, isolation_level: str | None = None) -> list[st
     return roots
 
 
-def _check_path_rejection_reason(resolved: str, user, isolation_level: str | None = None) -> str | None:
+def _check_path_rejection_reason(
+    resolved: str, user, isolation_level: str | None = None
+) -> str | None:
     """check-path admissibility predicate; None = admissible (round 2, #3376).
 
     Review round 2 (#3376, 3994613308): admitting the whole workspace base
@@ -1012,7 +1014,11 @@ def _resolve_file_in_home(
         return None, None, None
     target = os.path.realpath(raw_path)
     home_root = next(
-        (root for root in _home_roots_for_write(user, isolation_level) if _is_within_any_root(target, [root])),
+        (
+            root
+            for root in _home_roots_for_write(user, isolation_level)
+            if _is_within_any_root(target, [root])
+        ),
         None,
     )
     if home_root is None:
