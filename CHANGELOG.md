@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Python packages are published to PyPI as `open-ace-server` (`pip install open-ace-server`) via Trusted Publishing; PyPI rejects `open-ace` as too similar to the unrelated `openace` project. Import names and the `openace` CLI are unchanged. Release wheels/sdists are now named `open_ace_server-X.Y.Z*`.
+- Internal: `webui_sandbox.py` split into a shared module and `webui_sandbox_opensandbox.py` (Issue #3431); no behavior change.
 
 ## [v2.0.0] - 2026-09-25
 
