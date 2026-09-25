@@ -1832,9 +1832,9 @@ class WebUIManager:
     def _get_sandbox_launcher(self) -> Any:
         """Return the sandboxed WebUI launcher (injectable for tests)."""
         if self._sandbox_launcher is None:
-            from app.services.webui_sandbox import SandboxedWebuiLauncher
+            from app.services.webui_sandbox_opensandbox import OpenSandboxWebuiLauncher
 
-            self._sandbox_launcher = SandboxedWebuiLauncher(
+            self._sandbox_launcher = OpenSandboxWebuiLauncher(
                 tier=(getattr(self.config, "sandbox_tier", "") or "").strip()
             )
         return self._sandbox_launcher
@@ -1896,7 +1896,7 @@ class WebUIManager:
         try:
             snapshot = launcher.load_snapshot(user_id)
         except Exception as exc:
-            from app.services.webui_sandbox import SnapshotUnreadableError
+            from app.services.webui_sandbox_opensandbox import SnapshotUnreadableError
 
             if not isinstance(exc, SnapshotUnreadableError):
                 raise
@@ -1908,7 +1908,7 @@ class WebUIManager:
                 exc,
             )
             history_unreadable = True
-        from app.services.webui_sandbox import RESTORE_SOURCE_DEGRADED
+        from app.services.webui_sandbox_opensandbox import RESTORE_SOURCE_DEGRADED
 
         result = launcher.launch(
             user_id=user_id,

@@ -873,7 +873,7 @@ class OpenSandboxProvider:
             # workflow row will ever claim them, so without this exclusion
             # every scheduler sweep would destroy live user webuis. Their
             # lifecycle belongs to the WEB process's generation reconcile
-            # (app/services/webui_sandbox.py). Declared in
+            # (app/services/webui_sandbox_opensandbox.py). Declared in
             # docs/sandbox-backends.md.
             if metadata.get(policy_mod.WEBUI_METADATA_KIND) == policy_mod.WEBUI_METADATA_KIND_VALUE:
                 continue
