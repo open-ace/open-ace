@@ -62,6 +62,42 @@ _WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
 # in sudoers (Issue #2305 review).
 _WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 
+# Issue #3431 (Option 1): root entry point that confines a per-user WebUI in a
+# systemd scope (cgroup limits) + bubblewrap (read-only host, private network
+# namespace, egress only through a host:port allowlist proxy). See
+# scripts/openace-webui-confine.py for the trust split between its modes.
+_WEBUI_CONFINE_WRAPPER = "/usr/local/bin/openace-webui-confine"
+CONFINEMENT_OFF = "off"
+CONFINEMENT_BWRAP = "bwrap"
+# Keys the confine wrapper owns or refuses (it sets HOME/PATH/proxy variables
+# itself; the host's own proxy is not reachable from the sandbox anyway).
+_CONFINE_RESERVED_ENV = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NODE_USE_ENV_PROXY",
+    }
+)
+_CONFINE_DENY_ENV_PREFIXES = ("LD_", "PYTHON", "NODE_OPTIONS", "BASH_ENV", "ENV")
+# `openace-webui-confine check` output token -> readiness reason code.
+_CONFINE_CHECK_REASONS = {
+    "missing:bwrap": "confinement_bwrap_missing",
+    "missing:setpriv": "confinement_setpriv_missing",
+    "missing:systemd-run": "confinement_systemd_unavailable",
+    "systemd:not-running": "confinement_systemd_unavailable",
+    "userns:unavailable": "confinement_userns_unavailable",
+    "bwrap:too-old": "confinement_bwrap_too_old",
+    "policy:invalid": "confinement_policy_invalid",
+}
+
 # Readiness-probe memoization window (both directions) so degraded hosts
 # cannot be loop-polled into repeated probe work (Issue #3374 review #9).
 _PROBE_MEMO_TTL_SECONDS = 30.0
@@ -263,6 +299,17 @@ class WorkspaceConfig:
     # sandboxed WebUIs launch on. Empty string falls back to the backend
     # config's default_tier. Read by the isolation capability probe only.
     sandbox_tier: str = ""
+    # Issue #3431 (Option 1): confine each os_user WebUI. "" / "off" keeps the
+    # plain sudo -u launch; "bwrap" requires the confine wrapper, systemd and
+    # bubblewrap (fail-closed: an unready host degrades the os_user level
+    # instead of launching unconfined). Any other value is a readiness error.
+    os_user_confinement: str = ""
+    confinement_memory_max: str = "4G"
+    confinement_cpu_quota: int = 200
+    confinement_tasks_max: int = 512
+    # Extra host:port pairs the sandbox may reach, beyond the Open ACE API /
+    # LLM proxy endpoints derived from the launch environment.
+    confinement_egress_allow: tuple[str, ...] = ()
 
 
 def read_workspace_config() -> WorkspaceConfig:
@@ -298,6 +345,17 @@ def read_workspace_config() -> WorkspaceConfig:
             webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
             required_isolation_level=(workspace.get("required_isolation_level", "") or "").strip(),
             sandbox_tier=(workspace.get("sandbox_tier", "") or "").strip(),
+            os_user_confinement=str(workspace.get("os_user_confinement", "") or "").strip().lower(),
+            confinement_memory_max=str(
+                workspace.get("confinement_memory_max", "4G") or "4G"
+            ).strip(),
+            confinement_cpu_quota=int(workspace.get("confinement_cpu_quota", 200) or 200),
+            confinement_tasks_max=int(workspace.get("confinement_tasks_max", 512) or 512),
+            confinement_egress_allow=tuple(
+                str(item).strip()
+                for item in (workspace.get("confinement_egress_allow") or [])
+                if str(item).strip()
+            ),
         )
     except Exception as e:
         logger.error(f"Error loading config: {e}")
@@ -2252,6 +2310,24 @@ class WebUIManager:
         # popen_env tracks whether to pass child_env to Popen; for the sudo
         # inline path env vars are already in the command, so skip it.
         popen_env: dict[str, str] | None = child_env
+        # Issue #3431: the confined launch hands the environment to the root
+        # wrapper on stdin, never on a (world-readable) command line.
+        stdin_payload: bytes | None = None
+        if self._confinement_enabled() and (
+            webui_dir
+            or self._platform not in ("linux", "darwin")
+            or pwd.getpwuid(os.getuid()).pw_name == system_account
+        ):
+            # Fail closed: these launch forms cannot be confined (dev-directory
+            # node, no user switch). The readiness probe normally refuses the
+            # first two before we get here; the same-account form is caught
+            # only here.
+            logger.error(
+                "Confinement is configured but this WebUI launch form cannot be "
+                "confined (user %s); refusing to launch unconfined",
+                user_id,
+            )
+            return None, model_pool
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -2287,6 +2363,21 @@ class WebUIManager:
                     openace_api_url,
                 ]
                 cwd = None
+            elif self._confinement_enabled():
+                # Issue #3431 (Option 1): confined launch. The readiness probe
+                # refused hosts that cannot confine and the guard above refused
+                # the unconfinable forms, so this branch is the only one left
+                # when confinement is configured.
+                cmd = self._build_confined_command(
+                    system_account=system_account,
+                    port=port,
+                    webui_cmd=webui_cmd,
+                    webui_log_dir=webui_log_dir,
+                    openace_api_url=openace_api_url,
+                )
+                stdin_payload = json.dumps(self._confined_env(child_env)).encode()
+                cwd = None
+                popen_env = None
             else:
                 # Different user: use sudo -u with openace-webui-launch wrapper
                 # to pass environment variables inline.
@@ -2400,9 +2491,15 @@ class WebUIManager:
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
                 env=popen_env,  # None for sudo-inline path (vars already in cmd)
+                stdin=subprocess.PIPE if stdin_payload is not None else None,
                 stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
                 stderr=subprocess.DEVNULL,
             )
+            if stdin_payload is not None and process.stdin is not None:
+                try:
+                    process.stdin.write(stdin_payload)
+                finally:
+                    process.stdin.close()
             return process, model_pool
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
@@ -2726,7 +2823,149 @@ class WebUIManager:
             return "launch_wrapper_missing"
         if shutil.which("sudo") is None:
             return "sudo_unavailable"
+        if self._confinement_enabled():
+            return self._confinement_readiness(webui_cmd)
         return None
+
+    # ── Issue #3431 (Option 1): confined os_user launch ───────────────
+
+    def _confinement_mode(self) -> str:
+        """The configured confinement mode, normalized ("" when unset/non-string)."""
+        mode = getattr(getattr(self, "config", None), "os_user_confinement", "")
+        return mode.strip().lower() if isinstance(mode, str) else ""
+
+    def _confinement_enabled(self) -> bool:
+        """Whether os_user WebUIs must launch confined (any value but off/empty)."""
+        return self._confinement_mode() not in ("", CONFINEMENT_OFF)
+
+    def confinement_active(self) -> bool:
+        """Confinement is configured AND this host passed its readiness check."""
+        return self._confinement_enabled() and self.per_user_launch_readiness() is None
+
+    def _confinement_readiness(self, webui_cmd: str) -> str | None:
+        """Degradation reason when this host cannot confine, else None.
+
+        Runs the wrapper's unprivileged ``check`` mode, which verifies the
+        tools, a running systemd, that bubblewrap can create user namespaces
+        (the Ubuntu 24.04+ AppArmor restriction is the usual failure), and that
+        the root-owned policy file lists this WebUI executable.
+        """
+        if self._confinement_mode() != CONFINEMENT_BWRAP:
+            return "confinement_mode_invalid"
+        if self._platform != "linux":
+            return "confinement_platform_unsupported"
+        # The egress allowlist is derived from server-side configuration
+        # only: without webui_callback_url the API URL would come from the
+        # request's Host header, which the user controls.
+        if not (getattr(self.config, "webui_callback_url", "") or "").strip():
+            return "confinement_callback_url_missing"
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
+            return "confinement_wrapper_missing"
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed wrapper path
+                [_WEBUI_CONFINE_WRAPPER, "check", "--webui", webui_cmd],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("confinement check could not run: %s", exc)
+            return "confinement_check_failed"
+        if result.returncode == 0:
+            return None
+        token = (result.stdout or "").strip().splitlines()[-1:] or [""]
+        return _CONFINE_CHECK_REASONS.get(token[0], "confinement_check_failed")
+
+    def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:
+        """The WebUI environment for the confine wrapper (stdin JSON).
+
+        Drops the keys the wrapper owns or refuses — it sets HOME, PATH and
+        the proxy variables itself, and the host's own proxy is unreachable
+        from the sandbox — plus empty values.
+        """
+        return {
+            key: value
+            for key, value in child_env.items()
+            if value
+            and key not in _CONFINE_RESERVED_ENV
+            and not key.startswith(_CONFINE_DENY_ENV_PREFIXES)
+        }
+
+    def _confinement_allowlist(self) -> list[str]:
+        """Return the host:port pairs the sandbox may reach.
+
+        Server-side configuration ONLY — ``webui_callback_url`` (the Open ACE
+        API and its LLM proxy, required by the readiness probe) plus
+        ``confinement_egress_allow``. Never the request-derived API URL: its
+        host comes from the client's Host header.
+        """
+        from urllib.parse import urlsplit
+
+        entries: list[str] = []
+        callback = (getattr(self.config, "webui_callback_url", "") or "").strip()
+        try:
+            parsed = urlsplit(callback)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError:
+            host = None
+        if host:
+            entries.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
+        entries.extend(getattr(self.config, "confinement_egress_allow", ()) or ())
+        return list(dict.fromkeys(entries))
+
+    def _build_confined_command(
+        self,
+        *,
+        system_account: str,
+        port: int,
+        webui_cmd: str,
+        webui_log_dir: str,
+        openace_api_url: str,
+    ) -> list[str]:
+        """``sudo -n openace-webui-confine launch ...`` for one user's WebUI.
+
+        The WebUI listens on loopback inside the sandbox; the wrapper's host
+        side listens on ``0.0.0.0:<port>`` (today's exposure) and forwards in.
+        """
+        cmd = [
+            "sudo",
+            "-n",
+            _WEBUI_CONFINE_WRAPPER,
+            "launch",
+            "--account",
+            system_account,
+            "--port",
+            str(port),
+            "--memory-max",
+            str(self.config.confinement_memory_max),
+            "--cpu-quota",
+            str(self.config.confinement_cpu_quota),
+            "--tasks-max",
+            str(self.config.confinement_tasks_max),
+            "--log-dir",
+            webui_log_dir,
+        ]
+        for entry in self._confinement_allowlist():
+            cmd += ["--allow", entry]
+        cmd += [
+            "--webui",
+            webui_cmd,
+            "--",
+            "--port",
+            str(port),
+            "--host",
+            "127.0.0.1",
+            "--token-secret",
+            self.config.token_secret,
+            "--quota-check-enabled",
+            "--openace-api-url",
+            openace_api_url,
+        ]
+        return cmd
 
     def supports_per_user_launch(self, system_account: str) -> tuple[bool, str | None]:
         """Report whether a WebUI for ``system_account`` would run as that OS user.

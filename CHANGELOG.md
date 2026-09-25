@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Optional confinement for `os_user` interactive workspaces (Issue #3431, Option 1): with `workspace.os_user_confinement = "bwrap"`, each per-user qwen-code-webui runs in a systemd scope (`MemoryMax`/`MemorySwapMax=0`/`CPUQuota`/`TasksMax`) entered through `setpriv --init-groups --no-new-privs` with all capabilities dropped, inside bubblewrap with a read-only host root, empty tmpfs over `/tmp`, `/var/tmp`, `/run` and the workspace base (only the user's home and `<base>/shared` are bound back — other homes are invisible), and a private network namespace whose only way out is a host-side proxy that allows allowlisted `host:port` pairs (the Open ACE API / LLM proxy endpoints plus `confinement_egress_allow`) and logs every decision. The root entry point `/usr/local/bin/openace-webui-confine launch` validates typed arguments, builds every systemd property itself, refuses executables not listed in the root-owned `/etc/openace/webui-confine.json`, and takes the WebUI environment on stdin so the proxy token never appears on a command line. The capability contract (policy revision `2026-09-25.1`) reports backend `qwen-code-webui-per-user-confined` with `resources` and `network_egress` enforced; a host that cannot confine degrades with a `confinement_*` reason instead of launching unconfined. The package installer installs the wrapper, the policy file and a `launch`-only sudoers rule. Real-Linux acceptance: `scripts/webui_confine_acceptance.py`.
+
 ## [v2.0.1] - 2026-09-25
 
 ### Changed
