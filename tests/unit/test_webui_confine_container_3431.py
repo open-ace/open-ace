@@ -214,7 +214,10 @@ def test_plan_container_launch(confine, planned_container):
     assert docker_argv[group_add + 1] == "4000"
     assert "tok" not in " ".join(docker_argv)
     assert payload["backend"] == "container"
-    assert payload["socket_dir"] == "/run/openace-webui/3001-3150"
+    # one run directory and one root-owned cid file per launch (launcher pid)
+    assert payload["socket_dir"] == f"/run/openace-webui/3001-3150-{os.getpid()}"
+    assert payload["cidfile"] == f"/run/openace-webui/3001-3150-{os.getpid()}.cid"
+    assert docker_argv[docker_argv.index("--cidfile") + 1] == payload["cidfile"]
     assert payload["tasks_max"] == 512
     assert payload["inner_env"]["OPENAI_API_KEY"] == "tok"
     assert payload["inner_env"]["HOME"] == "/wsbase/alice"
@@ -433,17 +436,56 @@ def test_supervisor_exits_at_once_when_the_launcher_is_already_gone(confine, tmp
     assert list(tmp_path.iterdir()) == []
 
 
-def test_docker_remove_only_touches_our_labelled_container(confine, monkeypatch):
+def test_docker_remove_only_touches_our_labelled_container_and_waits(confine, monkeypatch):
     calls = []
+    remaining = {"polls": 2}  # the name stays taken for two polls after rm -f
 
     def _fake(argv, **kwargs):
-        calls.append(argv[1])
-        label = "1" if "ours" in argv[-1] else ""
-        return subprocess.CompletedProcess(argv, 0, stdout=label + "\n", stderr="")
+        calls.append(argv[1] if argv[1] != "inspect" or "-f" not in argv or "Labels" in argv[3]
+                     else "poll")  # fmt: skip
+        if argv[1] == "inspect" and "Labels" in argv[3]:
+            label = "1" if "ours" in argv[-1] else ""
+            return subprocess.CompletedProcess(argv, 0, stdout=label + "\n", stderr="")
+        if argv[1] == "inspect":  # the wait-until-free poll
+            remaining["polls"] -= 1
+            rc = 0 if remaining["polls"] >= 0 else 1
+            return subprocess.CompletedProcess(argv, rc, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     monkeypatch.setattr(confine.subprocess, "run", _fake)
+    monkeypatch.setattr(confine.time, "sleep", lambda s: None)
     confine._docker_remove("/usr/bin/docker", "someone-elses")
     assert calls == ["inspect"]
     calls.clear()
     confine._docker_remove("/usr/bin/docker", "ours")
-    assert calls == ["inspect", "rm"]
+    assert calls == ["inspect", "rm", "poll", "poll", "poll"]  # waited until the name was free
+
+
+def test_docker_remove_id_uses_the_cid_file(confine, monkeypatch, tmp_path):
+    removed = []
+    monkeypatch.setattr(
+        confine.subprocess, "run",
+        lambda argv, **k: removed.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+    )  # fmt: skip
+    cid = "c" * 64
+    (tmp_path / "x.cid").write_text(cid + "\n")
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "x.cid")) is True
+    assert removed == [["/usr/bin/docker", "rm", "-f", cid]]
+    (tmp_path / "bad.cid").write_text("not-an-id --volumes\n")
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "bad.cid")) is False
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "missing.cid")) is False
+    assert len(removed) == 1
+
+
+def test_sweep_removes_only_dead_launches_of_the_same_port(confine, tmp_path):
+    root = tmp_path / "run"
+    root.mkdir()
+    dead = 999_999_999  # no such pid
+    for entry in (f"3001-3150-{dead}", f"3001-3150-{os.getpid()}", f"3001-31500-{dead}",
+                  f"3001-3151-{dead}"):  # fmt: skip
+        (root / entry).mkdir()
+    (root / f"3001-3150-{dead}.cid").write_text("x")
+    confine.sweep_stale_run_dirs("3001-3150", str(root))
+    assert sorted(p.name for p in root.iterdir()) == sorted(
+        [f"3001-3150-{os.getpid()}", f"3001-31500-{dead}", f"3001-3151-{dead}"]
+    )

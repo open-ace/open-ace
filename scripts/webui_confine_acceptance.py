@@ -565,13 +565,32 @@ def run_container(record: Record) -> None:
 
         # (b) the manager's escalation with inner suspended from inside the
         # container: SIGTERM to sudo, wait, SIGKILL to sudo (not forwarded).
-        sudo("docker", "exec", name, "pkill", "-STOP", "-f", "confine.py inner", check=False)
+        # The image has no pkill/ps: suspend `inner` with python, excluding
+        # the suspending process itself, and FAIL if nothing was suspended.
+        suspended = sudo(
+            "docker", "exec", name, "python3", "-c",
+            "import os, signal\n"
+            "me = os.getpid(); hits = []\n"
+            "for pid in os.listdir('/proc'):\n"
+            "    if not pid.isdigit() or int(pid) == me: continue\n"
+            "    try: cmd = open(f'/proc/{pid}/cmdline','rb').read()\n"
+            "    except OSError: continue\n"
+            "    if b'confine.py' in cmd and b'inner' in cmd:\n"
+            "        os.kill(int(pid), signal.SIGSTOP); hits.append(pid)\n"
+            "print(len(hits)); raise SystemExit(0 if hits else 1)",
+            check=False,
+        )  # fmt: skip
+        record.check("inner suspended inside the container", suspended.returncode == 0,
+                     suspended.stdout.strip())  # fmt: skip
         process.terminate()
+        escalated = False
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
+            escalated = True  # SIGTERM alone could not stop it: the case under test
             process.kill()
             process.wait(timeout=10)
+        record.check("the stop really needed the kill escalation", escalated)
         deadline = time.monotonic() + 60
         while (
             time.monotonic() < deadline
@@ -583,6 +602,15 @@ def run_container(record: Record) -> None:
         record.check("manager stop (terminate, then kill of sudo) removes a suspended container",
                      container_gone and port_free,
                      {"container_gone": container_gone, "port_free": port_free})  # fmt: skip
+        process = _launch()  # (c) relaunch at once on the same port
+        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
+        record.check("relaunch right after a kill-escalated stop serves again",
+                     answer is not None and answer[0] == 200)  # fmt: skip
+        process.terminate()
+        process.wait(timeout=30)
+        leftovers = sh("sudo", "-n", "ls", "/run/openace-webui", check=False).stdout.split()
+        record.check("no run directories or cid files left behind",
+                     [e for e in leftovers if e.startswith("3431-")] == [], leftovers)  # fmt: skip
         policy_text = sudo("cat", POLICY).stdout
         broken = json.loads(policy_text)
         broken["container"]["runtime"] = "runsc"  # plain runsc: no host UDS

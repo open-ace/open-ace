@@ -88,6 +88,7 @@ RUNTIME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MOUNT_UNSAFE_RE = re.compile(r"[,\n\r\0=]")
 SUPERVISOR_WATCH_SECONDS = 30.0
 CONTAINER_MIN_HOST_PIDS = 256  # gVisor sentry host-thread floor (--pids-limit)
+CONTAINER_REMOVE_WAIT_SECONDS = 30.0
 PROTECTED_SYMLINKS = "/proc/sys/fs/protected_symlinks"
 
 
@@ -652,6 +653,7 @@ def build_docker_argv(
     run_dir: str,
     script: str,
     webui_argv: Sequence[str],
+    cidfile: str | None = None,
 ) -> list[str]:
     """The fixed ``docker run`` command line for the container backend.
 
@@ -663,6 +665,7 @@ def build_docker_argv(
         container.docker, "run", "--rm", "-i", "--init",
         "--name", f"openace-webui-{uid}-{port}",
         "--label", "org.openace.confine=1", "--label", f"org.openace.uid={uid}",
+        *(["--cidfile", cidfile] if cidfile else []),
         "--runtime", container.runtime,
         "--network", "none",
         "--user", f"{uid}:{gid}",
@@ -1352,7 +1355,11 @@ def _plan_container(
         raise ConfineError("setpriv is not installed")
     python = sys.executable or "/usr/bin/python3"
     script = os.path.realpath(__file__)
-    run_dir = os.path.join(RUN_ROOT, f"{entry.pw_uid}-{port}")
+    # One run directory per launch (the launcher's pid): a successor launch
+    # on the same port never shares paths with a launch still shutting down.
+    launch_id = f"{entry.pw_uid}-{port}-{os.getpid()}"
+    run_dir = os.path.join(RUN_ROOT, launch_id)
+    cidfile = os.path.join(RUN_ROOT, f"{launch_id}.cid")  # root-owned directory
     extra_gids = sorted(gid for gid in account_groups(entry) if gid != entry.pw_gid)
     docker_argv = build_docker_argv(
         container=policy.container,
@@ -1367,6 +1374,7 @@ def _plan_container(
         shared=shared,
         log_dir=log_dir,
         run_dir=run_dir,
+        cidfile=cidfile,
         script=script,
         webui_argv=[webui, *webui_args],
     )
@@ -1380,6 +1388,7 @@ def _plan_container(
         "bind_host": args.bind_host,
         "allow": [f"[{h}]:{p}" if ":" in h else f"{h}:{p}" for h, p in allow],
         "socket_dir": run_dir,
+        "cidfile": cidfile,
         "setpriv_argv": _setpriv_argv(entry, python, script),
         # what ``inner`` receives on the container's stdin
         "inner_env": build_inner_env(env, home=home, sandbox_path=policy.path),
@@ -1462,18 +1471,78 @@ def _exec_with_stdin(argv: list[str], data: bytes) -> None:
     os.execve(argv[0], argv, {"PATH": SAFE_PATH, "LANG": "C.UTF-8"})
 
 
-def _docker_remove(docker: str, name: str) -> None:
-    """Force-remove our container *name* (only if it carries our label)."""
-    env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+def _docker_env() -> dict[str, str]:
+    return {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+
+
+def _docker_remove(docker: str, name: str, wait: float = CONTAINER_REMOVE_WAIT_SECONDS) -> None:
+    """Force-remove our container *name* (only if it carries our label) and
+    wait until the name is free, so a relaunch cannot race a removal still
+    in progress (docker run would fail with a name conflict)."""
+    env = _docker_env()
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         label = subprocess.run(  # noqa: S603 - fixed argv
             [docker, "inspect", "-f", '{{index .Config.Labels "org.openace.confine"}}', name],
             capture_output=True, text=True, timeout=30, check=False, env=env,
         )  # fmt: skip
-        if label.returncode == 0 and label.stdout.strip() == "1":
-            subprocess.run(  # noqa: S603 - fixed argv
-                [docker, "rm", "-f", name], capture_output=True, timeout=60, check=False, env=env
-            )
+        if label.returncode != 0 or label.stdout.strip() != "1":
+            return
+        subprocess.run(  # noqa: S603 - fixed argv
+            [docker, "rm", "-f", name], capture_output=True, timeout=60, check=False, env=env
+        )
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            gone = subprocess.run(  # noqa: S603 - fixed argv
+                [docker, "inspect", "-f", "{{.Id}}", name],
+                capture_output=True, timeout=30, check=False, env=env,
+            )  # fmt: skip
+            if gone.returncode != 0:
+                return
+            time.sleep(0.5)
+
+
+def _docker_remove_id(docker: str, cidfile: str) -> bool:
+    """Force-remove THIS launch's container by the id docker wrote to *cidfile*
+    (never by name: a successor launch may already hold the name)."""
+    try:
+        with open(cidfile, encoding="ascii") as handle:
+            cid = handle.read().strip()
+    except OSError:
+        return False
+    if not re.fullmatch(r"[0-9a-f]{64}", cid):
+        return False
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(  # noqa: S603 - fixed argv
+            [docker, "rm", "-f", cid], capture_output=True, timeout=60, check=False,
+            env=_docker_env(),
+        )  # fmt: skip
+        return True
+    return False
+
+
+def sweep_stale_run_dirs(prefix: str, run_root: str = RUN_ROOT) -> None:
+    """Remove run dirs / cid files of earlier launches on the same uid+port
+    whose launcher process is gone (a crashed or SIGKILLed launcher)."""
+    with contextlib.suppress(OSError):
+        for entry in os.listdir(run_root):
+            if not entry.startswith(prefix + "-"):
+                continue
+            pid_part = entry[len(prefix) + 1 :].split(".", 1)[0]
+            if not pid_part.isdigit():
+                continue
+            try:
+                os.kill(int(pid_part), 0)
+                continue  # that launcher is still alive: not ours to touch
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                continue
+            path = os.path.join(run_root, entry)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                with contextlib.suppress(OSError):
+                    os.unlink(path)
 
 
 def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) -> int:
@@ -1482,59 +1551,88 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
     Staying alive (instead of exec'ing docker) is what makes teardown
     reliable: sudo forwards SIGTERM to this process, which forwards it to the
     docker CLI; when sudo itself is SIGKILLed (the manager's escalation, not
-    forwarded) this process notices it was reparented and force-removes the
-    container. A container left over from a previous launch on the same port
-    is removed first, and the run directory is cleaned up at the end.
+    forwarded) this process notices it was reparented and force-removes ITS
+    container — by the id docker wrote to a root-owned cid file, so a
+    successor launch that already took the name is never touched. Each
+    launch has its own run directory. A container left over from a previous
+    launch on the same port is removed (and waited for) before starting.
     """
     uid, gid = int(payload["uid"]), int(payload["gid"])
     docker = docker_argv[0]
     name = docker_argv[docker_argv.index("--name") + 1]
     run_dir = str(payload["socket_dir"])
+    cidfile = str(payload["cidfile"])
     supervisor_payload = dict(payload, parent_pid=os.getpid())
     inner_env = json.dumps(supervisor_payload.pop("inner_env")).encode() + b"\n"
     setpriv_argv = list(supervisor_payload.pop("setpriv_argv"))  # type: ignore[call-overload]
     if len(inner_env) > PIPE_BUFFER - 1:
         raise ConfineError("environment too large for the hand-off pipe")
-    _docker_remove(docker, name)
-    prepare_run_dir(run_dir, uid, gid)
-    log_fd = open_root_egress_log(uid)
-    supervisor_payload["log_fd"] = log_fd
-    data = json.dumps(supervisor_payload).encode()
     parent = os.getppid()
-    supervisor = os.fork()
-    if supervisor == 0:  # pragma: no cover - exercised by the acceptance run
-        try:
-            _exec_with_stdin(setpriv_argv, data)
-        finally:
-            os._exit(70)
-    os.close(log_fd)  # only the supervisor writes the audit log
-    container = subprocess.Popen(  # noqa: S603 - fixed argv
-        docker_argv, stdin=subprocess.PIPE, env={"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
-    )
-    assert container.stdin is not None
-    container.stdin.write(inner_env)
-    container.stdin.close()
+    container: subprocess.Popen | None = None
+    pending: list[int] = []
 
     def _forward(signum, _frame) -> None:
+        if container is None:
+            pending.append(signum)  # delivered once docker is running
+            return
         with contextlib.suppress(ProcessLookupError):
             container.send_signal(signum)
 
+    # Before anything is started, so no signal can skip the cleanup below.
     signal.signal(signal.SIGTERM, _forward)
     signal.signal(signal.SIGINT, _forward)
+    supervisor = 0
+    removed = False
     try:
+        sweep_stale_run_dirs(os.path.basename(run_dir).rsplit("-", 1)[0])
+        _docker_remove(docker, name)
+        prepare_run_dir(run_dir, uid, gid)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(cidfile)  # root-owned directory; docker refuses an existing file
+        log_fd = open_root_egress_log(uid)
+        supervisor_payload["log_fd"] = log_fd
+        data = json.dumps(supervisor_payload).encode()
+        supervisor = os.fork()
+        if supervisor == 0:  # pragma: no cover - exercised by the acceptance run
+            try:
+                _exec_with_stdin(setpriv_argv, data)
+            finally:
+                os._exit(70)
+        os.close(log_fd)  # only the supervisor writes the audit log
+        if pending:
+            return 0  # stopped before docker started
+        container = subprocess.Popen(  # noqa: S603 - fixed argv
+            docker_argv, stdin=subprocess.PIPE, env=_docker_env()
+        )
+        with contextlib.suppress(BrokenPipeError):  # docker may exit at once
+            assert container.stdin is not None
+            container.stdin.write(inner_env)
+            container.stdin.close()
+        for signum in pending:
+            _forward(signum, None)
         while True:
             try:
                 return container.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
-                if os.getppid() != parent:
+                if os.getppid() != parent and not removed:
                     # sudo was killed: nothing will signal us again.
-                    _docker_remove(docker, name)
+                    removed = _docker_remove_id(docker, cidfile)
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(supervisor, signal.SIGTERM)
-        with contextlib.suppress(ChildProcessError):
-            os.waitpid(supervisor, 0)
+        if supervisor:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(supervisor, signal.SIGTERM)
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                with contextlib.suppress(ChildProcessError):
+                    if os.waitpid(supervisor, os.WNOHANG)[0]:
+                        break
+                time.sleep(0.2)
+            else:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(supervisor, signal.SIGKILL)
         shutil.rmtree(run_dir, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            os.unlink(cidfile)
 
 
 def run_launch(argv: Sequence[str]) -> int:
