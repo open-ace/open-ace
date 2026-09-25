@@ -133,7 +133,15 @@ TUNNEL_POOL = 4  # idle reverse-tunnel connections kept by ``inner``
 TUNNEL_POOL_MAX = 64  # the supervisor never holds more than this many
 TUNNEL_GO = b"\x01"
 TUNNEL_WAIT_SECONDS = 10.0
-MAX_INGRESS_CLIENTS = 256  # concurrent browser connections per instance
+MAX_INGRESS_CLIENTS = 256  # upper bound; the real limit derives from TasksMax
+# Every ingress client costs ~4 tasks in the scope (supervisor handler +
+# splice, inner tunnel worker + splice); keep most of TasksMax for the WebUI.
+TASKS_PER_INGRESS_CLIENT = 8
+INGRESS_IDLE_SECONDS = 300.0  # both directions silent this long: close
+LOG_FIELD_MAX = 256  # characters kept of each client-supplied log field
+LOG_MAX_BYTES = 8 * 1024 * 1024  # per launch; then one "suppressed" line
+LOG_ROTATE_BYTES = 8 * 1024 * 1024  # an older log this big is rotated at launch
+LOG_LINES_PER_SECOND = 50
 MAX_PACKAGE_ENTRIES = 200_000  # npm tree ownership walk bound
 
 
@@ -344,13 +352,24 @@ def require_root_controlled_package(path: str) -> None:
             return  # not an npm install: the executable check covers it
         root = parent
     seen = 0
-    for current, dirs, files in os.walk(root, followlinks=False):
+
+    def _walk_error(exc: OSError) -> None:
+        raise ConfineError(f"cannot verify {exc.filename}: {exc.strerror}")
+
+    for current, dirs, files in os.walk(root, followlinks=False, onerror=_walk_error):
         for name in dirs + files:
             seen += 1
             if seen > MAX_PACKAGE_ENTRIES:
                 raise ConfineError(f"{root} is too large to verify")
-            st = os.lstat(os.path.join(current, name))
+            full = os.path.join(current, name)
+            try:
+                st = os.lstat(full)
+            except OSError as exc:
+                raise ConfineError(f"cannot verify {full}: {exc.strerror}") from None
             if stat.S_ISLNK(st.st_mode):
+                # e.g. `npm link`: the target may live outside the tree
+                if not _root_controlled(os.path.realpath(full)):
+                    raise ConfineError(f"{full} points outside root-controlled files")
                 continue
             if st.st_uid != 0 or st.st_mode & 0o022:
                 raise ConfineError(
@@ -511,12 +530,41 @@ def build_inner_env(env: dict[str, str], *, home: str, sandbox_path: str) -> dic
 # ── Byte pumps (supervise + inner) ──────────────────────────────────────────
 
 
-def _pump(src: socket.socket, dst: socket.socket) -> None:
+class _Activity:
+    """Last time either direction of a splice moved a byte."""
+
+    def __init__(self) -> None:
+        self.last = time.monotonic()
+
+    def touch(self) -> None:
+        self.last = time.monotonic()
+
+
+def _pump(
+    src: socket.socket,
+    dst: socket.socket,
+    activity: _Activity | None = None,
+    idle: float | None = None,
+) -> None:
+    """Copy src -> dst. With *idle*, give up once BOTH directions were silent
+    that long (one quiet direction alone is normal: an SSE stream)."""
+    if idle is not None:
+        # (also bounds sendall on this socket: a peer that stops reading for
+        # the whole idle window is closed too)
+        src.settimeout(idle)
     try:
         while True:
-            chunk = src.recv(PIPE_BUFFER)
+            try:
+                chunk = src.recv(PIPE_BUFFER)
+            except TimeoutError:
+                if activity is not None and idle is not None:
+                    if time.monotonic() - activity.last < idle:
+                        continue
+                break
             if not chunk:
                 break
+            if activity is not None:
+                activity.touch()
             dst.sendall(chunk)
     except OSError:
         pass
@@ -525,16 +573,27 @@ def _pump(src: socket.socket, dst: socket.socket) -> None:
             dst.shutdown(socket.SHUT_WR)
 
 
-def splice(a: socket.socket, b: socket.socket, initial_to_b: bytes = b"") -> None:
-    """Copy both directions until both sides close; closes both sockets."""
+def splice(
+    a: socket.socket, b: socket.socket, initial_to_b: bytes = b"", idle: float | None = None
+) -> None:
+    """Copy both directions until both sides close; closes both sockets.
+
+    *idle*: close once neither direction moved a byte for that many seconds.
+    """
+    activity = _Activity()
     try:
         if initial_to_b:
             b.sendall(initial_to_b)
-        worker = threading.Thread(target=_pump, args=(b, a), daemon=True)
+        worker = threading.Thread(target=_pump, args=(b, a, activity, idle), daemon=True)
         worker.start()
-        _pump(a, b)
+        _pump(a, b, activity, idle)
+        if idle is not None:
+            # the other direction may be blocked in recv: wake it up
+            for sock in (a, b):
+                with contextlib.suppress(OSError):
+                    sock.shutdown(socket.SHUT_RDWR)
         worker.join()
-    except OSError:
+    except (OSError, RuntimeError):
         pass
     finally:
         for sock in (a, b):
@@ -626,7 +685,7 @@ class TunnelPool:
             with contextlib.suppress(OSError):
                 client.close()
             return
-        splice(client, tunnel)
+        splice(client, tunnel, idle=INGRESS_IDLE_SECONDS)
 
 
 def _tunnel_worker(tunnel_path: str, port: int, replenish: threading.Semaphore) -> None:
@@ -654,7 +713,7 @@ def _tunnel_worker(tunnel_path: str, port: int, replenish: threading.Semaphore) 
         except OSError:
             conn.close()
             return
-        splice(conn, upstream)
+        splice(conn, upstream, idle=INGRESS_IDLE_SECONDS)
         return
 
 
@@ -662,9 +721,15 @@ def _run_tunnel_pool(tunnel_path: str, port: int, size: int = TUNNEL_POOL) -> No
     replenish = threading.Semaphore(size)
     while True:
         replenish.acquire()
-        threading.Thread(
-            target=_tunnel_worker, args=(tunnel_path, port, replenish), daemon=True
-        ).start()
+        try:
+            threading.Thread(
+                target=_tunnel_worker, args=(tunnel_path, port, replenish), daemon=True
+            ).start()
+        except RuntimeError:
+            # TasksMax pressure: give the slot back and retry — never let the
+            # replenisher die (ingress would stay dead until the next launch).
+            replenish.release()
+            time.sleep(1.0)
 
 
 # ── Egress proxy (supervise) ────────────────────────────────────────────────
@@ -708,20 +773,59 @@ class EgressProxy:
     sandbox starts), never a path: the log directory is writable from inside.
     """
 
-    def __init__(self, allow: Sequence[tuple[str, int]], log_fd: int | None = None) -> None:
+    def __init__(
+        self,
+        allow: Sequence[tuple[str, int]],
+        log_fd: int | None = None,
+        max_bytes: int = LOG_MAX_BYTES,
+        lines_per_second: int = LOG_LINES_PER_SECOND,
+    ) -> None:
         self.allow = tuple(allow)
         self.log_fd = log_fd
         self._log_lock = threading.Lock()
+        self._max_bytes = max_bytes
+        self._written = 0
+        self._capped = False
+        self._rate = lines_per_second
+        self._window = int(time.monotonic())
+        self._in_window = 0
+        self._dropped = 0
 
     def log(self, verdict: str, method: str, host: str, port: int | str, extra: str = "") -> None:
+        """Append one bounded line. The log lives on the host filesystem, so a
+        sandbox must not be able to grow it without limit: fields are cut,
+        lines are rate-limited and the launch stops logging at a size cap."""
         if self.log_fd is None:
             return
-        # repr() the client-supplied fields: no newline can forge a log line.
-        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {verdict} {method!r} {host!r}:{port}"
+
+        def _field(value: str) -> str:
+            # repr(): no CR/LF can forge a line; cut: no 64 KB hosts
+            return repr(str(value)[:LOG_FIELD_MAX])
+
+        line = (
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {verdict} {_field(method)} {_field(host)}:{port}"
+        )
         if extra:
-            line += f" {extra!r}"
-        with self._log_lock, contextlib.suppress(OSError):
-            os.write(self.log_fd, (line + "\n").encode("utf-8", "backslashreplace"))
+            line += f" {_field(extra)}"
+        with self._log_lock:
+            if self._capped:
+                return
+            now = int(time.monotonic())
+            if now != self._window:
+                if self._dropped:
+                    line = f"{line}\n# {self._dropped} line(s) dropped by the rate limit"
+                self._window, self._in_window, self._dropped = now, 0, 0
+            self._in_window += 1
+            if self._in_window > self._rate:
+                self._dropped += 1
+                return
+            data = (line + "\n").encode("utf-8", "backslashreplace")
+            if self._written + len(data) > self._max_bytes:
+                self._capped = True
+                data = b"# egress log size cap reached; further decisions are not logged\n"
+            self._written += len(data)
+            with contextlib.suppress(OSError):
+                os.write(self.log_fd, data)
 
     def handle(self, conn: socket.socket) -> None:
         method = "?"
@@ -873,6 +977,7 @@ def plan_launch(
     payload: dict[str, object] = {
         "account": entry.pw_name,
         "uid": entry.pw_uid,
+        "tasks_max": tasks,
         "port": port,
         "bind_host": args.bind_host,
         "allow": [f"[{h}]:{p}" if ":" in h else f"{h}:{p}" for h, p in allow],
@@ -907,9 +1012,14 @@ def open_root_egress_log(uid: int, log_root: str = EGRESS_LOG_ROOT) -> int:
     st = os.lstat(log_root)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != me or st.st_mode & 0o022:
         raise ConfineError(f"{log_root} is not a directory controlled by uid {me}")
+    path = os.path.join(log_root, f"{uid}.egress.log")
+    with contextlib.suppress(OSError):
+        old = os.lstat(path)
+        if stat.S_ISREG(old.st_mode) and old.st_size > LOG_ROTATE_BYTES:
+            os.replace(path, path + ".1")  # keep one previous generation
     try:
         fd = os.open(
-            os.path.join(log_root, f"{uid}.egress.log"),
+            path,
             os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
             0o600,
         )
@@ -948,6 +1058,12 @@ def run_launch(argv: Sequence[str]) -> int:
 # ── Mode: supervise (target account, host side) ────────────────────────────
 
 
+def _ingress_limit(payload: dict) -> int:
+    """Concurrent ingress clients: a slice of TasksMax, never the whole scope."""
+    tasks = int(payload.get("tasks_max") or 512)
+    return max(4, min(MAX_INGRESS_CLIENTS, tasks // TASKS_PER_INGRESS_CLIENT))
+
+
 def run_supervise() -> int:
     payload = json.loads(sys.stdin.read())
     parent = os.getppid()
@@ -980,7 +1096,9 @@ def run_supervise() -> int:
     ingress_listener.bind((payload["bind_host"], int(payload["port"])))
     ingress_listener.listen(128)
     threading.Thread(
-        target=_serve, args=(ingress_listener, tunnels.serve_client, "ingress"), daemon=True
+        target=_serve,
+        args=(ingress_listener, tunnels.serve_client, "ingress", _ingress_limit(payload)),
+        daemon=True,
     ).start()
 
     argv = build_bwrap_argv(

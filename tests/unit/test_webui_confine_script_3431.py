@@ -741,3 +741,116 @@ def test_package_tree_must_be_root_controlled(confine, tmp_path):
     plain = tmp_path / "plain-webui"
     plain.write_text("x")
     confine.require_root_controlled_package(str(plain))
+
+
+# ── round 3: bounded log, idle splices, task budget ─────────────────────────
+
+
+def test_log_fields_are_cut_and_the_launch_log_is_capped(confine, tmp_path):
+    path = tmp_path / "egress.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        proxy = confine.EgressProxy([], fd, max_bytes=2000, lines_per_second=10_000)
+        for _ in range(50):
+            proxy.log("DENY", "CONNECT", "h" * 60_000, 443)
+    finally:
+        os.close(fd)
+    text = path.read_text()
+    assert len(text) <= 2000 + 200
+    assert "size cap reached" in text
+    assert max(len(line) for line in text.splitlines()) < confine.LOG_FIELD_MAX + 100
+
+
+def test_log_rate_limit_drops_and_reports(confine, tmp_path, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(confine.time, "monotonic", lambda: clock[0])
+    path = tmp_path / "egress.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        proxy = confine.EgressProxy([], fd, lines_per_second=3)
+        for _ in range(10):
+            proxy.log("DENY", "GET", "x", 80)
+        clock[0] = 101.0
+        proxy.log("DENY", "GET", "y", 80)
+    finally:
+        os.close(fd)
+    lines = path.read_text().splitlines()
+    assert len([line for line in lines if "'x'" in line]) == 3
+    assert "# 7 line(s) dropped by the rate limit" in lines
+
+
+def test_root_egress_log_rotates_a_large_previous_log(confine, tmp_path, monkeypatch):
+    monkeypatch.setattr(confine, "LOG_ROTATE_BYTES", 10)
+    root = tmp_path / "log"
+    root.mkdir(mode=0o755)
+    (root / "3001.egress.log").write_text("x" * 100)
+    (root / "3001.egress.log").chmod(0o600)
+    os.close(confine.open_root_egress_log(3001, str(root)))
+    assert (root / "3001.egress.log.1").read_text() == "x" * 100
+    assert (root / "3001.egress.log").read_text() == ""
+
+
+def test_idle_splice_closes_silent_connections(confine):
+    a_outer, a_inner = socket.socketpair()
+    b_inner, b_outer = socket.socketpair()
+    worker = threading.Thread(
+        target=confine.splice, args=(a_inner, b_inner), kwargs={"idle": 0.5}, daemon=True
+    )
+    worker.start()
+    a_outer.sendall(b"hi")
+    assert b_outer.recv(2) == b"hi"
+    worker.join(timeout=5)  # nothing moves for 0.5 s: both sides closed
+    assert not worker.is_alive()
+    b_outer.settimeout(1)
+    assert b_outer.recv(1) == b""
+
+
+def test_ingress_limit_derives_from_tasks_max(confine):
+    assert confine._ingress_limit({"tasks_max": 512}) == 64
+    assert confine._ingress_limit({"tasks_max": 16}) == 4
+    assert confine._ingress_limit({"tasks_max": 65535}) == confine.MAX_INGRESS_CLIENTS
+    assert confine._ingress_limit({}) == 64
+
+
+def test_tunnel_replenisher_survives_thread_exhaustion(confine, monkeypatch):
+    starts = []
+    real_thread = confine.threading.Thread
+
+    class _Flaky(real_thread):
+        def start(self):
+            starts.append(1)
+            if len(starts) <= 2:
+                raise RuntimeError("can't start new thread")
+            if len(starts) >= 4:
+                raise SystemExit  # stop the test's replenisher loop
+            super().start()
+
+    monkeypatch.setattr(confine.threading, "Thread", _Flaky)
+    monkeypatch.setattr(confine.time, "sleep", lambda s: None)
+    monkeypatch.setattr(confine, "_tunnel_worker", lambda *a: None)
+    with pytest.raises(SystemExit):
+        confine._run_tunnel_pool("/nonexistent", 1, size=2)
+    assert len(starts) == 4  # two failures retried, the loop kept going
+
+
+def test_package_walk_checks_symlink_targets(confine, tmp_path, monkeypatch):
+    tree = tmp_path / "node_modules" / "pkg"
+    tree.mkdir(parents=True)
+    entry = tree / "cli.js"
+    entry.write_text("x")
+    (tree / "linked").symlink_to(tmp_path / "outside")
+    (tmp_path / "outside").mkdir()
+    # make every real entry look root-owned; only the link target is judged
+    real_lstat = os.lstat
+
+    def _lstat(path):
+        result = real_lstat(path)
+        if str(path).startswith(str(tmp_path / "node_modules")):
+            fields = list(result)
+            fields[4] = 0
+            return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(confine.os, "lstat", _lstat)
+    with pytest.raises(confine.ConfineError, match="points outside"):
+        confine.require_root_controlled_package(str(entry))
