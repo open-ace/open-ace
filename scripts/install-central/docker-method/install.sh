@@ -26,6 +26,8 @@ RUN_USER="${RUN_USER:-open-ace}"
 RUN_USER_UID="${RUN_USER_UID:-}"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/$RUN_USER/open-ace}"
 IMAGE_NAME="${IMAGE_NAME:-open-ace:latest}"
+# Published image pulled by the "pull" option and retagged as $IMAGE_NAME.
+PULL_IMAGE="${PULL_IMAGE:-ghcr.io/open-ace/open-ace:latest}"
 WEB_PORT="${WEB_PORT:-19888}"
 INTERNAL_WEB_PORT="${INTERNAL_WEB_PORT:-19888}"
 DB_USER="${DB_USER:-$RUN_USER}"
@@ -521,6 +523,7 @@ show_help() {
     echo "  RUN_USER_UID         UID for the run user (default: auto, for NFS/Docker bind mount set explicit UID)"
     echo "  DEPLOY_DIR           Deployment directory (default: /home/\$RUN_USER/open-ace)"
     echo "  IMAGE_NAME           Docker image name"
+    echo "  PULL_IMAGE           Published image to pull (default: ghcr.io/open-ace/open-ace:latest)"
     echo "  WEB_PORT             Web server port"
     echo "  DB_USER              PostgreSQL username (default: \$RUN_USER)"
     echo "  DB_PASSWORD          PostgreSQL password"
@@ -1623,7 +1626,7 @@ build_docker_image() {
     echo ""
     echo "请选择:"
     echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
-    echo "  2) 从 Docker Hub 拉取镜像"
+    echo "  2) 拉取已发布镜像 ($PULL_IMAGE)"
     echo "  3) 本地构建镜像 (自动构建前端)"
     echo "  4) 跳过 (稍后手动处理)"
     echo ""
@@ -1674,16 +1677,14 @@ build_docker_image() {
             fi
             ;;
         2)
-            print_info "从 Docker Hub 拉取镜像..."
-
-            # Pull application image
-            print_info "拉取镜像: $IMAGE_NAME"
-            if docker pull "$IMAGE_NAME"; then
-                print_success "应用镜像拉取完成: $IMAGE_NAME"
+            # Pull the published application image and retag it as $IMAGE_NAME
+            print_info "拉取镜像: $PULL_IMAGE"
+            if docker pull "$PULL_IMAGE" && docker tag "$PULL_IMAGE" "$IMAGE_NAME"; then
+                print_success "应用镜像拉取完成: $PULL_IMAGE -> $IMAGE_NAME"
             else
                 print_error "镜像拉取失败"
                 print_info "请检查:"
-                print_info "  1. Docker Hub 镜像加速器是否已配置"
+                print_info "  1. 网络能否访问 ghcr.io（或用 PULL_IMAGE 指向可访问的镜像）"
                 print_info "  2. 网络连接是否正常"
                 print_info "  3. 镜像名称是否正确"
                 return 1

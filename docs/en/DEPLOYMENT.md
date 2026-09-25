@@ -176,7 +176,7 @@ cd open-ace
 # 2. Generate .env (SECRET_KEY, OPENACE_ENCRYPTION_KEY, UPLOAD_AUTH_KEY, ...)
 ./scripts/bootstrap-compose-env.sh
 
-# 3. Start (pulls the pre-built openace/open-ace:latest image by default)
+# 3. Start (pulls the pre-built ghcr.io/open-ace/open-ace:latest image by default)
 docker compose up -d --wait
 
 # 4. Verify
@@ -185,9 +185,15 @@ docker compose logs -f open-ace
 ```
 
 For offline servers, pull the image on a connected machine with
-`docker pull openace/open-ace:latest`, transfer it via
-`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz`, load it
+`docker pull ghcr.io/open-ace/open-ace:latest`, transfer it via
+`docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz`, load it
 with `gunzip -c open-ace-images.tar.gz | docker load`, then start the stack.
+
+Pre-built images are published to GitHub Container Registry for every release
+(`ghcr.io/open-ace/open-ace:latest`, `:vX.Y.Z`, `:X.Y.Z`, `:X.Y`, `:X`) and are
+`linux/amd64` only; Apple Silicon hosts run them under emulation. To build the
+image from your checkout instead (e.g. when `ghcr.io` is unreachable), run
+`docker compose up -d --build --wait`.
 
 ### Deployment Configuration
 
@@ -197,7 +203,7 @@ repository root:
 | Setting | Environment variable | Default |
 |---------|----------------------|---------|
 | Web port | `PORT` | `19888` |
-| Image | `IMAGE_NAME` | `openace/open-ace:latest` |
+| Image | `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` |
 | Database user | `DB_USER` | `ace` |
 | Database name | `DB_NAME` | `ace` |
 | Database password | `DB_PASSWORD` | `dev-password-change-in-production` (must change in production) |
@@ -302,7 +308,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. Pin a specific version (in .env)
-echo "IMAGE_NAME=openace/open-ace:v2.0.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.0.0" >> .env
 
 # 2. Pull and recreate the container
 docker compose pull
@@ -335,7 +341,7 @@ docker compose restart open-ace
 docker compose down
 
 # Remove images
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # Remove data volumes (complete cleanup)
 docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data

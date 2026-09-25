@@ -59,7 +59,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: scheduler
-          image: openace/open-ace:latest
+          image: ghcr.io/open-ace/open-ace:latest
           imagePullPolicy: Always
           command: ["python", "-m", "app.scheduler_worker"]
           securityContext:

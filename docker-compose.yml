@@ -71,7 +71,7 @@ services:
         # Base image registry. Override for networks where Docker Hub is
         # unreachable (e.g. mainland China): BASE_REGISTRY=docker.m.daocloud.io
         BASE_REGISTRY: ${BASE_REGISTRY:-docker.io}
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:
@@ -159,7 +159,7 @@ services:
 # Uses leader election to ensure only one active scheduler.
 # For single-instance development, omit this service.
   scheduler:
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace-scheduler
     restart: unless-stopped
     profiles:
