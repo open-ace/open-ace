@@ -25,6 +25,15 @@ Installed as ``/usr/local/bin/openace-webui-confine``. One file, four modes:
                loopback proxy port to the egress socket, and runs the WebUI.
 ``check``      unprivileged readiness probe for the manager.
 
+Issue #3431 Option 2 adds a second backend, ``--backend container``: the
+sandbox is a Docker container on a gVisor (runsc) runtime instead of
+bubblewrap. ``launch`` then prepares a root-owned run directory, forks the
+same ``supervise`` endpoints (as the account, via setpriv) and execs a fixed
+``docker run`` whose image is digest-pinned in the policy; the WebUI
+environment reaches ``inner`` on the container's stdin. ``launch --probe``
+(root) verifies the runtime, the image, a gVisor kernel and host UNIX-socket
+access (runsc needs ``--host-uds=all``) for the manager's readiness check.
+
 Nothing on the host side ever follows a path the sandbox can write: the
 socket directory is bound READ-ONLY into the sandbox, the sandbox only
 connects out to it (ingress uses a reverse tunnel instead of a listener the
@@ -44,6 +53,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import grp
+import ipaddress
 import json
 import os
 import pwd
@@ -68,6 +78,15 @@ INNER_SOCKET_DIR = "/run/openace"
 TUNNEL_SOCKET = "tunnel.sock"
 EGRESS_SOCKET = "egress.sock"
 EGRESS_LOG_ROOT = "/var/log/openace-webui"
+# Container backend (Option 2): root-owned parent of the per-instance socket
+# directories that are bind-mounted into containers (the account must not be
+# able to swap a bind-mount source for a symlink).
+RUN_ROOT = "/run/openace-webui"
+CONTAINER_SCRIPT = "/opt/openace/confine.py"
+IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9._/:-]*@)?sha256:[0-9a-f]{64}$")
+RUNTIME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+MOUNT_UNSAFE_RE = re.compile(r"[,\n\r\0=]")
+SUPERVISOR_WATCH_SECONDS = 30.0
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Root-owned policy file written by the installer. ``launch`` refuses to run
 # without it: it pins which executables may be started as a user (a free
@@ -142,11 +161,20 @@ LOG_FIELD_MAX = 256  # characters kept of each client-supplied log field
 LOG_MAX_BYTES = 8 * 1024 * 1024  # per launch; then one "suppressed" line
 LOG_ROTATE_BYTES = 8 * 1024 * 1024  # an older log this big is rotated at launch
 LOG_LINES_PER_SECOND = 50
+SUMMARY_SLOW_SECONDS = 60  # summary cadence once a class is past its ceiling
 MAX_PACKAGE_ENTRIES = 200_000  # npm tree ownership walk bound
 
 
 class ConfineError(Exception):
     """A refused launch (exit status 64, message on stderr)."""
+
+
+class ContainerPolicy(NamedTuple):
+    """The policy's ``container`` section (Option 2 backend)."""
+
+    image: str  # name@sha256:<64 hex> or a local image id sha256:<64 hex>
+    runtime: str  # a Docker runtime name registered for runsc --host-uds=all
+    docker: str  # absolute path of the docker CLI
 
 
 class Policy(NamedTuple):
@@ -156,6 +184,7 @@ class Policy(NamedTuple):
     path: str
     bases: frozenset[str]  # empty = any workspace base
     denied_groups: frozenset[str]
+    container: ContainerPolicy | None = None
 
 
 # ── Validation helpers (pure; unit-tested) ──────────────────────────────────
@@ -205,7 +234,8 @@ def parse_allow_entry(raw: str) -> tuple[str, int]:
         if not HOST_RE.fullmatch(host) and not _is_ip(host):
             raise ConfineError(f"allow entry {raw!r}: invalid host")
     port = _parse_port(port_s, f"allow entry {raw!r}")
-    return host.lower(), port
+    host = host.lower()
+    return (canonical_ip(host) if _is_ip(host) else host), port
 
 
 METHOD_RE = re.compile(r"^[A-Z]{1,16}$")
@@ -223,9 +253,16 @@ def normalize_host(host: str) -> str | None:
     host = host.lower()
     if host.endswith("."):
         host = host[:-1]
-    if _is_ip(host) or (HOST_RE.fullmatch(host) and not host.startswith("*.")):
+    if _is_ip(host):
+        return canonical_ip(host)
+    if HOST_RE.fullmatch(host) and not host.startswith("*."):
         return host
     return None
+
+
+def canonical_ip(value: str) -> str:
+    """One spelling per address (``0:0::1`` -> ``::1``)."""
+    return ipaddress.ip_address(value).compressed
 
 
 def match_allow(host: str, port: int, allow: Sequence[tuple[str, int]]) -> str | None:
@@ -475,7 +512,25 @@ def load_policy(path: str = CONFIG_PATH) -> Policy:
         os.path.isabs(part) for part in sandbox_path.split(":")
     ):
         raise ConfineError(f"policy file {path}: 'path' must be absolute directories joined by ':'")
-    return Policy(webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied))
+    container = None
+    raw_container = data.get("container")
+    if raw_container is not None:
+        if not isinstance(raw_container, dict):
+            raise ConfineError(f"policy file {path}: 'container' must be an object")
+        image = raw_container.get("image", "")
+        runtime = raw_container.get("runtime", "")
+        docker = raw_container.get("docker", "/usr/bin/docker")
+        if not isinstance(image, str) or not IMAGE_RE.fullmatch(image):
+            raise ConfineError(
+                f"policy file {path}: container.image must be pinned by digest "
+                "(name@sha256:<64 hex>) or be a local image id (sha256:<64 hex>)"
+            )
+        if not isinstance(runtime, str) or not RUNTIME_RE.fullmatch(runtime):
+            raise ConfineError(f"policy file {path}: container.runtime is not a runtime name")
+        if not isinstance(docker, str) or not os.path.isabs(docker):
+            raise ConfineError(f"policy file {path}: container.docker must be an absolute path")
+        container = ContainerPolicy(image, runtime, docker)
+    return Policy(webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied), container)
 
 
 def validate_log_dir(path: str, entry: pwd.struct_passwd) -> str:
@@ -557,6 +612,69 @@ def build_inner_env(env: dict[str, str], *, home: str, sandbox_path: str) -> dic
     inner_env = dict(env)
     inner_env.update({"HOME": home, "PATH": sandbox_path, "LANG": env.get("LANG", "C.UTF-8")})
     return inner_env
+
+
+def _mount_safe(path: str) -> str:
+    """A path usable in ``docker run --mount`` (no field separators)."""
+    if MOUNT_UNSAFE_RE.search(path):
+        raise ConfineError(f"path {path!r} cannot be bind-mounted safely")
+    return path
+
+
+def build_docker_argv(
+    *,
+    container: ContainerPolicy,
+    uid: int,
+    gid: int,
+    extra_gids: Sequence[int],
+    port: int,
+    memory_max: str,
+    cpu_quota: int,
+    tasks_max: int,
+    home: str,
+    shared: str | None,
+    log_dir: str,
+    run_dir: str,
+    script: str,
+    webui_argv: Sequence[str],
+) -> list[str]:
+    """The fixed ``docker run`` command line for the container backend.
+
+    Every option is built here; nothing from the caller reaches docker except
+    validated values. No environment is on the command line: ``inner`` reads
+    it from stdin (``-i``), so ``docker inspect`` does not show it either.
+    """
+    argv = [
+        container.docker, "run", "--rm", "-i", "--init",
+        "--name", f"openace-webui-{uid}-{port}",
+        "--label", "org.openace.confine=1", "--label", f"org.openace.uid={uid}",
+        "--runtime", container.runtime,
+        "--network", "none",
+        "--user", f"{uid}:{gid}",
+    ]  # fmt: skip
+    for extra in extra_gids:
+        argv += ["--group-add", str(extra)]
+    argv += [
+        "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--memory", memory_max, "--memory-swap", memory_max,
+        "--cpus", f"{cpu_quota / 100:.2f}", "--pids-limit", str(tasks_max),
+        "--mount", f"type=bind,src={_mount_safe(home)},dst={home}",
+    ]  # fmt: skip
+    if shared:
+        argv += ["--mount", f"type=bind,src={_mount_safe(shared)},dst={shared}"]
+    argv += [
+        "--mount", f"type=bind,src={_mount_safe(log_dir)},dst={log_dir}",
+        # READ-ONLY, as with bubblewrap: the container only connects out.
+        "--mount", f"type=bind,src={_mount_safe(run_dir)},dst={INNER_SOCKET_DIR},readonly",
+        "--mount", f"type=bind,src={_mount_safe(script)},dst={CONTAINER_SCRIPT},readonly",
+        "--workdir", home,
+        "--entrypoint", "python3",
+        container.image,
+        "-I", CONTAINER_SCRIPT, "inner", "--env-stdin", "--watch-supervisor",
+        "--port", str(port), "--", *webui_argv,
+    ]  # fmt: skip
+    return argv
 
 
 # ── Byte pumps (supervise + inner) ──────────────────────────────────────────
@@ -746,6 +864,31 @@ class TunnelPool:
         splice(client, tunnel, idle=INGRESS_IDLE_SECONDS)
 
 
+class _TunnelHealth:
+    """``inner`` side: whether the supervisor is still there (watchdog input)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.idle = 0
+        self.last_ok = time.monotonic()
+
+    def connected(self) -> None:
+        with self.lock:
+            self.idle += 1
+            self.last_ok = time.monotonic()
+
+    def released(self) -> None:
+        with self.lock:
+            self.idle -= 1
+
+    def supervisor_gone(self, grace: float) -> bool:
+        with self.lock:
+            return self.idle <= 0 and time.monotonic() - self.last_ok > grace
+
+
+TUNNEL_HEALTH = _TunnelHealth()
+
+
 def _tunnel_worker(tunnel_path: str, port: int, replenish: threading.Semaphore) -> None:
     """``inner`` side: one idle tunnel; on GO, connect it to the WebUI."""
     while True:
@@ -756,10 +899,12 @@ def _tunnel_worker(tunnel_path: str, port: int, replenish: threading.Semaphore) 
             conn.close()
             time.sleep(0.5)
             continue
+        TUNNEL_HEALTH.connected()
         try:
             go = conn.recv(1)
         except OSError:
             go = b""
+        TUNNEL_HEALTH.released()
         if go != TUNNEL_GO:
             conn.close()
             time.sleep(0.2)
@@ -845,6 +990,8 @@ class EgressProxy:
         # ALLOW/FAIL: far above normal use; past it only per-entry counters
         self._allow_max_bytes = max(max_bytes * 8, 1)
         self._allow_written = 0
+        self._allow_summary_at = 0
+        self._deny_summary_at = 0
         self._rate = lines_per_second  # per verdict class, per second
         self._deny_written = 0
         self._deny_capped = False
@@ -864,28 +1011,52 @@ class EgressProxy:
         with contextlib.suppress(OSError):
             os.write(self.log_fd, (text + "\n").encode("utf-8", "backslashreplace"))  # type: ignore[arg-type]
 
-    def _roll(self, now: int) -> None:
-        """Close the previous second-window: write its summaries, stamped with
-        that window's time so they stay in order. Caller holds the lock."""
-        if now == self._window:
+    def _roll(self, now: int, force: bool = False) -> None:
+        """Close the previous second-window. Caller holds the lock.
+
+        Summaries are stamped with the window they describe, so they stay in
+        order. They count toward their class's byte ceiling; once a class is
+        past it, its counters keep accumulating and are written at most once
+        a minute (and at shutdown), so even a lifetime-long flood grows the
+        log by a few lines per minute per allowlist entry.
+        """
+        if now == self._window and not force:
             return
         stamp = self._window_stamp
-        for (verdict, entry, _), count in sorted(self._allow_overflow.items()):
-            self._write(f"{stamp} {verdict}-SUMMARY {entry} x{count}")
-        if self._deny_overflow:
-            self._write(f"{stamp} # {self._deny_overflow} DENY/BAD line(s) not logged (rate limit)")
+        allow_due = (
+            force
+            or self._allow_written < self._allow_max_bytes
+            or (now - self._allow_summary_at >= SUMMARY_SLOW_SECONDS)
+        )
+        deny_due = (
+            force
+            or self._deny_written < self._max_bytes
+            or (now - self._deny_summary_at >= SUMMARY_SLOW_SECONDS)
+        )
+        if allow_due and self._allow_overflow:
+            for (verdict, entry, _), count in sorted(self._allow_overflow.items()):
+                text = f"{stamp} {verdict}-SUMMARY {entry} x{count}"
+                self._allow_written += len(text) + 1
+                self._write(text)
+            self._allow_overflow = {}
+            self._allow_summary_at = now
+        if deny_due and self._deny_overflow:
+            text = f"{stamp} # {self._deny_overflow} DENY/BAD line(s) not logged (rate limit)"
+            self._deny_written += len(text) + 1
+            self._write(text)
+            self._deny_overflow = 0
+            self._deny_summary_at = now
         self._window = now
         self._window_stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self._allow_lines = self._deny_lines = self._deny_overflow = 0
-        self._allow_overflow = {}
+        self._allow_lines = self._deny_lines = 0
 
     def flush(self, final: bool = False) -> None:
-        """Write the summaries of a finished window (every second from the
-        supervisor's flusher; ``final`` at shutdown writes the current one)."""
+        """Write the summaries of finished windows (every second from the
+        supervisor's flusher; ``final`` at shutdown writes everything)."""
         if self.log_fd is None:
             return
         with self._log_lock:
-            self._roll(self._window + 1 if final else int(time.monotonic()))
+            self._roll(int(time.monotonic()), force=final)
 
     def log(
         self,
@@ -928,6 +1099,7 @@ class EgressProxy:
                     self._allow_overflow[key] = self._allow_overflow.get(key, 0) + 1
                 return
             if self._deny_capped:
+                self._deny_overflow += 1
                 return
             self._deny_lines += 1
             if self._deny_lines > self._rate:
@@ -1025,6 +1197,7 @@ def _launch_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow", action="append", default=[])
     parser.add_argument("--log-dir", required=True)
     parser.add_argument("--webui", required=True)
+    parser.add_argument("--backend", choices=("bwrap", "container"), default="bwrap")
     parser.add_argument("webui_args", nargs=argparse.REMAINDER)
     return parser
 
@@ -1061,15 +1234,21 @@ def plan_launch(
     webui = args.webui
     if os.path.normpath(webui) not in policy.webuis:
         raise ConfineError(f"--webui {webui!r} is not listed in {policy_path}")
-    require_root_controlled_executable(webui)
-    require_root_controlled_package(webui)
-    require_root_controlled_path(policy.path)
     log_dir = validate_log_dir(args.log_dir, entry)
     base, home, shared = workspace_layout(entry, policy.bases)
     try:
         env = validate_env(json.loads(env_text or "{}"))
     except json.JSONDecodeError as exc:
         raise ConfineError(f"environment on stdin is not JSON: {exc}") from None
+    if args.backend == "container":
+        return _plan_container(
+            args, policy, entry, port, cpu, tasks, allow, webui, webui_args,
+            log_dir, base, home, shared, env,
+        )  # fmt: skip
+    # bwrap: the WebUI and everything it runs come from the HOST filesystem.
+    require_root_controlled_executable(webui)
+    require_root_controlled_package(webui)
+    require_root_controlled_path(policy.path)
     for tool in ("systemd-run", "setpriv", "bwrap"):
         if shutil.which(tool, path=SAFE_PATH) is None:
             raise ConfineError(f"{tool} is not installed")
@@ -1098,6 +1277,7 @@ def plan_launch(
         python, "-I", script, "supervise",
     ]  # fmt: skip
     payload: dict[str, object] = {
+        "backend": "bwrap",
         "account": entry.pw_name,
         "uid": entry.pw_uid,
         "tasks_max": tasks,
@@ -1116,6 +1296,97 @@ def plan_launch(
         "script": script,
     }
     return systemd_argv, payload
+
+
+def _setpriv_argv(entry: pwd.struct_passwd, python: str, script: str) -> list[str]:
+    return [
+        shutil.which("setpriv", path=SAFE_PATH) or "setpriv",
+        f"--reuid={entry.pw_uid}",
+        f"--regid={entry.pw_gid}",
+        "--init-groups",
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--bounding-set=-all",
+        "--",
+        python, "-I", script, "supervise",
+    ]  # fmt: skip
+
+
+def _plan_container(
+    args, policy, entry, port, cpu, tasks, allow, webui, webui_args,
+    log_dir, base, home, shared, env,
+) -> tuple[list[str], dict[str, object]]:  # fmt: skip
+    """The container-backend half of :func:`plan_launch`.
+
+    The WebUI runs from the digest-pinned image, so the host-side ownership
+    checks of the bwrap backend do not apply; the image pin is the trust
+    anchor. Supplementary groups are passed as ``--group-add`` (privileged
+    ones were already refused) so shared-project ACLs keep working.
+    """
+    if policy.container is None:
+        raise ConfineError("the policy file has no 'container' section")
+    require_root_controlled_executable(policy.container.docker)
+    if shutil.which("setpriv", path=SAFE_PATH) is None:
+        raise ConfineError("setpriv is not installed")
+    python = sys.executable or "/usr/bin/python3"
+    script = os.path.realpath(__file__)
+    run_dir = os.path.join(RUN_ROOT, f"{entry.pw_uid}-{port}")
+    extra_gids = sorted(gid for gid in account_groups(entry) if gid != entry.pw_gid)
+    docker_argv = build_docker_argv(
+        container=policy.container,
+        uid=entry.pw_uid,
+        gid=entry.pw_gid,
+        extra_gids=extra_gids,
+        port=port,
+        memory_max=args.memory_max,
+        cpu_quota=cpu,
+        tasks_max=tasks,
+        home=home,
+        shared=shared,
+        log_dir=log_dir,
+        run_dir=run_dir,
+        script=script,
+        webui_argv=[webui, *webui_args],
+    )
+    payload: dict[str, object] = {
+        "backend": "container",
+        "account": entry.pw_name,
+        "uid": entry.pw_uid,
+        "gid": entry.pw_gid,
+        "tasks_max": tasks,
+        "port": port,
+        "bind_host": args.bind_host,
+        "allow": [f"[{h}]:{p}" if ":" in h else f"{h}:{p}" for h, p in allow],
+        "socket_dir": run_dir,
+        "setpriv_argv": _setpriv_argv(entry, python, script),
+        # what ``inner`` receives on the container's stdin
+        "inner_env": build_inner_env(env, home=home, sandbox_path=policy.path),
+    }
+    return docker_argv, payload
+
+
+def prepare_run_dir(path: str, uid: int, gid: int, run_root: str = RUN_ROOT) -> None:
+    """Create a fresh per-instance socket directory under the root-owned run root.
+
+    Root-owned parent: the account owns only the leaf, so it can never swap
+    the bind-mount source docker resolves. A leftover leaf is removed without
+    following symlinks first.
+    """
+    me = os.geteuid()
+    try:
+        os.mkdir(run_root, 0o755)
+    except FileExistsError:
+        pass
+    st = os.lstat(run_root)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != me or st.st_mode & 0o022:
+        raise ConfineError(f"{run_root} is not a directory controlled by uid {me}")
+    if os.path.lexists(path):
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+    os.mkdir(path, 0o700)
+    os.chown(path, uid, gid)
 
 
 def open_root_egress_log(uid: int, log_root: str = EGRESS_LOG_ROOT) -> int:
@@ -1157,10 +1428,53 @@ def open_root_egress_log(uid: int, log_root: str = EGRESS_LOG_ROOT) -> int:
     return fd
 
 
+def _exec_with_stdin(argv: list[str], data: bytes) -> None:
+    """execve *argv* with *data* waiting on its stdin (a pipe, never a file)."""
+    if len(data) > PIPE_BUFFER - 1:
+        raise ConfineError("environment too large for the hand-off pipe")
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, data)
+    os.close(write_fd)
+    os.dup2(read_fd, 0)
+    os.close(read_fd)
+    os.execve(argv[0], argv, {"PATH": SAFE_PATH, "LANG": "C.UTF-8"})
+
+
+def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) -> int:
+    """Fork the supervisor (as the account), then exec ``docker run``.
+
+    The supervisor's parent is this process — the docker CLI after exec — so
+    its parent watch stops it when the container ends. SIGTERM from the
+    manager reaches the docker CLI (via sudo), which forwards it to the
+    container; if the CLI is SIGKILLed, the container's ``inner`` notices the
+    supervisor is gone and stops the WebUI on its own.
+    """
+    uid, gid = int(payload["uid"]), int(payload["gid"])
+    prepare_run_dir(str(payload["socket_dir"]), uid, gid)
+    log_fd = open_root_egress_log(uid)
+    supervisor_payload = dict(payload, log_fd=log_fd)
+    inner_env = supervisor_payload.pop("inner_env")
+    setpriv_argv = list(supervisor_payload.pop("setpriv_argv"))  # type: ignore[call-overload]
+    data = json.dumps(supervisor_payload).encode()
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - exercised by the acceptance run
+        try:
+            _exec_with_stdin(setpriv_argv, data)
+        finally:
+            os._exit(70)
+    os.close(log_fd)  # only the supervisor writes the audit log
+    _exec_with_stdin(docker_argv, json.dumps(inner_env).encode() + b"\n")
+    return 0  # pragma: no cover - execve does not return
+
+
 def run_launch(argv: Sequence[str]) -> int:
     if os.geteuid() != 0:
         raise ConfineError("launch must run as root (via sudo)")
+    if list(argv[:1]) == ["--probe"]:
+        return run_container_probe()
     systemd_argv, payload = plan_launch(argv, sys.stdin.read())
+    if payload.get("backend") == "container":
+        return _run_launch_container(systemd_argv, payload)
     payload["log_fd"] = open_root_egress_log(int(payload["uid"]))
     read_fd, write_fd = os.pipe()
     data = json.dumps(payload).encode()
@@ -1191,7 +1505,11 @@ def run_supervise() -> int:
     payload = json.loads(sys.stdin.read())
     parent = os.getppid()
     allow = [parse_allow_entry(item) for item in payload["allow"]]
-    socket_dir = tempfile.mkdtemp(prefix="openace-webui-")
+    container_mode = payload.get("backend") == "container"
+    # The container backend gets a root-prepared directory (see prepare_run_dir).
+    socket_dir = (
+        str(payload["socket_dir"]) if container_mode else tempfile.mkdtemp(prefix="openace-webui-")
+    )
     log_fd = payload.get("log_fd")
     proxy = EgressProxy(allow, int(log_fd) if log_fd is not None else None)
 
@@ -1237,6 +1555,9 @@ def run_supervise() -> int:
         daemon=True,
     ).start()
 
+    if container_mode:
+        return _supervise_until_parent_exits(parent, socket_dir)
+
     argv = build_bwrap_argv(
         bwrap=payload["bwrap"],
         python=payload["python"],
@@ -1274,6 +1595,24 @@ def run_supervise() -> int:
         shutil.rmtree(socket_dir, ignore_errors=True)
 
 
+def _supervise_until_parent_exits(parent: int, socket_dir: str) -> int:
+    """Container backend: keep the endpoints up while the docker CLI runs."""
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    try:
+        while not stop.wait(1.0):
+            if os.getppid() != parent:
+                break
+        return 0
+    finally:
+        # The directory itself sits in the root-owned run root; remove what
+        # we created in it.
+        for name in (TUNNEL_SOCKET, EGRESS_SOCKET):
+            with contextlib.suppress(OSError):
+                os.unlink(os.path.join(socket_dir, name))
+
+
 # ── Mode: inner (inside the sandbox) ────────────────────────────────────────
 
 
@@ -1282,11 +1621,20 @@ def run_inner(argv: Sequence[str]) -> int:
         prog="openace-webui-confine inner", add_help=False, allow_abbrev=False
     )
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--env-stdin", action="store_true")
+    parser.add_argument("--watch-supervisor", action="store_true")
     parser.add_argument("webui_argv", nargs=argparse.REMAINDER)
     args = parser.parse_args(list(argv))
     webui_argv = list(args.webui_argv)
     if webui_argv[:1] == ["--"]:
         webui_argv = webui_argv[1:]
+    if args.env_stdin:
+        # Container backend: the environment arrives on stdin, never on a
+        # command line or in the container's (inspectable) configuration.
+        env = json.loads(sys.stdin.readline() or "{}")
+        if not isinstance(env, dict):
+            raise ConfineError("environment on stdin must be a JSON object")
+        os.environ.update({str(k): str(v) for k, v in env.items()})
 
     threading.Thread(
         target=_run_tunnel_pool,
@@ -1335,7 +1683,123 @@ def run_inner(argv: Sequence[str]) -> int:
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
+    if args.watch_supervisor:
+        # Container backend: nothing kills the container if the docker CLI
+        # is SIGKILLed; with the supervisor gone there is no ingress or
+        # egress anyway, so stop the WebUI and let --rm remove the container.
+        def _watch() -> None:
+            while child.poll() is None:
+                time.sleep(2.0)
+                if TUNNEL_HEALTH.supervisor_gone(SUPERVISOR_WATCH_SECONDS):
+                    child.terminate()
+                    return
+
+        threading.Thread(target=_watch, daemon=True, name="watchdog").start()
     return child.wait()
+
+
+# ── Mode: launch --probe (root; container backend readiness) ───────────────
+
+PROBE_PROGRAM = (
+    "import socket\n"
+    "print(open('/proc/version').read().strip(), flush=True)\n"
+    "s = socket.socket(socket.AF_UNIX)\n"
+    "s.settimeout(5)\n"
+    "s.connect('/run/openace/probe.sock')\n"
+    "s.sendall(b'ok')\n"
+)
+
+
+def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
+    """Print ``ok`` or one reason token; used by the manager's readiness check.
+
+    Verifies what the container backend's guarantees rest on: the docker CLI
+    is root-controlled, the runtime is registered, the pinned image exists
+    locally (no pull at launch), the runtime is gVisor (positively, from the
+    guest's /proc/version) and the container can connect to a host UNIX
+    socket in a read-only bind mount (runsc needs --host-uds=all).
+    """
+    try:
+        policy = load_policy(policy_path)
+        if policy.container is None:
+            raise ConfineError("the policy file has no 'container' section")
+        require_root_controlled_executable(policy.container.docker)
+    except ConfineError as exc:
+        print(f"# {exc}", file=sys.stderr)
+        print("policy:invalid")
+        return 1
+    container = policy.container
+    env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+
+    def _docker(*argv: str, timeout: float = 30) -> subprocess.CompletedProcess:
+        return subprocess.run(  # noqa: S603 - fixed argv
+            [container.docker, *argv], capture_output=True, text=True, timeout=timeout,
+            check=False, env=env,
+        )  # fmt: skip
+
+    try:
+        info = _docker("info", "--format", "{{json .Runtimes}}")
+    except (OSError, subprocess.SubprocessError):
+        print("docker:unavailable")
+        return 1
+    if info.returncode != 0:
+        print("docker:unavailable")
+        return 1
+    try:
+        runtimes = json.loads(info.stdout or "{}")
+    except json.JSONDecodeError:
+        runtimes = {}
+    if container.runtime not in runtimes:
+        print("runtime:missing")
+        return 1
+    if _docker("image", "inspect", "--format", "{{.Id}}", container.image).returncode != 0:
+        print("image:missing")
+        return 1
+    probe_dir = os.path.join(RUN_ROOT, f"probe-{os.getpid()}")
+    received: list[bytes] = []
+    try:
+        prepare_run_dir(probe_dir, 65534, 65534)
+        listener = _unix_listener(os.path.join(probe_dir, "probe.sock"))
+        # only the probe container's account (nobody) may connect
+        os.chown(os.path.join(probe_dir, "probe.sock"), 65534, 65534)
+        listener.settimeout(40)
+
+        def _accept() -> None:
+            with contextlib.suppress(OSError):
+                conn, _ = listener.accept()
+                conn.settimeout(5)
+                received.append(conn.recv(2))
+                conn.close()
+
+        acceptor = threading.Thread(target=_accept, daemon=True)
+        acceptor.start()
+        result = _docker(
+            "run", "--rm", "--runtime", container.runtime, "--network", "none",
+            "--user", "65534:65534", "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--mount", f"type=bind,src={probe_dir},dst={INNER_SOCKET_DIR},readonly",
+            "--entrypoint", "python3", container.image, "-I", "-c", PROBE_PROGRAM,
+            timeout=90,
+        )  # fmt: skip
+        # docker run has returned: the container either connected already or
+        # never will — close the listener so the accept thread ends now.
+        listener.close()
+        acceptor.join(timeout=2)
+    except (OSError, subprocess.SubprocessError, ConfineError) as exc:
+        print(f"# {exc}", file=sys.stderr)
+        print("probe:failed")
+        return 1
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+    if "gvisor" not in (result.stdout or "").lower():
+        print(f"# guest kernel: {(result.stdout or result.stderr).strip()[:200]}", file=sys.stderr)
+        print("kernel:unverified")
+        return 1
+    if received != [b"ok"]:
+        print("runtime:no-host-uds")
+        return 1
+    print("ok")
+    return 0
 
 
 # ── Mode: check (readiness probe, unprivileged) ─────────────────────────────

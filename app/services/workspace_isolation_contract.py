@@ -26,6 +26,18 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+# Revision 7 (2026-09-26.1, Issue #3431 Option 2): ``os_user_confinement =
+# "runsc"`` runs each OS-account WebUI in a Docker container on a gVisor
+# runtime; when the root probe verified the runtime (gVisor guest kernel read
+# from inside a container, host UNIX-socket access, pinned image present) the
+# snapshot reports the SANDBOXED level with backend ``local-container:runsc``
+# and every dimension enforced. Unlike the OpenSandbox backend its identity is
+# the OS account and the home is the host directory, so: the entry-point
+# matrix is the os_user one (filesystem_api stays enforced), the /user-url
+# gate keeps the identity-mapping chain, and the launch form stays the local
+# (per-user process) form — the pod form is chosen by the opensandbox BACKEND,
+# never by the level alone.
+#
 # Revision 6 (2026-09-25.1, Issue #3431 Option 1): an os_user deployment with
 # ``workspace.os_user_confinement = "bwrap"`` whose launch-path probe passed
 # (which now includes the confine wrapper's host check) reports backend
@@ -77,7 +89,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-25.1"
+POLICY_REVISION = "2026-09-26.1"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -138,6 +150,14 @@ _SANDBOXED_UNSUPPORTED = (DIMENSION_KERNEL, DIMENSION_NETWORK_EGRESS)
 
 BACKEND_PER_USER = "qwen-code-webui-per-user"
 BACKEND_PER_USER_CONFINED = "qwen-code-webui-per-user-confined"
+BACKEND_LOCAL_CONTAINER = "local-container"
+
+
+def is_opensandbox_backend(backend: str) -> bool:
+    """Whether a snapshot's backend is the OpenSandbox pod form (#3378)."""
+    return backend == BACKEND_OPENSANDBOX or backend.startswith(f"{BACKEND_OPENSANDBOX}:")
+
+
 BACKEND_SHARED = "qwen-code-webui-shared"
 BACKEND_OPENSANDBOX = "opensandbox"
 
@@ -614,8 +634,13 @@ class IsolationCapabilitySnapshot:
         # "webui: enforced" next to "no isolation at all". T-K: the matrix is
         # level-aware — a sandboxed snapshot reports its own wiring truth.
         if self.supported:
-            sandboxed = self.isolation_level == ISOLATION_LEVEL_SANDBOXED
-            details = ENTRY_POINT_DETAILS_SANDBOXED if sandboxed else ENTRY_POINT_DETAILS
+            # Issue #3431: the pod-specific matrix follows the BACKEND. A
+            # local-container sandboxed snapshot keeps the os_user matrix: its
+            # home is the host directory the /fs entry points already govern.
+            pod = self.isolation_level == ISOLATION_LEVEL_SANDBOXED and is_opensandbox_backend(
+                self.backend
+            )
+            details = ENTRY_POINT_DETAILS_SANDBOXED if pod else ENTRY_POINT_DETAILS
             data["entry_points"] = {name: d["status"] for name, d in details.items()}
             # Issue #3410: the string map alone could not tell an integrator
             # "covered by the declared level" from "governed by a different
@@ -1001,6 +1026,21 @@ def build_workspace_isolation_snapshot(
         # check when confinement is configured, so "configured + no
         # degradation" means every launch on this host is confined.
         confinement_active = getattr(manager, "confinement_active", None)
+        confinement_mode = getattr(manager, "confinement_mode", None)
+        if (
+            callable(confinement_active)
+            and confinement_active()
+            and callable(confinement_mode)
+            and confinement_mode() == "runsc"
+        ):
+            return IsolationCapabilitySnapshot(
+                supported=True,
+                backend=f"{BACKEND_LOCAL_CONTAINER}:runsc",
+                isolation_level=ISOLATION_LEVEL_SANDBOXED,
+                enforced=ALL_DIMENSIONS,
+                unsupported=(),
+                reasons=sandbox_reasons,
+            )
         if callable(confinement_active) and confinement_active():
             return IsolationCapabilitySnapshot(
                 supported=True,
@@ -1138,7 +1178,9 @@ def evaluate_isolation_requirement(
         )
     if required_level == ISOLATION_LEVEL_NONE:
         return None
-    if isolation_level_at_least(snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED):
+    if isolation_level_at_least(
+        snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED
+    ) and is_opensandbox_backend(snapshot.backend):
         # Review round 1 (T-B, pin=floor): a sandboxed-capable deployment
         # satisfies every requirement at or below sandboxed with the pod
         # form — the strongest VERIFIED form, which is what launches. The
@@ -1149,7 +1191,11 @@ def evaluate_isolation_requirement(
         # request from a mapping-less user a silent 400 even though the
         # launch itself would have been a sandboxed pod.
         return None
-    if required_level == ISOLATION_LEVEL_SANDBOXED:
+    if required_level == ISOLATION_LEVEL_SANDBOXED and not isolation_level_at_least(
+        snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED
+    ):
+        # (A local-container sandboxed snapshot falls through to the OS-account
+        # chain below: its identity IS the OS account — Issue #3431.)
         # Issue #3378: identity for sandboxed pods is the per-instance webui
         # token, not an OS account — the identity_mapping / per-user-launch
         # chain below is os_user-specific and does not apply. The gate is the

@@ -12,7 +12,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 ```json
 {
   "local_workspace_multi_user": "supported | unsupported",
-  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | opensandbox:<tier>",
+  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | local-container:runsc | opensandbox:<tier>",
   "isolation_level": "none | os_user | sandboxed",
   "enforced": ["identity", "filesystem", "environment", "process"],
   "unsupported": ["resources", "network_egress", "kernel"],
@@ -43,7 +43,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
       "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
     }
   },
-  "policy_revision": "2026-09-25.1"
+  "policy_revision": "2026-09-26.1"
 }
 ```
 
@@ -51,6 +51,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 - `backend`:实际运行器——`qwen-code-webui-per-user`(每用户独立 WebUI 进程)、
   `qwen-code-webui-per-user-confined`(#3431:同上,且每个进程运行在 systemd
   scope + bubblewrap 约束内,见 §5.1)、`qwen-code-webui-shared`(共享单实例)或
+  `local-container:runsc`(#3431:sandboxed 等级,WebUI 运行于本机 gVisor 容器,见 §5.2)或
   `opensandbox:<tier>`(#3378:sandboxed 等级,WebUI 运行于该 tier 的 OpenSandbox pod)。
 - `isolation_level` / `enforced` / `unsupported`:见下节。
 - `reasons`:unsupported 时的机器可读原因(可能为空)。
@@ -339,6 +340,66 @@ dev 目录模式与"服务账户即目标账户"两种无法约束的启动形�
 - 验收:`scripts/webui_confine_acceptance.py`(需一次性 Linux 主机,
   `CONFINE_ACCEPTANCE_DISPOSABLE=1`)。
 
+### 5.2 可选:本机容器沙箱(`os_user_confinement = "runsc"`,#3431 Option 2,policy revision 2026-09-26.1)
+
+不需要 Kubernetes 的 **sandboxed** 等级:每个用户的 WebUI 运行在本机 Docker 容器里,运行时为
+gVisor(runsc)。与 §5.1 共用同一个 root 入口、宿主侧进程与出口代理,只是沙箱从 bubblewrap
+换成了 gVisor 容器;身份仍是该用户的 OS 账户,home 仍是宿主上的 `<base>/<account>`。
+
+| 维度 | 机制 |
+|---|---|
+| kernel | gVisor 用户态内核;readiness 探针在容器内读取 `/proc/version`,**正向**确认是 gVisor |
+| 资源 | `docker run --memory/--memory-swap/--cpus/--pids-limit`(取自 `confinement_*` 配置) |
+| 文件系统 | 只读镜像根 + `--tmpfs /tmp`;只挂入本人 home、`<base>/shared` 与日志目录;`--user <uid>:<gid>` + 账户附加组(`--group-add`) |
+| 进程/权限 | `--cap-drop ALL`、`--security-opt no-new-privileges`、`--init` |
+| 网络 | `--network none`;出入口与 §5.1 相同:反向隧道 + 只放行白名单 `host:port` 的出口代理(经只读挂入的 UNIX socket,需 runsc `--host-uds=all`) |
+| 环境 | WebUI 环境经容器 stdin 传入,不出现在命令行,`docker inspect` 也看不到 |
+
+快照:`isolation_level = sandboxed`、`backend = local-container:runsc`、七个维度全部 `enforced`。
+与 OpenSandbox pod 形态(§6)的区别是**有意的**:
+
+- 入口矩阵沿用 os_user 的那一份——home 是宿主目录,`/api/fs` 等入口仍然 `enforced`;
+- `/user-url` 门闸仍走 OS 账户链(`system_account` 映射、账户检查);
+- 启动形态仍是"每用户本地进程"形态,**绝不**路由到 OpenSandbox pod 启动器(pod 形态按
+  `opensandbox:*` backend 判定,而不是按等级)。
+
+部署要求(Linux 包安装形态,单机 Docker 即可):
+
+1. Docker + gVisor,并注册一个专用运行时(`/etc/docker/daemon.json`):
+   ```json
+   {"runtimes": {"runsc-openace": {"path": "/usr/bin/runsc", "runtimeArgs": ["--host-uds=all"]}}}
+   ```
+   `--host-uds=all` 只作用于使用该运行时的容器;容器内能看到的宿主 socket 只有只读挂入的那两个。
+2. WebUI 镜像:用 `scripts/docker/webui-sandbox.Dockerfile` 构建(含 node、python3 与固定版本的
+   qwen-code-webui),并在策略文件里**按内容固定**:
+   ```json
+   {"webui": ["/usr/bin/qwen-code-webui"],
+    "container": {"image": "sha256:<64 hex>", "runtime": "runsc-openace", "docker": "/usr/bin/docker"}}
+   ```
+   `image` 必须是 `name@sha256:<64 hex>` 或本地镜像 ID `sha256:<64 hex>`(tag 可被改指,拒绝);
+   `webui` 列出的是**镜像内**的路径;installer 重跑会保留 `container` 段。
+3. `workspace.os_user_confinement = "runsc"`,`workspace.webui_callback_url` 必填(同 §5.1);
+   可用 `confinement_container_webui` 改镜像内 WebUI 路径(默认 `/usr/bin/qwen-code-webui`)。
+
+readiness:manager 通过 `sudo -n openace-webui-confine launch --probe`(root)检查——docker CLI 为
+root 所控、运行时已注册、镜像已在本地(启动时不拉取)、容器内内核为 gVisor、容器能连上只读挂入的
+宿主 UNIX socket。成功结果缓存 1 小时,失败 30 秒。原因码:`confinement_docker_unavailable`、
+`confinement_runtime_missing`、`confinement_image_missing`、`confinement_kernel_unverified`、
+`confinement_runtime_host_uds_disabled`、`confinement_policy_invalid`、`confinement_check_failed`
+(以及 §5.1 共有的 `confinement_platform_unsupported`、`confinement_callback_url_missing`、
+`confinement_wrapper_missing`)。
+
+生命周期:manager 对 sudo 发 SIGTERM → docker CLI 转发给容器 → WebUI 退出、`--rm` 删除容器。
+docker CLI 被 SIGKILL 时容器不会被 Docker 停止;容器内的看门狗在宿主侧进程消失约 30 秒后自行
+停止 WebUI,随后 `--rm` 删除容器(实测 36 秒)。
+
+**诚实声明**:
+
+- 仅验证了 gVisor(runsc);Kata 等其它运行时的内核判定不在本次范围内,探针会报
+  `confinement_kernel_unverified`。
+- 与 §5.1 相同:出口代理不检查 TLS;不防御被攻破的服务账户;宿主侧入口仍监听 `0.0.0.0:<port>`。
+- 镜像内容(node 版本、工具链)即 agent 可用的工具集,属产品决定。
+
 ## 6. sandboxed 等级部署要求与诚实声明(语义最后变更于 2026-09-12.2;所有快照一律报告当前 POLICY_REVISION)
 
 `sandboxed` = WebUI 进程运行于 OpenSandbox pod:每用户每实例一个独立 pod、
@@ -518,7 +579,7 @@ c = json.load(open(sys.argv[1]))
 NEEDED = ("webui", "filesystem_api", "session_history")    # 本地工作台入口
 KNOWN  = {"enforced", "partial", "remote_machine_scope",
           "separate_contract", "sandboxed_entry_not_wired", "disabled"}
-REVIEWED = {"2026-09-25.1"}                                # 你已评审过的 revision
+REVIEWED = {"2026-09-26.1"}                                # 你已评审过的 revision
 d = c.get("entry_point_details", {})
 ok = (
     c.get("local_workspace_multi_user") == "supported"

@@ -12,6 +12,13 @@ bubblewrap, and it creates OS accounts. Run it ONLY on a disposable host:
 
     CONFINE_ACCEPTANCE_DISPOSABLE=1 python3 scripts/webui_confine_acceptance.py
 
+Option 2 (``--backend container``, a Docker + gVisor host with a registered
+``runsc --host-uds=all`` runtime and the webui-sandbox image built locally):
+
+    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=container \
+    CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
+    CONFINE_ACCEPTANCE_RUNTIME=runsc-openace python3 scripts/webui_confine_acceptance.py
+
 It installs scripts/openace-webui-confine.py to /usr/local/bin, writes
 /etc/openace/webui-confine.json, creates the accounts ``cfa`` and ``cfb`` under
 /srv/openace-confine-acceptance, and removes the accounts and that tree on exit.
@@ -160,6 +167,16 @@ def host_ip() -> str:
             return sh("hostname", "-I").stdout.split()[0]
 
 
+def container_policy() -> dict | None:
+    if os.environ.get("CONFINE_ACCEPTANCE_BACKEND") != "container":
+        return None
+    return {
+        "image": os.environ["CONFINE_ACCEPTANCE_IMAGE"],
+        "runtime": os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "runsc-openace"),
+        "docker": shutil.which("docker") or "/usr/bin/docker",
+    }
+
+
 def setup(real_webui: bool) -> None:
     sudo("install", "-o", "root", "-g", "root", "-m", "0755", str(WRAPPER_SRC), WRAPPER)
     probe = Path("/tmp/openace-confine-probe")
@@ -168,7 +185,11 @@ def setup(real_webui: bool) -> None:
     probe.unlink()
     webuis = [PROBE] + ([REAL_WEBUI] if real_webui else [])
     sudo("install", "-d", "-o", "root", "-g", "root", "-m", "0755", "/etc/openace")
-    sudo("tee", POLICY, input=json.dumps({"webui": webuis, "path": "/usr/local/bin:/usr/bin:/bin"}))
+    policy = {"webui": webuis, "path": "/usr/local/bin:/usr/bin:/bin"}
+    container = container_policy()
+    if container is not None:
+        policy["container"] = container
+    sudo("tee", POLICY, input=json.dumps(policy))
     sudo("chmod", "0644", POLICY)
     sudo("install", "-d", "-o", "root", "-g", "root", "-m", "0755", BASE)
     if sh("getent", "group", SHARED_GROUP, check=False).returncode != 0:
@@ -197,7 +218,12 @@ def teardown() -> None:
 
 
 def launch(
-    port: int, webui: str, webui_args: list[str], env: dict, allow: list[str]
+    port: int,
+    webui: str,
+    webui_args: list[str],
+    env: dict,
+    allow: list[str],
+    backend: str = "bwrap",
 ) -> subprocess.Popen:
     cmd = [
         "sudo", "-n", WRAPPER, "launch", "--account", "cfa", "--port", str(port),
@@ -206,7 +232,7 @@ def launch(
     ]  # fmt: skip
     for entry in allow:
         cmd += ["--allow", entry]
-    cmd += ["--webui", webui, "--", *webui_args]
+    cmd += ["--webui", webui, "--backend", backend, "--", *webui_args]
     process = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         start_new_session=True,
@@ -456,6 +482,99 @@ def _run_real_webui(record: Record, target: str) -> None:
         process.wait(timeout=15)
 
 
+def run_container(record: Record) -> None:
+    """Option 2: the real WebUI from the pinned image on the gVisor runtime."""
+    target = host_ip()
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(ALLOWED_PORT), "--bind", "0.0.0.0"],  # noqa: S104
+        cwd="/tmp", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    name = "openace-webui-3431-3441"
+    upstream = f"http://{target}:{ALLOWED_PORT}"
+    env = {"OPENAI_API_KEY": SECRET, "OPENAI_BASE_URL": f"{upstream}/api/proxy/v1",
+           "OPENACE_LOG_DIR": LOG_DIR}  # fmt: skip
+    args = ["--port", "3441", "--host", "127.0.0.1", "--token-secret", "acceptance",
+            "--quota-check-enabled", "--openace-api-url", upstream, "--auth-type", "openai"]  # fmt: skip
+
+    def _launch() -> subprocess.Popen:
+        return launch(3441, REAL_WEBUI, args, env, [f"{target}:{ALLOWED_PORT}"],
+                      backend="container")  # fmt: skip
+
+    try:
+        probe = sudo(WRAPPER, "launch", "--probe", check=False)
+        record.check("root probe passes", probe.returncode == 0, probe.stdout.strip())
+        process = _launch()
+        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
+        record.check("real WebUI serves its UI from the gVisor container",
+                     answer is not None and answer[0] == 200 and b"Qwen Code" in answer[1])  # fmt: skip
+        kernel = sudo("docker", "exec", name, "cat", "/proc/version", check=False).stdout
+        record.check("guest kernel is gVisor", "gvisor" in kernel.lower(), kernel.strip()[:40])
+        cfg = sudo("docker", "inspect", "-f",
+                   "{{.HostConfig.NetworkMode}} {{.HostConfig.ReadonlyRootfs}} {{.Config.User}} "
+                   "{{.HostConfig.CapDrop}}", name, check=False).stdout.split()  # fmt: skip
+        record.check("network none, read-only root, account uid, caps dropped",
+                     cfg[:3] == ["none", "true", f"{USERS['cfa']}:{USERS['cfa']}"]
+                     and "ALL" in " ".join(cfg[3:]), cfg)  # fmt: skip
+        env_seen = sudo("docker", "inspect", "-f", "{{json .Config.Env}}", name).stdout
+        record.check("environment not visible in docker inspect", SECRET not in env_seen)
+        record.check("secret on no command line", not cmdlines_containing(SECRET))
+        listing = sudo("docker", "exec", name, "ls", BASE, check=False).stdout.split()
+        record.check(
+            "other homes hidden inside the container", listing == ["cfa", "shared"], listing
+        )
+        log_text = Path(LOG_DIR, "webui.log")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and "LLM proxy started on port" not in (
+            log_text.read_text(errors="replace") if log_text.exists() else ""
+        ):
+            time.sleep(0.5)
+        port = (
+            log_text.read_text(errors="replace")
+            .split("LLM proxy started on port", 1)[1]
+            .split()[0]
+            .strip(",")
+        )
+        sudo("docker", "exec", name, "python3", "-c",
+             "import urllib.request as u\n"
+             f"r=u.Request('http://127.0.0.1:{port}/chat/completions',data=b'{{}}',"
+             "headers={'content-type':'application/json'})\n"
+             "try: u.urlopen(r,timeout=20)\nexcept Exception: pass", check=False)  # fmt: skip
+        audit = sudo("cat", AUDIT_LOG, check=False).stdout
+        record.check("upstream call leaves through the egress proxy (audit log)",
+                     f"ALLOW 'POST' '{target}':{ALLOWED_PORT}" in audit, audit.strip()[-160:])  # fmt: skip
+        process.terminate()
+        process.wait(timeout=30)
+        gone = not sudo("docker", "ps", "-aq", "--filter", f"name={name}").stdout.strip()
+        record.check("SIGTERM to sudo removes the container", gone)
+        process = _launch()
+        wait_http("http://127.0.0.1:3441/", timeout=90)
+        cli = sh(
+            "pgrep", "-f", f"docker run --rm -i --init --name {name}", check=False
+        ).stdout.split()
+        for pid in cli:
+            sudo("kill", "-KILL", pid, check=False)
+        deadline = time.monotonic() + 90
+        while (
+            time.monotonic() < deadline
+            and sudo("docker", "ps", "-q", "--filter", f"name={name}").stdout.strip()
+        ):
+            time.sleep(2)
+        record.check("watchdog removes the container after SIGKILL of the docker CLI",
+                     not sudo("docker", "ps", "-q", "--filter", f"name={name}").stdout.strip())  # fmt: skip
+        process.wait(timeout=30)
+        policy_text = sudo("cat", POLICY).stdout
+        broken = json.loads(policy_text)
+        broken["container"]["runtime"] = "runsc"  # plain runsc: no host UDS
+        sudo("tee", POLICY, input=json.dumps(broken))
+        probe = sudo(WRAPPER, "launch", "--probe", check=False)
+        record.check("probe refuses a runtime without host UDS",
+                     probe.stdout.strip() == "runtime:no-host-uds", probe.stdout.strip())  # fmt: skip
+        sudo("tee", POLICY, input=policy_text)
+    finally:
+        server.terminate()
+        sudo("docker", "rm", "-f", name, check=False)
+
+
 def main() -> int:
     if sys.platform != "linux" or not os.path.isdir("/run/systemd/system"):
         print("refusing: needs Linux with systemd running", file=sys.stderr)
@@ -466,15 +585,24 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    for tool in ("bwrap", "setpriv", "systemd-run", "nsenter", "curl"):
+    tools = (
+        ("setpriv", "docker")
+        if container_policy()
+        else ("bwrap", "setpriv", "systemd-run", "nsenter", "curl")
+    )
+    for tool in tools:
         if shutil.which(tool) is None:
             print(f"refusing: {tool} is not installed", file=sys.stderr)
             return 2
-    real_webui = os.path.exists(REAL_WEBUI)
+    container = container_policy() is not None
+    real_webui = container or os.path.exists(REAL_WEBUI)
     record = Record()
     try:
         setup(real_webui)
-        run(record, real_webui)
+        if container:
+            run_container(record)
+        else:
+            run(record, real_webui)
     finally:
         teardown()
     print(

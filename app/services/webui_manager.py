@@ -69,6 +69,24 @@ _WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 _WEBUI_CONFINE_WRAPPER = "/usr/local/bin/openace-webui-confine"
 CONFINEMENT_OFF = "off"
 CONFINEMENT_BWRAP = "bwrap"
+# Issue #3431 (Option 2): the same confined launch, with a Docker container on
+# a gVisor runtime as the sandbox. Reported as the sandboxed level
+# (backend local-container:runsc) once the root probe verified the runtime.
+CONFINEMENT_RUNSC = "runsc"
+# `openace-webui-confine launch --probe` token -> readiness reason code.
+_CONTAINER_PROBE_REASONS = {
+    "policy:invalid": "confinement_policy_invalid",
+    "docker:unavailable": "confinement_docker_unavailable",
+    "runtime:missing": "confinement_runtime_missing",
+    "image:missing": "confinement_image_missing",
+    "kernel:unverified": "confinement_kernel_unverified",
+    "runtime:no-host-uds": "confinement_runtime_host_uds_disabled",
+    "probe:failed": "confinement_check_failed",
+}
+# The probe starts a container: cache a success for an hour (the runtime and
+# pinned image do not change under a running process), a failure briefly.
+_CONTAINER_PROBE_OK_TTL_SECONDS = 3600.0
+_CONTAINER_PROBE_FAIL_TTL_SECONDS = 30.0
 # Keys the confine wrapper owns or refuses (it sets HOME/PATH/proxy variables
 # itself; the host's own proxy is not reachable from the sandbox anyway).
 _CONFINE_RESERVED_ENV = frozenset(
@@ -310,6 +328,8 @@ class WorkspaceConfig:
     # Extra host:port pairs the sandbox may reach, beyond the Open ACE API /
     # LLM proxy endpoints derived from the launch environment.
     confinement_egress_allow: tuple[str, ...] = ()
+    # Option 2: the WebUI executable INSIDE the pinned image.
+    confinement_container_webui: str = "/usr/bin/qwen-code-webui"
 
 
 def read_workspace_config() -> WorkspaceConfig:
@@ -356,6 +376,9 @@ def read_workspace_config() -> WorkspaceConfig:
                 for item in (workspace.get("confinement_egress_allow") or [])
                 if str(item).strip()
             ),
+            confinement_container_webui=str(
+                workspace.get("confinement_container_webui") or "/usr/bin/qwen-code-webui"
+            ).strip(),
         )
     except Exception as e:
         logger.error(f"Error loading config: {e}")
@@ -1621,18 +1644,31 @@ class WebUIManager:
         backend so a bypassed gate cannot silently downgrade to local).
         """
         explicit = (required_isolation or "").strip()
-        if explicit == WEBUI_FORM_SANDBOXED:
-            return WEBUI_FORM_SANDBOXED
         from app.services.workspace_isolation_contract import (
+            BACKEND_LOCAL_CONTAINER,
             ISOLATION_LEVEL_SANDBOXED,
             build_workspace_isolation_snapshot,
+            is_opensandbox_backend,
         )
 
+        # Issue #3431 Option 2: a local-container sandboxed deployment runs
+        # the sandbox INSIDE the per-user local form (the confined launch), so
+        # neither an explicit sandboxed request nor a sandboxed snapshot may
+        # route it to the OpenSandbox pod launcher. The pod form follows the
+        # opensandbox backend.
+        if self._confinement_mode() == CONFINEMENT_RUNSC:
+            if snapshot is None:
+                snapshot = build_workspace_isolation_snapshot(self)
+            if snapshot.backend.startswith(BACKEND_LOCAL_CONTAINER):
+                return WEBUI_FORM_LOCAL
+        if explicit == WEBUI_FORM_SANDBOXED:
+            return WEBUI_FORM_SANDBOXED
         if snapshot is None:
             snapshot = build_workspace_isolation_snapshot(self)
         return (
             WEBUI_FORM_SANDBOXED
             if snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+            and is_opensandbox_backend(snapshot.backend)
             else WEBUI_FORM_LOCAL
         )
 
@@ -2237,7 +2273,12 @@ class WebUIManager:
         # resolution memo with the readiness probe (Issue #3374 review #9
         # round 2): both call sites see one resolution instead of diverging.
         resolved = getattr(self, "_resolved_webui", None)
-        if resolved:
+        webui_cmd: str | None
+        webui_dir: str | None
+        if self._confinement_mode() == CONFINEMENT_RUNSC:
+            # Issue #3431 Option 2: the executable is a path inside the image.
+            webui_cmd, webui_dir = self.config.confinement_container_webui, None
+        elif resolved:
             webui_cmd, webui_dir = resolved
         else:
             webui_cmd, webui_dir = self._find_webui_executable()
@@ -2801,6 +2842,12 @@ class WebUIManager:
     def _compute_launch_readiness(self) -> str | None:
         if self._platform not in ("linux", "darwin"):
             return "platform_unsupported"
+        if self._confinement_mode() == CONFINEMENT_RUNSC:
+            # The WebUI runs from the pinned image: no host-side WebUI or
+            # openace-webui-launch is involved; the root probe is the check.
+            if shutil.which("sudo") is None:
+                return "sudo_unavailable"
+            return self._container_readiness()
         resolved = getattr(self, "_resolved_webui", None)
         if resolved:
             webui_cmd, webui_dir = resolved
@@ -2837,6 +2884,11 @@ class WebUIManager:
     def _confinement_enabled(self) -> bool:
         """Whether os_user WebUIs must launch confined (any value but off/empty)."""
         return self._confinement_mode() not in ("", CONFINEMENT_OFF)
+
+    def confinement_mode(self) -> str:
+        """The configured confinement mode ("" when off), for the contract."""
+        mode = self._confinement_mode()
+        return "" if mode == CONFINEMENT_OFF else mode
 
     def confinement_active(self) -> bool:
         """Confinement is configured AND this host passed its readiness check."""
@@ -2878,6 +2930,58 @@ class WebUIManager:
             return None
         token = (result.stdout or "").strip().splitlines()[-1:] or [""]
         return _CONFINE_CHECK_REASONS.get(token[0], "confinement_check_failed")
+
+    def _container_readiness(self) -> str | None:
+        """Option 2 readiness: ``sudo -n openace-webui-confine launch --probe``.
+
+        The probe (root) verifies the docker CLI, the registered runtime, the
+        pinned image, a gVisor guest kernel and host UNIX-socket access from a
+        container. Memoized: a success for an hour, a failure for 30 s.
+        """
+        if self._platform != "linux":
+            return "confinement_platform_unsupported"
+        if not (getattr(self.config, "webui_callback_url", "") or "").strip():
+            return "confinement_callback_url_missing"
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
+            return "confinement_wrapper_missing"
+        now = time.monotonic()
+        memo: tuple[float, str | None] | None = getattr(self, "_container_probe_memo", None)
+        if memo is not None:
+            stamp, cached = memo
+            ttl = (
+                _CONTAINER_PROBE_OK_TTL_SECONDS
+                if cached is None
+                else _CONTAINER_PROBE_FAIL_TTL_SECONDS
+            )
+            if now - stamp < ttl:
+                return cached
+        reason: str | None
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed wrapper path
+                ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe"],
+                capture_output=True,
+                text=True,
+                timeout=150,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("confinement container probe could not run: %s", exc)
+            reason = "confinement_check_failed"
+        else:
+            token = (result.stdout or "").strip().splitlines()[-1:] or [""]
+            if result.returncode == 0 and token[0] == "ok":
+                reason = None
+            else:
+                reason = _CONTAINER_PROBE_REASONS.get(token[0], "confinement_check_failed")
+                logger.warning(
+                    "confinement container probe failed (%s): %s",
+                    reason,
+                    (result.stderr or "").strip()[-300:],
+                )
+        self._container_probe_memo = (now, reason)
+        return reason
 
     def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:
         """The WebUI environment for the confine wrapper (stdin JSON).
@@ -2951,6 +3055,8 @@ class WebUIManager:
         ]
         for entry in self._confinement_allowlist():
             cmd += ["--allow", entry]
+        if self._confinement_mode() == CONFINEMENT_RUNSC:
+            cmd += ["--backend", "container"]
         cmd += [
             "--webui",
             webui_cmd,

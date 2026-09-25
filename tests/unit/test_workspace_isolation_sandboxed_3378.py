@@ -323,7 +323,7 @@ def test_snapshot_appends_sandbox_reason_when_configured_but_failing(monkeypatch
 
 
 def test_policy_revision_bumped():
-    assert wic.POLICY_REVISION == "2026-09-25.1"
+    assert wic.POLICY_REVISION == "2026-09-26.1"
 
 
 def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
