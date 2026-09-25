@@ -2547,7 +2547,8 @@ if node_dir and node_dir not in parts:
     parts.insert(0, node_dir)
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as handle:
-    json.dump({"webui": webuis, "path": ":".join(parts)}, handle, indent=2)
+    # keep every other key the operator set (bases, denied_groups, ...)
+    json.dump(dict(data, webui=webuis, path=":".join(parts)), handle, indent=2)
     handle.write("\n")
 os.replace(tmp, path)
 '; then
