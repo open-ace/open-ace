@@ -73,7 +73,7 @@ class _FakeLaunchResult:
 
 
 class _FakeLauncher:
-    """Stands in for SandboxedWebuiLauncher; records every call."""
+    """Stands in for OpenSandboxWebuiLauncher; records every call."""
 
     def __init__(self, *, restore_confirmed=True, healthy=True):
         self.launch_calls: list[dict] = []
@@ -490,7 +490,7 @@ def test_unreadable_snapshot_degrades_start_and_suspends_exports():
 
     class _UnreadableSnapshotLauncher(_FakeLauncher):
         def load_snapshot(self, user_id):
-            from app.services.webui_sandbox import SnapshotUnreadableError
+            from app.services.webui_sandbox_opensandbox import SnapshotUnreadableError
 
             raise SnapshotUnreadableError(f"snapshot for user {user_id}: EACCES")
 
