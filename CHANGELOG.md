@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.0.0] - 2026-09-25
+
 Open ACE 2.0 turns the self-hosted workspace into a multi-user, sandbox-isolated platform: interactive and autonomous agents can now run in OpenSandbox (gVisor/Kata) pods, autonomous workflows gain an independent acceptance-verification phase, and enterprise identity (SAML SSO, DingTalk/Feishu org sync) and alerting landed. It is a major version because of the upgrade-affecting changes listed below.
 
 ### Breaking Changes / Upgrade Notes
@@ -185,5 +187,6 @@ Open ACE 2.0 turns the self-hosted workspace into a multi-user, sandbox-isolated
 
 [v1.1.0]: https://github.com/open-ace/open-ace/releases/tag/v1.1.0
 [v1.2.0]: https://github.com/open-ace/open-ace/releases/tag/v1.2.0
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.2.0...HEAD
+[v2.0.0]: https://github.com/open-ace/open-ace/releases/tag/v2.0.0
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v2.0.0...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
