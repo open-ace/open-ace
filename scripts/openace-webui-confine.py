@@ -28,8 +28,10 @@ Installed as ``/usr/local/bin/openace-webui-confine``. One file, four modes:
 Nothing on the host side ever follows a path the sandbox can write: the
 socket directory is bound READ-ONLY into the sandbox, the sandbox only
 connects out to it (ingress uses a reverse tunnel instead of a listener the
-host would connect to), and the egress log is opened once, with O_NOFOLLOW,
-before the sandbox exists.
+host would connect to), and the egress log is opened by ROOT in the
+root-owned /var/log/openace-webui/ and handed down as a descriptor — the
+account can append through it but can neither open, replace nor truncate the
+file.
 
 The sandbox has no route out except the egress proxy, so egress control is
 structural: anything that ignores the proxy variables gets no network at all.
@@ -65,7 +67,7 @@ MIN_ACCOUNT_UID = 1000
 INNER_SOCKET_DIR = "/run/openace"
 TUNNEL_SOCKET = "tunnel.sock"
 EGRESS_SOCKET = "egress.sock"
-EGRESS_LOG_NAME = "confine-egress.log"
+EGRESS_LOG_ROOT = "/var/log/openace-webui"
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Root-owned policy file written by the installer. ``launch`` refuses to run
 # without it: it pins which executables may be started as a user (a free
@@ -113,6 +115,9 @@ PRIVILEGED_GROUPS = frozenset(
         "kvm",
         "systemd-journal",
         "staff",
+        "incus",
+        "incus-admin",
+        "lpadmin",
     }
 )
 MEMORY_RE = re.compile(r"^[1-9][0-9]{0,12}[KMGT]?$")
@@ -128,6 +133,8 @@ TUNNEL_POOL = 4  # idle reverse-tunnel connections kept by ``inner``
 TUNNEL_POOL_MAX = 64  # the supervisor never holds more than this many
 TUNNEL_GO = b"\x01"
 TUNNEL_WAIT_SECONDS = 10.0
+MAX_INGRESS_CLIENTS = 256  # concurrent browser connections per instance
+MAX_PACKAGE_ENTRIES = 200_000  # npm tree ownership walk bound
 
 
 class ConfineError(Exception):
@@ -320,6 +327,38 @@ def require_root_controlled_executable(path: str) -> None:
         )
 
 
+def require_root_controlled_package(path: str) -> None:
+    """The npm tree the WebUI runs from must be root-controlled throughout.
+
+    Checking only the entry file's path would leave its dependencies (and the
+    ``qwen`` CLI it spawns, installed in the same global ``node_modules``)
+    writable by whoever owns them. When the resolved executable lives under a
+    ``node_modules`` directory, the whole directory is walked (symlinks are
+    not followed; their targets inside the tree are checked on their own).
+    """
+    real = os.path.realpath(path)
+    root = real
+    while os.path.basename(root) != "node_modules":
+        parent = os.path.dirname(root)
+        if parent == root:
+            return  # not an npm install: the executable check covers it
+        root = parent
+    seen = 0
+    for current, dirs, files in os.walk(root, followlinks=False):
+        for name in dirs + files:
+            seen += 1
+            if seen > MAX_PACKAGE_ENTRIES:
+                raise ConfineError(f"{root} is too large to verify")
+            st = os.lstat(os.path.join(current, name))
+            if stat.S_ISLNK(st.st_mode):
+                continue
+            if st.st_uid != 0 or st.st_mode & 0o022:
+                raise ConfineError(
+                    f"{os.path.join(current, name)} is not root-owned and protected "
+                    "from group/world writes (the npm prefix must be root's)"
+                )
+
+
 def require_root_controlled_path(sandbox_path: str) -> None:
     """Every PATH entry the sandbox sees must be root-controlled.
 
@@ -438,6 +477,9 @@ def build_bwrap_argv(
         # never replace them (connect() on a socket works on a read-only mount).
         "--ro-bind", socket_dir, INNER_SOCKET_DIR,
         "--unshare-user",
+        # A nested user namespace could not undo the locked mounts, but it is
+        # attack surface the WebUI never needs.
+        "--disable-userns",
         "--unshare-ipc",
         "--unshare-pid",
         "--unshare-uts",
@@ -500,13 +542,34 @@ def splice(a: socket.socket, b: socket.socket, initial_to_b: bytes = b"") -> Non
                 sock.close()
 
 
-def _serve(listener: socket.socket, handler, name: str) -> None:
+def _serve(listener: socket.socket, handler, name: str, limit: int = MAX_INGRESS_CLIENTS) -> None:
+    """Accept forever; at most *limit* handlers at once (threads count against
+    the scope's TasksMax, shared with the WebUI). Over the limit, or when a
+    thread cannot be started, the connection is closed — the loop survives."""
+    slots = threading.BoundedSemaphore(limit)
+
+    def _run(conn: socket.socket) -> None:
+        try:
+            handler(conn)
+        finally:
+            slots.release()
+
     while True:
         try:
             conn, _ = listener.accept()
         except OSError:
             return
-        threading.Thread(target=handler, args=(conn,), daemon=True, name=name).start()
+        if not slots.acquire(blocking=False):
+            with contextlib.suppress(OSError):
+                conn.close()
+            continue
+        try:
+            threading.Thread(target=_run, args=(conn,), daemon=True, name=name).start()
+        except RuntimeError:
+            slots.release()
+            with contextlib.suppress(OSError):
+                conn.close()
+            time.sleep(0.1)
 
 
 def _unix_listener(path: str) -> socket.socket:
@@ -772,6 +835,7 @@ def plan_launch(
     if os.path.normpath(webui) not in policy.webuis:
         raise ConfineError(f"--webui {webui!r} is not listed in {policy_path}")
     require_root_controlled_executable(webui)
+    require_root_controlled_package(webui)
     require_root_controlled_path(policy.path)
     log_dir = validate_log_dir(args.log_dir, entry)
     base, home, shared = workspace_layout(entry, policy.bases)
@@ -808,6 +872,7 @@ def plan_launch(
     ]  # fmt: skip
     payload: dict[str, object] = {
         "account": entry.pw_name,
+        "uid": entry.pw_uid,
         "port": port,
         "bind_host": args.bind_host,
         "allow": [f"[{h}]:{p}" if ":" in h else f"{h}:{p}" for h, p in allow],
@@ -825,10 +890,45 @@ def plan_launch(
     return systemd_argv, payload
 
 
+def open_root_egress_log(uid: int, log_root: str = EGRESS_LOG_ROOT) -> int:
+    """Open ``<log_root>/<uid>.egress.log`` for appending, as root.
+
+    The directory and file are owned by the caller (root in production) and
+    closed to others; the descriptor is inherited down the exec chain, so the
+    account appends through it but can never open, replace or truncate the
+    file. O_NOFOLLOW + O_NONBLOCK + fstat refuse a symlink, a FIFO (which
+    would block the open) or a hard-linked file.
+    """
+    me = os.geteuid()
+    try:
+        os.mkdir(log_root, 0o755)
+    except FileExistsError:
+        pass
+    st = os.lstat(log_root)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != me or st.st_mode & 0o022:
+        raise ConfineError(f"{log_root} is not a directory controlled by uid {me}")
+    try:
+        fd = os.open(
+            os.path.join(log_root, f"{uid}.egress.log"),
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o600,
+        )
+    except OSError as exc:
+        raise ConfineError(f"cannot open the egress log ({exc.strerror})") from None
+    fst = os.fstat(fd)
+    if not stat.S_ISREG(fst.st_mode) or fst.st_nlink != 1 or fst.st_uid != me:
+        os.close(fd)
+        raise ConfineError("the egress log is not a private regular file")
+    os.set_blocking(fd, True)
+    os.set_inheritable(fd, True)
+    return fd
+
+
 def run_launch(argv: Sequence[str]) -> int:
     if os.geteuid() != 0:
         raise ConfineError("launch must run as root (via sudo)")
     systemd_argv, payload = plan_launch(argv, sys.stdin.read())
+    payload["log_fd"] = open_root_egress_log(int(payload["uid"]))
     read_fd, write_fd = os.pipe()
     data = json.dumps(payload).encode()
     if len(data) > PIPE_BUFFER - 1:
@@ -848,24 +948,13 @@ def run_launch(argv: Sequence[str]) -> int:
 # ── Mode: supervise (target account, host side) ────────────────────────────
 
 
-def open_egress_log(log_dir: str) -> int | None:
-    """Open the egress log for appending BEFORE the sandbox exists (O_NOFOLLOW)."""
-    try:
-        return os.open(
-            os.path.join(log_dir, EGRESS_LOG_NAME),
-            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600,
-        )
-    except OSError:
-        return None
-
-
 def run_supervise() -> int:
     payload = json.loads(sys.stdin.read())
     parent = os.getppid()
     allow = [parse_allow_entry(item) for item in payload["allow"]]
     socket_dir = tempfile.mkdtemp(prefix="openace-webui-")
-    proxy = EgressProxy(allow, open_egress_log(payload["log_dir"]))
+    log_fd = payload.get("log_fd")
+    proxy = EgressProxy(allow, int(log_fd) if log_fd is not None else None)
     egress_listener = _unix_listener(os.path.join(socket_dir, EGRESS_SOCKET))
     threading.Thread(
         target=_serve, args=(egress_listener, proxy.handle, "egress"), daemon=True
@@ -1023,20 +1112,29 @@ def run_check(argv: Sequence[str], policy_path: str = CONFIG_PATH) -> int:
             if os.path.normpath(args.webui) not in policy.webuis:
                 raise ConfineError(f"{args.webui} is not listed in {policy_path}")
             require_root_controlled_executable(args.webui)
+            require_root_controlled_package(args.webui)
         require_root_controlled_path(policy.path)
     except ConfineError as exc:
         print(f"# {exc}", file=sys.stderr)
         print("policy:invalid")
         return 1
     bwrap = shutil.which("bwrap", path=SAFE_PATH) or "bwrap"
-    probe = subprocess.run(  # noqa: S603 - fixed argv
-        [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--unshare-net", "--", "/bin/true"],
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-    if probe.returncode != 0:
+
+    def _bwrap_ok(*extra: str) -> bool:
+        result = subprocess.run(  # noqa: S603 - fixed argv
+            [bwrap, "--ro-bind", "/", "/", "--unshare-user", *extra, "--unshare-net",
+             "--", "/bin/true"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )  # fmt: skip
+        return result.returncode == 0
+
+    if not _bwrap_ok():
         print("userns:unavailable")
+        return 1
+    if not _bwrap_ok("--disable-userns"):
+        print("bwrap:too-old")  # --disable-userns needs bubblewrap >= 0.8
         return 1
     print("ok")
     return 0

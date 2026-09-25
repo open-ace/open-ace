@@ -97,6 +97,7 @@ def test_missing_wrapper_is_reported():
         (1, "systemd:not-running\n", "confinement_systemd_unavailable"),
         (1, "userns:unavailable\n", "confinement_userns_unavailable"),
         (1, "policy:invalid\n", "confinement_policy_invalid"),
+        (1, "bwrap:too-old\n", "confinement_bwrap_too_old"),
         (1, "", "confinement_check_failed"),
         (2, "something new\n", "confinement_check_failed"),
     ],

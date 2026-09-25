@@ -94,6 +94,7 @@ _CONFINE_CHECK_REASONS = {
     "missing:systemd-run": "confinement_systemd_unavailable",
     "systemd:not-running": "confinement_systemd_unavailable",
     "userns:unavailable": "confinement_userns_unavailable",
+    "bwrap:too-old": "confinement_bwrap_too_old",
     "policy:invalid": "confinement_policy_invalid",
 }
 

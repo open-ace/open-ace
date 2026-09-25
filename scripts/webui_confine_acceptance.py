@@ -43,6 +43,7 @@ SHARED_GROUP = "cfa-shared"
 LOG_DIR = "/tmp/qwen-code-webui-3431"
 ALLOWED_PORT, DENIED_PORT = 18431, 18432
 SECRET = "proxy-token-3431-acceptance"
+AUDIT_LOG = "/var/log/openace-webui/3431.egress.log"  # root-owned, per uid
 
 PROBE_SOURCE = textwrap.dedent('''\
     #!/usr/bin/python3
@@ -84,16 +85,12 @@ PROBE_SOURCE = textwrap.dedent('''\
         except OSError:
             return False
 
-    def swap_egress_log():
-        # Replace the host-side egress log with a symlink into our home: the
-        # supervisor must keep writing to the descriptor it opened, never here.
-        log_dir = os.environ.get("OPENACE_LOG_DIR")
-        if not log_dir:
-            return None
-        log = os.path.join(log_dir, "confine-egress.log")
+    def audit_log_openable():
+        # The egress audit log is root-owned; the account only holds an
+        # inherited descriptor outside the sandbox. Nothing here may open it.
+        path = "/var/log/openace-webui/%d.egress.log" % os.getuid()
         try:
-            os.unlink(log)
-            os.symlink(os.path.join(os.environ["HOME"], "log-redirect"), log)
+            open(path, "a").close()
             return True
         except OSError:
             return False
@@ -101,7 +98,6 @@ PROBE_SOURCE = textwrap.dedent('''\
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             base = os.path.dirname(os.environ["HOME"])
-            swapped = swap_egress_log()
             report = {
                 "uid": os.getuid(), "groups": sorted(os.getgroups()),
                 "base_entries": sorted(os.listdir(base)),
@@ -117,7 +113,7 @@ PROBE_SOURCE = textwrap.dedent('''\
                 "secret_in_env": os.environ.get("OPENAI_API_KEY"),
                 "pid1": open("/proc/1/comm").read().strip(),
                 "sockdir_writable": sockdir_writable(),
-                "log_swapped": swapped,
+                "audit_log_openable": audit_log_openable(),
             }
             body = json.dumps(report).encode()
             self.send_response(200)
@@ -188,7 +184,7 @@ def setup(real_webui: bool) -> None:
     sudo("chown", f"cfb:{SHARED_GROUP}", f"{BASE}/shared/proj/README")
     sudo("chmod", "0660", f"{BASE}/shared/proj/README")
     sudo("tee", f"{BASE}/cfb/secret", input="secret of cfb\n")
-    sudo("rm", "-rf", LOG_DIR)
+    sudo("rm", "-rf", LOG_DIR, AUDIT_LOG)
     sudo("install", "-d", "-o", "cfa", "-g", "cfa", "-m", "0755", LOG_DIR)
 
 
@@ -197,7 +193,7 @@ def teardown() -> None:
     for name in USERS:
         sudo("userdel", "-r", name, check=False)
     sudo("groupdel", SHARED_GROUP, check=False)
-    sudo("rm", "-rf", BASE, LOG_DIR, PROBE, check=False)
+    sudo("rm", "-rf", BASE, LOG_DIR, PROBE, AUDIT_LOG, check=False)
 
 
 def launch(
@@ -343,11 +339,9 @@ def _run_probe(record: Record, target: str) -> None:
         )
         record.check("pid namespace", report["pid1"] == "bwrap", report["pid1"])
         record.check("socket directory read-only inside", report["sockdir_writable"] is False)
-        redirected = sudo("test", "-s", f"{BASE}/cfa/log-redirect", check=False).returncode == 0
         record.check(
-            "egress log swap cannot redirect supervisor writes",
-            report["log_swapped"] is True and not redirected,
-            {"swapped": report["log_swapped"], "redirected": redirected},
+            "egress audit log not openable from the sandbox",
+            report["audit_log_openable"] is False,
         )
         unit = "openace-webui-3431-3431.scope"
         props = dict(
@@ -358,9 +352,12 @@ def _run_probe(record: Record, target: str) -> None:
         record.check("cgroup limits applied", props == {
             "MemoryMax": str(512 * 1024 * 1024), "TasksMax": "128", "CPUQuotaPerSecUSec": "1s",
         }, props)  # fmt: skip
-        # The probe unlinked the original log (its inode lives on in the
-        # supervisor's descriptor); what matters is checked above: no write
-        # was redirected through the planted symlink.
+        log = sudo("cat", AUDIT_LOG, check=False).stdout
+        record.check(
+            "egress decisions in the root-owned audit log",
+            "ALLOW 'GET'" in log and "DENY 'GET'" in log,
+            sudo("stat", "-c", "%U:%G %a", AUDIT_LOG, check=False).stdout.strip(),
+        )
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=15)
@@ -427,7 +424,7 @@ def _run_real_webui(record: Record, target: str) -> None:
     }
     args = ["--port", "3435", "--host", "127.0.0.1", "--token-secret", "acceptance",
             "--quota-check-enabled", "--openace-api-url", upstream, "--auth-type", "openai"]  # fmt: skip
-    sudo("rm", "-f", f"{LOG_DIR}/confine-egress.log")  # owned by the account
+    sudo("rm", "-f", AUDIT_LOG)
     process = launch(3435, REAL_WEBUI, args, env, [f"{target}:{ALLOWED_PORT}"])
     try:
         answer = wait_http("http://127.0.0.1:3435/", timeout=60)
@@ -450,7 +447,7 @@ def _run_real_webui(record: Record, target: str) -> None:
             f"http://127.0.0.1:{port}/chat/completions", check=False,
         )  # fmt: skip
         # 0600, owned by the account (opened by the supervisor before bwrap)
-        log = sudo("cat", f"{LOG_DIR}/confine-egress.log", check=False).stdout
+        log = sudo("cat", AUDIT_LOG, check=False).stdout
         record.check("real WebUI upstream call leaves through the egress proxy",
                      f"ALLOW 'POST' '{target}':{ALLOWED_PORT}" in log,
                      [result.stdout, log.strip()])  # fmt: skip

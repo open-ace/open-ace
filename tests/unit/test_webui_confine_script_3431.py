@@ -434,8 +434,8 @@ def test_bwrap_argv_hides_base_and_binds_sockets_read_only(confine):
     # the socket directory is READ-ONLY inside: the sandbox cannot swap sockets
     assert "--ro-bind /tmp/openace-webui-x /run/openace" in joined
     assert "--bind /tmp/openace-webui-x" not in joined
-    for flag in ("--unshare-net", "--unshare-pid", "--unshare-user", "--die-with-parent",
-                 "--new-session"):  # fmt: skip
+    for flag in ("--unshare-net", "--unshare-pid", "--unshare-user", "--disable-userns",
+                 "--die-with-parent", "--new-session"):  # fmt: skip
         assert flag in argv
     assert "--setenv" not in argv  # env goes through the process environment
     assert argv[argv.index("--") + 1 :] == [
@@ -675,10 +675,69 @@ def test_proxy_log_goes_to_the_descriptor_escaped(confine, tmp_path):
     assert "DENY 'CONNECT' 'deny.example':443" in lines[1]
 
 
-def test_open_egress_log_refuses_a_symlink(confine, tmp_path):
-    target = tmp_path / "elsewhere"
-    target.write_text("")
-    (tmp_path / confine.EGRESS_LOG_NAME).symlink_to(target)
-    assert confine.open_egress_log(str(tmp_path)) is None
-    fd = confine.open_egress_log(str(tmp_path / "missing-dir"))
-    assert fd is None
+def test_root_egress_log_is_private_and_refuses_tampered_files(confine, tmp_path):
+    root = tmp_path / "log"
+    fd = confine.open_root_egress_log(3001, str(root))
+    try:
+        path = root / "3001.egress.log"
+        assert (path.stat().st_mode & 0o777) == 0o600
+        assert os.get_inheritable(fd)  # handed down the exec chain
+        os.write(fd, b"line\n")
+        assert path.read_text() == "line\n"
+    finally:
+        os.close(fd)
+    # a symlink, a FIFO (which would block a plain open) and a hard link are refused
+    (root / "3002.egress.log").symlink_to(tmp_path / "elsewhere")
+    os.mkfifo(root / "3003.egress.log")
+    os.link(root / "3001.egress.log", tmp_path / "second-link")
+    for uid in (3002, 3003, 3001):
+        with pytest.raises(confine.ConfineError):
+            confine.open_root_egress_log(uid, str(root))
+
+
+def test_root_egress_log_refuses_a_foreign_or_writable_directory(confine, tmp_path):
+    root = tmp_path / "log"
+    root.mkdir(mode=0o777)
+    root.chmod(0o777)
+    with pytest.raises(confine.ConfineError, match="not a directory controlled"):
+        confine.open_root_egress_log(3001, str(root))
+
+
+def test_serve_bounds_concurrent_handlers(confine):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(16)
+    release = threading.Event()
+    started = []
+
+    def _handler(conn):
+        started.append(conn)
+        release.wait(5)
+        conn.close()
+
+    threading.Thread(target=confine._serve, args=(listener, _handler, "t", 2), daemon=True).start()
+    clients = [socket.create_connection(listener.getsockname()) for _ in range(3)]
+    deadline = time.monotonic() + 5
+    while len(started) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    clients[2].settimeout(2)
+    assert clients[2].recv(1) == b""  # the third connection is closed, not queued
+    assert len(started) == 2
+    release.set()
+    for client in clients:
+        client.close()
+    listener.close()
+
+
+def test_package_tree_must_be_root_controlled(confine, tmp_path):
+    pkg = tmp_path / "node_modules" / "qwen-code-webui" / "dist"
+    pkg.mkdir(parents=True)
+    entry = pkg / "cli.js"
+    entry.write_text("x")
+    # owned by the test user, not root: refused
+    with pytest.raises(confine.ConfineError, match="not root-owned"):
+        confine.require_root_controlled_package(str(entry))
+    # outside any node_modules tree the executable check alone applies
+    plain = tmp_path / "plain-webui"
+    plain.write_text("x")
+    confine.require_root_controlled_package(str(plain))

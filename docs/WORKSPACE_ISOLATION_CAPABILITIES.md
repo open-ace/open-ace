@@ -278,8 +278,8 @@ unsupported——**不会**静默降级到共享账户后宣称支持;该形态�
 | 资源 | `systemd-run --scope`(`MemoryMax`/`MemorySwapMax=0`/`CPUQuota`/`TasksMax`) | cgroup v2 硬限制,含 fork bomb 上限 |
 | 身份 | `setpriv --reuid/--regid --init-groups --no-new-privs`,能力集与 bounding set 清空 | 只带账户自己的附加组(`systemd-run --scope --uid` 会保留调用者即 root 的 group 0,故不用它) |
 | 文件系统 | bubblewrap:宿主根只读、`/tmp` `/var/tmp` `/run` 与 workspace base 为空 tmpfs | 仅本人 home 与 `<base>/shared` 被绑回;其他用户 home 不可见(不只是拒绝访问) |
-| 网络 | bubblewrap `--unshare-net`(仅 loopback) + 宿主侧出口代理 | 唯一出路是代理;代理只放行 `host:port` 白名单(`webui_callback_url` 的主机:端口 + `confinement_egress_allow`,**只取服务端配置,绝不取请求 Host 头**),其它一律 403 并记入 `<log_dir>/confine-egress.log` |
-| 入口 | 反向隧道 | 沙箱内只向宿主侧 socket **主动外连**(保持少量空闲隧道,浏览器连接到来时配对);socket 目录以**只读**方式绑入沙箱,宿主侧从不跟随沙箱可写的路径(出口日志也在沙箱启动前以 `O_NOFOLLOW` 打开) |
+| 网络 | bubblewrap `--unshare-net`(仅 loopback) + 宿主侧出口代理 | 唯一出路是代理;代理只放行 `host:port` 白名单(`webui_callback_url` 的主机:端口 + `confinement_egress_allow`,**只取服务端配置,绝不取请求 Host 头**),其它一律 403;每次判定记入 `/var/log/openace-webui/<uid>.egress.log`(root 所有 0600,由 root 打开后把描述符交给宿主侧进程——该账户只能追加,不能打开、替换或截断) |
+| 入口 | 反向隧道 | 沙箱内只向宿主侧 socket **主动外连**(保持少量空闲隧道,浏览器连接到来时配对);socket 目录以**只读**方式绑入沙箱,宿主侧从不跟随沙箱可写的路径;同时处理的浏览器连接数有上限(256) |
 
 配置项(`config.json` 的 `workspace`):
 
@@ -295,15 +295,17 @@ unsupported——**不会**静默降级到共享账户后宣称支持;该形态�
 白名单就会被用户改写,因此探针报告 `confinement_callback_url_missing`。
 
 **账户限制**:目标账户须 uid ≥ 1000,且不得属于特权组(`sudo`/`wheel`/`admin`/`adm`/
-`shadow`/`disk`/`docker`/`lxd`/`libvirt`/`kvm`/`systemd-journal`/`staff` 或 gid 0)——
+`shadow`/`disk`/`docker`/`lxd`/`incus`/`incus-admin`/`libvirt`/`kvm`/`systemd-journal`/
+`staff`/`lpadmin` 或 gid 0;名单式,站点特有的特权组请用 `denied_groups` 追加)——
 沙箱内的文件访问仍按真实附加组判定,这些组会被带进沙箱。策略文件可用
 `denied_groups` 追加组名、用 `bases` 限定允许的 workspace base(如 `["/home"]`)。
-WebUI 可执行文件(解析符号链接后)及策略 `path` 中的每个目录都须为 root 所有且非
-组/其他人可写,否则拒绝启动(`#!/usr/bin/env node` 通过该 PATH 找 `node`)。
+WebUI 可执行文件(解析符号链接后)、它所在的整个 npm `node_modules` 树(也包含它启动的
+`qwen` CLI),以及策略 `path` 中的每个目录都须为 root 所有且非组/其他人可写,否则拒绝启动
+(`#!/usr/bin/env node` 通过该 PATH 找 `node`)——即 npm 全局前缀必须归 root。
 
 部署要求(包安装形态;Docker 形态无 systemd,启用后按下列原因码 fail closed):
 
-- Linux + systemd(cgroup v2)、`bubblewrap`、`setpriv`(util-linux);
+- Linux + systemd(cgroup v2)、`bubblewrap` ≥ 0.8(需要 `--disable-userns`)、`setpriv`(util-linux);
 - 非特权 user namespace 可用。Ubuntu 24.04+ 的 AppArmor 默认限制它:加载发行版自带的
   `bwrap-userns-restrict` profile(与 Codex/Claude Code 的要求相同);
 - installer 安装 `/usr/local/bin/openace-webui-confine`、根属主策略文件
@@ -317,7 +319,8 @@ WebUI 可执行文件(解析符号链接后)及策略 `path` 中的每个目录�
 `confinement_platform_unsupported`、`confinement_wrapper_missing`、
 `confinement_bwrap_missing`、`confinement_setpriv_missing`、
 `confinement_systemd_unavailable`、`confinement_userns_unavailable`、
-`confinement_policy_invalid`、`confinement_callback_url_missing`、`confinement_check_failed`。
+`confinement_bwrap_too_old`、`confinement_policy_invalid`、`confinement_callback_url_missing`、
+`confinement_check_failed`。
 dev 目录模式与"服务账户即目标账户"两种无法约束的启动形态在启动时直接拒绝。冷 worker(manager 未初始化、
 探针未跑)只报告普通 os_user 维度。
 
@@ -331,6 +334,8 @@ dev 目录模式与"服务账户即目标账户"两种无法约束的启动形�
 - 出口代理按客户端给出的主机名与端口判定,**不检查 TLS**(与 Claude Code 沙箱代理的已知
   局限相同);放行宽泛域名即留下外带通道。白名单主机名解析到的地址不再二次校验。
 - 宿主侧入口转发仍监听 `0.0.0.0:<port>`(与未约束时的暴露面相同),依赖 WebUI token。
+- 沙箱内任意进程都能占满反向隧道池,让本用户自己的 WebUI 不可达——影响只限该用户自己的
+  工作区(沙箱本来就能替换自己的 WebUI),属自我拒绝服务。
 - 验收:`scripts/webui_confine_acceptance.py`(需一次性 Linux 主机,
   `CONFINE_ACCEPTANCE_DISPOSABLE=1`)。
 

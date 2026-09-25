@@ -2933,8 +2933,9 @@ $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path
 # openace-webui-launch rule omitted: workspace.os_user_confinement is set (Issue #3431)"
     fi
 
-    # Only add webui_local_rule if not empty
-    if [ -n "$webui_local_rule" ]; then
+    # Only add webui_local_rule if not empty (and never under confinement:
+    # it starts a WebUI as any account WITHOUT the sandbox — Issue #3431)
+    if [ -n "$webui_local_rule" ] && [ "$confine_configured" != true ]; then
         current_user_rules="${current_user_rules}
 ${webui_local_rule}"
     fi
@@ -3099,6 +3100,15 @@ ${line}"
            ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
+            need_update=true
+        fi
+
+        # Issue #3431: under confinement, an existing unconfined launch rule
+        # (openace-webui-launch or a direct webui rule) must be REMOVED —
+        # every probe above only looks for missing rules, so check presence.
+        if [ "$confine_configured" = true ] && \
+           grep -qE "^${run_user} .*NOPASSWD: (/usr/local/bin/openace-webui-launch|${webui_path}|/usr/local/bin/qwen-code-webui)( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers still grants an unconfined WebUI launch to '$run_user' while confinement is configured"
             need_update=true
         fi
 
