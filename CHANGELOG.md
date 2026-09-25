@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.0.1] - 2026-09-25
+
 ### Changed
 - Python packages are published to PyPI as `open-ace-server` (`pip install open-ace-server`) via Trusted Publishing; PyPI rejects `open-ace` as too similar to the unrelated `openace` project. Import names and the `openace` CLI are unchanged. Release wheels/sdists are now named `open_ace_server-X.Y.Z*`.
+- Internal: `webui_sandbox.py` split into a shared module and `webui_sandbox_opensandbox.py` (Issue #3431); no behavior change.
 
 ## [v2.0.0] - 2026-09-25
 
@@ -191,5 +194,6 @@ Open ACE 2.0 turns the self-hosted workspace into a multi-user, sandbox-isolated
 [v1.1.0]: https://github.com/open-ace/open-ace/releases/tag/v1.1.0
 [v1.2.0]: https://github.com/open-ace/open-ace/releases/tag/v1.2.0
 [v2.0.0]: https://github.com/open-ace/open-ace/releases/tag/v2.0.0
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v2.0.0...HEAD
+[v2.0.1]: https://github.com/open-ace/open-ace/releases/tag/v2.0.1
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v2.0.1...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
