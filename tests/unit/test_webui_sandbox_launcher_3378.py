@@ -1,4 +1,4 @@
-"""Issue #3378: SandboxedWebuiLauncher core (create body, restore, renew, destroy).
+"""Issue #3378: OpenSandboxWebuiLauncher core (create body, restore, renew, destroy).
 
 Fake-provider unit tests for the launcher halves of D2/D5: the create body the
 launcher assembles via policy.build_create_request (bootstrap-prefixed
@@ -23,6 +23,7 @@ import pytest
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import parse_backend_config
 from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import FakeOpenSandboxApi
 from app.services import webui_sandbox as ws
+from app.services import webui_sandbox_opensandbox as wso
 from app.services import workspace_isolation_contract as wic
 
 pytestmark = [pytest.mark.issue(3378)]
@@ -152,9 +153,9 @@ def _launcher(
     ttl_minutes: int = 1440,
     backend=None,
     restore_timeout: float = 5.0,
-) -> tuple[ws.SandboxedWebuiLauncher, _FakeProxyService]:
+) -> tuple[wso.OpenSandboxWebuiLauncher, _FakeProxyService]:
     proxy_service = _FakeProxyService(ttl_minutes)
-    launcher = ws.SandboxedWebuiLauncher(
+    launcher = wso.OpenSandboxWebuiLauncher(
         backend_config=backend or _backend(),
         api_factory=lambda endpoint: fake,
         proxy_service_factory=lambda: proxy_service,
@@ -192,9 +193,9 @@ def test_create_body_carries_bootstrap_entrypoint_and_webui_metadata():
     assert "exec tail -f /dev/null" not in script
 
     meta = body["metadata"]
-    assert meta[ws.WEBUI_METADATA_KIND] == "webui"
-    assert meta[ws.WEBUI_METADATA_GENERATION] == ws.current_process_generation()
-    assert meta[ws.WEBUI_METADATA_OWNER] == "7"
+    assert meta[wso.WEBUI_METADATA_KIND] == "webui"
+    assert meta[wso.WEBUI_METADATA_GENERATION] == ws.current_process_generation()
+    assert meta[wso.WEBUI_METADATA_OWNER] == "7"
     assert meta["openace.generation"] == "1"  # workflow-generation key intact
 
     assert body["image"] == {"uri": _WEBUI_IMAGE}
@@ -312,7 +313,7 @@ def test_restore_uploads_extracts_then_touches_marker_in_order():
     result = _launch(launcher, snapshot=snapshot)
 
     assert result.restore_confirmed is True
-    assert fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH] == snapshot
+    assert fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] == snapshot
     commands = [b["command"] for b in fake.command_bodies]
     extract = next(c for c in commands if "tar -xf" in c)
     touch = next(c for c in commands if c.startswith("touch /workspace/.openace-restore-done"))
@@ -332,9 +333,9 @@ def test_first_launch_without_snapshot_uploads_empty_marker_tar():
     result = _launch(launcher, snapshot=None)
 
     assert result.restore_confirmed is True
-    uploaded = fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH]
+    uploaded = fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH]
     # A VALID empty tar (extraction succeeds, extracts nothing) — not 0 bytes.
-    assert uploaded == ws.empty_state_tar()
+    assert uploaded == wso.empty_state_tar()
     assert len(uploaded) >= 1024
     with tarfile.open(fileobj=__import__("io").BytesIO(uploaded)):
         pass
@@ -378,7 +379,7 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
     snapshot_slot = tmp_path / "webui-11.tar"
     snapshot_slot.write_bytes(_state_tar())
     snapshot_slot.chmod(0o000)
-    launcher = ws.SandboxedWebuiLauncher(
+    launcher = wso.OpenSandboxWebuiLauncher(
         backend_config=_backend(),
         api_factory=lambda endpoint: FakeOpenSandboxApi(),
         proxy_service_factory=lambda: _FakeProxyService(),
@@ -387,15 +388,15 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
         state_root_override=str(tmp_path),
     )
     try:
-        with pytest.raises(ws.SnapshotUnreadableError):
+        with pytest.raises(wso.SnapshotUnreadableError):
             launcher.load_snapshot(11)
 
-        with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+        with caplog.at_level("WARNING", logger="app.services.webui_sandbox_opensandbox"):
             result = launcher.launch(
                 user_id=11,
                 callback_url="http://openace.open-ace.svc.cluster.local:8080",
                 snapshot=None,
-                restore_source=ws.RESTORE_SOURCE_DEGRADED,
+                restore_source=wso.RESTORE_SOURCE_DEGRADED,
             )
 
         # The degrade is honest: unconfirmed restore, exports refuse...
@@ -403,7 +404,7 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
         assert launcher.export_snapshot(result.sandbox_id, restore_confirmed=False) is None
         # ...and the CP record that reconcile trusts DOES NOT EXIST.
         assert launcher.restore_confirmed_on_cp(result.sandbox_id) is False
-        record_dir = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME
+        record_dir = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME
         assert not record_dir.exists() or list(record_dir.iterdir()) == []
         # The entrypoint still got its unblock marker (empty-history start).
         commands = [b["command"] for b in launcher._api.command_bodies]  # noqa: SLF001
@@ -666,7 +667,7 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
     proxy_service = _FakeProxyService()
 
     def _launcher_for(tier: str):
-        return ws.SandboxedWebuiLauncher(
+        return wso.OpenSandboxWebuiLauncher(
             backend_config=backend,
             tier=tier,
             api_factory=lambda endpoint: fakes[endpoint.tier],

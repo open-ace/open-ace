@@ -176,7 +176,7 @@ cd open-ace
 # 2. 生成 .env（SECRET_KEY、OPENACE_ENCRYPTION_KEY、UPLOAD_AUTH_KEY 等）
 ./scripts/bootstrap-compose-env.sh
 
-# 3. 启动（默认拉取 openace/open-ace:latest 预构建镜像）
+# 3. 启动（默认拉取 ghcr.io/open-ace/open-ace:latest 预构建镜像）
 docker compose up -d --wait
 
 # 4. 验证
@@ -184,9 +184,11 @@ docker compose ps
 docker compose logs -f open-ace
 ```
 
-离线环境可在有网络的机器上先 `docker pull openace/open-ace:latest`，再
-`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz` 传到服务器，
+离线环境可在有网络的机器上先 `docker pull ghcr.io/open-ace/open-ace:latest`，再
+`docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz` 传到服务器，
 用 `gunzip -c open-ace-images.tar.gz | docker load` 导入后启动。
+
+每个版本的预构建镜像都发布到 GitHub Container Registry（`ghcr.io/open-ace/open-ace:latest`、`:vX.Y.Z`、`:X.Y.Z`、`:X.Y`、`:X`），仅提供 `linux/amd64`，Apple Silicon 主机以模拟方式运行。若无法访问 `ghcr.io`，可改为从当前代码本地构建：`docker compose up -d --build --wait`。
 
 ### 部署配置
 
@@ -195,7 +197,7 @@ docker compose logs -f open-ace
 | 设置 | 环境变量 | 默认值 |
 |------|----------|--------|
 | Web 端口 | `PORT` | `19888` |
-| 镜像 | `IMAGE_NAME` | `openace/open-ace:latest` |
+| 镜像 | `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` |
 | 数据库用户 | `DB_USER` | `ace` |
 | 数据库名称 | `DB_NAME` | `ace` |
 | 数据库密码 | `DB_PASSWORD` | `dev-password-change-in-production`（生产必须修改） |
@@ -300,7 +302,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. 指定版本（在 .env 中设置）
-echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.0.0" >> .env
 
 # 2. 拉取并重建容器
 docker compose pull
@@ -333,7 +335,7 @@ docker compose restart open-ace
 docker compose down
 
 # 删除镜像
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # 删除数据卷（彻底清理）
 docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
@@ -611,6 +613,14 @@ python3 scripts/manage.py remote sync     # 同步文件到远程
 ```
 
 ## 升级
+
+> **从 v1.x 升级到 v2.0**：以 v2.0 重启前请先确认：
+> 1. 源码 / 离线包安装需要 Python 3.10+。
+> 2. 首次重启前把 `OPENACE_ENCRYPTION_KEY` 设为原 `SECRET_KEY` 的值（见 [升级注意：已加密敏感数据](#升级注意已加密敏感数据)）。
+> 3. Docker 镜像以 uid 1000 运行；挂载卷须对其可写，多用户工作区模式请使用 `docker-compose.multi-user.yml`。
+> 4. 数据库须已处于 `baseline_2026_06_23` 或之后；执行 `alembic upgrade head`。
+>
+> 完整列表见 [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md) 的 `v2.0.0` 段落。
 
 ```bash
 # 备份数据

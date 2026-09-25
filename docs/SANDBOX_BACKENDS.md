@@ -579,7 +579,7 @@ plane vs per-pod verification, crash-loss windows, snapshot ceiling) — lives i
 > The exclusion is implemented in `provider.reconcile_orphans` (metadata filter
 > + client-side re-check) and bound by tests. Anyone wiring that sweep to a new
 > production caller MUST keep the exclusion; WebUI pods are reclaimed by the web
-> process's own generation-keyed reconcile (`app/services/webui_sandbox.py`),
+> process's own generation-keyed reconcile (`app/services/webui_sandbox_opensandbox.py`),
 > not by the workflow live-set.
 
 **Single web process assumption.** The webui-pod reconcile destroys WebUI pods

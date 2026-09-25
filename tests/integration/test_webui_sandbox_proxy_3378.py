@@ -25,7 +25,8 @@ import threading
 
 import pytest
 
-from app.services.webui_sandbox import SandboxedWebuiLauncher, SandboxWebuiProxy
+from app.services.webui_sandbox import SandboxWebuiProxy
+from app.services.webui_sandbox_opensandbox import OpenSandboxWebuiLauncher
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -284,9 +285,9 @@ def _ws_upgrade(port: int, connection: str = "Upgrade") -> tuple[socket.socket, 
     return sock, head, rest
 
 
-def _real_launcher() -> SandboxedWebuiLauncher:
+def _real_launcher() -> OpenSandboxWebuiLauncher:
     """A launcher wired only for health_check (sockets only — no backend)."""
-    return SandboxedWebuiLauncher(
+    return OpenSandboxWebuiLauncher(
         api_factory=lambda endpoint: None,
         proxy_service_factory=lambda: None,
     )

@@ -185,7 +185,7 @@ def register_sandbox_runtime_verified(
 ) -> None:
     """Record that a sandbox pod's boot probes passed on ``tier`` (launcher hook).
 
-    Called by ``SandboxedWebuiLauncher`` after the runtime-class and egress
+    Called by ``OpenSandboxWebuiLauncher`` after the runtime-class and egress
     probes confirm the pod on the tier the pod was launched against.
     ``kernel_enforced`` distinguishes the two probe directions (provider
     ``_run_probes``): gVisor identifies itself positively in the kernel probe,

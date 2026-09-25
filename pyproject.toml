@@ -1,6 +1,8 @@
 [project]
-name = "open-ace"
-version = "1.2.0"
+# PyPI distribution name. "open-ace" is rejected by PyPI as too similar to the
+# unrelated "openace" project; the import names and the `openace` CLI are unchanged.
+name = "open-ace-server"
+version = "2.0.1"
 description = "Self-hosted enterprise AI workspace and governance platform"
 readme = "README.md"
 license = "Apache-2.0"

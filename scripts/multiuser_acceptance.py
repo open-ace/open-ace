@@ -460,7 +460,7 @@ def merge_max_instances(max_instances: int = 3) -> None:
     (same-image helper container; read-modify-write preserves every other
     key). Volume name is deterministic under the dedicated project."""
     docker = shutil.which("docker") or "docker"
-    image = os.environ.get("IMAGE_NAME") or "openace/open-ace:latest"
+    image = os.environ.get("IMAGE_NAME") or "ghcr.io/open-ace/open-ace:latest"
     merge_code = (
         "import json\n"
         "p='/config/config.json'\n"
@@ -626,7 +626,7 @@ class Recorder:
             git_sha = run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, timeout=30).stdout.strip()
         except Exception:  # noqa: BLE001 - fingerprint is best effort
             pass
-        image = os.environ.get("IMAGE_NAME", "openace/open-ace:latest")
+        image = os.environ.get("IMAGE_NAME", "ghcr.io/open-ace/open-ace:latest")
         digest = "?"
         try:
             digest = (

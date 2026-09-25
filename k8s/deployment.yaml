@@ -37,7 +37,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: open-ace
-          image: open-ace:latest
+          image: ghcr.io/open-ace/open-ace:latest
           imagePullPolicy: Always
           # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
           lifecycle:

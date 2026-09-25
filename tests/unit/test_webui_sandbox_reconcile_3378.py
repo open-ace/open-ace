@@ -22,6 +22,7 @@ from app.modules.workspace.autonomous.sandbox.opensandbox.config import parse_ba
 from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import FakeOpenSandboxApi
 from app.modules.workspace.autonomous.sandbox.opensandbox.policy import PROVIDER_NAME
 from app.services import webui_sandbox as ws
+from app.services import webui_sandbox_opensandbox as wso
 from app.services import workspace_isolation_contract as wic
 
 pytestmark = [pytest.mark.issue(3378)]
@@ -89,7 +90,7 @@ def _webui_metadata(*, generation: str, owner: str = "7") -> dict:
 
 def _confirm_restore_cp(root, sandbox_id) -> None:
     """Write the control-plane restore-confirmation record (T-E export gate)."""
-    record = root / ws.RESTORE_CONFIRMED_DIRNAME / sandbox_id
+    record = root / wso.RESTORE_CONFIRMED_DIRNAME / sandbox_id
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(json.dumps({"sandbox_id": sandbox_id}), encoding="utf-8")
 
@@ -120,7 +121,7 @@ def test_reconcile_spares_own_generation_and_untouched_non_webui(tmp_path):
             }
         }
     )
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -144,9 +145,9 @@ def test_reconcile_exports_orphan_with_cp_record_and_persists_by_owner(tmp_path)
     sid = orphan["id"]
     # T-E: the export gate is the CP record; the pod has a state tree.
     _confirm_restore_cp(tmp_path, sid)
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -169,7 +170,7 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     # Record the API calls as a single ordered event stream.
     events: list[tuple[str, str]] = []
@@ -193,7 +194,7 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     fake.download_file = download_recorder
     fake.delete_sandbox = delete_recorder
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -210,7 +211,7 @@ def test_reconcile_export_precedes_destroy_per_orphan(tmp_path):
     state_download_index = next(
         i
         for i, (kind, detail) in enumerate(events)
-        if kind == "download_file" and detail == ws.WEBUI_STATE_TAR_PATH
+        if kind == "download_file" and detail == wso.WEBUI_STATE_TAR_PATH
     )
     delete_index = kinds.index("delete_sandbox")
     assert tar_index < state_download_index < delete_index
@@ -226,7 +227,7 @@ def test_reconcile_skips_export_for_degraded_orphan_without_cp_record(tmp_path):
     pre_existing = tmp_path / "webui-7.tar"
     pre_existing.write_bytes(_tar_bytes("old/keep.tar", b"old"))
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -244,12 +245,12 @@ def test_reconcile_ignores_forged_pod_marker_without_cp_record(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
-    fake.uploaded[sid][ws.RESTORE_MARKER_PATH] = b"1"  # forged by the pod
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes("evil/x", b"evil")
+    fake.uploaded[sid][wso.RESTORE_MARKER_PATH] = b"1"  # forged by the pod
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes("evil/x", b"evil")
     pre_existing = tmp_path / "webui-7.tar"
     pre_existing.write_bytes(_tar_bytes("old/keep.tar", b"old"))
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -264,9 +265,9 @@ def test_reconcile_delete_clears_cp_record(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
-    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+    record = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME / sid
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -281,7 +282,7 @@ def test_reconcile_export_failure_does_not_block_destroy(tmp_path):
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -317,10 +318,10 @@ def test_reconcile_one_unreachable_execd_does_not_abort_the_round(tmp_path, capl
     fake._down = sid1  # the first orphan's execd refuses connections
     for sid, owner in ((sid1, 7), (sid2, 8)):
         _confirm_restore_cp(tmp_path, sid)
-        fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+        fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
     with caplog.at_level("WARNING"):
-        destroyed = ws.reconcile_webui_orphans(
+        destroyed = wso.reconcile_webui_orphans(
             backend_config=_backend(),
             api_factory=lambda endpoint: fake,
             state_root_override=str(tmp_path),
@@ -347,9 +348,9 @@ def test_reconcile_export_tar_runs_under_exec_identity(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
-    ws.reconcile_webui_orphans(
+    wso.reconcile_webui_orphans(
         backend_config=cfg,
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -368,14 +369,14 @@ def test_reconcile_is_idempotent_on_rerun(tmp_path):
     fake = FakeOpenSandboxApi()
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     _confirm_restore_cp(tmp_path, orphan["id"])
-    fake.uploaded[orphan["id"]][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[orphan["id"]][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
 
-    first = ws.reconcile_webui_orphans(
+    first = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
     )
-    second = ws.reconcile_webui_orphans(
+    second = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -391,7 +392,7 @@ def test_reconcile_fail_soft_on_corrupt_config(monkeypatch):
         raise sbcfg.SandboxConfigError("corrupt json")
 
     monkeypatch.setattr(sbcfg, "load_backend_config", boom)
-    assert ws.reconcile_webui_orphans() == []
+    assert wso.reconcile_webui_orphans() == []
 
 
 def test_reconcile_ignores_foreign_installation_client_side(tmp_path):
@@ -408,7 +409,7 @@ def test_reconcile_ignores_foreign_installation_client_side(tmp_path):
             }
         }
     )
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -461,7 +462,7 @@ def test_reconcile_skips_destroy_while_peer_heartbeat_is_fresh(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
     peer = _write_peer_heartbeat(tmp_path, ts=time.time())
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -480,11 +481,11 @@ def test_reconcile_destroys_once_peer_heartbeats_are_stale(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
     stale_ts = time.time() - ws.HEARTBEAT_FRESH_WINDOW_SECONDS - 30
     _write_peer_heartbeat(tmp_path, ts=stale_ts)
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -499,7 +500,7 @@ def test_reconcile_own_heartbeat_never_blocks_the_sweep(tmp_path):
     own = ws.write_webui_heartbeat(str(tmp_path))
     assert own is not None and own.exists()
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -558,7 +559,7 @@ def test_legacy_peer_heartbeat_still_counts_during_rolling_upgrade(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef")})
     peer = _write_peer_heartbeat(tmp_path, ts=time.time(), pid=4242, legacy=True)
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -725,7 +726,7 @@ def test_reconcile_skips_sweep_when_heartbeat_files_unreadable(tmp_path):
     locked = tmp_path / f"{ws.HEARTBEAT_FILENAME_PREFIX}peer-generation-4711.json"
     locked.chmod(0o000)
     try:
-        destroyed = ws.reconcile_webui_orphans(
+        destroyed = wso.reconcile_webui_orphans(
             backend_config=_backend(),
             api_factory=lambda endpoint: fake,
             state_root_override=str(tmp_path),
@@ -779,7 +780,7 @@ def test_maybe_spawn_runs_reconcile_on_separate_greenlet_fail_soft(monkeypatch):
         calls.append(1)
         raise RuntimeError("sandbox-backends.json corrupted")  # fail-soft must swallow
 
-    monkeypatch.setattr(ws, "reconcile_webui_orphans", _fake_reconcile)
+    monkeypatch.setattr(wso, "reconcile_webui_orphans", _fake_reconcile)
     assert ws.maybe_spawn_webui_orphan_reconcile() is True
     assert len(spawned) == 1  # spawned, NOT inlined
     spawned[0]()  # the greenlet body swallows the exception
@@ -850,7 +851,7 @@ def test_provider_orphan_sweep_excludes_webui_pods():
 
 
 def _launcher_with_pod(fake, tmp_path, *, max_bytes=None):
-    launcher = ws.SandboxedWebuiLauncher(
+    launcher = wso.OpenSandboxWebuiLauncher(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         proxy_service_factory=lambda: None,
@@ -887,10 +888,10 @@ def test_snapshot_round_trip_via_independent_root(tmp_path):
         snapshot=launcher.load_snapshot(9),
     )
     assert launcher.load_snapshot(9) == stored
-    assert fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH] == stored
+    assert fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] == stored
 
     # Export: the pod's tar is downloaded and persisted under webui-<user>.tar.
-    fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes(
+    fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes(
         "chats/new.jsonl", b"[3]"
     )
     blob = launcher.export_snapshot(result.sandbox_id, restore_confirmed=True)
@@ -914,11 +915,11 @@ def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, caplog):
     sid = fake.create_sandbox({"metadata": {}})["id"]
     # A tar larger than the ceiling.
     blob = _tar_bytes() + b"\0" * 4096
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = blob
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = blob
     old = _tar_bytes("old/keep.tar", b"old")
     (tmp_path / "webui-5.tar").write_bytes(old)
 
-    with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+    with caplog.at_level("WARNING", logger="app.services.webui_sandbox_opensandbox"):
         result = launcher.export_snapshot(sid, restore_confirmed=True, user_id=5)
     assert result is None  # skip, never a truncation
     assert (tmp_path / "webui-5.tar").read_bytes() == old  # last good kept
@@ -928,7 +929,7 @@ def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, caplog):
     assert freeze_logs, "the over-ceiling skip must log its dedicated warning"
     message = freeze_logs[0].getMessage()
     assert "user 5" in message
-    assert ws.STATE_MAX_BYTES_ENV in message  # OPENACE_WEBUI_STATE_MAX_BYTES
+    assert wso.STATE_MAX_BYTES_ENV in message  # OPENACE_WEBUI_STATE_MAX_BYTES
     assert str(len(blob)) in message  # N (actual size)
     assert "1024" in message  # M (ceiling)
     assert "keeping previous snapshot" in message
@@ -952,17 +953,17 @@ def test_destroy_deletes_pod_even_when_final_export_raises(tmp_path):
 
 
 def test_state_max_bytes_env_override(monkeypatch):
-    monkeypatch.setenv(ws.STATE_MAX_BYTES_ENV, "2048")
-    assert ws.state_max_bytes() == 2048
-    monkeypatch.delenv(ws.STATE_MAX_BYTES_ENV)
-    assert ws.state_max_bytes() == ws.DEFAULT_STATE_MAX_BYTES == 16 * 1024 * 1024
+    monkeypatch.setenv(wso.STATE_MAX_BYTES_ENV, "2048")
+    assert wso.state_max_bytes() == 2048
+    monkeypatch.delenv(wso.STATE_MAX_BYTES_ENV)
+    assert wso.state_max_bytes() == wso.DEFAULT_STATE_MAX_BYTES == 16 * 1024 * 1024
 
 
 def test_unconfirmed_restore_never_exports_local_path(tmp_path):
     fake = FakeOpenSandboxApi()
     launcher = _launcher_with_pod(fake, tmp_path)
     sid = fake.create_sandbox({"metadata": {}})["id"]
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
     assert launcher.export_snapshot(sid, restore_confirmed=False) is None
     # And destroy under the guard performs no export either.
     launcher.destroy(sid, 5, restore_confirmed=False)
@@ -971,7 +972,7 @@ def test_unconfirmed_restore_never_exports_local_path(tmp_path):
 
 
 def test_empty_state_tar_is_a_valid_archive():
-    blob = ws.empty_state_tar()
+    blob = wso.empty_state_tar()
     assert len(blob) >= 1024  # two zero blocks + tar padding
     with tarfile.open(fileobj=io.BytesIO(blob)):
         pass
@@ -1060,7 +1061,7 @@ def test_load_snapshot_distinguishes_missing_from_unreadable(tmp_path):
     path.write_bytes(_tar_bytes())
     path.chmod(0o000)
     # Unreadable → SnapshotUnreadableError (NOT a first launch).
-    with pytest.raises(ws.SnapshotUnreadableError):
+    with pytest.raises(wso.SnapshotUnreadableError):
         launcher.load_snapshot(6)
     path.chmod(0o600)
 
@@ -1074,7 +1075,7 @@ def test_launch_writes_cp_restore_record_and_destroy_clears_it(tmp_path):
     result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
 
     assert result.restore_confirmed is True
-    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / result.sandbox_id
+    record = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME / result.sandbox_id
     assert record.is_file()
     assert launcher.restore_confirmed_on_cp(result.sandbox_id) is True
 
@@ -1112,7 +1113,7 @@ def test_malformed_sandbox_ids_never_touch_the_filesystem(tmp_path, caplog):
     launcher = _launcher_with_pod(fake, tmp_path)
 
     for bad in _MALICIOUS_IDS:
-        with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+        with caplog.at_level("WARNING", logger="app.services.webui_sandbox_opensandbox"):
             assert launcher.mark_restore_confirmed(bad) is False
         assert launcher.restore_confirmed_on_cp(bad) is False
         launcher.clear_restore_confirmation(bad)  # must neither raise nor unlink
@@ -1120,7 +1121,7 @@ def test_malformed_sandbox_ids_never_touch_the_filesystem(tmp_path, caplog):
     # Nothing escaped the state root: the record dir is empty and the
     # traversal target (restore-confirmed/../webui-7.tar == webui-7.tar) was
     # never created.
-    record_dir = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME
+    record_dir = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME
     assert not record_dir.exists() or list(record_dir.iterdir()) == []
     assert not (tmp_path / "webui-7.tar").exists()
     assert any("malformed sandbox id" in r.message for r in caplog.records)
@@ -1145,7 +1146,7 @@ def test_reconcile_skips_export_but_deletes_pod_for_malformed_orphan_id(tmp_path
 
     fake = _InjectedRowFake()
 
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -1185,10 +1186,10 @@ def test_failed_delete_keeps_cp_record_and_next_round_exports(tmp_path):
     orphan = fake.create_sandbox({"metadata": _webui_metadata(generation="deadbeef", owner="7")})
     sid = orphan["id"]
     _confirm_restore_cp(tmp_path, sid)
-    fake.uploaded[sid][ws.WEBUI_STATE_TAR_PATH] = _tar_bytes()
-    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+    fake.uploaded[sid][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes()
+    record = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME / sid
 
-    first = ws.reconcile_webui_orphans(
+    first = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -1199,7 +1200,7 @@ def test_failed_delete_keeps_cp_record_and_next_round_exports(tmp_path):
 
     # The retry round: the record is still there, so the export runs again
     # BEFORE the (now working) delete — the history is not lost.
-    second = ws.reconcile_webui_orphans(
+    second = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
@@ -1220,7 +1221,7 @@ def test_destroy_keeps_cp_record_when_delete_fails(tmp_path):
     launcher._proxy_service_factory = lambda: _NoopProxyService()
     result = launcher.launch(user_id=8, callback_url="http://openace:8080", snapshot=None)
     sid = result.sandbox_id
-    record = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME / sid
+    record = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME / sid
     assert record.is_file()
 
     launcher.destroy(sid, 8, restore_confirmed=True, final_export=False)
@@ -1248,7 +1249,7 @@ def test_reconcile_skips_when_heartbeat_root_unwritable(tmp_path, monkeypatch):
         return None  # write_webui_heartbeat's fail-soft failure result
 
     monkeypatch.setattr(ws, "write_webui_heartbeat", _unwritable)
-    destroyed = ws.reconcile_webui_orphans(
+    destroyed = wso.reconcile_webui_orphans(
         backend_config=_backend(),
         api_factory=lambda endpoint: fake,
         state_root_override=str(tmp_path),
