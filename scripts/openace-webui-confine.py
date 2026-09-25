@@ -367,9 +367,16 @@ def require_root_controlled_package(path: str) -> None:
             except OSError as exc:
                 raise ConfineError(f"cannot verify {full}: {exc.strerror}") from None
             if stat.S_ISLNK(st.st_mode):
-                # e.g. `npm link`: the target may live outside the tree
-                if not _root_controlled(os.path.realpath(full)):
-                    raise ConfineError(f"{full} points outside root-controlled files")
+                # e.g. `npm link`: the target may live outside the tree. A
+                # dangling link (a stale .bin entry) is acceptable when only
+                # root could create its target.
+                target = os.path.realpath(full)
+                probe = target
+                while not os.path.lexists(probe) and probe != "/":
+                    probe = os.path.dirname(probe)
+                if not _root_controlled(probe):
+                    kind = "dangling symlink" if probe != target else "symlink"
+                    raise ConfineError(f"{full} is a {kind} outside root-controlled files")
                 continue
             if st.st_uid != 0 or st.st_mode & 0o022:
                 raise ConfineError(
@@ -545,13 +552,14 @@ def _pump(
     dst: socket.socket,
     activity: _Activity | None = None,
     idle: float | None = None,
-) -> None:
+) -> bool:
     """Copy src -> dst. With *idle*, give up once BOTH directions were silent
     that long (one quiet direction alone is normal: an SSE stream)."""
     if idle is not None:
         # (also bounds sendall on this socket: a peer that stops reading for
         # the whole idle window is closed too)
         src.settimeout(idle)
+    timed_out = False
     try:
         while True:
             try:
@@ -560,6 +568,7 @@ def _pump(
                 if activity is not None and idle is not None:
                     if time.monotonic() - activity.last < idle:
                         continue
+                timed_out = True
                 break
             if not chunk:
                 break
@@ -571,6 +580,7 @@ def _pump(
     finally:
         with contextlib.suppress(OSError):
             dst.shutdown(socket.SHUT_WR)
+    return timed_out
 
 
 def splice(
@@ -586,9 +596,10 @@ def splice(
             b.sendall(initial_to_b)
         worker = threading.Thread(target=_pump, args=(b, a, activity, idle), daemon=True)
         worker.start()
-        _pump(a, b, activity, idle)
-        if idle is not None:
-            # the other direction may be blocked in recv: wake it up
+        if _pump(a, b, activity, idle):
+            # Idle timeout: the other direction may still be blocked in recv —
+            # wake it. A normal EOF (half-close) must NOT do this: the peer
+            # may still be sending its response.
             for sock in (a, b):
                 with contextlib.suppress(OSError):
                     sock.shutdown(socket.SHUT_RDWR)
@@ -601,31 +612,53 @@ def splice(
                 sock.close()
 
 
-def _serve(listener: socket.socket, handler, name: str, limit: int = MAX_INGRESS_CLIENTS) -> None:
+def _serve(
+    listener: socket.socket,
+    handler,
+    name: str,
+    limit: int = MAX_INGRESS_CLIENTS,
+    per_source: int | None = None,
+) -> None:
     """Accept forever; at most *limit* handlers at once (threads count against
-    the scope's TasksMax, shared with the WebUI). Over the limit, or when a
-    thread cannot be started, the connection is closed — the loop survives."""
+    the scope's TasksMax, shared with the WebUI), and at most *per_source*
+    from one peer address, so a single remote host cannot hold every slot.
+    Over a limit, or when a thread cannot be started, the connection is
+    closed — the loop survives."""
     slots = threading.BoundedSemaphore(limit)
+    by_source: dict[str, int] = {}
+    lock = threading.Lock()
 
-    def _run(conn: socket.socket) -> None:
+    def _release(source: str) -> None:
+        with lock:
+            by_source[source] -= 1
+            if not by_source[source]:
+                del by_source[source]
+        slots.release()
+
+    def _run(conn: socket.socket, source: str) -> None:
         try:
             handler(conn)
         finally:
-            slots.release()
+            _release(source)
 
     while True:
         try:
-            conn, _ = listener.accept()
+            conn, peer = listener.accept()
         except OSError:
             return
-        if not slots.acquire(blocking=False):
+        source = peer[0] if isinstance(peer, tuple) and peer else ""
+        with lock:
+            over_source = per_source is not None and by_source.get(source, 0) >= per_source
+        if over_source or not slots.acquire(blocking=False):
             with contextlib.suppress(OSError):
                 conn.close()
             continue
+        with lock:
+            by_source[source] = by_source.get(source, 0) + 1
         try:
-            threading.Thread(target=_run, args=(conn,), daemon=True, name=name).start()
+            threading.Thread(target=_run, args=(conn, source), daemon=True, name=name).start()
         except RuntimeError:
-            slots.release()
+            _release(source)
             with contextlib.suppress(OSError):
                 conn.close()
             time.sleep(0.1)
@@ -783,49 +816,88 @@ class EgressProxy:
         self.allow = tuple(allow)
         self.log_fd = log_fd
         self._log_lock = threading.Lock()
-        self._max_bytes = max_bytes
-        self._written = 0
-        self._capped = False
-        self._rate = lines_per_second
+        self._max_bytes = max_bytes  # applies to DENY/BAD lines only
+        self._rate = lines_per_second  # per verdict class, per second
+        self._deny_written = 0
+        self._deny_capped = False
         self._window = int(time.monotonic())
-        self._in_window = 0
-        self._dropped = 0
+        self._window_stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._allow_lines = 0
+        self._deny_lines = 0
+        self._allow_overflow: dict[tuple[str, str, str], int] = {}
+        self._deny_overflow = 0
 
-    def log(self, verdict: str, method: str, host: str, port: int | str, extra: str = "") -> None:
-        """Append one bounded line. The log lives on the host filesystem, so a
-        sandbox must not be able to grow it without limit: fields are cut,
-        lines are rate-limited and the launch stops logging at a size cap."""
+    @staticmethod
+    def _field(value: object) -> str:
+        # repr(): no CR/LF can forge a line; cut: no 64 KB hosts
+        return repr(str(value)[:LOG_FIELD_MAX])
+
+    def _write(self, text: str) -> None:
+        with contextlib.suppress(OSError):
+            os.write(self.log_fd, (text + "\n").encode("utf-8", "backslashreplace"))  # type: ignore[arg-type]
+
+    def _roll(self, now: int) -> None:
+        """Close the previous second-window: write its summaries, stamped with
+        that window's time so they stay in order. Caller holds the lock."""
+        if now == self._window:
+            return
+        stamp = self._window_stamp
+        for (verdict, host, port), count in sorted(self._allow_overflow.items()):
+            self._write(f"{stamp} {verdict}-SUMMARY {host}:{port} x{count}")
+        if self._deny_overflow:
+            self._write(f"{stamp} # {self._deny_overflow} DENY/BAD line(s) not logged (rate limit)")
+        self._window = now
+        self._window_stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._allow_lines = self._deny_lines = self._deny_overflow = 0
+        self._allow_overflow = {}
+
+    def flush(self, final: bool = False) -> None:
+        """Write the summaries of a finished window (every second from the
+        supervisor's flusher; ``final`` at shutdown writes the current one)."""
         if self.log_fd is None:
             return
-
-        def _field(value: str) -> str:
-            # repr(): no CR/LF can forge a line; cut: no 64 KB hosts
-            return repr(str(value)[:LOG_FIELD_MAX])
-
-        line = (
-            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {verdict} {_field(method)} {_field(host)}:{port}"
-        )
-        if extra:
-            line += f" {_field(extra)}"
         with self._log_lock:
-            if self._capped:
+            self._roll(self._window + 1 if final else int(time.monotonic()))
+
+    def log(self, verdict: str, method: str, host: str, port: int | str, extra: str = "") -> None:
+        """Append one bounded decision line.
+
+        ALLOW/FAIL decisions are never dropped — they are the record of what
+        was actually reached: beyond the per-second budget they are summarized
+        per host:port with a count (bounded, the host must be allowlisted).
+        DENY/BAD lines have their own budget and a per-launch byte cap, so a
+        flood of denied requests can neither hide allowed traffic nor fill
+        the host filesystem.
+        """
+        if self.log_fd is None:
+            return
+        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {verdict} {self._field(method)} {self._field(host)}:{port}"
+        if extra:
+            line += f" {self._field(extra)}"
+        with self._log_lock:
+            self._roll(int(time.monotonic()))
+            if verdict in ("ALLOW", "FAIL"):
+                self._allow_lines += 1
+                if self._allow_lines <= self._rate:
+                    self._write(line)
+                else:
+                    key = (verdict, self._field(host), str(port))
+                    self._allow_overflow[key] = self._allow_overflow.get(key, 0) + 1
                 return
-            now = int(time.monotonic())
-            if now != self._window:
-                if self._dropped:
-                    line = f"{line}\n# {self._dropped} line(s) dropped by the rate limit"
-                self._window, self._in_window, self._dropped = now, 0, 0
-            self._in_window += 1
-            if self._in_window > self._rate:
-                self._dropped += 1
+            if self._deny_capped:
                 return
-            data = (line + "\n").encode("utf-8", "backslashreplace")
-            if self._written + len(data) > self._max_bytes:
-                self._capped = True
-                data = b"# egress log size cap reached; further decisions are not logged\n"
-            self._written += len(data)
-            with contextlib.suppress(OSError):
-                os.write(self.log_fd, data)
+            self._deny_lines += 1
+            if self._deny_lines > self._rate:
+                self._deny_overflow += 1
+                return
+            data = line + "\n"
+            if self._deny_written + len(data) > self._max_bytes:
+                self._deny_capped = True
+                self._write("# DENY/BAD size cap reached; further denials are not logged "
+                            "(ALLOW decisions still are)")  # fmt: skip
+                return
+            self._deny_written += len(data)
+            self._write(line)
 
     def handle(self, conn: socket.socket) -> None:
         method = "?"
@@ -1071,6 +1143,13 @@ def run_supervise() -> int:
     socket_dir = tempfile.mkdtemp(prefix="openace-webui-")
     log_fd = payload.get("log_fd")
     proxy = EgressProxy(allow, int(log_fd) if log_fd is not None else None)
+
+    def _flusher() -> None:
+        while True:
+            time.sleep(1.0)
+            proxy.flush()
+
+    threading.Thread(target=_flusher, daemon=True, name="log-flush").start()
     egress_listener = _unix_listener(os.path.join(socket_dir, EGRESS_SOCKET))
     threading.Thread(
         target=_serve, args=(egress_listener, proxy.handle, "egress"), daemon=True
@@ -1097,7 +1176,13 @@ def run_supervise() -> int:
     ingress_listener.listen(128)
     threading.Thread(
         target=_serve,
-        args=(ingress_listener, tunnels.serve_client, "ingress", _ingress_limit(payload)),
+        args=(
+            ingress_listener,
+            tunnels.serve_client,
+            "ingress",
+            _ingress_limit(payload),
+            max(2, _ingress_limit(payload) // 2),  # one host: at most half
+        ),
         daemon=True,
     ).start()
 
@@ -1134,6 +1219,7 @@ def run_supervise() -> int:
                 if os.getppid() != parent:
                     child.terminate()
     finally:
+        proxy.flush(final=True)
         shutil.rmtree(socket_dir, ignore_errors=True)
 
 

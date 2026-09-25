@@ -757,7 +757,7 @@ def test_log_fields_are_cut_and_the_launch_log_is_capped(confine, tmp_path):
         os.close(fd)
     text = path.read_text()
     assert len(text) <= 2000 + 200
-    assert "size cap reached" in text
+    assert "DENY/BAD size cap reached" in text
     assert max(len(line) for line in text.splitlines()) < confine.LOG_FIELD_MAX + 100
 
 
@@ -776,7 +776,10 @@ def test_log_rate_limit_drops_and_reports(confine, tmp_path, monkeypatch):
         os.close(fd)
     lines = path.read_text().splitlines()
     assert len([line for line in lines if "'x'" in line]) == 3
-    assert "# 7 line(s) dropped by the rate limit" in lines
+    assert any(line.endswith("# 7 DENY/BAD line(s) not logged (rate limit)") for line in lines)
+    # the summary is written (stamped with its own window) BEFORE the next window's line
+    summary = next(i for i, line in enumerate(lines) if "not logged" in line)
+    assert summary < next(i for i, line in enumerate(lines) if "'y'" in line)
 
 
 def test_root_egress_log_rotates_a_large_previous_log(confine, tmp_path, monkeypatch):
@@ -852,5 +855,121 @@ def test_package_walk_checks_symlink_targets(confine, tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(confine.os, "lstat", _lstat)
-    with pytest.raises(confine.ConfineError, match="points outside"):
+    with pytest.raises(confine.ConfineError, match="symlink outside root-controlled"):
+        confine.require_root_controlled_package(str(entry))
+
+
+# ── round 4: ALLOW never hidden, half-close, per-source cap, dangling links ─
+
+
+def test_denied_flood_cannot_hide_allowed_egress(confine, tmp_path, monkeypatch):
+    clock = [200.0]
+    monkeypatch.setattr(confine.time, "monotonic", lambda: clock[0])
+    path = tmp_path / "egress.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        proxy = confine.EgressProxy([], fd, max_bytes=500, lines_per_second=3)
+        for _ in range(60):
+            proxy.log("DENY", "CONNECT", "noise.example", 443)  # rate AND byte cap hit
+        for _ in range(5):
+            proxy.log("ALLOW", "CONNECT", "api.example.com", 443)
+        clock[0] = 201.0
+        proxy.flush()
+        proxy.log("ALLOW", "CONNECT", "api.example.com", 443)
+        proxy.flush(final=True)
+    finally:
+        os.close(fd)
+    text = path.read_text()
+    assert text.count("ALLOW 'CONNECT' 'api.example.com':443") == 4  # 3 in budget + next window
+    assert "ALLOW-SUMMARY 'api.example.com':443 x2" in text  # the overflow is counted, not lost
+
+
+def test_half_closed_request_still_gets_its_response(confine):
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def _serve_once():
+        conn, _ = server.accept()
+        data = b""
+        while True:
+            chunk = conn.recv(64)
+            if not chunk:
+                break
+            data += chunk
+        time.sleep(0.3)  # reply after the client's EOF
+        conn.sendall(b"RESPONSE:" + data)
+        conn.close()
+
+    threading.Thread(target=_serve_once, daemon=True).start()
+    client, served = socket.socketpair()
+    upstream = socket.create_connection(server.getsockname())
+    threading.Thread(
+        target=confine.splice, args=(served, upstream), kwargs={"idle": 300}, daemon=True
+    ).start()
+    client.sendall(b"req")
+    client.shutdown(socket.SHUT_WR)
+    client.settimeout(5)
+    reply = b""
+    while True:
+        chunk = client.recv(64)
+        if not chunk:
+            break
+        reply += chunk
+    assert reply == b"RESPONSE:req"
+    server.close()
+
+
+def test_serve_caps_connections_per_source(confine):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(16)
+    release = threading.Event()
+    started = []
+
+    def _handler(conn):
+        started.append(conn)
+        release.wait(5)
+        conn.close()
+
+    threading.Thread(
+        target=confine._serve, args=(listener, _handler, "t", 10, 2), daemon=True
+    ).start()
+    clients = [socket.create_connection(listener.getsockname()) for _ in range(3)]
+    deadline = time.monotonic() + 5
+    while len(started) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    clients[2].settimeout(2)
+    assert clients[2].recv(1) == b""  # same source, over its share
+    assert len(started) == 2
+    release.set()
+    for client in clients:
+        client.close()
+    listener.close()
+
+
+def test_package_walk_dangling_symlink_rules(confine, tmp_path, monkeypatch):
+    tree = tmp_path / "node_modules" / "pkg"
+    tree.mkdir(parents=True)
+    entry = tree / "cli.js"
+    entry.write_text("x")
+    real_lstat = os.lstat
+
+    def _lstat(path):
+        result = real_lstat(path)
+        if str(path).startswith(str(tmp_path / "node_modules")):
+            fields = list(result)
+            fields[4] = 0
+            return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(confine.os, "lstat", _lstat)
+    # dangling into a root-controlled location: only root could create it
+    if confine._root_controlled("/usr"):
+        (tree / "stale").symlink_to("/usr/nonexistent-3431/bin/x")
+        confine.require_root_controlled_package(str(entry))
+        (tree / "stale").unlink()
+    # dangling into a user-writable location: refused, and the message says so
+    (tree / "stale").symlink_to(tmp_path / "missing" / "x")
+    with pytest.raises(confine.ConfineError, match="dangling symlink"):
         confine.require_root_controlled_package(str(entry))
