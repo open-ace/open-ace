@@ -4,6 +4,15 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to rebuild/republish, e.g. v2.0.0"
+        required: true
+
+# PyPI uses Trusted Publishing (OIDC), not an API token: the pypi-publish job
+# runs only when the repository variable PYPI_PUBLISH is "true", and PyPI must
+# list this repo + workflow (release.yml) + environment (pypi) as a trusted
+# publisher for the open-ace project.
 
 permissions:
   contents: write
@@ -16,6 +25,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ github.event.release.tag_name || inputs.tag }}
         submodules: false
 
     - name: Setup Node.js
@@ -72,11 +82,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [pre-release-tests]
     env:
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ env.RELEASE_TAG }}
         submodules: false
 
     - name: Set up Python
@@ -90,17 +101,35 @@ jobs:
         pip install -c requirements-ci.lock build
         python -m build --sdist --wheel --outdir dist/
 
-    - name: Publish to PyPI
-      if: env.PYPI_API_TOKEN != ''
-      uses: pypa/gh-action-pypi-publish@release/v1
+    - name: Keep distributions for PyPI
+      uses: actions/upload-artifact@v7
       with:
-        password: ${{ env.PYPI_API_TOKEN }}
-
-    - name: Skip PyPI publish
-      if: env.PYPI_API_TOKEN == ''
-      run: echo "PYPI_API_TOKEN is not configured; skipping PyPI publish."
+        name: python-dist
+        path: dist/
+        retention-days: 7
 
     - name: Upload release assets
       uses: softprops/action-gh-release@v3
       with:
+        tag_name: ${{ env.RELEASE_TAG }}
         files: dist/*
+
+  pypi-publish:
+    # Separate job so only it gets an OIDC token, and a PyPI failure can never
+    # block the GitHub Release assets above.
+    runs-on: ubuntu-latest
+    needs: [build-and-publish]
+    if: vars.PYPI_PUBLISH == 'true'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/open-ace/
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/download-artifact@v7
+      with:
+        name: python-dist
+        path: dist/
+
+    - name: Publish to PyPI (Trusted Publishing)
+      uses: pypa/gh-action-pypi-publish@release/v1
