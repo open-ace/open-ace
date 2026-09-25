@@ -397,7 +397,7 @@ releases go through a `release/vX.Y.Z` branch that is merged back by PR.
    `./scripts/release.sh --version X.Y.Z` (bumps `pyproject.toml`)
 5. Publish the GitHub Release with `dist/open-ace-X.Y.Z.tar.gz` attached;
    `.github/workflows/release.yml` then builds the sdist/wheel, attaches them, and
-   publishes to PyPI via Trusted Publishing (enabled by the `PYPI_PUBLISH=true`
+   publishes to PyPI as `open-ace-server` via Trusted Publishing (enabled by the `PYPI_PUBLISH=true`
    repository variable; no API token). `docker-publish.yml` pushes the GHCR image
 6. Open a PR from `release/vX.Y.Z` to `main`
 7. Refresh the docs site (`open-ace/open-ace-docs`): update the release

@@ -12,7 +12,8 @@ on:
 # PyPI uses Trusted Publishing (OIDC), not an API token: the pypi-publish job
 # runs only when the repository variable PYPI_PUBLISH is "true", and PyPI must
 # list this repo + workflow (release.yml) + environment (pypi) as a trusted
-# publisher for the open-ace project.
+# publisher for the open-ace-server project ("open-ace" is too similar to the
+# unrelated "openace" project for PyPI to accept).
 
 permissions:
   contents: write
@@ -122,7 +123,7 @@ jobs:
     if: vars.PYPI_PUBLISH == 'true'
     environment:
       name: pypi
-      url: https://pypi.org/project/open-ace/
+      url: https://pypi.org/project/open-ace-server/
     permissions:
       id-token: write
     steps:

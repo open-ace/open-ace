@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Python packages are published to PyPI as `open-ace-server` (`pip install open-ace-server`) via Trusted Publishing; PyPI rejects `open-ace` as too similar to the unrelated `openace` project. Import names and the `openace` CLI are unchanged. Release wheels/sdists are now named `open_ace_server-X.Y.Z*`.
+
 ## [v2.0.0] - 2026-09-25
 
 Open ACE 2.0 turns the self-hosted workspace into a multi-user, sandbox-isolated platform: interactive and autonomous agents can now run in OpenSandbox (gVisor/Kata) pods, autonomous workflows gain an independent acceptance-verification phase, and enterprise identity (SAML SSO, DingTalk/Feishu org sync) and alerting landed. It is a major version because of the upgrade-affecting changes listed below.
