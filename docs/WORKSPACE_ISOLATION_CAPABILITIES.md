@@ -278,7 +278,7 @@ unsupported——**不会**静默降级到共享账户后宣称支持;该形态�
 | 资源 | `systemd-run --scope`(`MemoryMax`/`MemorySwapMax=0`/`CPUQuota`/`TasksMax`) | cgroup v2 硬限制,含 fork bomb 上限 |
 | 身份 | `setpriv --reuid/--regid --init-groups --no-new-privs`,能力集与 bounding set 清空 | 只带账户自己的附加组(`systemd-run --scope --uid` 会保留调用者即 root 的 group 0,故不用它) |
 | 文件系统 | bubblewrap:宿主根只读、`/tmp` `/var/tmp` `/run` 与 workspace base 为空 tmpfs | 仅本人 home 与 `<base>/shared` 被绑回;其他用户 home 不可见(不只是拒绝访问) |
-| 网络 | bubblewrap `--unshare-net`(仅 loopback) + 宿主侧出口代理 | 唯一出路是代理;代理只放行 `host:port` 白名单(`webui_callback_url` 的主机:端口 + `confinement_egress_allow`,**只取服务端配置,绝不取请求 Host 头**),其它一律 403;判定记入 `/var/log/openace-webui/<uid>.egress.log`(root 所有 0600,由 root 打开后把描述符交给宿主侧进程——沙箱内进程无法打开、替换或截断它;同一账户在宿主上的其它进程理论上可附着到持有描述符的宿主侧进程,不在防护范围内)。日志有界且可能被汇总:**ALLOW/FAIL 判定从不丢弃**(超出每秒 50 行时按 host:port 汇总计数写出——主机必在白名单内,故有界),DENY/BAD 另有每秒 50 行与每次启动 8 MiB 的上限(拒绝洪泛无法掩盖放行记录);每个客户端字段截断到 256 字符,超过 8 MiB 的旧日志在启动时轮转为 `.1` |
+| 网络 | bubblewrap `--unshare-net`(仅 loopback) + 宿主侧出口代理 | 唯一出路是代理;代理只放行 `host:port` 白名单(`webui_callback_url` 的主机:端口 + `confinement_egress_allow`,**只取服务端配置,绝不取请求 Host 头**),其它一律 403;判定记入 `/var/log/openace-webui/<uid>.egress.log`(root 所有 0600,由 root 打开后把描述符交给宿主侧进程——沙箱内进程无法打开、替换或截断它;同一账户在宿主上的其它进程理论上可附着到持有描述符的宿主侧进程,不在防护范围内)。日志有界且可能被汇总:**ALLOW/FAIL 判定从不丢弃**(超出每秒 50 行或其单独的字节上限时,按**所匹配的白名单条目**汇总计数写出——条目集合有限;主机在匹配与记录前统一规范化,含空白/控制字符的主机及非短大写方法按 BAD 拒绝),DENY/BAD 另有每秒 50 行与每次启动 8 MiB 的上限(拒绝洪泛无法掩盖放行记录);每个客户端字段截断到 256 字符,超过 8 MiB 的旧日志在启动时轮转为 `.1` |
 | 入口 | 反向隧道 | 沙箱内只向宿主侧 socket **主动外连**(保持少量空闲隧道,浏览器连接到来时配对);socket 目录以**只读**方式绑入沙箱,宿主侧从不跟随沙箱可写的路径;同时处理的浏览器连接数取 `TasksMax / 8`(上限 256),单个来源地址至多占一半;双向静默 300 秒的连接会被关闭——匿名客户端不能耗尽 scope 的任务配额 |
 
 配置项(`config.json` 的 `workspace`):

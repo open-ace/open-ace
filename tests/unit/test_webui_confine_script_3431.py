@@ -881,7 +881,7 @@ def test_denied_flood_cannot_hide_allowed_egress(confine, tmp_path, monkeypatch)
         os.close(fd)
     text = path.read_text()
     assert text.count("ALLOW 'CONNECT' 'api.example.com':443") == 4  # 3 in budget + next window
-    assert "ALLOW-SUMMARY 'api.example.com':443 x2" in text  # the overflow is counted, not lost
+    assert "ALLOW-SUMMARY api.example.com:443 x2" in text  # the overflow is counted, not lost
 
 
 def test_half_closed_request_still_gets_its_response(confine):
@@ -973,3 +973,79 @@ def test_package_walk_dangling_symlink_rules(confine, tmp_path, monkeypatch):
     (tree / "stale").symlink_to(tmp_path / "missing" / "x")
     with pytest.raises(confine.ConfineError, match="dangling symlink"):
         confine.require_root_controlled_package(str(entry))
+
+
+# ── round 5: one spelling per host, bounded ALLOW/FAIL summaries ─────────────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("API.Example.com.", "api.example.com"), ("[::1]", "::1"), ("10.0.0.5", "10.0.0.5"),
+     ("\tapi.example.com", None), ("api .example.com", None), ("a..b", None),
+     ("*.example.com", None), ("", None)],
+)  # fmt: skip
+def test_normalize_host(confine, raw, expected):
+    assert confine.normalize_host(raw) == expected
+
+
+def test_match_allow_returns_the_configured_entry(confine):
+    allow = [("*.pythonhosted.org", 443), ("::1", 8080), ("api.example.com", 443)]
+    assert confine.match_allow("files.pythonhosted.org", 443, allow) == "*.pythonhosted.org:443"
+    assert confine.match_allow("::1", 8080, allow) == "[::1]:8080"
+    assert confine.match_allow("api.example.com", 80, allow) is None
+
+
+def test_spelling_variants_fold_into_one_summary_entry(confine, tmp_path, monkeypatch):
+    clock = [300.0]
+    monkeypatch.setattr(confine.time, "monotonic", lambda: clock[0])
+    path = tmp_path / "egress.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    allow = [("localhost", 9)]
+    proxy = confine.EgressProxy(allow, fd, lines_per_second=2)
+    try:
+        for spelling in ("LOCALHOST.", "LocalHost", "localhost", "LOCALHOSt", "localHOST."):
+            client, served = socket.socketpair()
+            worker = threading.Thread(target=proxy.handle, args=(served,), daemon=True)
+            worker.start()
+            client.sendall(f"CONNECT {spelling}:9 HTTP/1.1\r\n\r\n".encode())
+            client.settimeout(10)
+            client.recv(64)
+            client.close()
+            worker.join(timeout=10)
+        clock[0] = 301.0
+        proxy.flush()
+    finally:
+        os.close(fd)
+    text = path.read_text()
+    # every attempt fails to connect (nothing listens on :9) — one entry, one count
+    assert text.count("FAIL-SUMMARY localhost:9 x3") == 1
+    assert "LOCALHOST" not in text  # logged in canonical form only
+
+
+@pytest.mark.parametrize(
+    "request_line",
+    ["CONNECT \tlocalhost:9 HTTP/1.1", "C0NNECT localhost:9 HTTP/1.1", "connect localhost:9 HTTP/1.1",
+     "CONNECT%sX localhost:9 HTTP/1.1" % ("A" * 20)],
+)  # fmt: skip
+def test_malformed_methods_and_hosts_are_bad_requests(confine, request_line):
+    reply = _through_proxy(confine, [("localhost", 9)], (request_line + "\r\n\r\n").encode())
+    assert reply.startswith(b"HTTP/1.1 400")
+
+
+def test_allow_fail_byte_ceiling_switches_to_counters(confine, tmp_path, monkeypatch):
+    clock = [400.0]
+    monkeypatch.setattr(confine.time, "monotonic", lambda: clock[0])
+    path = tmp_path / "egress.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        proxy = confine.EgressProxy([], fd, max_bytes=10, lines_per_second=1000)  # ceiling 80 B
+        for _ in range(20):
+            proxy.log("ALLOW", "CONNECT", "api.example.com", 443, entry="api.example.com:443")
+        clock[0] = 401.0
+        proxy.flush()
+    finally:
+        os.close(fd)
+    lines = path.read_text().splitlines()
+    assert len([line for line in lines if " ALLOW 'CONNECT'" in line]) <= 1
+    summary = [line for line in lines if "ALLOW-SUMMARY api.example.com:443" in line]
+    assert len(summary) == 1 and summary[0].endswith(f"x{20 - (len(lines) - 1)}")

@@ -208,20 +208,45 @@ def parse_allow_entry(raw: str) -> tuple[str, int]:
     return host.lower(), port
 
 
-def host_allowed(host: str, port: int, allow: Sequence[tuple[str, int]]) -> bool:
-    """Exact host match, or ``*.domain`` matching strict subdomains; ports exact."""
-    host = host.strip().lower().rstrip(".")
+METHOD_RE = re.compile(r"^[A-Z]{1,16}$")
+
+
+def normalize_host(host: str) -> str | None:
+    """Canonical form of a request host, or None when it is not a host name/IP.
+
+    Lower-case, without IPv6 brackets or a trailing dot. Anything else (spaces,
+    control characters, empty labels) is refused — so one allowlisted host has
+    exactly one spelling, in matching and in the log.
+    """
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
+    host = host.lower()
+    if host.endswith("."):
+        host = host[:-1]
+    if _is_ip(host) or (HOST_RE.fullmatch(host) and not host.startswith("*.")):
+        return host
+    return None
+
+
+def match_allow(host: str, port: int, allow: Sequence[tuple[str, int]]) -> str | None:
+    """The allowlist entry (``host:port`` as configured) matching a NORMALIZED
+    host, or None. Exact match, or ``*.domain`` for strict subdomains."""
     for allowed_host, allowed_port in allow:
         if port != allowed_port:
             continue
+        entry = f"[{allowed_host}]:{port}" if ":" in allowed_host else f"{allowed_host}:{port}"
         if allowed_host.startswith("*."):
             if host.endswith(allowed_host[1:]) and host != allowed_host[2:]:
-                return True
+                return entry
         elif host == allowed_host:
-            return True
-    return False
+            return entry
+    return None
+
+
+def host_allowed(host: str, port: int, allow: Sequence[tuple[str, int]]) -> bool:
+    """Whether *host* (any accepted spelling) matches an allowlist entry."""
+    normalized = normalize_host(host.strip())
+    return normalized is not None and match_allow(normalized, port, allow) is not None
 
 
 def validate_env(env: object) -> dict[str, str]:
@@ -816,7 +841,10 @@ class EgressProxy:
         self.allow = tuple(allow)
         self.log_fd = log_fd
         self._log_lock = threading.Lock()
-        self._max_bytes = max_bytes  # applies to DENY/BAD lines only
+        self._max_bytes = max_bytes  # DENY/BAD lines
+        # ALLOW/FAIL: far above normal use; past it only per-entry counters
+        self._allow_max_bytes = max(max_bytes * 8, 1)
+        self._allow_written = 0
         self._rate = lines_per_second  # per verdict class, per second
         self._deny_written = 0
         self._deny_capped = False
@@ -842,8 +870,8 @@ class EgressProxy:
         if now == self._window:
             return
         stamp = self._window_stamp
-        for (verdict, host, port), count in sorted(self._allow_overflow.items()):
-            self._write(f"{stamp} {verdict}-SUMMARY {host}:{port} x{count}")
+        for (verdict, entry, _), count in sorted(self._allow_overflow.items()):
+            self._write(f"{stamp} {verdict}-SUMMARY {entry} x{count}")
         if self._deny_overflow:
             self._write(f"{stamp} # {self._deny_overflow} DENY/BAD line(s) not logged (rate limit)")
         self._window = now
@@ -859,12 +887,22 @@ class EgressProxy:
         with self._log_lock:
             self._roll(self._window + 1 if final else int(time.monotonic()))
 
-    def log(self, verdict: str, method: str, host: str, port: int | str, extra: str = "") -> None:
+    def log(
+        self,
+        verdict: str,
+        method: str,
+        host: str,
+        port: int | str,
+        extra: str = "",
+        entry: str | None = None,
+    ) -> None:
         """Append one bounded decision line.
 
         ALLOW/FAIL decisions are never dropped — they are the record of what
-        was actually reached: beyond the per-second budget they are summarized
-        per host:port with a count (bounded, the host must be allowlisted).
+        was actually reached: beyond the per-second budget (or past their own,
+        much larger byte ceiling) they are counted per matched ALLOWLIST ENTRY
+        (a finite set: host spellings and ``*.domain`` subdomains all fold
+        into the entry they matched).
         DENY/BAD lines have their own budget and a per-launch byte cap, so a
         flood of denied requests can neither hide allowed traffic nor fill
         the host filesystem.
@@ -878,10 +916,15 @@ class EgressProxy:
             self._roll(int(time.monotonic()))
             if verdict in ("ALLOW", "FAIL"):
                 self._allow_lines += 1
-                if self._allow_lines <= self._rate:
+                data_len = len(line) + 1
+                if (
+                    self._allow_lines <= self._rate
+                    and self._allow_written + data_len <= self._allow_max_bytes
+                ):
+                    self._allow_written += data_len
                     self._write(line)
                 else:
-                    key = (verdict, self._field(host), str(port))
+                    key = (verdict, entry or f"{host}:{port}", "")
                     self._allow_overflow[key] = self._allow_overflow.get(key, 0) + 1
                 return
             if self._deny_capped:
@@ -923,18 +966,26 @@ class EgressProxy:
                 headers.append("Connection: close")
                 new_head = "\r\n".join([f"{method} {slash}{path} {version}", *headers])
                 forward = new_head.encode("iso-8859-1") + b"\r\n\r\n" + rest
-            if not host_allowed(host, port, self.allow):
-                self.log("DENY", method, host, port)
-                self._reply(conn, 403, f"egress to {host}:{port} is not in the allowlist")
+            if not METHOD_RE.fullmatch(method):
+                raise ValueError("method is not a short upper-case token")
+            normalized = normalize_host(host)
+            if normalized is None:
+                raise ValueError("host is not a host name or IP address")
+            entry = match_allow(normalized, port, self.allow)
+            if entry is None:
+                self.log("DENY", method, normalized, port)
+                self._reply(conn, 403, f"egress to {normalized}:{port} is not in the allowlist")
                 return
             try:
-                upstream = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT_SECONDS)
+                upstream = socket.create_connection(
+                    (normalized, port), timeout=CONNECT_TIMEOUT_SECONDS
+                )
                 upstream.settimeout(None)
             except OSError as exc:
-                self.log("FAIL", method, host, port, str(exc))
-                self._reply(conn, 502, f"cannot reach {host}:{port}")
+                self.log("FAIL", method, normalized, port, type(exc).__name__, entry=entry)
+                self._reply(conn, 502, f"cannot reach {normalized}:{port}")
                 return
-            self.log("ALLOW", method, host, port)
+            self.log("ALLOW", method, normalized, port, entry=entry)
             if method.upper() == "CONNECT":
                 conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 if rest:
