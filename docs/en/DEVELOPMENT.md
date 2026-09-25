@@ -386,14 +386,25 @@ SELECT * FROM daily_usage LIMIT 10;
 
 ## Release Process
 
-1. Update `VERSION` file
-2. Update `CHANGELOG.md`
-3. Create git tag
-4. Build release package
+Direct commits to `main` are blocked by the `no-commit-to-branch` hook, so
+releases go through a `release/vX.Y.Z` branch that is merged back by PR.
+
+1. Curate the `[Unreleased]` section of `CHANGELOG.md` (it becomes the release notes)
+2. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
+3. Build the deployment tarball:
+   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`
+4. Bump the version, move `[Unreleased]` to `[vX.Y.Z]`, commit, tag and push the tag:
+   `./scripts/release.sh --version X.Y.Z` (bumps `pyproject.toml`)
+5. Publish the GitHub Release with `dist/open-ace-X.Y.Z.tar.gz` attached;
+   `.github/workflows/release.yml` then builds the sdist/wheel and publishes to PyPI
+6. Open a PR from `release/vX.Y.Z` to `main`
+7. Refresh the docs site (`open-ace/open-ace-docs`): update the release
+   summary in `src/pages/project/releases.js`, then redeploy so it re-syncs
+   `docs/en` and `docs/cn` from `main`
 
 ```bash
-# Build release
-./scripts/release.sh --version 1.1.0
+# Preview what the release script would change
+./scripts/release.sh --version X.Y.Z --dry-run
 ```
 
 ## Getting Help

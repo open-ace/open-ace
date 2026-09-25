@@ -302,7 +302,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. Pin a specific version (in .env)
-echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
+echo "IMAGE_NAME=openace/open-ace:v2.0.0" >> .env
 
 # 2. Pull and recreate the container
 docker compose pull
@@ -614,6 +614,16 @@ python3 scripts/manage.py remote sync     # Sync files to remote
 ```
 
 ## Upgrading
+
+> **Upgrading from v1.x to v2.0**: check these before restarting on v2.0.
+> 1. Python 3.10+ is required for source and package installs.
+> 2. Set `OPENACE_ENCRYPTION_KEY` to your previous `SECRET_KEY` value before the first restart
+>    (see [Upgrade Note: Encrypted Secrets](#upgrade-note-encrypted-secrets)).
+> 3. The Docker image runs as uid 1000; make mounted volumes writable by it, and use
+>    `docker-compose.multi-user.yml` for multi-user workspace mode.
+> 4. The database must already be on `baseline_2026_06_23` or later; run `alembic upgrade head`.
+>
+> Full list: the `v2.0.0` section of [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md).
 
 ```bash
 # Backup data

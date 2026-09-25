@@ -300,7 +300,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. 指定版本（在 .env 中设置）
-echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
+echo "IMAGE_NAME=openace/open-ace:v2.0.0" >> .env
 
 # 2. 拉取并重建容器
 docker compose pull
@@ -611,6 +611,14 @@ python3 scripts/manage.py remote sync     # 同步文件到远程
 ```
 
 ## 升级
+
+> **从 v1.x 升级到 v2.0**：以 v2.0 重启前请先确认：
+> 1. 源码 / 离线包安装需要 Python 3.10+。
+> 2. 首次重启前把 `OPENACE_ENCRYPTION_KEY` 设为原 `SECRET_KEY` 的值（见 [升级注意：已加密敏感数据](#升级注意已加密敏感数据)）。
+> 3. Docker 镜像以 uid 1000 运行；挂载卷须对其可写，多用户工作区模式请使用 `docker-compose.multi-user.yml`。
+> 4. 数据库须已处于 `baseline_2026_06_23` 或之后；执行 `alembic upgrade head`。
+>
+> 完整列表见 [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md) 的 `v2.0.0` 段落。
 
 ```bash
 # 备份数据

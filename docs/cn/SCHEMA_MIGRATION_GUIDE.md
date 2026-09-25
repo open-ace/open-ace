@@ -133,15 +133,16 @@ def upgrade():
 
 应用版本与 schema 版本的兼容关系：
 
-| 应用版本 | 最小 Schema 版本 | 最大 Schema 版本 | 兼容窗口 |
-|---------|-----------------|-----------------|---------|
-| v2.1    | baseline_2026_06_23 | HEAD          | 10 revisions |
-| v2.0    | baseline_2026_06_23 | 20260717_004  | 5 revisions |
+| 应用版本 | 最低升级起点 | 运行时要求 |
+|---------|-------------|-----------|
+| v2.0.x  | `baseline_2026_06_23` | 该版本随附的 Alembic head |
+| v1.2.x  | `baseline_2026_06_23` | 该版本随附的 Alembic head |
+
+仍停留在基线之前 revision（如 v1.2.0 之前的历史 hash）的数据库不支持原地升级，没有受支持的迁移路径。
 
 **判断逻辑**：
-- 应用启动时检查 schema 版本是否在兼容窗口内
-- 版本过低：启动失败，提示升级
-- 版本过高：启动失败，提示应用需要升级
+- 安装 / 升级：`scripts/check_min_revision.py` 在 `alembic upgrade head` 之前运行，接受基线谱系内的任意 revision，以便升级补齐缺失的迁移；基线之前的 revision 直接报错并中止安装。
+- Web 与调度器启动：`check_schema_compatibility()`（`app/repositories/schema_guard.py`）要求已迁移到 head，确保服务不会在迁移未完成的 schema 上运行。
 
 ## 禁止的操作
 
