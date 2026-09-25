@@ -76,9 +76,32 @@ PROBE_SOURCE = textwrap.dedent('''\
         except Exception:
             return False
 
+    def sockdir_writable():
+        try:
+            with open("/run/openace/planted", "w") as handle:
+                handle.write("x")
+            return True
+        except OSError:
+            return False
+
+    def swap_egress_log():
+        # Replace the host-side egress log with a symlink into our home: the
+        # supervisor must keep writing to the descriptor it opened, never here.
+        log_dir = os.environ.get("OPENACE_LOG_DIR")
+        if not log_dir:
+            return None
+        log = os.path.join(log_dir, "confine-egress.log")
+        try:
+            os.unlink(log)
+            os.symlink(os.path.join(os.environ["HOME"], "log-redirect"), log)
+            return True
+        except OSError:
+            return False
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             base = os.path.dirname(os.environ["HOME"])
+            swapped = swap_egress_log()
             report = {
                 "uid": os.getuid(), "groups": sorted(os.getgroups()),
                 "base_entries": sorted(os.listdir(base)),
@@ -93,6 +116,8 @@ PROBE_SOURCE = textwrap.dedent('''\
                 "direct_target": direct(target, ALLOWED_PORT),
                 "secret_in_env": os.environ.get("OPENAI_API_KEY"),
                 "pid1": open("/proc/1/comm").read().strip(),
+                "sockdir_writable": sockdir_writable(),
+                "log_swapped": swapped,
             }
             body = json.dumps(report).encode()
             self.send_response(200)
@@ -251,6 +276,7 @@ def run(record: Record, real_webui: bool) -> None:
         _run_probe(record, target)
         _run_teardown_paths(record, target)
         _run_policy_refusal(record, target)
+        _run_privileged_group_refusal(record, target)
         if real_webui:
             _run_real_webui(record, target)
     finally:
@@ -262,7 +288,7 @@ def _run_probe(record: Record, target: str) -> None:
     record.check(
         "check mode passes", sh(WRAPPER, "check", "--webui", PROBE, check=False).returncode == 0
     )
-    env = {"OPENAI_API_KEY": SECRET, "ACCEPTANCE_TARGET": target}
+    env = {"OPENAI_API_KEY": SECRET, "ACCEPTANCE_TARGET": target, "OPENACE_LOG_DIR": LOG_DIR}
     process = launch(
         3431, PROBE, ["--port", "3431", "--host", "127.0.0.1"], env, [f"{target}:{ALLOWED_PORT}"]
     )
@@ -316,7 +342,14 @@ def _run_probe(record: Record, target: str) -> None:
             cmdlines_containing(SECRET),
         )
         record.check("pid namespace", report["pid1"] == "bwrap", report["pid1"])
-        unit = "openace-webui-cfa-3431.scope"
+        record.check("socket directory read-only inside", report["sockdir_writable"] is False)
+        redirected = sudo("test", "-s", f"{BASE}/cfa/log-redirect", check=False).returncode == 0
+        record.check(
+            "egress log swap cannot redirect supervisor writes",
+            report["log_swapped"] is True and not redirected,
+            {"swapped": report["log_swapped"], "redirected": redirected},
+        )
+        unit = "openace-webui-3431-3431.scope"
         props = dict(
             line.split("=", 1)
             for line in sh("systemctl", "show", unit, "-p", "MemoryMax", "-p", "TasksMax",
@@ -325,8 +358,9 @@ def _run_probe(record: Record, target: str) -> None:
         record.check("cgroup limits applied", props == {
             "MemoryMax": str(512 * 1024 * 1024), "TasksMax": "128", "CPUQuotaPerSecUSec": "1s",
         }, props)  # fmt: skip
-        log = Path(LOG_DIR, "confine-egress.log").read_text()
-        record.check("egress decisions logged", "ALLOW GET" in log and "DENY GET" in log)
+        # The probe unlinked the original log (its inode lives on in the
+        # supervisor's descriptor); what matters is checked above: no write
+        # was redirected through the planted symlink.
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=15)
@@ -340,7 +374,7 @@ def _run_teardown_paths(record: Record, target: str) -> None:
     process.terminate()  # what WebUIManager does: SIGTERM to sudo
     process.wait(timeout=15)
     record.check(
-        "SIGTERM to sudo tears the sandbox down", scope_gone("openace-webui-cfa-3432.scope")
+        "SIGTERM to sudo tears the sandbox down", scope_gone("openace-webui-3431-3432.scope")
     )
 
     process = launch(3433, PROBE, ["--port", "3433", "--host", "127.0.0.1"], env, allow)
@@ -350,8 +384,28 @@ def _run_teardown_paths(record: Record, target: str) -> None:
     sudo("kill", "-KILL", str(process.pid), check=False)
     process.wait(timeout=15)
     record.check(
-        "SIGKILL to sudo still tears the sandbox down", scope_gone("openace-webui-cfa-3433.scope")
+        "SIGKILL to sudo still tears the sandbox down", scope_gone("openace-webui-3431-3433.scope")
     )
+
+
+def _run_privileged_group_refusal(record: Record, target: str) -> None:
+    if sh("id", "cfsudo", check=False).returncode != 0:
+        sudo("useradd", "-u", "3439", "-d", f"{BASE}/cfsudo", "-m", "-G", "sudo", "cfsudo")
+    try:
+        process = subprocess.Popen(
+            ["sudo", "-n", WRAPPER, "launch", "--account", "cfsudo", "--port", "3439",
+             "--memory-max", "512M", "--cpu-quota", "100", "--tasks-max", "128",
+             "--allow", f"{target}:{ALLOWED_PORT}", "--log-dir", LOG_DIR, "--webui", PROBE],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )  # fmt: skip
+        _, err = process.communicate(b"{}", timeout=15)
+        record.check(
+            "account in a privileged group refused",
+            process.returncode == 64 and b"privileged group" in err,
+            err.decode().strip(),
+        )
+    finally:
+        sudo("userdel", "-r", "cfsudo", check=False)
 
 
 def _run_policy_refusal(record: Record, target: str) -> None:
@@ -360,7 +414,7 @@ def _run_policy_refusal(record: Record, target: str) -> None:
     stderr = process.stderr.read().decode() if process.stderr else ""
     record.check("unlisted executable refused before any scope exists",
                  process.returncode == 64 and "not listed" in stderr
-                 and sh("systemctl", "is-active", "openace-webui-cfa-3434.scope", check=False).stdout.strip() != "active",
+                 and sh("systemctl", "is-active", "openace-webui-3431-3434.scope", check=False).stdout.strip() != "active",
                  stderr.strip())  # fmt: skip
 
 
@@ -395,13 +449,11 @@ def _run_real_webui(record: Record, target: str) -> None:
             "-m", "20", "-X", "POST", "-H", "content-type: application/json", "-d", "{}",
             f"http://127.0.0.1:{port}/chat/completions", check=False,
         )  # fmt: skip
-        log = (
-            Path(LOG_DIR, "confine-egress.log").read_text()
-            if Path(LOG_DIR, "confine-egress.log").exists()
-            else ""
-        )
+        # 0600, owned by the account (opened by the supervisor before bwrap)
+        log = sudo("cat", f"{LOG_DIR}/confine-egress.log", check=False).stdout
         record.check("real WebUI upstream call leaves through the egress proxy",
-                     f"ALLOW POST {target}:{ALLOWED_PORT}" in log, [result.stdout, log.strip()])  # fmt: skip
+                     f"ALLOW 'POST' '{target}':{ALLOWED_PORT}" in log,
+                     [result.stdout, log.strip()])  # fmt: skip
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=15)

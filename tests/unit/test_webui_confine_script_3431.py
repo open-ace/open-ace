@@ -2,10 +2,12 @@
 
 The wrapper's root mode (``launch``) is a security boundary, so its decisions
 are pinned here without root: allowlist parsing/matching, environment
-validation, the policy-file ownership rules, the systemd-run / setpriv command
-line it execs, and the bubblewrap argv. The egress proxy is exercised over
-real sockets. The Linux end-to-end run (real systemd scope + bubblewrap) lives
-in tests/integration/subprocess/test_webui_confine_linux_3431.py.
+validation, account/group refusal, the policy-file ownership rules, the
+root-controlled executable/PATH checks, the systemd-run / setpriv command
+line it execs, and the bubblewrap argv. The reverse tunnel and the egress
+proxy run over real sockets. The Linux end-to-end run (real systemd scope +
+bubblewrap + the real WebUI) is scripts/webui_confine_acceptance.py, which
+needs root and a disposable host.
 """
 
 from __future__ import annotations
@@ -14,8 +16,11 @@ import importlib.util
 import json
 import os
 import pwd
+import shutil
 import socket
+import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +37,12 @@ def confine():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _entry(name="alice", uid=None, home="/wsbase/alice", gid=None):
+    uid = os.getuid() if uid is None else uid
+    gid = os.getgid() if gid is None else gid
+    return pwd.struct_passwd((name, "x", uid, gid, "", home, "/bin/bash"))
 
 
 # ── allowlist ───────────────────────────────────────────────────────────────
@@ -54,7 +65,7 @@ def test_parse_allow_entry_accepts(confine, raw, expected):
 @pytest.mark.parametrize(
     "raw",
     ["example.com", ":443", "example.com:0", "example.com:70000", "exa mple.com:80",
-     "[not-ip]:80", "example.com:http", "*.*.com:443", "a..b:80"],
+     "[not-ip]:80", "example.com:http", "*.*.com:443", "a..b:80", "example.com:4²3"],
 )  # fmt: skip
 def test_parse_allow_entry_rejects(confine, raw):
     with pytest.raises(confine.ConfineError):
@@ -78,7 +89,7 @@ def test_host_allowed_exact_wildcard_and_port(confine):
 
 
 def test_validate_env_keeps_normal_keys(confine):
-    env = {"OPENAI_API_KEY": "tok", "OPENACE_LOG_DIR": "/tmp/x", "LANG": "C.UTF-8"}
+    env = {"OPENAI_API_KEY": "tok", "OPENACE_LOG_DIR": "/tmp/x", "ENVIRONMENT": "prod"}
     assert confine.validate_env(env) == env
 
 
@@ -90,7 +101,9 @@ def test_validate_env_keeps_normal_keys(confine):
         {"NODE_OPTIONS": "--require /tmp/x"},
         {"PATH": "/tmp"},
         {"HOME": "/root"},
-        {"HTTPS_PROXY": "http://attacker:1"},
+        {"ENV": "/tmp/rc"},
+        {"BASH_ENV": "/tmp/rc"},
+        {"HTTPS_PROXY": "http://elsewhere:1"},
         {"bad key": "x"},
         {"OK": 1},
         {"OK": "a\0b"},
@@ -100,6 +113,104 @@ def test_validate_env_keeps_normal_keys(confine):
 def test_validate_env_rejects(confine, env):
     with pytest.raises(confine.ConfineError):
         confine.validate_env(env)
+
+
+# ── account + layout + log dir ──────────────────────────────────────────────
+
+
+def test_resolve_account_refuses_root_and_missing(confine):
+    with pytest.raises(confine.ConfineError, match="privileged or reserved"):
+        confine.resolve_account("root")
+    with pytest.raises(confine.ConfineError, match="does not exist"):
+        confine.resolve_account("no-such-account-3431")
+
+
+@pytest.mark.parametrize(
+    ("groups", "refused"),
+    [({2001: "alice"}, None), ({2001: "alice", 27: "sudo"}, r"sudo\(27\)"),
+     ({2001: "alice", 0: "wheel0"}, r"wheel0\(0\)"), ({2001: "alice", 42: "shadow"}, "shadow"),
+     ({2001: "alice", 999: "docker"}, "docker")],
+)  # fmt: skip
+def test_resolve_account_refuses_privileged_groups(confine, monkeypatch, groups, refused):
+    monkeypatch.setattr(confine.pwd, "getpwnam", lambda name: _entry(name, 2001, gid=2001))
+    monkeypatch.setattr(confine, "account_groups", lambda entry: groups)
+    if refused is None:
+        assert confine.resolve_account("alice").pw_uid == 2001
+    else:
+        with pytest.raises(confine.ConfineError, match=f"privileged group.*{refused}"):
+            confine.resolve_account("alice")
+
+
+def test_resolve_account_honours_policy_denied_groups(confine, monkeypatch):
+    monkeypatch.setattr(confine.pwd, "getpwnam", lambda name: _entry(name, 2001, gid=2001))
+    monkeypatch.setattr(confine, "account_groups", lambda entry: {2001: "a", 3000: "gpu"})
+    with pytest.raises(confine.ConfineError, match="gpu"):
+        confine.resolve_account("a", confine.PRIVILEGED_GROUPS | {"gpu"})
+
+
+def test_workspace_layout_with_real_directories(confine, tmp_path):
+    base = tmp_path / "wsbase"
+    (base / "alice").mkdir(parents=True)
+    entry = _entry(home=str(base / "alice"))
+    assert confine.workspace_layout(entry) == (str(base), str(base / "alice"), None)
+    (base / "shared").mkdir()
+    assert confine.workspace_layout(entry)[2] == str(base / "shared")
+    with pytest.raises(confine.ConfineError, match="outside the policy"):
+        confine.workspace_layout(entry, frozenset({"/home"}))
+    assert confine.workspace_layout(entry, frozenset({str(base)}))[0] == str(base)
+
+
+def test_workspace_layout_refuses_missing_symlinked_or_foreign_home(confine, tmp_path):
+    with pytest.raises(confine.ConfineError, match="not accessible"):
+        confine.workspace_layout(_entry(home=str(tmp_path / "gone")))
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(real)
+    with pytest.raises(confine.ConfineError, match="not a directory owned"):
+        confine.workspace_layout(_entry(home=str(link)))
+    with pytest.raises(confine.ConfineError, match="not a directory owned"):
+        confine.workspace_layout(_entry(uid=os.getuid() + 1, home=str(real)))
+
+
+def test_validate_log_dir_with_real_directories(confine, tmp_path):
+    suffix = str(os.getpid()) + str(time.monotonic_ns())[-6:]
+    path = f"/tmp/qwen-code-webui-{suffix}"
+    os.mkdir(path)
+    try:
+        assert confine.validate_log_dir(path, _entry()) == path
+        with pytest.raises(confine.ConfineError, match="not a directory owned"):
+            confine.validate_log_dir(path, _entry(uid=os.getuid() + 1))
+    finally:
+        os.rmdir(path)
+    with pytest.raises(confine.ConfineError, match="not accessible"):
+        confine.validate_log_dir(path, _entry())
+    with pytest.raises(confine.ConfineError, match="is not /tmp"):
+        confine.validate_log_dir("/tmp/qwen-code-webui-1/../../etc", _entry())
+
+
+# ── root-controlled executable / PATH ──────────────────────────────────────
+
+
+def test_root_controlled_executable(confine, tmp_path):
+    if not confine._root_controlled("/bin"):
+        pytest.skip("/bin is not root-controlled on this machine")
+    confine.require_root_controlled_executable("/bin/sh")
+    own = tmp_path / "webui"
+    own.write_text("#!/bin/sh\n")
+    own.chmod(0o755)
+    with pytest.raises(confine.ConfineError, match="not root-owned"):
+        confine.require_root_controlled_executable(str(own))
+    with pytest.raises(confine.ConfineError, match="not an executable"):
+        confine.require_root_controlled_executable(str(tmp_path / "missing"))
+
+
+def test_root_controlled_path(confine, tmp_path):
+    if not confine._root_controlled("/usr/bin"):
+        pytest.skip("/usr/bin is not root-controlled on this machine")
+    confine.require_root_controlled_path("/usr/bin:/bin:/nonexistent-3431/bin")
+    with pytest.raises(confine.ConfineError, match="not root-controlled"):
+        confine.require_root_controlled_path(f"/usr/bin:{tmp_path}")
 
 
 # ── policy file ─────────────────────────────────────────────────────────────
@@ -128,6 +239,12 @@ def _policy_file(tmp_path: Path, data) -> Path:
     return path
 
 
+def _skip_if_writable_ancestors(path: Path) -> None:
+    for parent in [path.parent, *path.parent.parents]:
+        if parent.stat().st_mode & 0o022:
+            pytest.skip(f"{parent} is group/world-writable on this machine")
+
+
 def test_policy_refuses_non_root_owner(confine, tmp_path):
     path = _policy_file(tmp_path, {"webui": ["/usr/bin/qwen-code-webui"]})
     with pytest.raises(confine.ConfineError, match="root-owned"):
@@ -151,34 +268,29 @@ def test_policy_refuses_symlink(confine, tmp_path):
 
 
 def test_policy_parses_when_root_controlled(confine, tmp_path, monkeypatch):
-    # tmp_path's ancestors are not root-owned on a dev box; patching lstat to
-    # uid 0 covers the directory walk too.
     path = _policy_file(
-        tmp_path, {"webui": ["/usr/bin/qwen-code-webui"], "path": "/opt/node/bin:/usr/bin"}
-    )
-    for parent in [path.parent, *path.parent.parents]:
-        if parent.stat().st_mode & 0o022:
-            pytest.skip(f"{parent} is group/world-writable on this machine")
+        tmp_path,
+        {"webui": ["/usr/bin/qwen-code-webui"], "path": "/opt/node/bin:/usr/bin",
+         "bases": ["/home"], "denied_groups": ["gpu"]},
+    )  # fmt: skip
+    _skip_if_writable_ancestors(path)
     _as_root_owned(monkeypatch, confine)
-    webuis, sandbox_path = confine.load_policy(str(path))
-    assert webuis == frozenset({"/usr/bin/qwen-code-webui"})
-    assert sandbox_path == "/opt/node/bin:/usr/bin"
+    policy = confine.load_policy(str(path))
+    assert policy.webuis == frozenset({"/usr/bin/qwen-code-webui"})
+    assert policy.path == "/opt/node/bin:/usr/bin"
+    assert policy.bases == frozenset({"/home"})
+    assert "gpu" in policy.denied_groups and "sudo" in policy.denied_groups
 
 
 @pytest.mark.parametrize(
     "data",
-    [
-        {"webui": "/usr/bin/x"},
-        {"webui": ["relative/x"]},
-        {"webui": ["/x"], "path": "rel:/usr/bin"},
-        "not json",
-    ],
-)
+    [{"webui": "/usr/bin/x"}, {"webui": ["relative/x"]}, {"path": "/usr/bin"},
+     {"webui": ["/x"], "path": "rel:/usr/bin"}, {"webui": ["/x"], "bases": ["rel"]},
+     {"webui": ["/x"], "denied_groups": "sudo"}, ["not", "an", "object"], "not json"],
+)  # fmt: skip
 def test_policy_rejects_bad_content(confine, tmp_path, monkeypatch, data):
     path = _policy_file(tmp_path, data)
-    for parent in [path.parent, *path.parent.parents]:
-        if parent.stat().st_mode & 0o022:
-            pytest.skip(f"{parent} is group/world-writable on this machine")
+    _skip_if_writable_ancestors(path)
     _as_root_owned(monkeypatch, confine)
     with pytest.raises(confine.ConfineError):
         confine.load_policy(str(path))
@@ -189,40 +301,57 @@ def test_policy_rejects_bad_content(confine, tmp_path, monkeypatch, data):
 
 @pytest.fixture
 def planned(confine, monkeypatch, tmp_path):
-    """plan_launch with passwd / filesystem / tool lookups stubbed out."""
-    entry = pwd.struct_passwd(("alice", "x", 3001, 3001, "", "/wsbase/alice", "/bin/bash"))
-    monkeypatch.setattr(confine, "resolve_account", lambda name: entry)
+    """plan_launch with the filesystem/passwd validators stubbed out (they are
+    tested for real above), so the argv assembly can be pinned exactly."""
+    entry = _entry("alice", 3001, "/wsbase/alice", gid=3001)
+    webui = "/usr/bin/qwen-code-webui"
+    policy = confine.Policy(
+        frozenset({webui}), "/usr/bin:/bin", frozenset(), confine.PRIVILEGED_GROUPS
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(confine, "load_policy", lambda path=None: policy)
+
+    def _resolve(name, denied):
+        seen["denied"] = denied
+        return entry
+
+    monkeypatch.setattr(confine, "resolve_account", _resolve)
     monkeypatch.setattr(
-        confine, "workspace_layout", lambda e: ("/wsbase", "/wsbase/alice", "/wsbase/shared")
+        confine, "workspace_layout", lambda e, bases: ("/wsbase", "/wsbase/alice", "/wsbase/shared")
     )
     monkeypatch.setattr(confine, "validate_log_dir", lambda path, e: path)
-    webui = tmp_path / "qwen-code-webui"
-    webui.write_text("#!/bin/sh\n")
-    webui.chmod(0o755)
     monkeypatch.setattr(
-        confine, "load_policy", lambda path=None: (frozenset({str(webui)}), "/usr/bin:/bin")
+        confine, "require_root_controlled_executable", lambda p: seen.setdefault("exe", p)
+    )
+    monkeypatch.setattr(
+        confine, "require_root_controlled_path", lambda p: seen.setdefault("path", p)
     )
     monkeypatch.setattr(confine.shutil, "which", lambda tool, path=None: f"/usr/bin/{tool}")
 
-    def _plan(*extra, env=None, argv=None):
-        base = [
-            "--account", "alice", "--port", "3150", "--memory-max", "4G",
-            "--cpu-quota", "200", "--tasks-max", "512", "--allow", "10.0.0.5:19888",
-            "--log-dir", "/tmp/qwen-code-webui-7", "--webui", str(webui),
-        ]  # fmt: skip
-        args = argv if argv is not None else [*base, *extra, "--", "--port", "3150"]
+    base = {
+        "--account": "alice", "--port": "3150", "--memory-max": "4G", "--cpu-quota": "200",
+        "--tasks-max": "512", "--log-dir": "/tmp/qwen-code-webui-7", "--webui": webui,
+    }  # fmt: skip
+
+    def _plan(override=None, *, env=None, allow=("10.0.0.5:19888",), tail=("--", "--port", "3150")):
+        opts = dict(base, **(override or {}))
+        argv = [item for pair in opts.items() for item in pair]
+        for entry_ in allow:
+            argv += ["--allow", entry_]
+        argv += list(tail)
         return confine.plan_launch(
-            args, json.dumps(env if env is not None else {"OPENAI_API_KEY": "tok"})
+            argv, json.dumps({"OPENAI_API_KEY": "tok"} if env is None else env)
         )
 
-    _plan.webui = str(webui)
+    _plan.webui = webui
+    _plan.seen = seen
     return _plan
 
 
 def test_plan_launch_builds_fixed_scope_and_setpriv(confine, planned):
     systemd_argv, payload = planned()
     assert systemd_argv[:5] == [
-        "/usr/bin/systemd-run", "--scope", "--quiet", "--collect", "--unit=openace-webui-alice-3150",
+        "/usr/bin/systemd-run", "--scope", "--quiet", "--collect", "--unit=openace-webui-3001-3150",
     ]  # fmt: skip
     props = [systemd_argv[i + 1] for i, arg in enumerate(systemd_argv) if arg == "-p"]
     assert props == ["MemoryMax=4G", "MemorySwapMax=0", "CPUQuota=200%", "TasksMax=512"]
@@ -238,38 +367,40 @@ def test_plan_launch_builds_fixed_scope_and_setpriv(confine, planned):
     assert payload["webui_argv"] == [planned.webui, "--port", "3150"]
     assert payload["allow"] == ["10.0.0.5:19888"]
     assert payload["path"] == "/usr/bin:/bin"
+    # the ownership checks and the group denylist are applied on the way
+    assert planned.seen["exe"] == planned.webui
+    assert planned.seen["path"] == "/usr/bin:/bin"
+    assert "sudo" in planned.seen["denied"]
 
 
 @pytest.mark.parametrize(
     ("override", "match"),
     [
-        (["--port", "80"], ">= 1024"),
-        (["--memory-max", "4G;x"], "memory-max"),
-        (["--cpu-quota", "0"], "cpu-quota"),
-        (["--cpu-quota", "9999"], "cpu-quota"),
-        (["--tasks-max", "5"], "tasks-max"),
-        (["--bind-host", "evil"], "bind-host"),
-        (["--webui", "/bin/sh"], "not listed"),
+        ({"--port": "80"}, ">= 1024"),
+        ({"--port": "3²50"}, "ASCII"),
+        ({"--memory-max": "4G;x"}, "memory-max"),
+        ({"--cpu-quota": "0"}, "cpu-quota"),
+        ({"--cpu-quota": "9999"}, "cpu-quota"),
+        ({"--cpu-quota": "1²"}, "ASCII"),
+        ({"--tasks-max": "5"}, "tasks-max"),
+        ({"--bind-host": "evil"}, "bind-host"),
+        ({"--webui": "/bin/sh"}, "not listed"),
     ],
 )
 def test_plan_launch_rejects_bad_arguments(confine, planned, override, match):
-    base = {
-        "--account": "alice", "--port": "3150", "--memory-max": "4G", "--cpu-quota": "200",
-        "--tasks-max": "512", "--log-dir": "/tmp/qwen-code-webui-7", "--webui": planned.webui,
-    }  # fmt: skip
-    base[override[0]] = override[1]
-    argv = [item for pair in base.items() for item in pair] + ["--allow", "10.0.0.5:19888"]
     with pytest.raises(confine.ConfineError, match=match):
-        planned(argv=argv)
+        planned(override)
 
 
 def test_plan_launch_requires_an_allow_entry(confine, planned):
-    argv = [
-        "--account", "alice", "--port", "3150", "--memory-max", "4G", "--cpu-quota", "200",
-        "--tasks-max", "512", "--log-dir", "/tmp/qwen-code-webui-7", "--webui", planned.webui,
-    ]  # fmt: skip
     with pytest.raises(confine.ConfineError, match="--allow"):
-        planned(argv=argv)
+        planned(allow=())
+
+
+def test_plan_launch_rejects_abbreviated_options(confine, planned):
+    # allow_abbrev=False: "--acc" must not silently mean "--account"
+    with pytest.raises(SystemExit):
+        confine.plan_launch(["--acc", "alice"], "{}")
 
 
 def test_plan_launch_rejects_reserved_env_and_bad_json(confine, planned):
@@ -284,17 +415,10 @@ def test_plan_launch_rejects_reserved_env_and_bad_json(confine, planned):
         )  # fmt: skip
 
 
-def test_resolve_account_refuses_root_and_reserved(confine):
-    with pytest.raises(confine.ConfineError, match="privileged or reserved"):
-        confine.resolve_account("root")
-    with pytest.raises(confine.ConfineError, match="does not exist"):
-        confine.resolve_account("no-such-account-3431")
-
-
 # ── bubblewrap argv ─────────────────────────────────────────────────────────
 
 
-def test_bwrap_argv_hides_base_before_binding_home(confine):
+def test_bwrap_argv_hides_base_and_binds_sockets_read_only(confine):
     argv = confine.build_bwrap_argv(
         bwrap="/usr/bin/bwrap", python="/usr/bin/python3", script="/usr/local/bin/c",
         base="/wsbase", home="/wsbase/alice", shared="/wsbase/shared",
@@ -307,7 +431,9 @@ def test_bwrap_argv_hides_base_before_binding_home(confine):
     assert joined.index("--tmpfs /wsbase") < joined.index("--bind /wsbase/alice /wsbase/alice")
     assert "--bind /wsbase/shared /wsbase/shared" in joined
     assert joined.index("--tmpfs /tmp") < joined.index("--bind /tmp/qwen-code-webui-7")
-    assert "--bind /tmp/openace-webui-x /run/openace" in joined
+    # the socket directory is READ-ONLY inside: the sandbox cannot swap sockets
+    assert "--ro-bind /tmp/openace-webui-x /run/openace" in joined
+    assert "--bind /tmp/openace-webui-x" not in joined
     for flag in ("--unshare-net", "--unshare-pid", "--unshare-user", "--die-with-parent",
                  "--new-session"):  # fmt: skip
         assert flag in argv
@@ -336,6 +462,93 @@ def test_inner_env_sets_home_and_path(confine):
         "PATH": "/usr/bin",
         "LANG": "C.UTF-8",
     }
+
+
+# ── reverse tunnel ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def echo_server():
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(8)
+
+    def _serve():
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            data = conn.recv(1024)
+            conn.sendall(b"echo:" + data)
+            conn.close()
+
+    threading.Thread(target=_serve, daemon=True).start()
+    yield server.getsockname()[1]
+    server.close()
+
+
+def test_tunnel_pool_pairs_client_with_idle_tunnel(confine):
+    pool = confine.TunnelPool()
+    tunnel_host, tunnel_inner = socket.socketpair()
+    pool.add(tunnel_host)
+    client, client_served = socket.socketpair()
+    worker = threading.Thread(target=pool.serve_client, args=(client_served,), daemon=True)
+    worker.start()
+    assert tunnel_inner.recv(1) == confine.TUNNEL_GO
+    client.sendall(b"hello")
+    assert tunnel_inner.recv(5) == b"hello"
+    tunnel_inner.sendall(b"world")
+    tunnel_inner.close()
+    assert client.recv(5) == b"world"
+    client.close()
+    worker.join(timeout=5)
+
+
+def test_tunnel_pool_closes_client_without_tunnel_and_caps_idle(confine, monkeypatch):
+    monkeypatch.setattr(confine, "TUNNEL_WAIT_SECONDS", 0.2)
+    pool = confine.TunnelPool(max_idle=1)
+    assert pool.take(timeout=0.1) is None  # nothing idle
+    client, served = socket.socketpair()
+    pool.serve_client(served)  # no tunnel arrives: the client is closed
+    client.settimeout(1)
+    assert client.recv(1) == b""
+    first, _keep1 = socket.socketpair()
+    second, keep2 = socket.socketpair()
+    pool.add(first)
+    pool.add(second)  # over the cap: closed, never queued
+    keep2.settimeout(1)
+    assert keep2.recv(1) == b""
+
+
+def test_reverse_tunnel_end_to_end_over_unix_socket(confine, echo_server):
+    # AF_UNIX paths are capped (~104 bytes on macOS); pytest's tmp_path is longer.
+    short_dir = tempfile.mkdtemp(prefix="oc3431-", dir="/tmp")
+    path = os.path.join(short_dir, "tunnel.sock")
+    pool = confine.TunnelPool()
+    listener = confine._unix_listener(path)
+
+    def _accept():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            pool.add(conn)
+
+    threading.Thread(target=_accept, daemon=True).start()
+    threading.Thread(
+        target=confine._run_tunnel_pool, args=(path, echo_server, 2), daemon=True
+    ).start()
+    for _ in range(3):  # more clients than the pool size: tunnels are replenished
+        client, served = socket.socketpair()
+        threading.Thread(target=pool.serve_client, args=(served,), daemon=True).start()
+        client.settimeout(10)
+        client.sendall(b"ping")
+        assert client.recv(64) == b"echo:ping"
+        client.close()
+    listener.close()
+    shutil.rmtree(short_dir, ignore_errors=True)
 
 
 # ── egress proxy over real sockets ──────────────────────────────────────────
@@ -370,8 +583,8 @@ def upstream():
     server.close()
 
 
-def _through_proxy(confine, allow, request: bytes) -> bytes:
-    proxy = confine.EgressProxy(allow)
+def _through_proxy(confine, allow, request: bytes, log_fd=None) -> bytes:
+    proxy = confine.EgressProxy(allow, log_fd)
     client, served = socket.socketpair()
     worker = threading.Thread(target=proxy.handle, args=(served,), daemon=True)
     worker.start()
@@ -421,9 +634,7 @@ def test_proxy_tunnels_allowed_connect(confine, upstream):
 def test_proxy_denies_unlisted_port_and_host(confine, upstream):
     port, seen = upstream
     denied_port = _through_proxy(
-        confine,
-        [("127.0.0.1", port + 1)],
-        f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n".encode(),
+        confine, [("127.0.0.1", port + 1)], f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n".encode()
     )
     denied_host = _through_proxy(
         confine,
@@ -435,6 +646,39 @@ def test_proxy_denies_unlisted_port_and_host(confine, upstream):
     assert seen == []  # nothing reached the upstream
 
 
-def test_proxy_refuses_origin_form_requests(confine):
-    reply = _through_proxy(confine, [("127.0.0.1", 1)], b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
-    assert reply.startswith(b"HTTP/1.1 400")
+def test_proxy_refuses_origin_form_and_bad_ports(confine):
+    assert _through_proxy(confine, [("h", 1)], b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").startswith(
+        b"HTTP/1.1 400"
+    )
+    assert _through_proxy(confine, [("h", 1)], "CONNECT h:1² HTTP/1.1\r\n\r\n".encode()).startswith(
+        b"HTTP/1.1 400"
+    )
+
+
+def test_proxy_log_goes_to_the_descriptor_escaped(confine, tmp_path):
+    log = tmp_path / "egress.log"
+    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        _through_proxy(
+            confine,
+            [("127.0.0.1", 1)],
+            b"CONNECT evil.example\r\nFAKE ALLOW:443 HTTP/1.1\r\n\r\n",
+            log_fd=fd,
+        )
+        _through_proxy(
+            confine, [("127.0.0.1", 1)], b"CONNECT deny.example:443 HTTP/1.1\r\n\r\n", fd
+        )
+    finally:
+        os.close(fd)
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2  # no forged line from the CR/LF inside the target
+    assert "DENY 'CONNECT' 'deny.example':443" in lines[1]
+
+
+def test_open_egress_log_refuses_a_symlink(confine, tmp_path):
+    target = tmp_path / "elsewhere"
+    target.write_text("")
+    (tmp_path / confine.EGRESS_LOG_NAME).symlink_to(target)
+    assert confine.open_egress_log(str(tmp_path)) is None
+    fd = confine.open_egress_log(str(tmp_path / "missing-dir"))
+    assert fd is None

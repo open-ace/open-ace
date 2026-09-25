@@ -1,28 +1,35 @@
 #!/usr/bin/python3 -I
 """openace-webui-confine — confined per-user WebUI launch (Issue #3431, Option 1).
 
-Installed as ``/usr/local/bin/openace-webui-confine``. One file, three modes,
-three trust levels:
+Installed as ``/usr/local/bin/openace-webui-confine``. One file, four modes:
 
 ``launch``     root, via ``sudo -n``. The ONLY root code. It validates its
-               typed arguments, reads the WebUI environment (JSON) from stdin,
-               and execs ``systemd-run --scope`` with limits it builds itself —
-               no caller-supplied property ever reaches systemd — followed by
+               typed arguments against the passwd database and the root-owned
+               policy file, reads the WebUI environment (JSON) from stdin, and
+               execs ``systemd-run --scope`` with limits it builds itself — no
+               caller-supplied property ever reaches systemd — followed by
                ``setpriv`` to drop to the target account (``--init-groups``:
                ``systemd-run --scope --uid`` keeps the CALLER's supplementary
-               groups, i.e. root's group 0, which setpriv does not). The
-               environment is handed on through a pipe on stdin, so the proxy
-               token never appears in a world-readable command line or in the
-               (world-readable) transient unit properties.
+               groups, i.e. root's group 0). The environment is handed on
+               through a pipe on stdin, never on a command line. (The WebUI's
+               own ``--token-secret`` argument is still on its command line:
+               qwen-code-webui accepts it only as a flag.)
 ``supervise``  the target account, host network namespace, inside the scope's
-               cgroup. Owns the two host-side endpoints — the ingress forwarder
-               (``bind_host:port`` -> ``ingress.sock``) and the egress proxy
-               (``egress.sock`` -> allowlisted ``host:port`` only) — and runs
-               bubblewrap.
+               cgroup. Owns every host-side endpoint — the ingress listener on
+               ``bind_host:port``, the reverse-tunnel socket and the egress
+               proxy socket — and runs bubblewrap.
 ``inner``      the target account inside bubblewrap: private network namespace
                (loopback only), read-only host root, empty tmpfs over the
-               workspace base / ``/tmp`` / ``/run``. Bridges the two sockets to
-               loopback TCP and runs the WebUI with ``HTTP(S)_PROXY`` set.
+               workspace base / ``/tmp`` / ``/var/tmp`` / ``/run``. Keeps a small
+               pool of outbound tunnel connections for ingress, bridges a
+               loopback proxy port to the egress socket, and runs the WebUI.
+``check``      unprivileged readiness probe for the manager.
+
+Nothing on the host side ever follows a path the sandbox can write: the
+socket directory is bound READ-ONLY into the sandbox, the sandbox only
+connects out to it (ingress uses a reverse tunnel instead of a listener the
+host would connect to), and the egress log is opened once, with O_NOFOLLOW,
+before the sandbox exists.
 
 The sandbox has no route out except the egress proxy, so egress control is
 structural: anything that ignores the proxy variables gets no network at all.
@@ -34,9 +41,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import grp
 import json
 import os
 import pwd
+import queue
 import re
 import shutil
 import signal
@@ -48,13 +57,15 @@ import tempfile
 import threading
 import time
 from collections.abc import Sequence
+from typing import NamedTuple
 
 # ── Shared constants ────────────────────────────────────────────────────────
 
 MIN_ACCOUNT_UID = 1000
 INNER_SOCKET_DIR = "/run/openace"
-INGRESS_SOCKET = "ingress.sock"
+TUNNEL_SOCKET = "tunnel.sock"
 EGRESS_SOCKET = "egress.sock"
+EGRESS_LOG_NAME = "confine-egress.log"
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Root-owned policy file written by the installer. ``launch`` refuses to run
 # without it: it pins which executables may be started as a user (a free
@@ -63,9 +74,10 @@ SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CONFIG_PATH = "/etc/openace/webui-confine.json"
 LOG_DIR_RE = re.compile(r"^/tmp/qwen-code-webui-[0-9]+$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DIGITS_RE = re.compile(r"^[0-9]{1,9}$")
 # Keys the caller may never set: they steer the dynamic loader / interpreters
 # or the proxy wiring this script owns.
-ENV_KEY_DENY_PREFIXES = ("LD_", "PYTHON", "NODE_OPTIONS", "BASH_ENV", "ENV")
+ENV_KEY_DENY_PREFIXES = ("LD_", "PYTHON", "NODE_OPTIONS")
 ENV_KEY_OWNED = frozenset(
     {
         "HTTP_PROXY",
@@ -79,22 +91,88 @@ ENV_KEY_OWNED = frozenset(
         "NODE_USE_ENV_PROXY",
         "HOME",
         "PATH",
+        "ENV",
+        "BASH_ENV",
+    }
+)
+# Supplementary groups that carry host privileges the sandbox would inherit
+# (file access checks inside the user namespace still use the real groups).
+# The policy file can extend this list with "denied_groups".
+PRIVILEGED_GROUPS = frozenset(
+    {
+        "root",
+        "sudo",
+        "wheel",
+        "admin",
+        "adm",
+        "shadow",
+        "disk",
+        "docker",
+        "lxd",
+        "libvirt",
+        "kvm",
+        "systemd-journal",
+        "staff",
     }
 )
 MEMORY_RE = re.compile(r"^[1-9][0-9]{0,12}[KMGT]?$")
 HOST_RE = re.compile(
-    r"^(\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+    r"^(\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
 )
 MAX_HEAD_BYTES = 64 * 1024
+HEAD_TIMEOUT_SECONDS = 30.0
 CONNECT_TIMEOUT_SECONDS = 15.0
 PIPE_BUFFER = 65536
+TUNNEL_POOL = 4  # idle reverse-tunnel connections kept by ``inner``
+TUNNEL_POOL_MAX = 64  # the supervisor never holds more than this many
+TUNNEL_GO = b"\x01"
+TUNNEL_WAIT_SECONDS = 10.0
 
 
 class ConfineError(Exception):
     """A refused launch (exit status 64, message on stderr)."""
 
 
+class Policy(NamedTuple):
+    """The root-owned policy file's content."""
+
+    webuis: frozenset[str]
+    path: str
+    bases: frozenset[str]  # empty = any workspace base
+    denied_groups: frozenset[str]
+
+
 # ── Validation helpers (pure; unit-tested) ──────────────────────────────────
+
+
+def _digits(raw: str, what: str) -> int:
+    # str.isdigit() accepts non-ASCII digits that int() then rejects.
+    if not DIGITS_RE.fullmatch(raw):
+        raise ConfineError(f"{what} must be an ASCII integer")
+    return int(raw)
+
+
+def _parse_port(raw: str, what: str) -> int:
+    port = _digits(raw, what)
+    if not 0 < port < 65536:
+        raise ConfineError(f"{what}: port out of range")
+    return port
+
+
+def _is_ip(value: str) -> bool:
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(family, value)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _require_ip(value: str, what: str) -> None:
+    if not _is_ip(value):
+        raise ConfineError(f"{what}: not an IP address")
 
 
 def parse_allow_entry(raw: str) -> tuple[str, int]:
@@ -147,45 +225,119 @@ def validate_env(env: object) -> dict[str, str]:
     return clean
 
 
-def resolve_account(name: str) -> pwd.struct_passwd:
-    """Resolve a non-root, non-reserved account with a usable home."""
+def account_groups(entry: pwd.struct_passwd) -> dict[int, str]:
+    """gid -> group name for every group the account would hold after --init-groups."""
+    groups: dict[int, str] = {}
+    for gid in os.getgrouplist(entry.pw_name, entry.pw_gid):
+        try:
+            groups[gid] = grp.getgrgid(gid).gr_name
+        except KeyError:
+            groups[gid] = str(gid)
+    return groups
+
+
+def resolve_account(
+    name: str, denied_groups: frozenset[str] = PRIVILEGED_GROUPS
+) -> pwd.struct_passwd:
+    """Resolve a regular account: uid >= 1000, no privileged group, sane home."""
     try:
         entry = pwd.getpwnam(name)
     except KeyError:
         raise ConfineError(f"account {name!r} does not exist") from None
-    if entry.pw_uid < MIN_ACCOUNT_UID or entry.pw_gid == 0:
+    if entry.pw_uid < MIN_ACCOUNT_UID:
         raise ConfineError(f"account {name!r} is privileged or reserved (uid {entry.pw_uid})")
+    privileged = sorted(
+        f"{name_}({gid})"
+        for gid, name_ in account_groups(entry).items()
+        if gid == 0 or name_ in denied_groups
+    )
+    if privileged:
+        raise ConfineError(
+            f"account {name!r} is in privileged group(s) {', '.join(privileged)}; "
+            "a confined WebUI would carry them into the sandbox"
+        )
     home = os.path.normpath(entry.pw_dir or "")
     if not home.startswith("/") or os.path.dirname(home) in ("", "/"):
         raise ConfineError(f"account {name!r} home {home!r} is not under a workspace base")
     return entry
 
 
-def workspace_layout(entry: pwd.struct_passwd) -> tuple[str, str, str | None]:
+def workspace_layout(
+    entry: pwd.struct_passwd, bases: frozenset[str] = frozenset()
+) -> tuple[str, str, str | None]:
     """Return (base, home, shared_root_or_None) for the account.
 
     Derived from the passwd entry, never from the caller: the base is the
     home's parent (``<base>/<account>``), hidden behind an empty tmpfs in the
     sandbox; the home and the shared-project namespace root ``<base>/shared``
-    are the only entries bound back.
+    are the only entries bound back. ``bases`` (from the policy) restricts
+    which workspace bases are acceptable.
     """
     home = os.path.normpath(entry.pw_dir)
-    home_st = os.lstat(home)
+    try:
+        home_st = os.lstat(home)
+    except OSError as exc:
+        raise ConfineError(f"home {home!r} is not accessible ({exc.strerror})") from None
     if not stat.S_ISDIR(home_st.st_mode) or home_st.st_uid != entry.pw_uid:
         raise ConfineError(f"home {home!r} is not a directory owned by {entry.pw_name!r}")
     base = os.path.dirname(home)
+    if bases and base not in bases:
+        raise ConfineError(f"home {home!r} is outside the policy's workspace bases")
     shared = os.path.join(base, "shared")
     try:
         shared_st = os.lstat(shared)
-    except FileNotFoundError:
+    except OSError:
         return base, home, None
     if not stat.S_ISDIR(shared_st.st_mode) or shared == home:
         return base, home, None
     return base, home, shared
 
 
-def load_policy(path: str = CONFIG_PATH) -> tuple[frozenset[str], str]:
-    """Read the root-owned policy file: (allowed webui executables, sandbox PATH).
+def _root_controlled(path: str) -> bool:
+    """True when *path* and every ancestor are root-owned and not group/world-writable."""
+    current = path
+    while True:
+        try:
+            st = os.lstat(current)
+        except OSError:
+            return False
+        if st.st_uid != 0 or st.st_mode & 0o022:
+            return False
+        if current in ("/", ""):
+            return True
+        current = os.path.dirname(current)
+
+
+def require_root_controlled_executable(path: str) -> None:
+    """The WebUI executable (after symlinks) must be a root-controlled file."""
+    real = os.path.realpath(path)
+    if not os.path.isfile(real) or not os.access(real, os.X_OK):
+        raise ConfineError(f"--webui {path!r} is not an executable file")
+    if not _root_controlled(real):
+        raise ConfineError(
+            f"--webui {path!r} resolves to {real!r}, which is not root-owned and "
+            "protected from group/world writes all the way up"
+        )
+
+
+def require_root_controlled_path(sandbox_path: str) -> None:
+    """Every PATH entry the sandbox sees must be root-controlled.
+
+    A ``#!/usr/bin/env node`` WebUI resolves ``node`` through this PATH, so a
+    directory the service account can write would let it choose the code the
+    account runs. A missing entry is checked through its nearest existing
+    ancestor (only its owner could create it later).
+    """
+    for entry in sandbox_path.split(":"):
+        probe = os.path.realpath(entry)
+        while not os.path.lexists(probe) and probe != "/":
+            probe = os.path.dirname(probe)
+        if not _root_controlled(probe):
+            raise ConfineError(f"PATH entry {entry!r} is not root-controlled")
+
+
+def load_policy(path: str = CONFIG_PATH) -> Policy:
+    """Read the root-owned policy file.
 
     Refuses a file (or directory chain) that a non-root user could have
     written: the file pins what root will start on the caller's behalf.
@@ -210,24 +362,44 @@ def load_policy(path: str = CONFIG_PATH) -> tuple[frozenset[str], str]:
             data = json.load(handle)
         except json.JSONDecodeError as exc:
             raise ConfineError(f"policy file {path} is not JSON: {exc}") from None
-    webuis = data.get("webui") if isinstance(data, dict) else None
-    if not isinstance(webuis, list) or not all(
-        isinstance(w, str) and os.path.isabs(w) for w in webuis
-    ):
-        raise ConfineError(f"policy file {path}: 'webui' must be a list of absolute paths")
+    if not isinstance(data, dict):
+        raise ConfineError(f"policy file {path} must be a JSON object")
+
+    def _abs_list(key: str, default: list[str]) -> frozenset[str]:
+        value = data.get(key, default)
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) and os.path.isabs(item) for item in value
+        ):
+            raise ConfineError(f"policy file {path}: {key!r} must be a list of absolute paths")
+        return frozenset(os.path.normpath(item) for item in value)
+
+    if "webui" not in data:
+        raise ConfineError(f"policy file {path}: 'webui' is required")
+    webuis = _abs_list("webui", [])
+    bases = _abs_list("bases", [])
+    denied = data.get("denied_groups", [])
+    if not isinstance(denied, list) or not all(isinstance(item, str) for item in denied):
+        raise ConfineError(f"policy file {path}: 'denied_groups' must be a list of names")
     sandbox_path = data.get("path", SAFE_PATH)
     if not isinstance(sandbox_path, str) or not all(
         os.path.isabs(part) for part in sandbox_path.split(":")
     ):
         raise ConfineError(f"policy file {path}: 'path' must be absolute directories joined by ':'")
-    return frozenset(webuis), sandbox_path
+    return Policy(webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied))
 
 
 def validate_log_dir(path: str, entry: pwd.struct_passwd) -> str:
-    """The webui log dir: ``/tmp/qwen-code-webui-<n>``, a real dir owned by the account."""
+    """The webui log dir: ``/tmp/qwen-code-webui-<n>``, a real dir owned by the account.
+
+    It is bound into the sandbox; nothing on the host side opens a path inside
+    it after the sandbox starts (the egress log is opened beforehand).
+    """
     if not LOG_DIR_RE.fullmatch(path):
         raise ConfineError(f"log dir {path!r} is not /tmp/qwen-code-webui-<n>")
-    st = os.lstat(path)
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        raise ConfineError(f"log dir {path!r} is not accessible ({exc.strerror})") from None
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != entry.pw_uid:
         raise ConfineError(f"log dir {path!r} is not a directory owned by {entry.pw_name!r}")
     return path
@@ -262,7 +434,9 @@ def build_bwrap_argv(
         argv += ["--bind", shared, shared]
     argv += [
         "--bind", log_dir, log_dir,
-        "--bind", socket_dir, INNER_SOCKET_DIR,
+        # READ-ONLY: the sandbox connects to the two host sockets but can
+        # never replace them (connect() on a socket works on a read-only mount).
+        "--ro-bind", socket_dir, INNER_SOCKET_DIR,
         "--unshare-user",
         "--unshare-ipc",
         "--unshare-pid",
@@ -336,8 +510,6 @@ def _serve(listener: socket.socket, handler, name: str) -> None:
 
 
 def _unix_listener(path: str) -> socket.socket:
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     old = os.umask(0o077)
     try:
@@ -348,10 +520,95 @@ def _unix_listener(path: str) -> socket.socket:
     return sock
 
 
+# ── Reverse tunnel (ingress) ────────────────────────────────────────────────
+
+
+class TunnelPool:
+    """Supervisor side: idle tunnel connections opened by ``inner``.
+
+    A browser connection is paired with one idle tunnel; the supervisor sends
+    ``TUNNEL_GO`` and ``inner`` connects that tunnel to the WebUI. The host
+    therefore never connects to anything inside the sandbox.
+    """
+
+    def __init__(self, max_idle: int = TUNNEL_POOL_MAX) -> None:
+        self._idle: queue.Queue[socket.socket] = queue.Queue(maxsize=max_idle)
+
+    def add(self, conn: socket.socket) -> None:
+        try:
+            self._idle.put_nowait(conn)
+        except queue.Full:
+            conn.close()  # the sandbox may not grow the supervisor's state
+
+    def take(self, timeout: float | None = None) -> socket.socket | None:
+        wait = TUNNEL_WAIT_SECONDS if timeout is None else timeout
+        deadline = time.monotonic() + wait
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                conn = self._idle.get(timeout=remaining)
+            except queue.Empty:
+                return None
+            try:
+                conn.sendall(TUNNEL_GO)
+                return conn
+            except OSError:
+                conn.close()  # a tunnel whose inner end died; try the next
+
+    def serve_client(self, client: socket.socket) -> None:
+        tunnel = self.take()
+        if tunnel is None:
+            with contextlib.suppress(OSError):
+                client.close()
+            return
+        splice(client, tunnel)
+
+
+def _tunnel_worker(tunnel_path: str, port: int, replenish: threading.Semaphore) -> None:
+    """``inner`` side: one idle tunnel; on GO, connect it to the WebUI."""
+    while True:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            conn.connect(tunnel_path)
+        except OSError:
+            conn.close()
+            time.sleep(0.5)
+            continue
+        try:
+            go = conn.recv(1)
+        except OSError:
+            go = b""
+        if go != TUNNEL_GO:
+            conn.close()
+            time.sleep(0.2)
+            continue
+        replenish.release()  # a fresh idle tunnel replaces this one
+        try:
+            upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
+            upstream.settimeout(None)
+        except OSError:
+            conn.close()
+            return
+        splice(conn, upstream)
+        return
+
+
+def _run_tunnel_pool(tunnel_path: str, port: int, size: int = TUNNEL_POOL) -> None:
+    replenish = threading.Semaphore(size)
+    while True:
+        replenish.acquire()
+        threading.Thread(
+            target=_tunnel_worker, args=(tunnel_path, port, replenish), daemon=True
+        ).start()
+
+
 # ── Egress proxy (supervise) ────────────────────────────────────────────────
 
 
 def _read_head(conn: socket.socket) -> tuple[bytes, bytes]:
+    conn.settimeout(HEAD_TIMEOUT_SECONDS)
     buf = b""
     while b"\r\n\r\n" not in buf:
         if len(buf) > MAX_HEAD_BYTES:
@@ -360,6 +617,7 @@ def _read_head(conn: socket.socket) -> tuple[bytes, bytes]:
         if not chunk:
             raise ValueError("connection closed before the request head")
         buf += chunk
+    conn.settimeout(None)
     head, _, rest = buf.partition(b"\r\n\r\n")
     return head, rest
 
@@ -372,6 +630,8 @@ def _split_authority(authority: str, default_port: int) -> tuple[str, int]:
         host, sep, port_s = authority.rpartition(":")
         if not sep:
             host, port_s = authority, ""
+    if port_s and not DIGITS_RE.fullmatch(port_s):
+        raise ValueError(f"bad port in {authority!r}")
     port = int(port_s) if port_s else default_port
     if not host or not 0 < port < 65536:
         raise ValueError(f"bad authority {authority!r}")
@@ -379,22 +639,29 @@ def _split_authority(authority: str, default_port: int) -> tuple[str, int]:
 
 
 class EgressProxy:
-    """HTTP proxy on a Unix socket that only reaches allowlisted host:port pairs."""
+    """HTTP proxy on a Unix socket that only reaches allowlisted host:port pairs.
 
-    def __init__(self, allow: Sequence[tuple[str, int]], log_path: str | None = None) -> None:
+    ``log_fd`` is an already-open append-only descriptor (opened before the
+    sandbox starts), never a path: the log directory is writable from inside.
+    """
+
+    def __init__(self, allow: Sequence[tuple[str, int]], log_fd: int | None = None) -> None:
         self.allow = tuple(allow)
-        self.log_path = log_path
+        self.log_fd = log_fd
         self._log_lock = threading.Lock()
 
-    def log(self, message: str) -> None:
-        if not self.log_path:
+    def log(self, verdict: str, method: str, host: str, port: int | str, extra: str = "") -> None:
+        if self.log_fd is None:
             return
-        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n"
+        # repr() the client-supplied fields: no newline can forge a log line.
+        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {verdict} {method!r} {host!r}:{port}"
+        if extra:
+            line += f" {extra!r}"
         with self._log_lock, contextlib.suppress(OSError):
-            with open(self.log_path, "a", encoding="utf-8") as handle:
-                handle.write(line)
+            os.write(self.log_fd, (line + "\n").encode("utf-8", "backslashreplace"))
 
     def handle(self, conn: socket.socket) -> None:
+        method = "?"
         try:
             head, rest = _read_head(conn)
             request_line, *header_lines = head.decode("iso-8859-1").split("\r\n")
@@ -418,24 +685,24 @@ class EgressProxy:
                 new_head = "\r\n".join([f"{method} {slash}{path} {version}", *headers])
                 forward = new_head.encode("iso-8859-1") + b"\r\n\r\n" + rest
             if not host_allowed(host, port, self.allow):
-                self.log(f"DENY {method} {host}:{port}")
+                self.log("DENY", method, host, port)
                 self._reply(conn, 403, f"egress to {host}:{port} is not in the allowlist")
                 return
             try:
                 upstream = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT_SECONDS)
                 upstream.settimeout(None)
             except OSError as exc:
-                self.log(f"FAIL {method} {host}:{port} {exc}")
+                self.log("FAIL", method, host, port, str(exc))
                 self._reply(conn, 502, f"cannot reach {host}:{port}")
                 return
-            self.log(f"ALLOW {method} {host}:{port}")
+            self.log("ALLOW", method, host, port)
             if method.upper() == "CONNECT":
                 conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 if rest:
                     upstream.sendall(rest)
             splice(conn, upstream, forward)
         except (ValueError, OSError) as exc:
-            self.log(f"BAD {exc}")
+            self.log("BAD", method, "-", "-", str(exc))
             with contextlib.suppress(OSError):
                 self._reply(conn, 400, "malformed proxy request")
         finally:
@@ -445,7 +712,7 @@ class EgressProxy:
     @staticmethod
     def _reply(conn: socket.socket, status: int, message: str) -> None:
         reason = {400: "Bad Request", 403: "Forbidden", 502: "Bad Gateway"}[status]
-        body = f"openace-webui-confine: {message}\n".encode()
+        body = f"openace-webui-confine: {message}\n".encode("utf-8", "backslashreplace")
         conn.sendall(
             f"HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\n"
             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body
@@ -455,32 +722,10 @@ class EgressProxy:
 # ── Mode: launch (root) ─────────────────────────────────────────────────────
 
 
-def _parse_port(raw: str, what: str) -> int:
-    if not raw.isdigit():
-        raise ConfineError(f"{what}: port must be numeric")
-    port = int(raw)
-    if not 0 < port < 65536:
-        raise ConfineError(f"{what}: port out of range")
-    return port
-
-
-def _is_ip(value: str) -> bool:
-    for family in (socket.AF_INET, socket.AF_INET6):
-        try:
-            socket.inet_pton(family, value)
-            return True
-        except OSError:
-            continue
-    return False
-
-
-def _require_ip(value: str, what: str) -> None:
-    if not _is_ip(value):
-        raise ConfineError(f"{what}: not an IP address")
-
-
 def _launch_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="openace-webui-confine launch", add_help=False)
+    parser = argparse.ArgumentParser(
+        prog="openace-webui-confine launch", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--account", required=True)
     parser.add_argument("--port", required=True)
     parser.add_argument("--bind-host", default="0.0.0.0")  # noqa: S104 - today's exposure
@@ -506,30 +751,30 @@ def plan_launch(
     webui_args = list(args.webui_args)
     if webui_args[:1] == ["--"]:
         webui_args = webui_args[1:]
-    entry = resolve_account(args.account)
+    policy = load_policy(policy_path)
+    entry = resolve_account(args.account, policy.denied_groups)
     port = _parse_port(args.port, "--port")
     if port < 1024:
         raise ConfineError("--port must be >= 1024")
     _require_ip(args.bind_host, "--bind-host")
     if not MEMORY_RE.fullmatch(args.memory_max):
         raise ConfineError("--memory-max must look like 4G / 512M / bytes")
-    cpu = int(args.cpu_quota) if args.cpu_quota.isdigit() else -1
+    cpu = _digits(args.cpu_quota, "--cpu-quota")
     if not 1 <= cpu <= 6400:
         raise ConfineError("--cpu-quota must be an integer percentage 1..6400")
-    tasks = int(args.tasks_max) if args.tasks_max.isdigit() else -1
+    tasks = _digits(args.tasks_max, "--tasks-max")
     if not 16 <= tasks <= 65535:
         raise ConfineError("--tasks-max must be 16..65535")
     allow = [parse_allow_entry(item) for item in args.allow]
     if not allow:
         raise ConfineError("at least one --allow host:port is required (the LLM proxy)")
-    allowed_webuis, sandbox_path = load_policy(policy_path)
     webui = args.webui
-    if webui not in allowed_webuis:
+    if os.path.normpath(webui) not in policy.webuis:
         raise ConfineError(f"--webui {webui!r} is not listed in {policy_path}")
-    if not os.path.isfile(webui) or not os.access(webui, os.X_OK):
-        raise ConfineError(f"--webui {webui!r} is not an executable file")
+    require_root_controlled_executable(webui)
+    require_root_controlled_path(policy.path)
     log_dir = validate_log_dir(args.log_dir, entry)
-    base, home, shared = workspace_layout(entry)
+    base, home, shared = workspace_layout(entry, policy.bases)
     try:
         env = validate_env(json.loads(env_text or "{}"))
     except json.JSONDecodeError as exc:
@@ -539,7 +784,7 @@ def plan_launch(
             raise ConfineError(f"{tool} is not installed")
     python = sys.executable or "/usr/bin/python3"
     script = os.path.realpath(__file__)
-    unit = f"openace-webui-{entry.pw_name}-{port}"
+    unit = f"openace-webui-{entry.pw_uid}-{port}"
     systemd_argv = [
         shutil.which("systemd-run", path=SAFE_PATH) or "systemd-run",
         "--scope",
@@ -572,7 +817,7 @@ def plan_launch(
         "shared": shared,
         "webui_argv": [webui, *webui_args],
         "env": env,
-        "path": sandbox_path,
+        "path": policy.path,
         "bwrap": shutil.which("bwrap", path=SAFE_PATH),
         "python": python,
         "script": script,
@@ -603,18 +848,41 @@ def run_launch(argv: Sequence[str]) -> int:
 # ── Mode: supervise (target account, host side) ────────────────────────────
 
 
+def open_egress_log(log_dir: str) -> int | None:
+    """Open the egress log for appending BEFORE the sandbox exists (O_NOFOLLOW)."""
+    try:
+        return os.open(
+            os.path.join(log_dir, EGRESS_LOG_NAME),
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError:
+        return None
+
+
 def run_supervise() -> int:
     payload = json.loads(sys.stdin.read())
     parent = os.getppid()
     allow = [parse_allow_entry(item) for item in payload["allow"]]
     socket_dir = tempfile.mkdtemp(prefix="openace-webui-")
-    egress_path = os.path.join(socket_dir, EGRESS_SOCKET)
-    ingress_path = os.path.join(socket_dir, INGRESS_SOCKET)
-    proxy = EgressProxy(allow, os.path.join(payload["log_dir"], "confine-egress.log"))
-    egress_listener = _unix_listener(egress_path)
+    proxy = EgressProxy(allow, open_egress_log(payload["log_dir"]))
+    egress_listener = _unix_listener(os.path.join(socket_dir, EGRESS_SOCKET))
     threading.Thread(
         target=_serve, args=(egress_listener, proxy.handle, "egress"), daemon=True
     ).start()
+
+    tunnels = TunnelPool()
+    tunnel_listener = _unix_listener(os.path.join(socket_dir, TUNNEL_SOCKET))
+
+    def _accept_tunnels() -> None:
+        while True:
+            try:
+                conn, _ = tunnel_listener.accept()
+            except OSError:
+                return
+            tunnels.add(conn)
+
+    threading.Thread(target=_accept_tunnels, daemon=True, name="tunnels").start()
 
     ingress_listener = socket.socket(
         socket.AF_INET6 if ":" in payload["bind_host"] else socket.AF_INET, socket.SOCK_STREAM
@@ -622,20 +890,8 @@ def run_supervise() -> int:
     ingress_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ingress_listener.bind((payload["bind_host"], int(payload["port"])))
     ingress_listener.listen(128)
-
-    def _ingress(conn: socket.socket) -> None:
-        upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            upstream.connect(ingress_path)
-        except OSError:
-            with contextlib.suppress(OSError):
-                conn.close()
-            upstream.close()
-            return
-        splice(conn, upstream)
-
     threading.Thread(
-        target=_serve, args=(ingress_listener, _ingress, "ingress"), daemon=True
+        target=_serve, args=(ingress_listener, tunnels.serve_client, "ingress"), daemon=True
     ).start()
 
     argv = build_bwrap_argv(
@@ -674,11 +930,13 @@ def run_supervise() -> int:
         shutil.rmtree(socket_dir, ignore_errors=True)
 
 
-# ── Mode: inner (inside bubblewrap) ─────────────────────────────────────────
+# ── Mode: inner (inside the sandbox) ────────────────────────────────────────
 
 
 def run_inner(argv: Sequence[str]) -> int:
-    parser = argparse.ArgumentParser(prog="openace-webui-confine inner", add_help=False)
+    parser = argparse.ArgumentParser(
+        prog="openace-webui-confine inner", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("webui_argv", nargs=argparse.REMAINDER)
     args = parser.parse_args(list(argv))
@@ -686,17 +944,12 @@ def run_inner(argv: Sequence[str]) -> int:
     if webui_argv[:1] == ["--"]:
         webui_argv = webui_argv[1:]
 
-    ingress_listener = _unix_listener(os.path.join(INNER_SOCKET_DIR, INGRESS_SOCKET))
-
-    def _to_webui(conn: socket.socket) -> None:
-        try:
-            upstream = socket.create_connection(("127.0.0.1", args.port), timeout=10)
-            upstream.settimeout(None)
-        except OSError:
-            with contextlib.suppress(OSError):
-                conn.close()
-            return
-        splice(conn, upstream)
+    threading.Thread(
+        target=_run_tunnel_pool,
+        args=(os.path.join(INNER_SOCKET_DIR, TUNNEL_SOCKET), args.port),
+        daemon=True,
+        name="tunnel-pool",
+    ).start()
 
     proxy_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     proxy_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -713,7 +966,7 @@ def run_inner(argv: Sequence[str]) -> int:
             "NO_PROXY": "localhost,127.0.0.1,::1",
             "no_proxy": "localhost,127.0.0.1,::1",
             # Node's built-in fetch honours the proxy variables only with this
-            # flag (Node >= 24); a runtime that ignores them gets no network.
+            # flag (Node >= 22.21 / 24); a runtime that ignores them gets no network.
             "NODE_USE_ENV_PROXY": "1",
         }
     )
@@ -729,7 +982,6 @@ def run_inner(argv: Sequence[str]) -> int:
             return
         splice(conn, upstream)
 
-    threading.Thread(target=_serve, args=(ingress_listener, _to_webui, "in"), daemon=True).start()
     threading.Thread(target=_serve, args=(proxy_listener, _to_proxy, "out"), daemon=True).start()
     child = subprocess.Popen(webui_argv, stdin=subprocess.DEVNULL, env=child_env)  # noqa: S603
 
@@ -746,11 +998,16 @@ def run_inner(argv: Sequence[str]) -> int:
 
 
 def run_check(argv: Sequence[str], policy_path: str = CONFIG_PATH) -> int:
-    """Exit 0 when this host can confine: tools present, systemd running,
-    the policy file valid and listing ``--webui``, and unprivileged user
+    """Exit 0 when this host can confine, else print one reason token.
+
+    Checks: tools present, systemd running, the policy file valid and listing
+    ``--webui`` (a root-controlled executable), and unprivileged user
     namespaces usable by bubblewrap (the Ubuntu 24.04+ AppArmor restriction is
-    the common failure). Prints one token the manager maps to a reason code."""
-    parser = argparse.ArgumentParser(prog="openace-webui-confine check", add_help=False)
+    the common failure). The manager maps the token to a reason code.
+    """
+    parser = argparse.ArgumentParser(
+        prog="openace-webui-confine check", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--webui", default="")
     args = parser.parse_args(list(argv))
     for tool in ("systemd-run", "setpriv", "bwrap"):
@@ -761,13 +1018,14 @@ def run_check(argv: Sequence[str], policy_path: str = CONFIG_PATH) -> int:
         print("systemd:not-running")
         return 1
     try:
-        allowed_webuis, _ = load_policy(policy_path)
+        policy = load_policy(policy_path)
+        if args.webui:
+            if os.path.normpath(args.webui) not in policy.webuis:
+                raise ConfineError(f"{args.webui} is not listed in {policy_path}")
+            require_root_controlled_executable(args.webui)
+        require_root_controlled_path(policy.path)
     except ConfineError as exc:
         print(f"# {exc}", file=sys.stderr)
-        print("policy:invalid")
-        return 1
-    if args.webui and args.webui not in allowed_webuis:
-        print(f"# {args.webui} is not listed in {policy_path}", file=sys.stderr)
         print("policy:invalid")
         return 1
     bwrap = shutil.which("bwrap", path=SAFE_PATH) or "bwrap"

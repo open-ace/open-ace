@@ -27,6 +27,7 @@ def _manager(**overrides) -> WebUIManager:
         enabled=True,
         multi_user_mode=True,
         token_secret="secret-3431",
+        webui_callback_url="http://10.0.0.5:19888",
         os_user_confinement="bwrap",
         confinement_memory_max="2G",
         confinement_cpu_quota=150,
@@ -64,6 +65,16 @@ def test_non_linux_platform_cannot_confine():
     assert (
         manager._confinement_readiness("/usr/bin/qwen-code-webui")
         == "confinement_platform_unsupported"
+    )
+
+
+def test_callback_url_is_required():
+    # Without it the API URL (and so the allowlist) would come from the
+    # request's Host header, which the user controls.
+    manager = _manager(webui_callback_url="")
+    assert (
+        manager._confinement_readiness("/usr/bin/qwen-code-webui")
+        == "confinement_callback_url_missing"
     )
 
 
@@ -168,27 +179,33 @@ def test_confined_env_drops_reserved_loader_and_empty_keys():
     }
 
 
-def test_allowlist_from_api_url_env_urls_and_extras():
-    manager = _manager()
-    entries = manager._confinement_allowlist(
-        "http://10.0.0.5:19888",
-        {
-            "OPENAI_BASE_URL": "http://10.0.0.5:19888/api/proxy/v1",  # duplicate host:port
-            "OPENACE_PROXY_URL": "https://openace.example.com/api",  # https default port
-            "OTHER_URL": "http://[fd00::1]:8080/x",  # IPv6 bracketed
-            "NOT_A_URL_KEY": "http://ignored:1",
-            "BAD_URL": "ftp://ignored",
-        },
+def test_allowlist_comes_from_server_config_only():
+    manager = _manager(
+        webui_callback_url="https://openace.example.com/",
+        confinement_egress_allow=("registry.npmjs.org:443", "openace.example.com:443"),
     )
-    assert entries == [
-        "10.0.0.5:19888",
+    assert manager._confinement_allowlist() == [
         "openace.example.com:443",
-        "[fd00::1]:8080",
         "registry.npmjs.org:443",
     ]
+    ipv6 = _manager(webui_callback_url="http://[fd00::1]:8080", confinement_egress_allow=())
+    assert ipv6._confinement_allowlist() == ["[fd00::1]:8080"]
 
 
-def test_confined_command_carries_no_environment_values():
+def test_request_derived_urls_never_reach_the_allowlist():
+    manager = _manager()
+    cmd = manager._build_confined_command(
+        system_account="alice",
+        port=3150,
+        webui_cmd="/usr/bin/qwen-code-webui",
+        webui_log_dir="/tmp/qwen-code-webui-7",
+        openace_api_url="http://attacker.example:19888",  # e.g. from a forged Host header
+    )
+    allows = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--allow"]
+    assert allows == ["10.0.0.5:19888", "registry.npmjs.org:443"]
+
+
+def test_confined_command_shape():
     manager = _manager()
     cmd = manager._build_confined_command(
         system_account="alice",
@@ -196,13 +213,8 @@ def test_confined_command_carries_no_environment_values():
         webui_cmd="/usr/bin/qwen-code-webui",
         webui_log_dir="/tmp/qwen-code-webui-7",
         openace_api_url="http://10.0.0.5:19888",
-        child_env={
-            "OPENAI_API_KEY": "tok-must-not-leak",
-            "OPENAI_BASE_URL": "http://10.0.0.5:19888/v1",
-        },
     )
     assert cmd[:4] == ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch"]
-    assert "tok-must-not-leak" not in " ".join(cmd)
     pairs = dict(zip(cmd[4::2], cmd[5::2], strict=False))
     assert pairs["--account"] == "alice"
     assert pairs["--memory-max"] == "2G"
@@ -340,3 +352,22 @@ def test_read_workspace_config_parses_confinement(tmp_path, monkeypatch):
     assert config.confinement_cpu_quota == 400
     assert config.confinement_tasks_max == 1024
     assert config.confinement_egress_allow == ("pypi.org:443", "files.pythonhosted.org:443")
+
+
+@pytest.mark.parametrize("form", ["dev_directory", "same_account"])
+@patch("app.services.webui_manager.pwd")
+@patch("app.services.webui_manager.subprocess.Popen")
+@patch("app.services.webui_manager.run_as_root_if_needed")
+def test_unconfinable_launch_forms_fail_closed(mock_chown, mock_popen, mock_pwd, form):
+    manager = _manager()
+    mock_pwd.getpwuid.return_value.pw_name = "alice" if form == "same_account" else "openace"
+    mock_chown.return_value = SimpleNamespace(returncode=0, stderr="")
+    webui = ("/src/webui/cli.js", "/src/webui") if form == "dev_directory" else ("/usr/bin/w", None)
+    with (
+        patch.object(manager, "_build_webui_env", return_value=({"OPENAI_API_KEY": "t"}, {})),
+        patch.object(manager, "_find_webui_executable", return_value=webui),
+        patch("app.services.webui_manager.os.makedirs"),
+    ):
+        process, _ = manager._launch_webui_process(7, "alice", 3150, "http://10.0.0.5")
+    assert process is None
+    mock_popen.assert_not_called()

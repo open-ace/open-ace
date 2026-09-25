@@ -2312,6 +2312,21 @@ class WebUIManager:
         # Issue #3431: the confined launch hands the environment to the root
         # wrapper on stdin, never on a (world-readable) command line.
         stdin_payload: bytes | None = None
+        if self._confinement_enabled() and (
+            webui_dir
+            or self._platform not in ("linux", "darwin")
+            or pwd.getpwuid(os.getuid()).pw_name == system_account
+        ):
+            # Fail closed: these launch forms cannot be confined (dev-directory
+            # node, no user switch). The readiness probe normally refuses the
+            # first two before we get here; the same-account form is caught
+            # only here.
+            logger.error(
+                "Confinement is configured but this WebUI launch form cannot be "
+                "confined (user %s); refusing to launch unconfined",
+                user_id,
+            )
+            return None, model_pool
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -2349,15 +2364,15 @@ class WebUIManager:
                 cwd = None
             elif self._confinement_enabled():
                 # Issue #3431 (Option 1): confined launch. The readiness probe
-                # already refused this path on a host that cannot confine, so
-                # there is no unconfined fallback here (fail-closed).
+                # refused hosts that cannot confine and the guard above refused
+                # the unconfinable forms, so this branch is the only one left
+                # when confinement is configured.
                 cmd = self._build_confined_command(
                     system_account=system_account,
                     port=port,
                     webui_cmd=webui_cmd,
                     webui_log_dir=webui_log_dir,
                     openace_api_url=openace_api_url,
-                    child_env=child_env,
                 )
                 stdin_payload = json.dumps(self._confined_env(child_env)).encode()
                 cwd = None
@@ -2838,6 +2853,11 @@ class WebUIManager:
             return "confinement_mode_invalid"
         if self._platform != "linux":
             return "confinement_platform_unsupported"
+        # The egress allowlist is derived from server-side configuration
+        # only: without webui_callback_url the API URL would come from the
+        # request's Host header, which the user controls.
+        if not (getattr(self.config, "webui_callback_url", "") or "").strip():
+            return "confinement_callback_url_missing"
         from app.utils.workspace import _is_wrapper_available
 
         if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
@@ -2873,29 +2893,25 @@ class WebUIManager:
             and not key.startswith(_CONFINE_DENY_ENV_PREFIXES)
         }
 
-    def _confinement_allowlist(self, openace_api_url: str, child_env: dict[str, str]) -> list[str]:
+    def _confinement_allowlist(self) -> list[str]:
         """Return the host:port pairs the sandbox may reach.
 
-        The Open ACE API / LLM proxy endpoints from the launch environment,
-        plus the configured ``confinement_egress_allow`` extras.
+        Server-side configuration ONLY — ``webui_callback_url`` (the Open ACE
+        API and its LLM proxy, required by the readiness probe) plus
+        ``confinement_egress_allow``. Never the request-derived API URL: its
+        host comes from the client's Host header.
         """
         from urllib.parse import urlsplit
 
-        urls = [openace_api_url] + [
-            value
-            for key, value in sorted(child_env.items())
-            if key.endswith("_URL") and value.startswith(("http://", "https://"))
-        ]
         entries: list[str] = []
-        for url in urls:
-            try:
-                parsed = urlsplit(url)
-                host = parsed.hostname
-                port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            except ValueError:
-                continue
-            if not host:
-                continue
+        callback = (getattr(self.config, "webui_callback_url", "") or "").strip()
+        try:
+            parsed = urlsplit(callback)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError:
+            host = None
+        if host:
             entries.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
         entries.extend(getattr(self.config, "confinement_egress_allow", ()) or ())
         return list(dict.fromkeys(entries))
@@ -2908,7 +2924,6 @@ class WebUIManager:
         webui_cmd: str,
         webui_log_dir: str,
         openace_api_url: str,
-        child_env: dict[str, str],
     ) -> list[str]:
         """``sudo -n openace-webui-confine launch ...`` for one user's WebUI.
 
@@ -2933,7 +2948,7 @@ class WebUIManager:
             "--log-dir",
             webui_log_dir,
         ]
-        for entry in self._confinement_allowlist(openace_api_url, child_env):
+        for entry in self._confinement_allowlist():
             cmd += ["--allow", entry]
         cmd += [
             "--webui",

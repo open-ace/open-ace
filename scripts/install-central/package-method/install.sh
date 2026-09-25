@@ -2898,6 +2898,15 @@ configure_sudoers() {
     if [ -x /usr/local/bin/openace-webui-confine ]; then
         confine_rule="$run_user ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-confine launch *"
     fi
+    # When confinement is configured, the plain launch rule would let the
+    # service account start an UNCONFINED WebUI as any account; omit it.
+    # (Re-run the installer after changing workspace.os_user_confinement.)
+    local confine_configured=false
+    if [ -n "$confine_rule" ] && [ -f "${config_dir:-}/config.json" ] && \
+       python3 -c 'import json,sys; m=str(json.load(open(sys.argv[1])).get("workspace",{}).get("os_user_confinement","")).strip().lower(); sys.exit(0 if m not in ("","off") else 1)' \
+           "${config_dir}/config.json" 2>/dev/null; then
+        confine_configured=true
+    fi
 
     local security_wrapper_rules=""
     for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
@@ -2916,6 +2925,13 @@ $run_user ALL=(root) NOPASSWD: $wrapper_bin *"
 # 安全性：wrapper 内部使用 exec /usr/bin/env，只设置环境变量并执行后续命令；
 # 第二个 * 限制 webui_path 之后只能是合法的 WebUI 参数，防止权限提升。
 $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *"
+    if [ "$confine_configured" = true ]; then
+        # Issue #3431: drop the unconfined launch rule (kept above verbatim
+        # for the non-confined case) and leave a marker instead.
+        current_user_rules=$(printf '%s\n' "$current_user_rules" | grep -v "NOPASSWD: /usr/local/bin/openace-webui-launch ")
+        current_user_rules="${current_user_rules}
+# openace-webui-launch rule omitted: workspace.os_user_confinement is set (Issue #3431)"
+    fi
 
     # Only add webui_local_rule if not empty
     if [ -n "$webui_local_rule" ]; then
@@ -3078,7 +3094,8 @@ ${line}"
         # leaving the new run_user without sudo permission (#1197 review).
         # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
         # so we grep for lines starting with "$run_user " that also contain the path.
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
+        if [ "$confine_configured" != true ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
