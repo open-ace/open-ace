@@ -80,6 +80,7 @@ def test_docker_argv_is_fully_pinned(confine):
         "--memory 4G --memory-swap 4G",
         "--cpus 1.50",
         "--pids-limit 512",
+        "--ulimit nproc=512:512",
         "type=bind,src=/wsbase/alice,dst=/wsbase/alice",
         "type=bind,src=/wsbase/shared,dst=/wsbase/shared",
         "type=bind,src=/tmp/qwen-code-webui-7,dst=/tmp/qwen-code-webui-7",
@@ -189,6 +190,8 @@ def planned_container(confine, monkeypatch):
     checked: list[str] = []
     monkeypatch.setattr(confine, "require_root_controlled_executable", checked.append)
     monkeypatch.setattr(confine.shutil, "which", lambda tool, path=None: f"/usr/bin/{tool}")
+    monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: state["protected"])
+    state["protected"] = True
 
     def _plan():
         argv = [
@@ -264,6 +267,7 @@ def probe(confine, monkeypatch, capsys, tmp_path):
     policy = confine.Policy(frozenset(), "/usr/bin", frozenset(), frozenset(), _container(confine))
     monkeypatch.setattr(confine, "load_policy", lambda path=None: policy)
     monkeypatch.setattr(confine, "require_root_controlled_executable", lambda p: None)
+    monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: True)
     # production runs as root and hands the probe socket to nobody (65534)
     monkeypatch.setattr(confine.os, "chown", lambda *a, **k: None)
     # AF_UNIX paths are capped (~104 bytes on macOS): keep the run root short
@@ -383,3 +387,63 @@ def test_summaries_slow_down_past_the_ceiling(confine, tmp_path, monkeypatch):
     written = [line for line in lines if " ALLOW 'CONNECT'" in line]
     counted = sum(int(line.rsplit("x", 1)[1]) for line in summaries)
     assert len(written) + counted == 120 * 3  # nothing lost: every decision is counted
+
+
+# ── review round 1 (#3437) ──────────────────────────────────────────────────
+
+
+def test_task_bound_is_rlimit_nproc_with_a_host_thread_floor(confine):
+    argv = " ".join(_docker_argv(confine, tasks_max=64))
+    assert "--ulimit nproc=64:64" in argv  # enforced per uid by the gVisor kernel
+    assert "--pids-limit 256" in argv  # gVisor's own host threads need headroom
+
+
+def test_symlinks_protected_reads_the_sysctl(confine, tmp_path):
+    flag = tmp_path / "protected_symlinks"
+    flag.write_text("1\n")
+    assert confine.symlinks_protected(str(flag)) is True
+    flag.write_text("0\n")
+    assert confine.symlinks_protected(str(flag)) is False
+    assert confine.symlinks_protected(str(tmp_path / "missing")) is False
+
+
+def test_container_planning_requires_protected_symlinks(confine, planned_container):
+    planned_container.state["protected"] = False
+    with pytest.raises(confine.ConfineError, match="protected_symlinks"):
+        planned_container()
+
+
+def test_probe_reports_unprotected_symlinks(probe, confine, monkeypatch):
+    monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: False)
+    assert probe({}) == (1, "symlinks:unprotected")
+
+
+def test_supervisor_exits_at_once_when_the_launcher_is_already_gone(confine, tmp_path):
+    flushed = []
+
+    class _Proxy:
+        def flush(self, final=False):
+            flushed.append(final)
+
+    (tmp_path / confine.TUNNEL_SOCKET).write_text("")
+    (tmp_path / confine.EGRESS_SOCKET).write_text("")
+    # a parent pid that is not ours: docker failed fast and the launcher exited
+    assert confine._supervise_until_parent_exits(os.getppid() + 1, str(tmp_path), _Proxy()) == 0
+    assert flushed == [True]  # the final audit-log summaries are written
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_docker_remove_only_touches_our_labelled_container(confine, monkeypatch):
+    calls = []
+
+    def _fake(argv, **kwargs):
+        calls.append(argv[1])
+        label = "1" if "ours" in argv[-1] else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=label + "\n", stderr="")
+
+    monkeypatch.setattr(confine.subprocess, "run", _fake)
+    confine._docker_remove("/usr/bin/docker", "someone-elses")
+    assert calls == ["inspect"]
+    calls.clear()
+    confine._docker_remove("/usr/bin/docker", "ours")
+    assert calls == ["inspect", "rm"]

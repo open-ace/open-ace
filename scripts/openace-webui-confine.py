@@ -32,7 +32,7 @@ same ``supervise`` endpoints (as the account, via setpriv) and execs a fixed
 ``docker run`` whose image is digest-pinned in the policy; the WebUI
 environment reaches ``inner`` on the container's stdin. ``launch --probe``
 (root) verifies the runtime, the image, a gVisor kernel and host UNIX-socket
-access (runsc needs ``--host-uds=all``) for the manager's readiness check.
+access (runsc needs ``--host-uds=open``) for the manager's readiness check.
 
 Nothing on the host side ever follows a path the sandbox can write: the
 socket directory is bound READ-ONLY into the sandbox, the sandbox only
@@ -87,6 +87,21 @@ IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9._/:-]*@)?sha256:[0-9a-f]{64}$")
 RUNTIME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MOUNT_UNSAFE_RE = re.compile(r"[,\n\r\0=]")
 SUPERVISOR_WATCH_SECONDS = 30.0
+CONTAINER_MIN_HOST_PIDS = 256  # gVisor sentry host-thread floor (--pids-limit)
+PROTECTED_SYMLINKS = "/proc/sys/fs/protected_symlinks"
+
+
+def symlinks_protected(path: str = PROTECTED_SYMLINKS) -> bool:
+    """fs.protected_symlinks=1: docker (root) cannot be steered through a
+    symlink the account plants in sticky /tmp — the log dir is bind-mounted
+    by path. Default on Debian/Ubuntu/RHEL; required by the container backend."""
+    try:
+        with open(path, encoding="ascii") as handle:
+            return handle.read().strip() == "1"
+    except OSError:
+        return False
+
+
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Root-owned policy file written by the installer. ``launch`` refuses to run
 # without it: it pins which executables may be started as a user (a free
@@ -173,7 +188,7 @@ class ContainerPolicy(NamedTuple):
     """The policy's ``container`` section (Option 2 backend)."""
 
     image: str  # name@sha256:<64 hex> or a local image id sha256:<64 hex>
-    runtime: str  # a Docker runtime name registered for runsc --host-uds=all
+    runtime: str  # a Docker runtime name registered for runsc --host-uds=open
     docker: str  # absolute path of the docker CLI
 
 
@@ -658,7 +673,12 @@ def build_docker_argv(
         "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--memory", memory_max, "--memory-swap", memory_max,
-        "--cpus", f"{cpu_quota / 100:.2f}", "--pids-limit", str(tasks_max),
+        "--cpus", f"{cpu_quota / 100:.2f}",
+        # Under gVisor, --pids-limit bounds the SENTRY's host threads (it
+        # needs a few hundred); the container's own processes are bounded by
+        # RLIMIT_NPROC, which the gVisor kernel enforces per uid.
+        "--pids-limit", str(max(tasks_max, CONTAINER_MIN_HOST_PIDS)),
+        "--ulimit", f"nproc={tasks_max}:{tasks_max}",
         "--mount", f"type=bind,src={_mount_safe(home)},dst={home}",
     ]  # fmt: skip
     if shared:
@@ -1326,6 +1346,8 @@ def _plan_container(
     if policy.container is None:
         raise ConfineError("the policy file has no 'container' section")
     require_root_controlled_executable(policy.container.docker)
+    if not symlinks_protected():
+        raise ConfineError("fs.protected_symlinks must be 1 for the container backend")
     if shutil.which("setpriv", path=SAFE_PATH) is None:
         raise ConfineError("setpriv is not installed")
     python = sys.executable or "/usr/bin/python3"
@@ -1440,31 +1462,79 @@ def _exec_with_stdin(argv: list[str], data: bytes) -> None:
     os.execve(argv[0], argv, {"PATH": SAFE_PATH, "LANG": "C.UTF-8"})
 
 
-def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) -> int:
-    """Fork the supervisor (as the account), then exec ``docker run``.
+def _docker_remove(docker: str, name: str) -> None:
+    """Force-remove our container *name* (only if it carries our label)."""
+    env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        label = subprocess.run(  # noqa: S603 - fixed argv
+            [docker, "inspect", "-f", '{{index .Config.Labels "org.openace.confine"}}', name],
+            capture_output=True, text=True, timeout=30, check=False, env=env,
+        )  # fmt: skip
+        if label.returncode == 0 and label.stdout.strip() == "1":
+            subprocess.run(  # noqa: S603 - fixed argv
+                [docker, "rm", "-f", name], capture_output=True, timeout=60, check=False, env=env
+            )
 
-    The supervisor's parent is this process — the docker CLI after exec — so
-    its parent watch stops it when the container ends. SIGTERM from the
-    manager reaches the docker CLI (via sudo), which forwards it to the
-    container; if the CLI is SIGKILLed, the container's ``inner`` notices the
-    supervisor is gone and stops the WebUI on its own.
+
+def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) -> int:
+    """Run the supervisor (as the account) and ``docker run``; stay their root parent.
+
+    Staying alive (instead of exec'ing docker) is what makes teardown
+    reliable: sudo forwards SIGTERM to this process, which forwards it to the
+    docker CLI; when sudo itself is SIGKILLed (the manager's escalation, not
+    forwarded) this process notices it was reparented and force-removes the
+    container. A container left over from a previous launch on the same port
+    is removed first, and the run directory is cleaned up at the end.
     """
     uid, gid = int(payload["uid"]), int(payload["gid"])
-    prepare_run_dir(str(payload["socket_dir"]), uid, gid)
-    log_fd = open_root_egress_log(uid)
-    supervisor_payload = dict(payload, log_fd=log_fd)
-    inner_env = supervisor_payload.pop("inner_env")
+    docker = docker_argv[0]
+    name = docker_argv[docker_argv.index("--name") + 1]
+    run_dir = str(payload["socket_dir"])
+    supervisor_payload = dict(payload, parent_pid=os.getpid())
+    inner_env = json.dumps(supervisor_payload.pop("inner_env")).encode() + b"\n"
     setpriv_argv = list(supervisor_payload.pop("setpriv_argv"))  # type: ignore[call-overload]
+    if len(inner_env) > PIPE_BUFFER - 1:
+        raise ConfineError("environment too large for the hand-off pipe")
+    _docker_remove(docker, name)
+    prepare_run_dir(run_dir, uid, gid)
+    log_fd = open_root_egress_log(uid)
+    supervisor_payload["log_fd"] = log_fd
     data = json.dumps(supervisor_payload).encode()
-    pid = os.fork()
-    if pid == 0:  # pragma: no cover - exercised by the acceptance run
+    parent = os.getppid()
+    supervisor = os.fork()
+    if supervisor == 0:  # pragma: no cover - exercised by the acceptance run
         try:
             _exec_with_stdin(setpriv_argv, data)
         finally:
             os._exit(70)
     os.close(log_fd)  # only the supervisor writes the audit log
-    _exec_with_stdin(docker_argv, json.dumps(inner_env).encode() + b"\n")
-    return 0  # pragma: no cover - execve does not return
+    container = subprocess.Popen(  # noqa: S603 - fixed argv
+        docker_argv, stdin=subprocess.PIPE, env={"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
+    )
+    assert container.stdin is not None
+    container.stdin.write(inner_env)
+    container.stdin.close()
+
+    def _forward(signum, _frame) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            container.send_signal(signum)
+
+    signal.signal(signal.SIGTERM, _forward)
+    signal.signal(signal.SIGINT, _forward)
+    try:
+        while True:
+            try:
+                return container.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                if os.getppid() != parent:
+                    # sudo was killed: nothing will signal us again.
+                    _docker_remove(docker, name)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(supervisor, signal.SIGTERM)
+        with contextlib.suppress(ChildProcessError):
+            os.waitpid(supervisor, 0)
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 def run_launch(argv: Sequence[str]) -> int:
@@ -1503,7 +1573,9 @@ def _ingress_limit(payload: dict) -> int:
 
 def run_supervise() -> int:
     payload = json.loads(sys.stdin.read())
-    parent = os.getppid()
+    # The launcher's pid travels in the payload: if it already exited (docker
+    # failed fast), os.getppid() here would already be 1 and never change.
+    parent = int(payload.get("parent_pid") or os.getppid())
     allow = [parse_allow_entry(item) for item in payload["allow"]]
     container_mode = payload.get("backend") == "container"
     # The container backend gets a root-prepared directory (see prepare_run_dir).
@@ -1556,7 +1628,7 @@ def run_supervise() -> int:
     ).start()
 
     if container_mode:
-        return _supervise_until_parent_exits(parent, socket_dir)
+        return _supervise_until_parent_exits(parent, socket_dir, proxy)
 
     argv = build_bwrap_argv(
         bwrap=payload["bwrap"],
@@ -1595,19 +1667,19 @@ def run_supervise() -> int:
         shutil.rmtree(socket_dir, ignore_errors=True)
 
 
-def _supervise_until_parent_exits(parent: int, socket_dir: str) -> int:
-    """Container backend: keep the endpoints up while the docker CLI runs."""
+def _supervise_until_parent_exits(parent: int, socket_dir: str, proxy: EgressProxy) -> int:
+    """Container backend: keep the endpoints up while the root launcher runs."""
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     try:
-        while not stop.wait(1.0):
-            if os.getppid() != parent:
-                break
+        while os.getppid() == parent and not stop.wait(1.0):
+            pass
         return 0
     finally:
-        # The directory itself sits in the root-owned run root; remove what
-        # we created in it.
+        proxy.flush(final=True)
+        # The directory itself sits in the root-owned run root (the launcher
+        # removes it); remove what we created in it.
         for name in (TUNNEL_SOCKET, EGRESS_SOCKET):
             with contextlib.suppress(OSError):
                 os.unlink(os.path.join(socket_dir, name))
@@ -1717,7 +1789,7 @@ def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
     is root-controlled, the runtime is registered, the pinned image exists
     locally (no pull at launch), the runtime is gVisor (positively, from the
     guest's /proc/version) and the container can connect to a host UNIX
-    socket in a read-only bind mount (runsc needs --host-uds=all).
+    socket in a read-only bind mount (runsc needs --host-uds=open).
     """
     try:
         policy = load_policy(policy_path)
@@ -1729,6 +1801,9 @@ def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
         print("policy:invalid")
         return 1
     container = policy.container
+    if not symlinks_protected():
+        print("symlinks:unprotected")
+        return 1
     env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
 
     def _docker(*argv: str, timeout: float = 30) -> subprocess.CompletedProcess:

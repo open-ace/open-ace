@@ -81,6 +81,7 @@ _CONTAINER_PROBE_REASONS = {
     "image:missing": "confinement_image_missing",
     "kernel:unverified": "confinement_kernel_unverified",
     "runtime:no-host-uds": "confinement_runtime_host_uds_disabled",
+    "symlinks:unprotected": "confinement_symlinks_unprotected",
     "probe:failed": "confinement_check_failed",
 }
 # The probe starts a container: cache a success for an hour (the runtime and
@@ -3266,7 +3267,14 @@ class WebUIManager:
         # sandboxed-capable deployment launches pods, which have no OS
         # account by design; skipping those prestarts would silently diverge
         # from what /user-url actually launches.
-        launch_form_is_sandboxed = snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+        # Issue #3431: only the OpenSandbox pod form has no OS account; a
+        # local-container sandboxed deployment still needs the mapping.
+        from app.services.workspace_isolation_contract import is_opensandbox_backend
+
+        launch_form_is_sandboxed = (
+            snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+            and is_opensandbox_backend(snapshot.backend)
+        )
         if not system_account and not launch_form_is_sandboxed:
             logger.info("Skipping webui prestart for user %s: no explicit mapping", user_id)
             return

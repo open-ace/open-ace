@@ -13,7 +13,7 @@ bubblewrap, and it creates OS accounts. Run it ONLY on a disposable host:
     CONFINE_ACCEPTANCE_DISPOSABLE=1 python3 scripts/webui_confine_acceptance.py
 
 Option 2 (``--backend container``, a Docker + gVisor host with a registered
-``runsc --host-uds=all`` runtime and the webui-sandbox image built locally):
+``runsc --host-uds=open`` runtime and the webui-sandbox image built locally):
 
     CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=container \
     CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
@@ -210,7 +210,10 @@ def setup(real_webui: bool) -> None:
 
 
 def teardown() -> None:
-    sudo("pkill", "-u", "cfa", check=False)
+    sudo("pkill", "-KILL", "-u", "cfa", check=False)
+    deadline = time.monotonic() + 15  # userdel refuses while processes remain
+    while time.monotonic() < deadline and sh("pgrep", "-u", "cfa", check=False).stdout.strip():
+        time.sleep(0.5)
     for name in USERS:
         sudo("userdel", "-r", name, check=False)
     sudo("groupdel", SHARED_GROUP, check=False)
@@ -546,22 +549,40 @@ def run_container(record: Record) -> None:
         process.wait(timeout=30)
         gone = not sudo("docker", "ps", "-aq", "--filter", f"name={name}").stdout.strip()
         record.check("SIGTERM to sudo removes the container", gone)
+        # (a) the docker CLI is SIGKILLed, then the manager relaunches at once
+        # on the same port: the leftover container must not block the launch.
         process = _launch()
         wait_http("http://127.0.0.1:3441/", timeout=90)
-        cli = sh(
+        for pid in sh(
             "pgrep", "-f", f"docker run --rm -i --init --name {name}", check=False
-        ).stdout.split()
-        for pid in cli:
+        ).stdout.split():
             sudo("kill", "-KILL", pid, check=False)
-        deadline = time.monotonic() + 90
+        process.wait(timeout=30)
+        process = _launch()
+        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
+        record.check("immediate relaunch after SIGKILL of the docker CLI serves again",
+                     answer is not None and answer[0] == 200)  # fmt: skip
+
+        # (b) the manager's escalation with inner suspended from inside the
+        # container: SIGTERM to sudo, wait, SIGKILL to sudo (not forwarded).
+        sudo("docker", "exec", name, "pkill", "-STOP", "-f", "confine.py inner", check=False)
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        deadline = time.monotonic() + 60
         while (
             time.monotonic() < deadline
             and sudo("docker", "ps", "-q", "--filter", f"name={name}").stdout.strip()
         ):
-            time.sleep(2)
-        record.check("watchdog removes the container after SIGKILL of the docker CLI",
-                     not sudo("docker", "ps", "-q", "--filter", f"name={name}").stdout.strip())  # fmt: skip
-        process.wait(timeout=30)
+            time.sleep(1)
+        container_gone = not sudo("docker", "ps", "-q", "--filter", f"name={name}").stdout.strip()
+        port_free = wait_http("http://127.0.0.1:3441/", timeout=3) is None
+        record.check("manager stop (terminate, then kill of sudo) removes a suspended container",
+                     container_gone and port_free,
+                     {"container_gone": container_gone, "port_free": port_free})  # fmt: skip
         policy_text = sudo("cat", POLICY).stdout
         broken = json.loads(policy_text)
         broken["container"]["runtime"] = "runsc"  # plain runsc: no host UDS

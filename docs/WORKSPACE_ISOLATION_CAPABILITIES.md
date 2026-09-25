@@ -349,10 +349,10 @@ gVisor(runsc)。与 §5.1 共用同一个 root 入口、宿主侧进程与出口
 | 维度 | 机制 |
 |---|---|
 | kernel | gVisor 用户态内核;readiness 探针在容器内读取 `/proc/version`,**正向**确认是 gVisor |
-| 资源 | `docker run --memory/--memory-swap/--cpus/--pids-limit`(取自 `confinement_*` 配置) |
+| 资源 | `docker run --memory/--memory-swap/--cpus` + `--ulimit nproc=<tasks_max>`(gVisor 内核按 uid 强制的进程数上限);`--pids-limit` 在 gVisor 下限制的是 sentry 的宿主线程,取 `max(tasks_max, 256)` |
 | 文件系统 | 只读镜像根 + `--tmpfs /tmp`;只挂入本人 home、`<base>/shared` 与日志目录;`--user <uid>:<gid>` + 账户附加组(`--group-add`) |
 | 进程/权限 | `--cap-drop ALL`、`--security-opt no-new-privileges`、`--init` |
-| 网络 | `--network none`;出入口与 §5.1 相同:反向隧道 + 只放行白名单 `host:port` 的出口代理(经只读挂入的 UNIX socket,需 runsc `--host-uds=all`) |
+| 网络 | `--network none`;出入口与 §5.1 相同:反向隧道 + 只放行白名单 `host:port` 的出口代理(经只读挂入的 UNIX socket,需 runsc `--host-uds=open`) |
 | 环境 | WebUI 环境经容器 stdin 传入,不出现在命令行,`docker inspect` 也看不到 |
 
 快照:`isolation_level = sandboxed`、`backend = local-container:runsc`、七个维度全部 `enforced`。
@@ -367,9 +367,11 @@ gVisor(runsc)。与 §5.1 共用同一个 root 入口、宿主侧进程与出口
 
 1. Docker + gVisor,并注册一个专用运行时(`/etc/docker/daemon.json`):
    ```json
-   {"runtimes": {"runsc-openace": {"path": "/usr/bin/runsc", "runtimeArgs": ["--host-uds=all"]}}}
+   {"runtimes": {"runsc-openace": {"path": "/usr/bin/runsc", "runtimeArgs": ["--host-uds=open"]}}}
    ```
-   `--host-uds=all` 只作用于使用该运行时的容器;容器内能看到的宿主 socket 只有只读挂入的那两个。
+   `--host-uds=open` 只允许**连接**宿主 socket(不能创建),且只作用于使用该运行时的容器;容器能连接的
+   是挂入目录(home、shared、日志目录、只读 socket 目录)中已存在且权限允许的 socket——与 §5.1 的
+   bubblewrap 形态一致。
 2. WebUI 镜像:用 `scripts/docker/webui-sandbox.Dockerfile` 构建(含 node、python3 与固定版本的
    qwen-code-webui),并在策略文件里**按内容固定**:
    ```json
@@ -381,17 +383,22 @@ gVisor(runsc)。与 §5.1 共用同一个 root 入口、宿主侧进程与出口
 3. `workspace.os_user_confinement = "runsc"`,`workspace.webui_callback_url` 必填(同 §5.1);
    可用 `confinement_container_webui` 改镜像内 WebUI 路径(默认 `/usr/bin/qwen-code-webui`)。
 
+要求 `fs.protected_symlinks=1`(Debian/Ubuntu/RHEL 默认):日志目录按路径由 docker(root)挂载,
+该设置阻止账户在粘滞的 `/tmp` 中用符号链接引导挂载源;未满足时报 `confinement_symlinks_unprotected`。
+
 readiness:manager 通过 `sudo -n openace-webui-confine launch --probe`(root)检查——docker CLI 为
 root 所控、运行时已注册、镜像已在本地(启动时不拉取)、容器内内核为 gVisor、容器能连上只读挂入的
 宿主 UNIX socket。成功结果缓存 1 小时,失败 30 秒。原因码:`confinement_docker_unavailable`、
 `confinement_runtime_missing`、`confinement_image_missing`、`confinement_kernel_unverified`、
-`confinement_runtime_host_uds_disabled`、`confinement_policy_invalid`、`confinement_check_failed`
+`confinement_runtime_host_uds_disabled`、`confinement_symlinks_unprotected`、`confinement_policy_invalid`、
+`confinement_check_failed`
 (以及 §5.1 共有的 `confinement_platform_unsupported`、`confinement_callback_url_missing`、
 `confinement_wrapper_missing`)。
 
-生命周期:manager 对 sudo 发 SIGTERM → docker CLI 转发给容器 → WebUI 退出、`--rm` 删除容器。
-docker CLI 被 SIGKILL 时容器不会被 Docker 停止;容器内的看门狗在宿主侧进程消失约 30 秒后自行
-停止 WebUI,随后 `--rm` 删除容器(实测 36 秒)。
+生命周期:root 启动进程在容器存活期间一直作为父进程——manager 对 sudo 发 SIGTERM → 转发给 docker
+CLI → 容器 → WebUI 退出、`--rm` 删除容器;manager 升级为 SIGKILL(sudo 不转发)时,root 启动进程
+发现自己被重新挂接,直接 `docker rm -f` 该容器。同一端口上遗留的旧容器在启动前被移除,运行目录在
+结束时清理。若宿主侧进程意外消失,容器内的看门狗约 30 秒后停止 WebUI,`--rm` 删除容器。
 
 **诚实声明**:
 
