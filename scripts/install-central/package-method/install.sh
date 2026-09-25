@@ -2501,6 +2501,68 @@ install_webui_launch_wrapper() {
     return 0
 }
 
+# Install the confined-launch wrapper + its root-owned policy file (Issue #3431,
+# Option 1). Harmless until an operator sets workspace.os_user_confinement to
+# "bwrap": the wrapper is only invoked on that path. The policy file pins which
+# executables the root wrapper may start as a user and the PATH they see; an
+# existing file keeps its entries and only gains the current webui path. Must
+# run BEFORE configure_sudoers (the rule keys off -x on the wrapper).
+install_webui_confine_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-webui-confine.py"
+    local dst="/usr/local/bin/openace-webui-confine"
+    local policy="/etc/openace/webui-confine.json"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-webui-confine.py not found at $src; skipping"
+        return 1
+    fi
+    if ! install -o root -g root -m 0755 "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to install $dst (need root?)"
+        return 1
+    fi
+
+    local webui_path="/usr/bin/qwen-code-webui"
+    if [ ! -x "$webui_path" ]; then
+        webui_path=$(find_webui_executable 2>/dev/null)
+    fi
+    local node_dir=""
+    if command -v node >/dev/null 2>&1; then
+        node_dir=$(dirname "$(command -v node)")
+    fi
+    install -d -o root -g root -m 0755 /etc/openace
+    # shellcheck disable=SC2016  # single-quoted Python, expanded by python3
+    if ! POLICY="$policy" WEBUI="$webui_path" NODE_DIR="$node_dir" python3 -c '
+import json, os
+path, webui, node_dir = os.environ["POLICY"], os.environ["WEBUI"], os.environ["NODE_DIR"]
+data = {}
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+webuis = [w for w in data.get("webui", []) if isinstance(w, str)]
+if webui and webui not in webuis:
+    webuis.append(webui)
+parts = [p for p in data.get("path", "/usr/local/bin:/usr/bin:/bin").split(":") if p]
+if node_dir and node_dir not in parts:
+    parts.insert(0, node_dir)
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    json.dump({"webui": webuis, "path": ":".join(parts)}, handle, indent=2)
+    handle.write("\n")
+os.replace(tmp, path)
+'; then
+        print_warning "Failed to write $policy"
+        return 1
+    fi
+    chown root:root "$policy"
+    chmod 0644 "$policy"
+    print_success "Installed webui-confine wrapper to $dst (policy: $policy)"
+    if ! command -v bwrap >/dev/null 2>&1; then
+        print_info "Confined workspaces (workspace.os_user_confinement=\"bwrap\") also need bubblewrap: apt-get install bubblewrap / dnf install bubblewrap"
+    fi
+    return 0
+}
+
 # Pin workspace.required_isolation_level='os_user' for multi-user installs
 # (Issue #3374). Must be called only AFTER install_webui_launch_wrapper and
 # only when the wrapper is executable: the runtime probe keys off the
@@ -2829,6 +2891,14 @@ configure_sudoers() {
     # 【安全加固 Issue #2181】安全 wrapper 规则生成
     # 遍历所有安全 wrapper，为每个存在的 wrapper 生成规则
     # 注意：openace-write-as 已包含在此循环中，不再单独处理
+    # Issue #3431: the confined-launch wrapper. Only its `launch` mode needs
+    # root; every argument is validated by the wrapper, which also refuses any
+    # executable not listed in the root-owned /etc/openace/webui-confine.json.
+    local confine_rule=""
+    if [ -x /usr/local/bin/openace-webui-confine ]; then
+        confine_rule="$run_user ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-confine launch *"
+    fi
+
     local security_wrapper_rules=""
     for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
         local wrapper_bin="/usr/local/bin/${wrapper}"
@@ -2851,6 +2921,12 @@ $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path
     if [ -n "$webui_local_rule" ]; then
         current_user_rules="${current_user_rules}
 ${webui_local_rule}"
+    fi
+
+    # Issue #3431: confined WebUI launch (only when the wrapper is installed)
+    if [ -n "$confine_rule" ]; then
+        current_user_rules="${current_user_rules}
+${confine_rule}"
     fi
 
     # Add utility rule (references Cmnd_Alias)
@@ -3006,6 +3082,14 @@ ${line}"
            ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
+            need_update=true
+        fi
+
+        # Issue #3431: an installed confine wrapper without its rule means the
+        # confined launch would fail at sudo; regenerate.
+        if [ -n "$confine_rule" ] && \
+           ! grep -qE "^${run_user} .*NOPASSWD: /usr/local/bin/openace-webui-confine launch \*" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing webui-confine rule for user '$run_user'"
             need_update=true
         fi
 
@@ -4785,6 +4869,10 @@ install_local() {
         # Install the webui-launch wrapper BEFORE configure_sudoers (Issue #2305):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
         install_webui_launch_wrapper "$sudoers_install_dir"
+
+        # Issue #3431: confined-launch wrapper + policy, also BEFORE
+        # configure_sudoers (its rule keys off -x on the wrapper).
+        install_webui_confine_wrapper "$sudoers_install_dir"
 
         # Issue #3374 (PR review round 5): pin the isolation floor only when
         # the launch wrapper actually landed — same executable check the

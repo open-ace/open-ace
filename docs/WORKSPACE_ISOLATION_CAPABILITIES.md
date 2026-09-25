@@ -12,7 +12,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 ```json
 {
   "local_workspace_multi_user": "supported | unsupported",
-  "backend": "qwen-code-webui-per-user | qwen-code-webui-shared | opensandbox:<tier>",
+  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | opensandbox:<tier>",
   "isolation_level": "none | os_user | sandboxed",
   "enforced": ["identity", "filesystem", "environment", "process"],
   "unsupported": ["resources", "network_egress", "kernel"],
@@ -43,14 +43,15 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
       "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
     }
   },
-  "policy_revision": "2026-09-16.1"
+  "policy_revision": "2026-09-25.1"
 }
 ```
 
 - `local_workspace_multi_user`:本地交互工作区多用户隔离是否受支持。
 - `backend`:实际运行器——`qwen-code-webui-per-user`(每用户独立 WebUI 进程)、
-  `qwen-code-webui-shared`(共享单实例)或 `opensandbox:<tier>`(#3378:sandboxed
-  等级,WebUI 运行于该 tier 的 OpenSandbox pod)。
+  `qwen-code-webui-per-user-confined`(#3431:同上,且每个进程运行在 systemd
+  scope + bubblewrap 约束内,见 §5.1)、`qwen-code-webui-shared`(共享单实例)或
+  `opensandbox:<tier>`(#3378:sandboxed 等级,WebUI 运行于该 tier 的 OpenSandbox pod)。
 - `isolation_level` / `enforced` / `unsupported`:见下节。
 - `reasons`:unsupported 时的机器可读原因(可能为空)。
 - `entry_point_details`(#3410 新增,与 `entry_points` 同生共死):每个入口的机器
@@ -266,6 +267,57 @@ wrapper 齐备)同样可以验证并强制 os_user。
 unsupported——**不会**静默降级到共享账户后宣称支持;该形态下默认启动路径保持
 既有行为,显式 `required_isolation=os_user` 得到结构化拒绝。
 
+### 5.1 可选:os_user 约束(confinement,#3431,policy revision 2026-09-25.1)
+
+`workspace.os_user_confinement = "bwrap"` 让每个 os_user WebUI 在启动时被约束,
+仍属 `os_user` 等级(共享宿主内核),但 `resources` 与 `network_egress` 两个维度
+变为 `enforced`,`backend` 报告 `qwen-code-webui-per-user-confined`:
+
+| 层 | 机制 | 效果 |
+|---|---|---|
+| 资源 | `systemd-run --scope`(`MemoryMax`/`MemorySwapMax=0`/`CPUQuota`/`TasksMax`) | cgroup v2 硬限制,含 fork bomb 上限 |
+| 身份 | `setpriv --reuid/--regid --init-groups --no-new-privs`,能力集与 bounding set 清空 | 只带账户自己的附加组(`systemd-run --scope --uid` 会保留调用者即 root 的 group 0,故不用它) |
+| 文件系统 | bubblewrap:宿主根只读、`/tmp` `/var/tmp` `/run` 与 workspace base 为空 tmpfs | 仅本人 home 与 `<base>/shared` 被绑回;其他用户 home 不可见(不只是拒绝访问) |
+| 网络 | bubblewrap `--unshare-net`(仅 loopback) + 宿主侧出口代理 | 唯一出路是代理;代理只放行 `host:port` 白名单(Open ACE API / LLM 代理地址 + `confinement_egress_allow`),其它一律 403 并记入 `<log_dir>/confine-egress.log` |
+
+配置项(`config.json` 的 `workspace`):
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `os_user_confinement` | `""` | `"bwrap"` 启用;`""`/`"off"` 关闭;其它值 → `confinement_mode_invalid` |
+| `confinement_memory_max` | `4G` | systemd `MemoryMax` |
+| `confinement_cpu_quota` | `200` | 百分比,`CPUQuota` |
+| `confinement_tasks_max` | `512` | `TasksMax` |
+| `confinement_egress_allow` | `[]` | 额外放行的 `host:port`(支持 `*.domain:port`、`[ipv6]:port`) |
+
+部署要求(包安装形态;Docker 形态无 systemd,启用后按下列原因码 fail closed):
+
+- Linux + systemd(cgroup v2)、`bubblewrap`、`setpriv`(util-linux);
+- 非特权 user namespace 可用。Ubuntu 24.04+ 的 AppArmor 默认限制它:加载发行版自带的
+  `bwrap-userns-restrict` profile(与 Codex/Claude Code 的要求相同);
+- installer 安装 `/usr/local/bin/openace-webui-confine`、根属主策略文件
+  `/etc/openace/webui-confine.json`(列出允许以用户身份启动的 WebUI 可执行文件与沙箱内
+  `PATH`),以及 sudoers 规则 `<service> ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-confine launch *`;
+- WebUI 运行时须遵循 `HTTP(S)_PROXY`:Node 22.21+ 在 `NODE_USE_ENV_PROXY=1`(wrapper
+  已设置)下对 `fetch` 生效;不遵循代理的请求没有网络(fail closed)。
+
+**fail-closed**:配置了约束但宿主不满足时,启动路径探针报告 `launch_path_degraded`,
+括注下列原因码之一,不会静默以未约束方式启动:`confinement_mode_invalid`、
+`confinement_platform_unsupported`、`confinement_wrapper_missing`、
+`confinement_bwrap_missing`、`confinement_setpriv_missing`、
+`confinement_systemd_unavailable`、`confinement_userns_unavailable`、
+`confinement_policy_invalid`、`confinement_check_failed`。冷 worker(manager 未初始化、
+探针未跑)只报告普通 os_user 维度。
+
+**诚实声明**:
+
+- `kernel` 仍 `unsupported`:与宿主共享内核;需要内核隔离请用 sandboxed 等级。
+- 出口代理按客户端给出的主机名与端口判定,**不检查 TLS**(与 Claude Code 沙箱代理的已知
+  局限相同);放行宽泛域名即留下外带通道。白名单主机名解析到的地址不再二次校验。
+- 宿主侧入口转发仍监听 `0.0.0.0:<port>`(与未约束时的暴露面相同),依赖 WebUI token。
+- 验收:`scripts/webui_confine_acceptance.py`(需一次性 Linux 主机,
+  `CONFINE_ACCEPTANCE_DISPOSABLE=1`)。
+
 ## 6. sandboxed 等级部署要求与诚实声明(语义最后变更于 2026-09-12.2;所有快照一律报告当前 POLICY_REVISION)
 
 `sandboxed` = WebUI 进程运行于 OpenSandbox pod:每用户每实例一个独立 pod、
@@ -445,7 +497,7 @@ c = json.load(open(sys.argv[1]))
 NEEDED = ("webui", "filesystem_api", "session_history")    # 本地工作台入口
 KNOWN  = {"enforced", "partial", "remote_machine_scope",
           "separate_contract", "sandboxed_entry_not_wired", "disabled"}
-REVIEWED = {"2026-09-16.1"}                                # 你已评审过的 revision
+REVIEWED = {"2026-09-25.1"}                                # 你已评审过的 revision
 d = c.get("entry_point_details", {})
 ok = (
     c.get("local_workspace_multi_user") == "supported"

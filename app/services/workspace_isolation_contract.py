@@ -26,6 +26,17 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+# Revision 6 (2026-09-25.1, Issue #3431 Option 1): an os_user deployment with
+# ``workspace.os_user_confinement = "bwrap"`` whose launch-path probe passed
+# (which now includes the confine wrapper's host check) reports backend
+# ``qwen-code-webui-per-user-confined`` and adds ``resources`` (systemd scope
+# MemoryMax/CPUQuota/TasksMax) and ``network_egress`` (private network
+# namespace, reachable only through a host:port allowlist proxy) to
+# ``enforced``. ``kernel`` stays unsupported (shared host kernel). A host that
+# cannot confine degrades through the existing launch_path_degraded reason with
+# a ``confinement_*`` probe code — never a silent unconfined os_user. A cold
+# worker (no manager, probe not run) keeps the plain os_user dimensions.
+#
 # Revision 5 (2026-09-16.1, Issue #3410): entry-point matrix RECALIBRATED and
 # made machine-readable.
 #  - filesystem_api: partial -> enforced. The /fs per-file paths no longer act
@@ -66,7 +77,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-16.1"
+POLICY_REVISION = "2026-09-25.1"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -107,6 +118,11 @@ _OS_USER_ENFORCED = (
 # so the kernel dimension is honestly reported as unsupported.
 _OS_USER_UNSUPPORTED = (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS, DIMENSION_KERNEL)
 
+# Issue #3431 (Option 1): confined os_user adds cgroup limits and a structural
+# egress boundary; the kernel is still the host's.
+_OS_USER_CONFINED_ENFORCED = _OS_USER_ENFORCED + (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS)
+_OS_USER_CONFINED_UNSUPPORTED = (DIMENSION_KERNEL,)
+
 # Config-derived facts for sandboxed WebUI pods: one pod per instance with a
 # per-instance token secret, an image_allowlisted digest-pinned image, and
 # resource limits that build_create_request always attaches (defaults are
@@ -121,6 +137,7 @@ _SANDBOXED_ENFORCED = (
 _SANDBOXED_UNSUPPORTED = (DIMENSION_KERNEL, DIMENSION_NETWORK_EGRESS)
 
 BACKEND_PER_USER = "qwen-code-webui-per-user"
+BACKEND_PER_USER_CONFINED = "qwen-code-webui-per-user-confined"
 BACKEND_SHARED = "qwen-code-webui-shared"
 BACKEND_OPENSANDBOX = "opensandbox"
 
@@ -979,6 +996,19 @@ def build_workspace_isolation_snapshot(
                     "documentation.",
                 ),
                 sandbox_reasons,
+            )
+        # Issue #3431: the probe above already includes the confinement host
+        # check when confinement is configured, so "configured + no
+        # degradation" means every launch on this host is confined.
+        confinement_active = getattr(manager, "confinement_active", None)
+        if callable(confinement_active) and confinement_active():
+            return IsolationCapabilitySnapshot(
+                supported=True,
+                backend=BACKEND_PER_USER_CONFINED,
+                isolation_level=ISOLATION_LEVEL_OS_USER,
+                enforced=_OS_USER_CONFINED_ENFORCED,
+                unsupported=_OS_USER_CONFINED_UNSUPPORTED,
+                reasons=sandbox_reasons,
             )
         return IsolationCapabilitySnapshot(
             supported=True,
