@@ -565,6 +565,7 @@ class MessageRepository:
         session_id: str,
         limit: int | None = None,
         offset: int = 0,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get timeline of messages for a conversation.
@@ -585,6 +586,8 @@ class MessageRepository:
                 via the route). ``None`` preserves the legacy unbounded behavior
                 for internal callers that still request it.
             offset: Offset for pagination.
+            tenant_id: Optional tenant ID for isolation (Issue #3440).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of messages (without ``full_entry``).
@@ -599,28 +602,41 @@ class MessageRepository:
                    agent_session_id, conversation_id, user_id, project_path
             FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
-            ORDER BY timestamp ASC
         """
         params: list = [session_id]
+        if tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(tenant_id)
+        query += " ORDER BY timestamp ASC"
         if limit is not None:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
         return self.db.fetch_all(query, tuple(params))
 
-    def get_conversation_details(self, session_id: str) -> dict | None:
+    def get_conversation_details(
+        self, session_id: str, tenant_id: int | None = None
+    ) -> dict | None:
         """
         Get details of a conversation.
 
         Args:
             session_id: Conversation/session ID.
+            tenant_id: Optional tenant ID for isolation (Issue #3440).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             Optional[Dict]: Conversation details or None.
         """
         # Use COALESCE to match session_id from multiple possible fields
         # GROUP BY includes all non-aggregated columns for PostgreSQL compatibility (Issue #2105)
-        query = """
+        params: list = [session_id]
+        tenant_clause = ""
+        if tenant_id is not None:
+            tenant_clause = "AND tenant_id = ?"
+            params.append(tenant_id)
+
+        query = f"""
             SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
@@ -637,11 +653,12 @@ class MessageRepository:
                 MAX(timestamp) as last_message_time
             FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
+            {tenant_clause}
             GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id),
                      agent_session_id, tool_name, host_name, sender_name
         """
 
-        return self.db.fetch_one(query, (session_id,))
+        return self.db.fetch_one(query, tuple(params))
 
     def get_all_senders(
         self, host_name: str | None = None, tenant_id: int | None = None

@@ -88,36 +88,48 @@ class TestTimelineRouteDefaults:
 
         captured = {}
 
-        def _fake_timeline(session_id, limit=None, offset=0):
+        def _fake_timeline(session_id, limit=None, offset=0, tenant_id=None):
             captured["limit"] = limit
             captured["offset"] = offset
+            captured["tenant_id"] = tenant_id
             return [{"role": "user", "content": "x"}]
 
         monkeypatch.setattr(
             messages_route.message_service, "get_conversation_timeline", _fake_timeline
         )
 
-        from flask import Flask
+        from flask import Flask, g
 
         app = Flask(__name__)
 
+        # The view is called directly, bypassing the blueprint's
+        # before_request tenant gate (Issue #3440), so set its output here.
+        @app.before_request
+        def _scope():
+            g.messages_tenant_id = 7
+
         # No limit param -> default 100.
         with app.test_request_context("/api/messages/conversation-timeline/s1"):
+            app.preprocess_request()
             messages_route.api_conversation_timeline("s1")
         assert captured["limit"] == 100
+        assert captured["tenant_id"] == 7
 
         # limit=0 / negative -> default 100.
         with app.test_request_context("/api/messages/conversation-timeline/s1?limit=0"):
+            app.preprocess_request()
             messages_route.api_conversation_timeline("s1")
         assert captured["limit"] == 100
 
         # limit above MAX -> clamped to 500.
         with app.test_request_context("/api/messages/conversation-timeline/s1?limit=99999"):
+            app.preprocess_request()
             messages_route.api_conversation_timeline("s1")
         assert captured["limit"] == 500
 
         # Explicit small limit honored.
         with app.test_request_context("/api/messages/conversation-timeline/s1?limit=20&offset=40"):
+            app.preprocess_request()
             messages_route.api_conversation_timeline("s1")
         assert captured["limit"] == 20
         assert captured["offset"] == 40
