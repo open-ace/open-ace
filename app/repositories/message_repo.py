@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.repositories.database import Database, escape_like
+from app.repositories.database import Database, distinct_values_sql, escape_like
 from app.utils.cache import cached
 from app.utils.roles import normalize_message_role
 from app.utils.senders import is_valid_sender
@@ -668,14 +668,17 @@ class MessageRepository:
             conditions.append("tenant_id = ?")
             params.append(tenant_id)
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        query = f"""
-            SELECT DISTINCT sender_name
-            FROM daily_messages
-            {where_clause}
-            ORDER BY sender_name
-        """
+        if conditions:
+            query = f"""
+                SELECT DISTINCT sender_name
+                FROM daily_messages
+                WHERE {' AND '.join(conditions)}
+                ORDER BY sender_name
+            """
+        else:
+            # Issue #3424: unfiltered DISTINCT read all of daily_messages.
+            # NULL senders are dropped here; is_valid_sender drops them anyway.
+            query = distinct_values_sql("daily_messages", "sender_name")
 
         rows = self.db.fetch_all(query, tuple(params))
 

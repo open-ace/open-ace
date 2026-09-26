@@ -447,71 +447,76 @@ class TestDailyStatsRepository:
     # refresh_stats
     # -------------------------------------------------------------------------
 
+    def _refresh_statements(self) -> list[tuple[str, tuple]]:
+        """SQL executed on the refresh transaction's cursor, in order."""
+        cursor = self.db.connection.return_value.__enter__.return_value.cursor.return_value
+        return [(c[0][0], c[0][1]) for c in cursor.execute.call_args_list]
+
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=False)
     def test_refresh_stats_specific_date_sqlite(self, mock_pg):
-        self.db.execute.return_value = MagicMock()
+        self.db._adapt_sql.side_effect = lambda q: q
         result = self.repo.refresh_stats(date="2024-01-15")
         assert result is True
-        # SQLite uses INSERT OR REPLACE (single statement, no separate DELETE)
-        # Issue #2333: SchedulerExecutionGuard adds additional execute calls for run recording
-        assert self.db.execute.call_count >= 1
-        # Find the INSERT call (should be present in the call list)
-        insert_calls = [
-            call
-            for call in self.db.execute.call_args_list
-            if "INSERT OR REPLACE INTO daily_stats" in str(call)
-        ]
-        assert len(insert_calls) >= 1
-        insert_call = insert_calls[0]
-        assert "date = ?" in insert_call[0][0]
+        (purge_sql, purge_params), (insert_sql, insert_params) = self._refresh_statements()
+        # Issue #3424: NULL-sender rows are purged in the same transaction
+        assert "DELETE FROM daily_stats WHERE sender_name IS NULL AND date = ?" in purge_sql
+        assert purge_params == ("2024-01-15",)
+        assert "INSERT OR REPLACE INTO daily_stats" in insert_sql
+        assert "date = ?" in insert_sql
+        assert insert_params[1:] == ("2024-01-15",)
+        self.db.connection.return_value.__enter__.return_value.commit.assert_called_once()
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=False)
     def test_refresh_stats_all_dates_sqlite(self, mock_pg):
-        self.db.execute.return_value = MagicMock()
+        self.db._adapt_sql.side_effect = lambda q: q
         result = self.repo.refresh_stats()
         assert result is True
-        # Issue #2333: SchedulerExecutionGuard adds additional execute calls for run recording
-        # Find the INSERT call (should be present in the call list)
-        insert_calls = [
-            call
-            for call in self.db.execute.call_args_list
-            if "INSERT OR REPLACE INTO daily_stats" in str(call)
-        ]
-        assert len(insert_calls) >= 1
-        insert_call = insert_calls[0]
-        assert "1=1" in insert_call[0][0]
+        (purge_sql, purge_params), (insert_sql, insert_params) = self._refresh_statements()
+        assert "sender_name IS NULL AND 1=1" in purge_sql
+        assert purge_params == ()
+        assert "INSERT OR REPLACE INTO daily_stats" in insert_sql
+        assert "1=1" in insert_sql
+        assert len(insert_params) == 1  # only updated_at
+
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
+    def test_refresh_stats_since_postgresql(self, mock_pg):
+        self.db._adapt_sql.side_effect = lambda q: q
+        self.db.get_connection.return_value.cursor.return_value.fetchone.return_value = (True,)
+        result = self.repo.refresh_stats(since="2024-01-15")
+        assert result is True
+        (purge_sql, purge_params), (insert_sql, insert_params) = self._refresh_statements()
+        assert "sender_name IS NULL AND date >= ?" in purge_sql
+        assert purge_params == ("2024-01-15",)
+        assert "WHERE date >= ?" in insert_sql
+        assert insert_params[1:] == ("2024-01-15",)
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
     def test_refresh_stats_postgresql(self, mock_pg):
+        self.db._adapt_sql.side_effect = lambda q: q
         # Mock advisory lock acquisition
         self.db.fetch_one.return_value = {"acquired": True}
-        self.db.execute.return_value = MagicMock()
         self.db.get_connection.return_value.cursor.return_value.fetchone.return_value = (True,)
         result = self.repo.refresh_stats(date="2024-01-15")
         assert result is True
-        # Issue #2333: SchedulerExecutionGuard adds execute calls for run recording
-        # Find the INSERT call (should be present in the call list)
-        insert_calls = [
-            call
-            for call in self.db.execute.call_args_list
-            if "INSERT INTO daily_stats" in str(call)
-        ]
-        assert len(insert_calls) >= 1
-        insert_call = insert_calls[0]
-        assert "ON CONFLICT" in insert_call[0][0]
-        assert "OR REPLACE" not in insert_call[0][0]
+        (purge_sql, _), (insert_sql, _) = self._refresh_statements()
+        assert "DELETE FROM daily_stats WHERE sender_name IS NULL" in purge_sql
+        assert "INSERT INTO daily_stats" in insert_sql
+        assert "ON CONFLICT" in insert_sql
+        assert "OR REPLACE" not in insert_sql
 
     def test_refresh_stats_exception(self):
-        self.db.execute.side_effect = Exception("DB error")
+        self.db.connection.side_effect = Exception("DB error")
         result = self.repo.refresh_stats()
         assert result is False
 
     # -------------------------------------------------------------------------
-    # needs_refresh
+    # needs_refresh / get_refresh_start_date
     # -------------------------------------------------------------------------
 
     def test_needs_refresh_empty_stats(self):
-        self.db.fetch_one.return_value = {"count": 0}
+        self.db.fetch_one.return_value = {"max_date": None}
         result = self.repo.needs_refresh()
         assert result is True
 
@@ -523,7 +528,6 @@ class TestDailyStatsRepository:
     def test_needs_refresh_stats_stale(self):
         """Messages have newer data than stats."""
         self.db.fetch_one.side_effect = [
-            {"count": 100},  # daily_stats not empty
             {"max_date": "2024-01-10"},  # stats max date
             {"max_date": "2024-01-15"},  # messages max date (newer)
         ]
@@ -533,10 +537,8 @@ class TestDailyStatsRepository:
     def test_needs_refresh_stats_up_to_date(self):
         """Stats are up to date."""
         self.db.fetch_one.side_effect = [
-            {"count": 100},  # daily_stats not empty
             {"max_date": "2024-01-15"},  # stats max date
             {"max_date": "2024-01-15"},  # messages max date (same)
-            {"count": 0},  # no NULL sender_name
         ]
         result = self.repo.needs_refresh()
         assert result is False
@@ -544,24 +546,32 @@ class TestDailyStatsRepository:
     def test_needs_refresh_no_message_data(self):
         """No messages at all - no refresh needed."""
         self.db.fetch_one.side_effect = [
-            {"count": 100},  # daily_stats not empty
             {"max_date": "2024-01-15"},  # stats max date
             None,  # no messages
-            {"count": 0},  # no NULL sender_name (no messages to sync)
         ]
         result = self.repo.needs_refresh()
         assert result is False
 
-    def test_needs_refresh_null_sender_name(self):
-        """Stats have NULL sender_name that should have data."""
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_needs_refresh_stays_cheap(self):
+        """Issue #3424: needs_refresh runs on the dashboard request path; it must
+        not run the NULL-sender EXISTS scan over daily_messages (tens of seconds
+        on large tables, and permanently true)."""
         self.db.fetch_one.side_effect = [
-            {"count": 100},  # daily_stats not empty
-            {"max_date": "2024-01-15"},  # stats max date
-            {"max_date": "2024-01-15"},  # messages max date (same)
-            {"count": 5},  # 5 rows with NULL sender_name that should have data
+            {"max_date": "2024-01-15"},
+            {"max_date": "2024-01-15"},
         ]
-        result = self.repo.needs_refresh()
-        assert result is True
+        assert self.repo.needs_refresh() is False
+        queries = [c[0][0] for c in self.db.fetch_one.call_args_list]
+        assert len(queries) == 2
+        assert not any("EXISTS" in q or "COUNT(*)" in q for q in queries)
+
+    def test_get_refresh_start_date(self):
+        self.db.fetch_one.return_value = {"max_date": "2024-01-15"}
+        assert self.repo.get_refresh_start_date() == "2024-01-15"
+        self.db.fetch_one.return_value = {"max_date": None}
+        assert self.repo.get_refresh_start_date() is None
 
     # -------------------------------------------------------------------------
     # refresh_hourly_stats

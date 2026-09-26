@@ -1630,9 +1630,13 @@ class RemoteSessionManager:
             # Refresh user_daily_stats so quota checks see up-to-date data
             try:
                 from app.repositories.daily_stats_repo import DailyStatsRepository
+                from app.utils.helpers import get_days_ago
 
+                # Issue #3424: refresh only the recent window this report can
+                # touch; a full refresh per usage report scanned all of
+                # daily_messages. Yesterday covers timezone skew at midnight.
                 daily_stats_repo = DailyStatsRepository()
-                daily_stats_repo.refresh_stats()
+                daily_stats_repo.refresh_stats(since=get_days_ago(1))
             except Exception as e:
                 logger.warning(f"Failed to refresh daily stats after usage report: {e}")
 

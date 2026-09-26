@@ -286,10 +286,12 @@ def api_trend():
     host = request.args.get("host")
     tenant_id = get_current_tenant_id()
 
-    # Ensure daily_stats is up to date
+    # Ensure daily_stats is up to date. Issue #3424: only the dates that can
+    # lag daily_messages are re-aggregated here; a full rebuild on this request
+    # path made the dashboard wait on a scan of all of daily_messages.
     daily_stats_repo = DailyStatsRepository()
     if daily_stats_repo.needs_refresh():
-        daily_stats_repo.refresh_stats()
+        daily_stats_repo.refresh_stats(since=daily_stats_repo.get_refresh_start_date())
 
     entries = usage_service.get_trend_data(
         start_date,
