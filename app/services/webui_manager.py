@@ -2848,7 +2848,9 @@ class WebUIManager:
         if cached is not None and now - cached[0] < _PROBE_MEMO_TTL_SECONDS:
             return cached[1]
         reason = self._compute_launch_readiness()
-        self._readiness_memo = (now, reason)
+        # Stamped when the check ENDS: a slow check (a Kata probe boots a VM)
+        # must not already be stale when it is stored.
+        self._readiness_memo = (time.monotonic(), reason)
         return reason
 
     def _compute_launch_readiness(self) -> str | None:
@@ -2984,7 +2986,6 @@ class WebUIManager:
         return time.monotonic() - stamp < ttl, cached
 
     def _run_container_probe(self, mode: str, kata: bool) -> str | None:
-        now = time.monotonic()
         reason: str | None
         try:
             result = subprocess.run(  # noqa: S603 - fixed wrapper path
@@ -3017,7 +3018,9 @@ class WebUIManager:
                     reason,
                     (result.stderr or "").strip()[-300:],
                 )
-        self._container_probe_memo = (mode, now, reason)
+        # Stamped when the probe ENDS, so waiters on the lock (and the next
+        # callers) see a failed minutes-long probe as fresh, not re-probe.
+        self._container_probe_memo = (mode, time.monotonic(), reason)
         return reason
 
     def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:

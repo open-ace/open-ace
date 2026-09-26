@@ -222,3 +222,48 @@ def test_a_mode_switch_reprobes():
         manager._container_readiness()
     assert run.call_count == 2
     assert "--backend" not in run.call_args.args[0]
+
+
+def test_a_slow_failing_probe_is_shared_and_cached():
+    """A Kata probe that fails after minutes: its result is stamped when it
+    ENDS, so the callers waiting on it (and the next ones) do not re-probe."""
+    import threading
+
+    manager = _manager()
+    clock = [1000.0]
+    lock = threading.Lock()
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def _slow_failing_probe(*args, **kwargs):
+        calls.append(1)
+        started.set()
+        release.wait(5)
+        with lock:
+            clock[0] += 300  # the boot timed out after five minutes
+        return _probe_result(1, "kernel:unverified")
+
+    def _now():
+        with lock:
+            return clock[0]
+
+    results = []
+    with (
+        patch("app.utils.workspace._is_wrapper_available", return_value=True),
+        patch("app.services.webui_manager.time.monotonic", side_effect=_now),
+        patch("app.services.webui_manager.subprocess.run", side_effect=_slow_failing_probe),
+    ):
+        workers = [
+            threading.Thread(target=lambda: results.append(manager._container_readiness()))
+            for _ in range(4)
+        ]
+        for worker in workers:
+            worker.start()
+        assert started.wait(5)
+        release.set()
+        for worker in workers:
+            worker.join(5)
+        assert manager._container_readiness() == "confinement_kernel_unverified"
+    assert calls == [1]
+    assert results == ["confinement_kernel_unverified"] * 4
