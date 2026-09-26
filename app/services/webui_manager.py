@@ -2958,9 +2958,10 @@ class WebUIManager:
         if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
             return "confinement_wrapper_missing"
         now = time.monotonic()
-        memo: tuple[float, str | None] | None = getattr(self, "_container_probe_memo", None)
-        if memo is not None:
-            stamp, cached = memo
+        mode = self._confinement_mode()
+        memo: tuple[str, float, str | None] | None = getattr(self, "_container_probe_memo", None)
+        if memo is not None and memo[0] == mode:  # a mode switch re-probes
+            _, stamp, cached = memo
             ttl = (
                 _CONTAINER_PROBE_OK_TTL_SECONDS
                 if cached is None
@@ -2981,8 +2982,9 @@ class WebUIManager:
                 ],
                 capture_output=True,
                 text=True,
-                # a Kata guest can take minutes to boot under nested virtualization
-                timeout=300 if kata else 150,
+                # a Kata guest can take minutes to boot under nested
+                # virtualization; the wrapper's own worst case is ~7 minutes
+                timeout=480 if kata else 150,
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -2999,7 +3001,7 @@ class WebUIManager:
                     reason,
                     (result.stderr or "").strip()[-300:],
                 )
-        self._container_probe_memo = (now, reason)
+        self._container_probe_memo = (mode, now, reason)
         return reason
 
     def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:

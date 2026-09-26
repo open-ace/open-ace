@@ -635,7 +635,13 @@ def run_container(record: Record, backend: str = "container") -> None:
             escalated = True  # SIGTERM alone could not stop it: the case under test
             process.kill()
             process.wait(timeout=10)
-        record.check("the stop really needed the kill escalation", escalated)
+        if kata:
+            # Kata: the docker CLI exits at once on SIGTERM (the container
+            # keeps running), so the LAUNCHER must remove it by id — a
+            # suspended guest cannot delay that. Escalation is not needed.
+            record.check("SIGTERM alone ends the launch of a suspended guest", not escalated)
+        else:
+            record.check("the stop really needed the kill escalation", escalated)
         deadline = time.monotonic() + 60
         while (
             time.monotonic() < deadline
@@ -656,6 +662,44 @@ def run_container(record: Record, backend: str = "container") -> None:
         leftovers = sh("sudo", "-n", "ls", "/run/openace-webui", check=False).stdout.split()
         record.check("no run directories or cid files left behind",
                      [e for e in leftovers if e.startswith("3431-")] == [], leftovers)  # fmt: skip
+        if kata:
+            # (d) a guest that breaks the channel's framing loses its
+            # container without its own cooperation: write an invalid frame
+            # into inner's channel descriptor from inside the guest.
+            process = _launch()
+            wait_http("http://127.0.0.1:3441/", timeout=boot)
+            forged = sudo(
+                "docker", "exec", name, "python3", "-c",
+                "import os, stat\n"
+                "me = os.getpid(); hits = 0\n"
+                "for pid in os.listdir('/proc'):\n"
+                "    if not pid.isdigit() or int(pid) == me: continue\n"
+                "    try: cmd = open(f'/proc/{pid}/cmdline','rb').read()\n"
+                "    except OSError: continue\n"
+                "    if not (b'confine.py' in cmd and b'inner' in cmd): continue\n"
+                "    fds = f'/proc/{pid}/fd'\n"
+                "    std = {os.readlink(f'{fds}/{n}') for n in ('0', '2')}\n"
+                "    for n in os.listdir(fds):\n"
+                "        link = os.readlink(f'{fds}/{n}')\n"
+                "        if link.startswith('pipe:') and link not in std:\n"
+                "            try:\n"
+                "                fd = os.open(f'{fds}/{n}', os.O_WRONLY | os.O_NONBLOCK)\n"
+                "                os.write(fd, bytes([99, 0, 0, 0, 2, 0, 0])); os.close(fd); hits += 1\n"
+                "            except OSError: pass\n"
+                "print(hits); raise SystemExit(0 if hits else 1)",
+                check=False,
+            )  # fmt: skip
+            ended = False
+            try:
+                process.wait(timeout=90)
+                ended = True
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=30)
+            gone = not sudo("docker", "ps", "-aq", "--filter", f"name={name}").stdout.strip()
+            record.check("a forged frame from the guest ends the launch and removes the container",
+                         forged.returncode == 0 and ended and gone,
+                         {"forged": forged.stdout.strip(), "ended": ended, "gone": gone})  # fmt: skip
         policy_text = sudo("cat", POLICY).stdout
         broken = json.loads(policy_text)
         if kata:

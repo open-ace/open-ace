@@ -19,6 +19,7 @@ import pwd
 import queue
 import socket
 import struct
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -251,7 +252,8 @@ def test_overrunning_the_window_drops_the_channel(confine, raw_host):
     host, send, _ = raw_host
     send(confine.MUX_OPEN, 2, confine.MUX_KIND_EGRESS)
     chunk = b"x" * confine.MUX_CHUNK
-    frames = (confine.MUX_WINDOW // confine.MUX_CHUNK) * 4  # far past window + socket buffer
+    # far past window + any socketpair buffer (the handler never reads)
+    frames = (confine.MUX_WINDOW // confine.MUX_CHUNK) * 32
     for _ in range(frames):
         send(confine.MUX_DATA, 2, chunk)
     assert host.closed.wait(10)
@@ -534,3 +536,171 @@ def test_probe_usage_is_strict(confine, monkeypatch):
     assert seen == ["container", "kata"]
     with pytest.raises(confine.ConfineError):
         confine.run_launch(["--probe", "--backend", "bwrap"])
+
+
+# ── review round 1: bounded handlers, closed channel, probe ────────────────
+
+
+def test_handlers_outliving_their_stream_still_count(confine):
+    """OPEN + RESET cycles must not start unbounded egress handlers."""
+    to_host_r, to_host_w = os.pipe()
+    from_host_r, from_host_w = os.pipe()
+    release = threading.Event()
+    running = []
+
+    def _slow_handler(sock):
+        running.append(1)
+        release.wait(10)
+
+    host = confine.Mux(
+        to_host_r, from_host_w, initiator=True,
+        accept={confine.MUX_KIND_EGRESS: _slow_handler}, max_streams=2,
+    )  # fmt: skip
+    threading.Thread(target=host.run, daemon=True).start()
+    reader = os.fdopen(from_host_r, "rb")
+    for sid in (2, 4, 6, 8):
+        os.write(to_host_w, confine.MUX_HEADER.pack(confine.MUX_OPEN, sid, 1) + b"E")
+        os.write(to_host_w, confine.MUX_HEADER.pack(confine.MUX_RESET, sid, 0))
+    resets = set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not {6, 8} <= resets:
+        ftype, sid, length = confine.MUX_HEADER.unpack(reader.read(confine.MUX_HEADER.size))
+        reader.read(length)
+        if ftype == confine.MUX_RESET:
+            resets.add(sid)
+    assert {6, 8} <= resets  # refused: two handlers are still running
+    assert len(running) == 2
+    release.set()
+    for fd in (to_host_w, from_host_w):
+        os.close(fd)
+
+
+def test_a_closed_channel_accepts_nothing(confine, raw_host):
+    host, send, _ = raw_host
+    host.close()
+    send(confine.MUX_OPEN, 2, confine.MUX_KIND_EGRESS)
+    time.sleep(0.2)
+    assert host._peer_handlers == 0 and not host._streams
+
+
+def test_child_exited(confine):
+    pid = os.fork()
+    if pid == 0:
+        os._exit(0)
+    assert _wait(lambda: confine._child_exited(pid))
+    assert confine._child_exited(pid) is True  # already reaped: still "exited"
+
+
+def test_supervisor_exits_when_the_channel_closes(confine, tmp_path):
+    closed = threading.Event()
+    closed.set()
+    proxy = confine.EgressProxy([])
+    rc = confine._supervise_until_parent_exits(
+        os.getppid(), str(tmp_path), proxy, channel_closed=closed
+    )
+    assert rc == 1
+
+
+def _probe_policy(confine, monkeypatch, tmp_path, container, kvm=True):
+    policy = confine.Policy(frozenset({"/w"}), "/usr/bin", frozenset(), frozenset(), container)
+    monkeypatch.setattr(confine, "load_policy", lambda path=None: policy)
+    monkeypatch.setattr(confine, "require_root_controlled_executable", lambda p: None)
+    monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: True)
+    kvm_path = tmp_path / "kvm"
+    if kvm:
+        kvm_path.write_text("")
+    monkeypatch.setattr(confine, "KVM_DEVICE", str(kvm_path))
+
+
+def test_probe_without_a_kata_runtime_is_a_policy_error(confine, monkeypatch, tmp_path, capsys):
+    container = confine.ContainerPolicy(IMAGE, "runsc-openace", "/usr/bin/docker")
+    _probe_policy(confine, monkeypatch, tmp_path, container)
+    assert confine.run_container_probe(backend="kata") == 1
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "policy:invalid"
+
+
+def test_probe_without_kvm(confine, monkeypatch, tmp_path, capsys):
+    _probe_policy(confine, monkeypatch, tmp_path, _kata_policy(confine), kvm=False)
+    assert confine.run_container_probe(backend="kata") == 1
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "kvm:unavailable"
+
+
+class _FakeProbeContainer:
+    """Stands in for ``docker run -i``: prints the release, echoes one line."""
+
+    def __init__(self, release, echo):
+        self._lines = queue.Queue()
+        self._lines.put(release.encode() + b"\n")
+        self._echo = echo
+        outer = self
+
+        class _Stdin:
+            def write(self, data):
+                outer._lines.put(outer._echo.encode() + b"\n")
+
+            def flush(self):
+                pass
+
+            def close(self):
+                outer._lines.put(b"")
+
+        self.stdin = _Stdin()
+        self.stdout = iter(self._lines.get, b"")
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        pass
+
+
+@pytest.fixture
+def kata_probe(confine, monkeypatch, tmp_path):
+    removed = []
+    state = {"evidence": True, "release": "6.18.35", "echo": "echo:ping"}
+
+    def _prepare(path, uid, gid, root=None):
+        os.makedirs(path)
+        Path(path, "probe.cid").write_text(CID)
+
+    monkeypatch.setattr(confine, "prepare_run_dir", _prepare)
+    monkeypatch.setattr(
+        confine.subprocess, "Popen",
+        lambda argv, **kw: _FakeProbeContainer(state["release"], state["echo"]),
+    )  # fmt: skip
+    monkeypatch.setattr(confine, "kata_evidence", lambda pid, cid: state["evidence"])
+    monkeypatch.setattr(confine, "_docker_remove_id", lambda docker, cf: removed.append(cf))
+
+    def _docker(*argv, timeout=30):
+        return subprocess.CompletedProcess(argv, 0, stdout="4242\n", stderr="")
+
+    def _run():
+        token = confine._run_kata_probe(_kata_policy(confine), _docker, str(tmp_path / "run"))
+        return token, removed
+
+    _run.state = state
+    return _run
+
+
+def test_kata_probe_ok_and_cleans_up(confine, kata_probe, tmp_path):
+    token, removed = kata_probe()
+    assert token == "ok"
+    assert removed and removed[-1].endswith("probe.cid")
+    assert not list((tmp_path / "run").glob("probe-*"))
+
+
+@pytest.mark.parametrize(
+    ("change", "token"),
+    [
+        ({"evidence": False}, "kernel:unverified"),  # runc (or anything) claimed as Kata
+        ({"release": os.uname().release}, "kernel:unverified"),  # the host's own kernel
+        ({"echo": "garbage"}, "channel:failed"),
+        ({"release": ""}, "probe:failed"),  # the guest never printed its release
+    ],
+)
+def test_kata_probe_refusals(confine, kata_probe, change, token):
+    kata_probe.state.update(change)
+    got, removed = kata_probe()
+    assert got == token
+    assert removed  # the probe container is removed on every path

@@ -1302,6 +1302,7 @@ class Mux:
         self._peer_parity = 0 if initiator else 1
         self._accept = accept
         self._max_streams = max_streams
+        self._peer_handlers = 0  # accept handlers still running (bounded too)
         self.closed = threading.Event()
         self.last_frame = time.monotonic()
 
@@ -1423,33 +1424,49 @@ class Mux:
             peer_open = sum(1 for s in self._streams if s % 2 == self._peer_parity)
             if sid in self._streams:
                 raise MuxError(f"stream {sid} opened twice")
-            refused = handler is None or peer_open >= self._max_streams
+            # A handler (e.g. the egress proxy's upstream connection) can
+            # outlive its stream after a RESET: both count against the cap.
+            refused = (
+                handler is None
+                or self.closed.is_set()
+                or max(peer_open, self._peer_handlers) >= self._max_streams
+            )
             if not refused:
                 ours, theirs = socket.socketpair()
                 stream = _MuxStream(sid, ours)
                 self._streams[sid] = stream
+                self._peer_handlers += 1
         if refused:
             with contextlib.suppress(OSError):
                 self._send(MUX_RESET, sid)
             return
 
+        def _handler_done() -> None:
+            with self._lock:
+                self._peer_handlers -= 1
+            with contextlib.suppress(OSError):
+                theirs.close()
+
         def _handle() -> None:
             try:
                 handler(theirs)  # type: ignore[misc]
             finally:
-                with contextlib.suppress(OSError):
-                    theirs.close()
+                _handler_done()
 
         try:
             threading.Thread(target=_handle, daemon=True, name="mux-accept").start()
+        except RuntimeError:
+            _handler_done()
+            self._abort(stream)
+            self._forget(stream)
+            return
+        try:
             threading.Thread(
                 target=self._run_stream, args=(stream,), daemon=True, name="mux-stream"
             ).start()
         except RuntimeError:
             self._abort(stream)
             self._forget(stream)
-            with contextlib.suppress(OSError):
-                theirs.close()
 
     # -- reading ----------------------------------------------------------
 
@@ -1462,7 +1479,7 @@ class Mux:
     def run(self) -> None:
         """Read frames until EOF or a protocol violation; then close."""
         try:
-            while True:
+            while not self.closed.is_set():
                 ftype, sid, length = MUX_HEADER.unpack(self._read_exact(MUX_HEADER.size))
                 if length > MUX_CHUNK:
                     raise MuxError("frame too large")
@@ -1531,8 +1548,10 @@ class Mux:
             stream.inbox.put(_MUX_ABORT)
             with contextlib.suppress(OSError):
                 stream.local.shutdown(socket.SHUT_RDWR)
-        # The write end stays open (a writer may be blocked on it); the
-        # process exits right after the channel closes.
+        # The write end stays open (a writer may be blocked on it): the
+        # supervisor exits once the channel closes (and the launcher then
+        # removes the container); inside the container the watchdog stops
+        # the WebUI.
 
 
 # ── Mode: launch (root) ─────────────────────────────────────────────────────
@@ -1860,6 +1879,14 @@ def _docker_remove_id(docker: str, cidfile: str) -> bool:
     return result.returncode == 0 or "no such container" in (result.stderr or "").lower()
 
 
+def _child_exited(pid: int) -> bool:
+    """Reap *pid* if it has exited (True); False while it runs."""
+    try:
+        return os.waitpid(pid, os.WNOHANG)[0] != 0
+    except ChildProcessError:
+        return True
+
+
 def _reap_supervisor(pid: int, grace: float = 10.0) -> None:
     """SIGTERM the supervisor, wait up to *grace* seconds, then SIGKILL.
 
@@ -1957,6 +1984,7 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
     signal.signal(signal.SIGINT, _forward)
     supervisor = 0
     removed = False
+    endpoints_gone = False
     held: set[int] = set()  # channel pipe ends still open in this process
 
     def _release(*fds: int) -> None:
@@ -2018,8 +2046,14 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
             try:
                 return container.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
-                if os.getppid() != parent and not removed:
-                    # sudo was killed: nothing will signal us again.
+                if supervisor and _child_exited(supervisor):
+                    # The host endpoints are gone (with the stdio channel:
+                    # the channel closed): nothing can reach the WebUI.
+                    supervisor = 0  # reaped: never signal that pid again
+                    endpoints_gone = True
+                # sudo was killed (nothing will signal us again), or the
+                # endpoints are gone: remove the container, retrying each pass.
+                if (os.getppid() != parent or endpoints_gone) and not removed:
                     removed = _docker_remove_id(docker, cidfile)
     finally:
         _release(*held)
@@ -2095,7 +2129,8 @@ def run_supervise() -> int:
 
     threading.Thread(target=_flusher, daemon=True, name="log-flush").start()
     serve_client: Callable[[socket.socket], None]
-    if payload.get("transport") == "stdio":
+    stdio_channel = payload.get("transport") == "stdio"
+    if stdio_channel:
         # Kata (#3438): both directions travel over the container's stdio.
         mux_in, mux_out = (int(fd) for fd in payload["mux_fds"])
         mux = Mux(mux_in, mux_out, initiator=True, accept={MUX_KIND_EGRESS: proxy.handle})
@@ -2159,7 +2194,9 @@ def run_supervise() -> int:
     ).start()
 
     if container_mode:
-        return _supervise_until_parent_exits(parent, socket_dir, proxy)
+        return _supervise_until_parent_exits(
+            parent, socket_dir, proxy, channel_closed=mux.closed if stdio_channel else None
+        )
 
     argv = build_bwrap_argv(
         bwrap=payload["bwrap"],
@@ -2198,14 +2235,25 @@ def run_supervise() -> int:
         shutil.rmtree(socket_dir, ignore_errors=True)
 
 
-def _supervise_until_parent_exits(parent: int, socket_dir: str, proxy: EgressProxy) -> int:
-    """Container backend: keep the endpoints up while the root launcher runs."""
+def _supervise_until_parent_exits(
+    parent: int,
+    socket_dir: str,
+    proxy: EgressProxy,
+    channel_closed: threading.Event | None = None,
+) -> int:
+    """Container backend: keep the endpoints up while the root launcher runs.
+
+    With the stdio channel, a closed channel (EOF or a framing violation)
+    ends the supervisor too; the launcher sees that and removes the
+    container, so a guest that broke the protocol cannot keep running.
+    """
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     try:
         while os.getppid() == parent and not stop.wait(1.0):
-            pass
+            if channel_closed is not None and channel_closed.is_set():
+                return 1
         return 0
     finally:
         proxy.flush(final=True)
@@ -2365,6 +2413,7 @@ KATA_PROBE_PROGRAM = (
 )
 KATA_PROBE_BOOT_SECONDS = 180.0  # a nested-virtualization guest boots in ~70 s
 KATA_SHIM = "containerd-shim-kata-v2"
+# the VMMs Kata ships besides qemu-system-*
 HYPERVISORS = ("cloud-hypervisor", "firecracker", "stratovirt")
 SHIM_RUNTIME_RE = re.compile(r"^io\.containerd\.([a-z0-9]+)\.v2$")
 
@@ -2413,21 +2462,25 @@ def _kata_runtime_available(runtime: str, registered: dict) -> bool:
     return True
 
 
-def _run_kata_probe(container: ContainerPolicy, docker, run_root: str = RUN_ROOT) -> str:
+def _run_kata_probe(
+    container: ContainerPolicy,
+    docker: Callable[..., subprocess.CompletedProcess],
+    run_root: str = RUN_ROOT,
+) -> str:
     """Boot one probe container on the Kata runtime; return a probe token."""
     probe_dir = os.path.join(run_root, f"probe-{os.getpid()}")
     cidfile = os.path.join(probe_dir, "probe.cid")
-    prepare_run_dir(probe_dir, 0, 0)  # root only: docker writes the cid file
     proc: subprocess.Popen | None = None
     try:
+        prepare_run_dir(probe_dir, 0, 0)  # root only: docker writes the cid file
         proc = subprocess.Popen(  # noqa: S603 - fixed argv
             [container.docker, "run", "--rm", "-i", "--cidfile", cidfile,
              "--runtime", container.kata_runtime, "--network", "none",
              "--user", "65534:65534", "--read-only", "--cap-drop", "ALL",
              "--security-opt", "no-new-privileges",
              "--entrypoint", "python3", container.image, "-I", "-c", KATA_PROBE_PROGRAM],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=_docker_env(),
+            # stderr is inherited: docker's own errors reach the manager's log
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=_docker_env(),
         )  # fmt: skip
         lines: queue.Queue[bytes] = queue.Queue()
 
@@ -2465,7 +2518,7 @@ def _run_kata_probe(container: ContainerPolicy, docker, run_root: str = RUN_ROOT
         if echo != "echo:ping":
             return "channel:failed"
         return "ok"
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ConfineError) as exc:
         print(f"# {exc}", file=sys.stderr)
         return "probe:failed"
     finally:
