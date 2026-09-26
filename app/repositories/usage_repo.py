@@ -6,6 +6,7 @@ Repository for usage data access operations.
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, cast
@@ -70,13 +71,17 @@ class UsageRepository:
     # A tenant's users; the one parameter is the tenant id.
     _TENANT_USER_IDS_SQL = "SELECT id FROM users WHERE tenant_id = ?"
 
-    # (db_url, index_name) pairs confirmed to exist. Only positive results are
-    # cached so an index built after startup is picked up on the next call.
-    _known_indexes: set[tuple[str, str]] = set()
+    # (db_url, index_name) -> monotonic time it was last confirmed to exist.
+    # Only positive results are cached, so an index built after startup is
+    # picked up on the next call; they expire so a dropped index stops being
+    # used within _INDEX_CACHE_TTL instead of only after a restart.
+    _known_indexes: dict[tuple[str, str], float] = {}
+    _INDEX_CACHE_TTL = 300.0
 
     def _has_index(self, index_name: str) -> bool:
         key = (self.db.db_url, index_name)
-        if key in self._known_indexes:
+        confirmed_at = self._known_indexes.get(key)
+        if confirmed_at is not None and time.monotonic() - confirmed_at < self._INDEX_CACHE_TTL:
             return True
         try:
             found = self.db.index_exists(index_name)
@@ -84,7 +89,9 @@ class UsageRepository:
             logger.warning("Index probe for %s failed: %s", index_name, e)
             return False
         if found:
-            self._known_indexes.add(key)
+            self._known_indexes[key] = time.monotonic()
+        else:
+            self._known_indexes.pop(key, None)
         return found
 
     def _tenant_distinct_values_sql(self, column: str, index_name: str) -> str:

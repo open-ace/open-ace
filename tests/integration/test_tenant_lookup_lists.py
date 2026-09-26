@@ -11,12 +11,14 @@ values and nothing from other tenants.
 import importlib.util
 import itertools
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
+import app.repositories.usage_repo as usage_repo_mod
 from app.repositories.usage_repo import UsageRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.regression, pytest.mark.issue(3424)]
@@ -59,15 +61,22 @@ def seeded(tmp_db):
 
 
 def _lists(db):
+    """All six lookups, plus how many used the indexed per-user walk."""
     repo = UsageRepository(db=db)
-    return (
-        repo.get_all_tools(tenant_id=1),
-        repo.get_all_hosts(tenant_id=1),
-        repo.get_all_tools(tenant_id=2),
-        repo.get_all_hosts(tenant_id=2),
-        repo.get_all_tools(tenant_id=3),
-        repo.get_all_hosts(tenant_id=3),
-    )
+    with patch.object(
+        usage_repo_mod,
+        "distinct_values_for_users_sql",
+        wraps=usage_repo_mod.distinct_values_for_users_sql,
+    ) as walk:
+        lists = (
+            repo.get_all_tools(tenant_id=1),
+            repo.get_all_hosts(tenant_id=1),
+            repo.get_all_tools(tenant_id=2),
+            repo.get_all_hosts(tenant_id=2),
+            repo.get_all_tools(tenant_id=3),
+            repo.get_all_hosts(tenant_id=3),
+        )
+    return lists, walk.call_count
 
 
 _EXPECTED = (
@@ -82,14 +91,27 @@ _EXPECTED = (
 
 def test_indexed_walk_returns_only_the_tenants_values(seeded):
     assert all(seeded.index_exists(name) for name in _INDEXES)
-    assert _lists(seeded) == _EXPECTED
+    assert _lists(seeded) == (_EXPECTED, 6)
 
 
 def test_fallback_without_index_returns_the_same_values(seeded):
     for name in _INDEXES:
         seeded.execute(f"DROP INDEX {name}")
     assert not any(seeded.index_exists(name) for name in _INDEXES)
-    assert _lists(seeded) == _EXPECTED
+    assert _lists(seeded) == (_EXPECTED, 0)
+
+
+def test_cached_index_confirmation_expires(seeded):
+    """A dropped index must stop being used once the cached confirmation
+    expires; without its index the walk rescans the table per probe."""
+    assert _lists(seeded) == (_EXPECTED, 6)
+    for name in _INDEXES:
+        seeded.execute(f"DROP INDEX {name}")
+    # Still inside the TTL: the cached confirmation is trusted.
+    assert _lists(seeded)[1] == 6
+    for key in UsageRepository._known_indexes:
+        UsageRepository._known_indexes[key] -= UsageRepository._INDEX_CACHE_TTL + 1
+    assert _lists(seeded) == (_EXPECTED, 0)
 
 
 def test_index_exists(tmp_db):

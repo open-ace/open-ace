@@ -27,17 +27,35 @@ _INDEXES = {
 }
 
 
+def _pg_index_state(conn: sa.Connection, name: str) -> bool | None:
+    """True if valid, False if INVALID (a failed CONCURRENTLY build), None if absent."""
+    row = conn.execute(
+        sa.text(
+            "SELECT i.indisvalid FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid"
+            " WHERE c.relname = :name AND pg_table_is_visible(c.oid)"
+        ),
+        {"name": name},
+    ).first()
+    return None if row is None else bool(row[0])
+
+
 def upgrade() -> None:
     conn = op.get_bind()
     existing = {index["name"] for index in sa.inspect(conn).get_indexes("daily_messages")}
     is_postgres = conn.dialect.name == "postgresql"
 
     for name, columns in _INDEXES.items():
-        if name in existing:
-            continue
         if is_postgres:
+            state = _pg_index_state(conn, name)
+            if state:
+                continue
             # MIG002: CONCURRENTLY avoids an ACCESS EXCLUSIVE lock during build.
             with op.get_context().autocommit_block():
+                if state is False:
+                    # A previous CONCURRENTLY build failed and left an INVALID
+                    # index the planner never uses; rebuild it rather than
+                    # treating the name as done.
+                    op.drop_index(name, table_name="daily_messages", postgresql_concurrently=True)
                 op.create_index(
                     name,
                     "daily_messages",
@@ -45,7 +63,7 @@ def upgrade() -> None:
                     postgresql_concurrently=True,
                     postgresql_where=sa.text("user_id IS NOT NULL"),
                 )
-        else:
+        elif name not in existing:
             op.create_index(
                 name,
                 "daily_messages",
