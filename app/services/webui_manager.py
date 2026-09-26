@@ -17,6 +17,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -73,6 +74,11 @@ CONFINEMENT_BWRAP = "bwrap"
 # a gVisor runtime as the sandbox. Reported as the sandboxed level
 # (backend local-container:runsc) once the root probe verified the runtime.
 CONFINEMENT_RUNSC = "runsc"
+# Issue #3438: the same container launch on a Kata Containers runtime
+# (backend local-container:kata); the guest is a VM, so the confine wrapper
+# carries ingress/egress over the container's stdio instead of host sockets.
+CONFINEMENT_KATA = "kata"
+_CONTAINER_CONFINEMENT_MODES = (CONFINEMENT_RUNSC, CONFINEMENT_KATA)
 # `openace-webui-confine launch --probe` token -> readiness reason code.
 _CONTAINER_PROBE_REASONS = {
     "policy:invalid": "confinement_policy_invalid",
@@ -81,6 +87,8 @@ _CONTAINER_PROBE_REASONS = {
     "image:missing": "confinement_image_missing",
     "kernel:unverified": "confinement_kernel_unverified",
     "runtime:no-host-uds": "confinement_runtime_host_uds_disabled",
+    "kvm:unavailable": "confinement_kvm_unavailable",
+    "channel:failed": "confinement_channel_failed",
     "symlinks:unprotected": "confinement_symlinks_unprotected",
     "probe:failed": "confinement_check_failed",
 }
@@ -88,6 +96,9 @@ _CONTAINER_PROBE_REASONS = {
 # pinned image do not change under a running process), a failure briefly.
 _CONTAINER_PROBE_OK_TTL_SECONDS = 3600.0
 _CONTAINER_PROBE_FAIL_TTL_SECONDS = 30.0
+# One probe at a time: under Kata each probe boots a VM (minutes when nested),
+# so concurrent readiness checks wait for the running probe's result instead.
+_CONTAINER_PROBE_LOCK = threading.Lock()
 # Keys the confine wrapper owns or refuses (it sets HOME/PATH/proxy variables
 # itself; the host's own proxy is not reachable from the sandbox anyway).
 _CONFINE_RESERVED_ENV = frozenset(
@@ -1657,7 +1668,7 @@ class WebUIManager:
         # neither an explicit sandboxed request nor a sandboxed snapshot may
         # route it to the OpenSandbox pod launcher. The pod form follows the
         # opensandbox backend.
-        if self._confinement_mode() == CONFINEMENT_RUNSC:
+        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
             if snapshot is None:
                 snapshot = build_workspace_isolation_snapshot(self)
             if snapshot.backend.startswith(BACKEND_LOCAL_CONTAINER):
@@ -2276,7 +2287,7 @@ class WebUIManager:
         resolved = getattr(self, "_resolved_webui", None)
         webui_cmd: str | None
         webui_dir: str | None
-        if self._confinement_mode() == CONFINEMENT_RUNSC:
+        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
             # Issue #3431 Option 2: the executable is a path inside the image.
             webui_cmd, webui_dir = self.config.confinement_container_webui, None
         elif resolved:
@@ -2837,13 +2848,15 @@ class WebUIManager:
         if cached is not None and now - cached[0] < _PROBE_MEMO_TTL_SECONDS:
             return cached[1]
         reason = self._compute_launch_readiness()
-        self._readiness_memo = (now, reason)
+        # Stamped when the check ENDS: a slow check (a Kata probe boots a VM)
+        # must not already be stale when it is stored.
+        self._readiness_memo = (time.monotonic(), reason)
         return reason
 
     def _compute_launch_readiness(self) -> str | None:
         if self._platform not in ("linux", "darwin"):
             return "platform_unsupported"
-        if self._confinement_mode() == CONFINEMENT_RUNSC:
+        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
             # The WebUI runs from the pinned image: no host-side WebUI or
             # openace-webui-launch is involved; the root probe is the check.
             if shutil.which("sudo") is None:
@@ -2937,8 +2950,13 @@ class WebUIManager:
 
         The probe (root) verifies the docker CLI, the registered runtime, the
         pinned image, a gVisor guest kernel and host UNIX-socket access from a
-        container. Memoized: a success for an hour, a failure for 30 s.
+        container — or, for Kata (#3438), /dev/kvm, a hypervisor under the Kata
+        shim for the probe container, a guest kernel other than the host's and
+        the stdio channel. Memoized: a success for an hour, a failure for 30 s;
+        concurrent callers share one running probe.
         """
+        mode = self._confinement_mode()
+        kata = mode == CONFINEMENT_KATA
         if self._platform != "linux":
             return "confinement_platform_unsupported"
         if not (getattr(self.config, "webui_callback_url", "") or "").strip():
@@ -2947,24 +2965,43 @@ class WebUIManager:
 
         if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
             return "confinement_wrapper_missing"
-        now = time.monotonic()
-        memo: tuple[float, str | None] | None = getattr(self, "_container_probe_memo", None)
-        if memo is not None:
-            stamp, cached = memo
-            ttl = (
-                _CONTAINER_PROBE_OK_TTL_SECONDS
-                if cached is None
-                else _CONTAINER_PROBE_FAIL_TTL_SECONDS
-            )
-            if now - stamp < ttl:
+        hit, cached = self._cached_container_probe(mode)
+        if hit:
+            return cached
+        with _CONTAINER_PROBE_LOCK:
+            hit, cached = self._cached_container_probe(mode)  # a probe that just finished
+            if hit:
                 return cached
+            return self._run_container_probe(mode, kata)
+
+    def _cached_container_probe(self, mode: str) -> tuple[bool, str | None]:
+        """(True, reason) while *mode*'s memoized probe result is fresh."""
+        memo: tuple[str, float, str | None] | None = getattr(self, "_container_probe_memo", None)
+        if memo is None or memo[0] != mode:  # a mode switch re-probes
+            return False, None
+        _, stamp, cached = memo
+        ttl = (
+            _CONTAINER_PROBE_OK_TTL_SECONDS if cached is None else _CONTAINER_PROBE_FAIL_TTL_SECONDS
+        )
+        return time.monotonic() - stamp < ttl, cached
+
+    def _run_container_probe(self, mode: str, kata: bool) -> str | None:
         reason: str | None
         try:
             result = subprocess.run(  # noqa: S603 - fixed wrapper path
-                ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe"],
+                [
+                    "sudo",
+                    "-n",
+                    _WEBUI_CONFINE_WRAPPER,
+                    "launch",
+                    "--probe",
+                    *(["--backend", "kata"] if kata else []),
+                ],
                 capture_output=True,
                 text=True,
-                timeout=150,
+                # a Kata guest can take minutes to boot under nested
+                # virtualization; the wrapper's own worst case is ~7 minutes
+                timeout=480 if kata else 150,
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -2981,7 +3018,9 @@ class WebUIManager:
                     reason,
                     (result.stderr or "").strip()[-300:],
                 )
-        self._container_probe_memo = (now, reason)
+        # Stamped when the probe ENDS, so waiters on the lock (and the next
+        # callers) see a failed minutes-long probe as fresh, not re-probe.
+        self._container_probe_memo = (mode, time.monotonic(), reason)
         return reason
 
     def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:
@@ -3058,6 +3097,8 @@ class WebUIManager:
             cmd += ["--allow", entry]
         if self._confinement_mode() == CONFINEMENT_RUNSC:
             cmd += ["--backend", "container"]
+        elif self._confinement_mode() == CONFINEMENT_KATA:
+            cmd += ["--backend", "kata"]
         cmd += [
             "--webui",
             webui_cmd,

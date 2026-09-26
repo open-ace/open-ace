@@ -26,6 +26,13 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+# Revision 8 (2026-09-26.2, Issue #3438): ``os_user_confinement = "kata"`` is
+# the same local-container form on a Kata Containers runtime. The root probe
+# verifies it from the HOST (docker's State.Pid is a hypervisor whose parent
+# is the Kata shim for that container id, and the guest kernel differs from
+# the host's), so the snapshot reports SANDBOXED with backend
+# ``local-container:kata`` and every dimension enforced, exactly like runsc.
+#
 # Revision 7 (2026-09-26.1, Issue #3431 Option 2): ``os_user_confinement =
 # "runsc"`` runs each OS-account WebUI in a Docker container on a gVisor
 # runtime; when the root probe verified the runtime (gVisor guest kernel read
@@ -89,7 +96,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-26.1"
+POLICY_REVISION = "2026-09-26.2"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -1027,15 +1034,11 @@ def build_workspace_isolation_snapshot(
         # degradation" means every launch on this host is confined.
         confinement_active = getattr(manager, "confinement_active", None)
         confinement_mode = getattr(manager, "confinement_mode", None)
-        if (
-            callable(confinement_active)
-            and confinement_active()
-            and callable(confinement_mode)
-            and confinement_mode() == "runsc"
-        ):
+        mode = confinement_mode() if callable(confinement_mode) else ""
+        if callable(confinement_active) and confinement_active() and mode in ("runsc", "kata"):
             return IsolationCapabilitySnapshot(
                 supported=True,
-                backend=f"{BACKEND_LOCAL_CONTAINER}:runsc",
+                backend=f"{BACKEND_LOCAL_CONTAINER}:{mode}",
                 isolation_level=ISOLATION_LEVEL_SANDBOXED,
                 enforced=ALL_DIMENSIONS,
                 unsupported=(),

@@ -19,6 +19,13 @@ Option 2 (``--backend container``, a Docker + gVisor host with a registered
     CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
     CONFINE_ACCEPTANCE_RUNTIME=runsc-openace python3 scripts/webui_confine_acceptance.py
 
+Kata (#3438, ``--backend kata``, a Docker host with /dev/kvm and Kata >= 3.32
+whose containerd-shim-kata-v2 is on dockerd's PATH):
+
+    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=kata \
+    CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
+    CONFINE_ACCEPTANCE_RUNTIME=io.containerd.kata.v2 python3 scripts/webui_confine_acceptance.py
+
 It installs scripts/openace-webui-confine.py to /usr/local/bin, writes
 /etc/openace/webui-confine.json, creates the accounts ``cfa`` and ``cfb`` under
 /srv/openace-confine-acceptance, and removes the accounts and that tree on exit.
@@ -167,12 +174,24 @@ def host_ip() -> str:
             return sh("hostname", "-I").stdout.split()[0]
 
 
+def container_backend() -> str:
+    """ "container" (gVisor), "kata", or "" for the bwrap backend."""
+    backend = os.environ.get("CONFINE_ACCEPTANCE_BACKEND", "")
+    return backend if backend in ("container", "kata") else ""
+
+
 def container_policy() -> dict | None:
-    if os.environ.get("CONFINE_ACCEPTANCE_BACKEND") != "container":
+    backend = container_backend()
+    if not backend:
         return None
+    if backend == "kata":
+        runtime = os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "io.containerd.kata.v2")
+        runtimes = {"kata": runtime}
+    else:
+        runtimes = {"runsc": os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "runsc-openace")}
     return {
         "image": os.environ["CONFINE_ACCEPTANCE_IMAGE"],
-        "runtime": os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "runsc-openace"),
+        "runtimes": runtimes,
         "docker": shutil.which("docker") or "/usr/bin/docker",
     }
 
@@ -485,8 +504,13 @@ def _run_real_webui(record: Record, target: str) -> None:
         process.wait(timeout=15)
 
 
-def run_container(record: Record) -> None:
-    """Option 2: the real WebUI from the pinned image on the gVisor runtime."""
+def run_container(record: Record, backend: str = "container") -> None:
+    """The real WebUI from the pinned image: Option 2 on gVisor (``container``)
+    or #3438 on Kata (``kata``, ingress/egress over the stdio channel)."""
+    kata = backend == "kata"
+    runtime_label = "Kata" if kata else "gVisor"
+    boot = 300.0 if kata else 90.0  # a nested-virtualization Kata guest boots slowly
+    probe_argv = [WRAPPER, "launch", "--probe", *(["--backend", "kata"] if kata else [])]
     target = host_ip()
     server = subprocess.Popen(
         [sys.executable, "-m", "http.server", str(ALLOWED_PORT), "--bind", "0.0.0.0"],  # noqa: S104
@@ -501,17 +525,38 @@ def run_container(record: Record) -> None:
 
     def _launch() -> subprocess.Popen:
         return launch(3441, REAL_WEBUI, args, env, [f"{target}:{ALLOWED_PORT}"],
-                      backend="container")  # fmt: skip
+                      backend=backend)  # fmt: skip
 
     try:
-        probe = sudo(WRAPPER, "launch", "--probe", check=False)
+        probe = sudo(*probe_argv, check=False, timeout=400)
         record.check("root probe passes", probe.returncode == 0, probe.stdout.strip())
         process = _launch()
-        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
-        record.check("real WebUI serves its UI from the gVisor container",
+        answer = wait_http("http://127.0.0.1:3441/", timeout=boot)
+        record.check(f"real WebUI serves its UI from the {runtime_label} container",
                      answer is not None and answer[0] == 200 and b"Qwen Code" in answer[1])  # fmt: skip
-        kernel = sudo("docker", "exec", name, "cat", "/proc/version", check=False).stdout
-        record.check("guest kernel is gVisor", "gvisor" in kernel.lower(), kernel.strip()[:40])
+        if kata:
+            guest = sudo("docker", "exec", name, "uname", "-r", check=False).stdout.strip()
+            record.check("guest kernel is not the host kernel",
+                         bool(guest) and guest != os.uname().release,
+                         {"guest": guest, "host": os.uname().release})  # fmt: skip
+            pid = sudo("docker", "inspect", "-f", "{{.State.Pid}}", name, check=False).stdout
+            exe = sudo("readlink", f"/proc/{pid.strip()}/exe", check=False).stdout.strip()
+            record.check("the host sees a hypervisor, not the WebUI",
+                         os.path.basename(exe).startswith("qemu-system-")
+                         or os.path.basename(exe) in ("cloud-hypervisor", "firecracker"),
+                         exe)  # fmt: skip
+            direct = sudo(
+                "docker", "exec", name, "python3", "-c",
+                "import socket\n"
+                f"try: socket.create_connection(('{target}', {ALLOWED_PORT}), timeout=5); print('reached')\n"
+                "except OSError as e: print('blocked', type(e).__name__)",
+                check=False,
+            ).stdout.strip()  # fmt: skip
+            record.check("a direct connection from the guest fails", direct.startswith("blocked"),
+                         direct)  # fmt: skip
+        else:
+            kernel = sudo("docker", "exec", name, "cat", "/proc/version", check=False).stdout
+            record.check("guest kernel is gVisor", "gvisor" in kernel.lower(), kernel.strip()[:40])
         cfg = sudo("docker", "inspect", "-f",
                    "{{.HostConfig.NetworkMode}} {{.HostConfig.ReadonlyRootfs}} {{.Config.User}} "
                    "{{.HostConfig.CapDrop}}", name, check=False).stdout.split()  # fmt: skip
@@ -552,14 +597,14 @@ def run_container(record: Record) -> None:
         # (a) the docker CLI is SIGKILLed, then the manager relaunches at once
         # on the same port: the leftover container must not block the launch.
         process = _launch()
-        wait_http("http://127.0.0.1:3441/", timeout=90)
+        wait_http("http://127.0.0.1:3441/", timeout=boot)
         for pid in sh(
             "pgrep", "-f", f"docker run --rm -i --init --name {name}", check=False
         ).stdout.split():
             sudo("kill", "-KILL", pid, check=False)
         process.wait(timeout=30)
         process = _launch()
-        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
+        answer = wait_http("http://127.0.0.1:3441/", timeout=boot)
         record.check("immediate relaunch after SIGKILL of the docker CLI serves again",
                      answer is not None and answer[0] == 200)  # fmt: skip
 
@@ -585,12 +630,19 @@ def run_container(record: Record) -> None:
         process.terminate()
         escalated = False
         try:
-            process.wait(timeout=5)
+            # Kata: the launcher's own docker rm -f of a VM can take a while
+            process.wait(timeout=20 if kata else 5)
         except subprocess.TimeoutExpired:
             escalated = True  # SIGTERM alone could not stop it: the case under test
             process.kill()
             process.wait(timeout=10)
-        record.check("the stop really needed the kill escalation", escalated)
+        if kata:
+            # Kata: the docker CLI exits at once on SIGTERM (the container
+            # keeps running), so the LAUNCHER must remove it by id — a
+            # suspended guest cannot delay that. Escalation is not needed.
+            record.check("SIGTERM alone ends the launch of a suspended guest", not escalated)
+        else:
+            record.check("the stop really needed the kill escalation", escalated)
         deadline = time.monotonic() + 60
         while (
             time.monotonic() < deadline
@@ -603,7 +655,7 @@ def run_container(record: Record) -> None:
                      container_gone and port_free,
                      {"container_gone": container_gone, "port_free": port_free})  # fmt: skip
         process = _launch()  # (c) relaunch at once on the same port
-        answer = wait_http("http://127.0.0.1:3441/", timeout=90)
+        answer = wait_http("http://127.0.0.1:3441/", timeout=boot)
         record.check("relaunch right after a kill-escalated stop serves again",
                      answer is not None and answer[0] == 200)  # fmt: skip
         process.terminate()
@@ -611,13 +663,56 @@ def run_container(record: Record) -> None:
         leftovers = sh("sudo", "-n", "ls", "/run/openace-webui", check=False).stdout.split()
         record.check("no run directories or cid files left behind",
                      [e for e in leftovers if e.startswith("3431-")] == [], leftovers)  # fmt: skip
+        if kata:
+            # (d) a guest that breaks the channel's framing loses its
+            # container without its own cooperation: write an invalid frame
+            # into inner's channel descriptor from inside the guest.
+            process = _launch()
+            wait_http("http://127.0.0.1:3441/", timeout=boot)
+            forged = sudo(
+                "docker", "exec", name, "python3", "-c",
+                "import os, stat\n"
+                "me = os.getpid(); hits = 0\n"
+                "for pid in os.listdir('/proc'):\n"
+                "    if not pid.isdigit() or int(pid) == me: continue\n"
+                "    try: cmd = open(f'/proc/{pid}/cmdline','rb').read()\n"
+                "    except OSError: continue\n"
+                "    if not (b'confine.py' in cmd and b'inner' in cmd): continue\n"
+                "    fds = f'/proc/{pid}/fd'\n"
+                "    std = {os.readlink(f'{fds}/{n}') for n in ('0', '2')}\n"
+                "    for n in os.listdir(fds):\n"
+                "        link = os.readlink(f'{fds}/{n}')\n"
+                "        if link.startswith('pipe:') and link not in std:\n"
+                "            try:\n"
+                "                fd = os.open(f'{fds}/{n}', os.O_WRONLY | os.O_NONBLOCK)\n"
+                "                os.write(fd, bytes([99, 0, 0, 0, 2, 0, 0])); os.close(fd); hits += 1\n"
+                "            except OSError: pass\n"
+                "print(hits); raise SystemExit(0 if hits else 1)",
+                check=False,
+            )  # fmt: skip
+            ended = False
+            try:
+                process.wait(timeout=90)
+                ended = True
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=30)
+            gone = not sudo("docker", "ps", "-aq", "--filter", f"name={name}").stdout.strip()
+            record.check("a forged frame from the guest ends the launch and removes the container",
+                         forged.returncode == 0 and ended and gone,
+                         {"forged": forged.stdout.strip(), "ended": ended, "gone": gone})  # fmt: skip
         policy_text = sudo("cat", POLICY).stdout
         broken = json.loads(policy_text)
-        broken["container"]["runtime"] = "runsc"  # plain runsc: no host UDS
+        if kata:
+            # runc claimed as Kata: the host-side evidence must refuse it
+            broken["container"]["runtimes"]["kata"] = "runc"
+            expected, label = "kernel:unverified", "probe refuses runc claimed as Kata"
+        else:
+            broken["container"]["runtimes"]["runsc"] = "runsc"  # plain runsc: no host UDS
+            expected, label = "runtime:no-host-uds", "probe refuses a runtime without host UDS"
         sudo("tee", POLICY, input=json.dumps(broken))
-        probe = sudo(WRAPPER, "launch", "--probe", check=False)
-        record.check("probe refuses a runtime without host UDS",
-                     probe.stdout.strip() == "runtime:no-host-uds", probe.stdout.strip())  # fmt: skip
+        probe = sudo(*probe_argv, check=False, timeout=400)
+        record.check(label, probe.stdout.strip() == expected, probe.stdout.strip())
         sudo("tee", POLICY, input=policy_text)
     finally:
         server.terminate()
@@ -649,7 +744,7 @@ def main() -> int:
     try:
         setup(real_webui)
         if container:
-            run_container(record)
+            run_container(record, container_backend())
         else:
             run(record, real_webui)
     finally:

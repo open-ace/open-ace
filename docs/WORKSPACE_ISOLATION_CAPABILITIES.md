@@ -43,7 +43,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
       "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
     }
   },
-  "policy_revision": "2026-09-26.1"
+  "policy_revision": "2026-09-26.2"
 }
 ```
 
@@ -402,10 +402,59 @@ CLI → 容器 → WebUI 退出、`--rm` 删除容器;manager 升级为 SIGKILL(
 
 **诚实声明**:
 
-- 仅验证了 gVisor(runsc);Kata 等其它运行时的内核判定不在本次范围内,探针会报
-  `confinement_kernel_unverified`。
+- 本节只覆盖 gVisor(runsc);Kata 见 §5.3。
 - 与 §5.1 相同:出口代理不检查 TLS;不防御被攻破的服务账户;宿主侧入口仍监听 `0.0.0.0:<port>`。
 - 镜像内容(node 版本、工具链)即 agent 可用的工具集,属产品决定。
+
+### 5.3 可选:本机 Kata 容器(`os_user_confinement = "kata"`,#3438,policy revision 2026-09-26.2)
+
+与 §5.2 相同的本机容器形态,运行时换成 **Kata Containers**:每个 WebUI 跑在一台轻量虚拟机里,
+拥有自己的 guest 内核。快照:`isolation_level = sandboxed`、`backend = local-container:kata`、
+七个维度全部 `enforced`;入口矩阵、身份门闸、本地启动形态与 §5.2 一致。
+
+与 §5.2 的差别:
+
+| 项 | Kata 形态 |
+|---|---|
+| 内核隔离 | 硬件虚拟化(KVM);guest 内核与宿主不同 |
+| 出入口通道 | Kata guest 经 virtio-fs 看到的宿主 UNIX socket **无法连接**(实测 `ECONNREFUSED`),因此不挂 socket 目录;入口与出口的所有连接以**帧**的形式复用在容器的 stdin/stdout 上(每条流独立的信用窗口,慢流不阻塞通道)。容器仍是 `--network none`,不建网桥、不写防火墙规则。宿主只打开 INGRESS 流、容器只打开 EGRESS 流,容器同时打开的流(含仍在运行的出口连接)有上限;任何违反帧协议的行为都会断开整个通道:宿主侧进程随即退出,root 启动进程据此删除容器(fail closed,不依赖容器配合) |
+| 看门狗 | 宿主每 5 秒发一次心跳;容器侧 30 秒收不到任何帧、或 stdin 结束,即停止 WebUI |
+| 任务上限 | `--pids-limit` 与 `--ulimit nproc` 都作用在 guest 内,取 `tasks_max`(无 gVisor 的 256 下限) |
+
+部署要求:
+
+1. 有 `/dev/kvm` 的 Linux 主机(物理机,或开启嵌套虚拟化的虚拟机)。
+2. **Kata ≥ 3.32.0**:Docker 29 会在 OCI spec 里带上 `time` namespace,更早的 Kata 报
+   `invalid namespace type`(kata-containers#13082 修复,首发于 3.32.0)。
+3. 运行时:`containerd-shim-kata-v2` 放在 dockerd 的 PATH 上(如 `/usr/local/bin`)即可直接用
+   `io.containerd.kata.v2`,**无需**修改 `daemon.json` 或重启 Docker;也可以在 `daemon.json` 注册一个
+   名字。策略文件用 `runtimes` 为每种模式指定运行时(旧的单个 `runtime` 键仍表示 runsc):
+   ```json
+   {"webui": ["/usr/bin/qwen-code-webui"],
+    "container": {"image": "sha256:<64 hex>", "docker": "/usr/bin/docker",
+                  "runtimes": {"runsc": "runsc-openace", "kata": "io.containerd.kata.v2"}}}
+   ```
+   用 shim 名时,探针要求 shim 二进制为 root 所控。
+4. 嵌套虚拟化下 guest 启动较慢(三层嵌套实测约 70 秒),Kata 默认的 `dial_timeout = 45` 不够,需要在
+   `/etc/kata-containers/configuration.toml` 中调大(例如 180);物理机上默认值即可。
+5. `workspace.os_user_confinement = "kata"`,其余同 §5.2。
+
+readiness:`sudo -n openace-webui-confine launch --probe --backend kata`(root)——除 §5.2 的检查外:
+`/dev/kvm` 存在;用 Kata 运行时启动一个探针容器,并**在宿主侧正向确认**:docker 报告的
+`State.Pid` 是 hypervisor 进程(`qemu-system-*` / `cloud-hypervisor` / `firecracker` / `stratovirt`),其父进程是
+为**这个**容器 id 启动的 `containerd-shim-kata-v2`(runc 下 `State.Pid` 是容器自己的 init 进程);
+guest 的 `uname -r` 与宿主不同;stdio 通道能往返。这弥补了 §6.4 所述 pod 形态下"Kata 只能确认不是
+gVisor"的单向判定。guest 启动最多等待 180 秒,整个探针最坏约 7 分钟(manager 给 8 分钟)。新增原因码:`confinement_kvm_unavailable`、
+`confinement_channel_failed`;其余同 §5.2。
+
+**诚实声明**:
+
+- 吞吐:stdio 通道比网桥 TCP 慢。三层嵌套实测 stdio 双向各约 1.7 MB/s,同环境网桥 TCP 约
+  11.4 MB/s;对 WebUI 与 LLM 流式响应足够,经出口代理的大文件下载会明显变慢。这是为了不给 guest
+  任何网络接口、不在宿主上管理防火墙规则而做的取舍。
+- 内存:`--memory` 决定 guest 虚拟机的大小,Kata 自身还有额外开销(默认 guest 内存等),宿主上看到的
+  占用高于该值。
+- 其余同 §5.2。
 
 ## 6. sandboxed 等级部署要求与诚实声明(语义最后变更于 2026-09-12.2;所有快照一律报告当前 POLICY_REVISION)
 
@@ -586,7 +635,7 @@ c = json.load(open(sys.argv[1]))
 NEEDED = ("webui", "filesystem_api", "session_history")    # 本地工作台入口
 KNOWN  = {"enforced", "partial", "remote_machine_scope",
           "separate_contract", "sandboxed_entry_not_wired", "disabled"}
-REVIEWED = {"2026-09-26.1"}                                # 你已评审过的 revision
+REVIEWED = {"2026-09-26.2"}                                # 你已评审过的 revision
 d = c.get("entry_point_details", {})
 ok = (
     c.get("local_workspace_multi_user") == "supported"
