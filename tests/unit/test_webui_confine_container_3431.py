@@ -477,6 +477,49 @@ def test_docker_remove_id_uses_the_cid_file(confine, monkeypatch, tmp_path):
     assert len(removed) == 1
 
 
+def test_docker_remove_id_reports_failure_so_the_launcher_retries(confine, monkeypatch, tmp_path):
+    cid = "d" * 64
+    (tmp_path / "x.cid").write_text(cid)
+    result = {"rc": 1, "stderr": "Error response from daemon: connection refused"}
+    monkeypatch.setattr(
+        confine.subprocess, "run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, result["rc"], "", result["stderr"]),
+    )  # fmt: skip
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "x.cid")) is False
+    result["stderr"] = f"Error response from daemon: No such container: {cid}"
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "x.cid")) is True
+
+    def _timeout(argv, **k):
+        raise subprocess.TimeoutExpired(argv, 60)
+
+    monkeypatch.setattr(confine.subprocess, "run", _timeout)
+    assert confine._docker_remove_id("/usr/bin/docker", str(tmp_path / "x.cid")) is False
+
+
+def test_reap_supervisor_stops_once_the_child_is_already_reaped(confine, monkeypatch):
+    kills = []
+    monkeypatch.setattr(confine.os, "kill", lambda pid, sig: kills.append(sig))
+
+    def _gone(pid, flags):
+        raise ChildProcessError
+
+    monkeypatch.setattr(confine.os, "waitpid", _gone)
+    monkeypatch.setattr(confine.time, "sleep", lambda s: pytest.fail("must not keep polling"))
+    confine._reap_supervisor(4242)
+    assert kills == [confine.signal.SIGTERM]  # never a SIGKILL to a possibly recycled pid
+
+
+def test_reap_supervisor_escalates_after_the_grace_period(confine, monkeypatch):
+    kills = []
+    clock = [0.0]
+    monkeypatch.setattr(confine.os, "kill", lambda pid, sig: kills.append(sig))
+    monkeypatch.setattr(confine.os, "waitpid", lambda pid, flags: (0, 0))
+    monkeypatch.setattr(confine.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(confine.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    confine._reap_supervisor(4242, grace=1.0)
+    assert kills == [confine.signal.SIGTERM, confine.signal.SIGKILL]
+
+
 def test_sweep_removes_only_dead_launches_of_the_same_port(confine, tmp_path):
     root = tmp_path / "run"
     root.mkdir()

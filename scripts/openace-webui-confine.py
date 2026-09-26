@@ -1511,13 +1511,37 @@ def _docker_remove_id(docker: str, cidfile: str) -> bool:
         return False
     if not re.fullmatch(r"[0-9a-f]{64}", cid):
         return False
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run(  # noqa: S603 - fixed argv
-            [docker, "rm", "-f", cid], capture_output=True, timeout=60, check=False,
-            env=_docker_env(),
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv
+            [docker, "rm", "-f", cid], capture_output=True, text=True, timeout=60,
+            check=False, env=_docker_env(),
         )  # fmt: skip
-        return True
-    return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # Only a confirmed removal (or a container already gone) ends the retries.
+    return result.returncode == 0 or "no such container" in (result.stderr or "").lower()
+
+
+def _reap_supervisor(pid: int, grace: float = 10.0) -> None:
+    """SIGTERM the supervisor, wait up to *grace* seconds, then SIGKILL.
+
+    Stops at once when the child is already reaped (ChildProcessError): a
+    SIGKILL after that could hit a recycled pid.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                return
+        except ChildProcessError:
+            return
+        time.sleep(0.2)
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+    with contextlib.suppress(ChildProcessError):
+        os.waitpid(pid, 0)
 
 
 def sweep_stale_run_dirs(prefix: str, run_root: str = RUN_ROOT) -> None:
@@ -1608,6 +1632,9 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
             assert container.stdin is not None
             container.stdin.write(inner_env)
             container.stdin.close()
+        # A stop that raced Popen is still forwarded, but the docker CLI may
+        # not have installed its signal proxy yet and die without stopping the
+        # container: the id-based removal in ``finally`` covers that.
         for signum in pending:
             _forward(signum, None)
         while True:
@@ -1618,18 +1645,15 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
                     # sudo was killed: nothing will signal us again.
                     removed = _docker_remove_id(docker, cidfile)
     finally:
-        if supervisor:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(supervisor, signal.SIGTERM)
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                with contextlib.suppress(ChildProcessError):
-                    if os.waitpid(supervisor, os.WNOHANG)[0]:
-                        break
-                time.sleep(0.2)
-            else:
+        if container is not None and not removed:
+            # Idempotent: a container that exited under --rm is already gone.
+            # Covers a docker CLI that died before proxying a stop signal.
+            if container.poll() is None:
                 with contextlib.suppress(ProcessLookupError):
-                    os.kill(supervisor, signal.SIGKILL)
+                    container.kill()
+            _docker_remove_id(docker, cidfile)
+        if supervisor:
+            _reap_supervisor(supervisor)
         shutil.rmtree(run_dir, ignore_errors=True)
         with contextlib.suppress(OSError):
             os.unlink(cidfile)
