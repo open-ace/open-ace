@@ -6,11 +6,18 @@ Repository for usage data access operations.
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, cast
 
-from app.repositories.database import Database, distinct_values_sql, escape_like, is_postgresql
+from app.repositories.database import (
+    Database,
+    distinct_values_for_users_sql,
+    distinct_values_sql,
+    escape_like,
+    is_postgresql,
+)
 from app.utils.helpers import to_iso_date
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
@@ -61,10 +68,54 @@ class UsageRepository:
             return None
         return tenant_id if tenant_id > 0 else None
 
+    # A tenant's users; the one parameter is the tenant id.
+    _TENANT_USER_IDS_SQL = "SELECT id FROM users WHERE tenant_id = ?"
+
+    # (db_url, index_name) -> monotonic time it was last confirmed to exist.
+    # Only positive results are cached, so an index built after startup is
+    # picked up on the next call; they expire so a dropped index stops being
+    # used within _INDEX_CACHE_TTL instead of only after a restart.
+    _known_indexes: dict[tuple[str, str], float] = {}
+    _INDEX_CACHE_TTL = 300.0
+
+    def _has_index(self, index_name: str) -> bool:
+        key = (self.db.db_url, index_name)
+        confirmed_at = self._known_indexes.get(key)
+        if confirmed_at is not None and time.monotonic() - confirmed_at < self._INDEX_CACHE_TTL:
+            return True
+        try:
+            found = self.db.index_exists(index_name)
+        except Exception as e:
+            logger.warning("Index probe for %s failed: %s", index_name, e)
+            return False
+        if found:
+            self._known_indexes[key] = time.monotonic()
+        else:
+            self._known_indexes.pop(key, None)
+        return found
+
+    def _tenant_distinct_values_sql(self, column: str, index_name: str) -> str:
+        """Distinct ``column`` values of a tenant's daily_messages rows.
+
+        Issue #3424: with ``index_name`` on (user_id, column) the values are
+        walked per tenant user (a few index probes). Without it that walk would
+        rescan the table once per probe, so fall back to one plain scan until
+        migration 20260926_002 has built the index.
+        """
+        if self._has_index(index_name):
+            return distinct_values_for_users_sql(
+                "daily_messages", column, self._TENANT_USER_IDS_SQL
+            )
+        return f"""
+            SELECT DISTINCT {column}
+            FROM daily_messages
+            WHERE {self._tenant_user_condition("user_id")}
+        """
+
     @staticmethod
     def _tenant_user_condition(column_ref: str) -> str:
         """Return a tenant-scope predicate for a user_id column."""
-        return f"{column_ref} IN (SELECT id FROM users WHERE tenant_id = ?)"
+        return f"{column_ref} IN ({UsageRepository._TENANT_USER_IDS_SQL})"
 
     def save_usage(
         self,
@@ -1193,18 +1244,10 @@ class UsageRepository:
         """
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
         params: list = []
-        conditions = []
         if normalized_tenant_id is not None:
-            conditions.append(self._tenant_user_condition("user_id"))
+            # Issue #3424: same rows as "user_id IN (tenant users)".
+            query = self._tenant_distinct_values_sql("tool_name", "idx_messages_user_tool")
             params.append(normalized_tenant_id)
-
-        if conditions:
-            query = f"""
-                SELECT DISTINCT tool_name
-                FROM daily_messages
-                WHERE {' AND '.join(conditions)}
-                ORDER BY tool_name
-            """
         else:
             # Issue #3424: unfiltered DISTINCT read all of daily_messages.
             query = distinct_values_sql("daily_messages", "tool_name")
@@ -1228,28 +1271,21 @@ class UsageRepository:
         # Get SQL filter clause
         sql_filter = get_hostname_filter_sql()
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
-        tenant_filter = ""
         params: list = []
         if normalized_tenant_id is not None:
-            tenant_filter = f" AND {self._tenant_user_condition('user_id')}"
+            distinct_hosts = self._tenant_distinct_values_sql("host_name", "idx_messages_user_host")
             params.append(normalized_tenant_id)
-
-        if tenant_filter:
-            query = f"""
-                SELECT DISTINCT host_name
-                FROM daily_messages
-                WHERE {sql_filter}{tenant_filter}
-                ORDER BY host_name
-            """
         else:
-            # Issue #3424: the hostname filter only reads host_name, so it can
-            # run on the distinct values instead of on every message row.
-            query = f"""
-                SELECT host_name
-                FROM ({distinct_values_sql("daily_messages", "host_name")}) hosts
-                WHERE {sql_filter}
-                ORDER BY host_name
-            """
+            distinct_hosts = distinct_values_sql("daily_messages", "host_name")
+
+        # Issue #3424: the hostname filter only reads host_name, so it can run
+        # on the distinct values instead of on every message row.
+        query = f"""
+            SELECT host_name
+            FROM ({distinct_hosts}) hosts
+            WHERE {sql_filter}
+            ORDER BY host_name
+        """
 
         rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
 

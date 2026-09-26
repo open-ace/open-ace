@@ -3691,6 +3691,14 @@ CREATE INDEX idx_messages_usage_trend_covering ON daily_messages USING btree (da
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages USING btree (user_id, date, role) INCLUDE (tokens_used) WHERE ((user_id IS NOT NULL) AND ((role)::text = 'assistant'::text));
 
+CREATE INDEX idx_messages_user_host ON daily_messages USING btree (user_id, host_name) WHERE (user_id IS NOT NULL);
+
+
+--
+--
+
+CREATE INDEX idx_messages_user_tool ON daily_messages USING btree (user_id, tool_name) WHERE (user_id IS NOT NULL);
+
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (workflow_id, phase, status);
 
 

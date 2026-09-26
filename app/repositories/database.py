@@ -228,6 +228,39 @@ def distinct_values_sql(table: str, column: str) -> str:
     """
 
 
+def distinct_values_for_users_sql(table: str, column: str, user_ids_sql: str) -> str:
+    """Like :func:`distinct_values_sql`, restricted to rows of a set of users.
+
+    Walks each user's values separately through a ``(user_id, column)`` index,
+    so the cost is one index probe per (user, distinct value) instead of a
+    scan of every row the users own (#3424: tenant-scoped tool/host lists).
+    Needs that composite index to be fast.
+
+    ``user_ids_sql`` is a SELECT returning one user id column; it may contain
+    ``?`` placeholders, whose parameters the caller passes as usual.
+    ``table`` and ``column`` are interpolated verbatim and must be trusted
+    identifiers.
+    """
+    return f"""
+        WITH RECURSIVE scoped_users(id) AS (
+            {user_ids_sql}
+        ),
+        user_values(user_id, value) AS (
+            SELECT u.id, (SELECT MIN(t.{column}) FROM {table} t WHERE t.user_id = u.id)
+            FROM scoped_users u
+            UNION ALL
+            SELECT v.user_id, (
+                SELECT MIN(t.{column}) FROM {table} t
+                WHERE t.user_id = v.user_id AND t.{column} > v.value
+            )
+            FROM user_values v
+            WHERE v.value IS NOT NULL
+        )
+        SELECT DISTINCT value AS {column} FROM user_values WHERE value IS NOT NULL
+        ORDER BY {column}
+    """
+
+
 def ensure_db_dir() -> None:
     """Ensure the database directory exists (for SQLite)."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -563,5 +596,35 @@ class Database:
         else:
             result = self.fetch_one(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
+            )
+            return result is not None
+
+    def index_exists(self, index_name: str) -> bool:
+        """
+        Check if a usable index exists.
+
+        On PostgreSQL an index left INVALID by a failed ``CREATE INDEX
+        CONCURRENTLY`` does not count: the planner cannot use it.
+
+        Args:
+            index_name: Name of the index.
+
+        Returns:
+            bool: True if the index exists (and is valid on PostgreSQL).
+        """
+        if self._is_postgresql:
+            result = self.fetch_one(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+                    WHERE c.relname = %s AND i.indisvalid AND pg_table_is_visible(c.oid)
+                )
+                """,
+                (index_name,),
+            )
+            return bool(result.get("exists", False)) if result else False
+        else:
+            result = self.fetch_one(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name=?", (index_name,)
             )
             return result is not None
