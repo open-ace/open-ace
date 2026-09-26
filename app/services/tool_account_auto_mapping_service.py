@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
-from app.repositories.database import Database, adapt_boolean_condition
+from app.repositories.database import Database, adapt_boolean_condition, distinct_values_sql
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
 
@@ -336,9 +336,11 @@ class ToolAccountAutoMappingService:
         self._users_cache = None
 
         # Get all unique sender_names from daily_messages
-        discovered_query = """
-            SELECT DISTINCT sender_name FROM daily_messages
-            WHERE sender_name IS NOT NULL AND sender_name != ''
+        # Issue #3424: loose index scan instead of reading every message row.
+        discovered_query = f"""
+            SELECT sender_name
+            FROM ({distinct_values_sql("daily_messages", "sender_name")}) senders
+            WHERE sender_name != ''
         """
         discovered_rows = self.db.fetch_all(discovered_query)
         discovered_count = len(discovered_rows)

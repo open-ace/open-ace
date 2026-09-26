@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, cast
 
-from app.repositories.database import Database, escape_like, is_postgresql
+from app.repositories.database import Database, distinct_values_sql, escape_like, is_postgresql
+from app.utils.helpers import to_iso_date
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
 
@@ -978,6 +979,14 @@ class UsageRepository:
 
             results: dict[str, dict] = {}
             for row in rows:
+                # Issue #3424: CAST(... AS DATE) yields datetime.date on
+                # PostgreSQL; the caller merges these with daily_messages'
+                # string dates, and comparing the two raised TypeError.
+                row = {
+                    **row,
+                    "first_date": to_iso_date(row["first_date"]),
+                    "last_date": to_iso_date(row["last_date"]),
+                }
                 tool = normalize_tool_name(row["tool_name"])
                 if tool in results:
                     existing = results[tool]
@@ -1189,13 +1198,16 @@ class UsageRepository:
             conditions.append(self._tenant_user_condition("user_id"))
             params.append(normalized_tenant_id)
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"""
-            SELECT DISTINCT tool_name
-            FROM daily_messages
-            {where_clause}
-            ORDER BY tool_name
-        """
+        if conditions:
+            query = f"""
+                SELECT DISTINCT tool_name
+                FROM daily_messages
+                WHERE {' AND '.join(conditions)}
+                ORDER BY tool_name
+            """
+        else:
+            # Issue #3424: unfiltered DISTINCT read all of daily_messages.
+            query = distinct_values_sql("daily_messages", "tool_name")
 
         rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
         return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
@@ -1222,12 +1234,22 @@ class UsageRepository:
             tenant_filter = f" AND {self._tenant_user_condition('user_id')}"
             params.append(normalized_tenant_id)
 
-        query = f"""
-            SELECT DISTINCT host_name
-            FROM daily_messages
-            WHERE {sql_filter}{tenant_filter}
-            ORDER BY host_name
-        """
+        if tenant_filter:
+            query = f"""
+                SELECT DISTINCT host_name
+                FROM daily_messages
+                WHERE {sql_filter}{tenant_filter}
+                ORDER BY host_name
+            """
+        else:
+            # Issue #3424: the hostname filter only reads host_name, so it can
+            # run on the distinct values instead of on every message row.
+            query = f"""
+                SELECT host_name
+                FROM ({distinct_values_sql("daily_messages", "host_name")}) hosts
+                WHERE {sql_filter}
+                ORDER BY host_name
+            """
 
         rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
 

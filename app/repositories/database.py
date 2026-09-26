@@ -201,6 +201,33 @@ def escape_like(value: str, escape_char: str = "\\") -> str:
     )
 
 
+def distinct_values_sql(table: str, column: str) -> str:
+    """Build a query for the distinct non-NULL values of an indexed column.
+
+    ``SELECT DISTINCT col FROM big_table`` reads every row: PostgreSQL has no
+    skip scan, so listing the handful of tools/hosts/senders in daily_messages
+    took 5-20 s on a large install (#3424). This recursive "loose index scan"
+    walks the column's btree from one value to the next instead, doing one
+    index probe per distinct value. Works on PostgreSQL and SQLite; the column
+    must have an index for it to be fast.
+
+    ``table`` and ``column`` are interpolated verbatim and must be trusted
+    identifiers, never user input. The result column is named ``column`` and
+    is ordered ascending.
+    """
+    return f"""
+        WITH RECURSIVE distinct_values(value) AS (
+            SELECT (SELECT MIN({column}) FROM {table})
+            UNION ALL
+            SELECT (SELECT MIN(t.{column}) FROM {table} t WHERE t.{column} > d.value)
+            FROM distinct_values d
+            WHERE d.value IS NOT NULL
+        )
+        SELECT value AS {column} FROM distinct_values WHERE value IS NOT NULL
+        ORDER BY value
+    """
+
+
 def ensure_db_dir() -> None:
     """Ensure the database directory exists (for SQLite)."""
     os.makedirs(CONFIG_DIR, exist_ok=True)

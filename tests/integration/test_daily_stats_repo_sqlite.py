@@ -256,6 +256,86 @@ class TestRefreshStats:
         assert len(stats) == 1
         assert stats[0]["total_tokens"] == 300  # 100 + 200
 
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_refresh_stats_does_not_duplicate_null_sender_rows(self, tmp_db):
+        """NULL sender_name never hits the unique key; repeated refreshes must
+        still leave exactly one row per group, or trend totals multiply."""
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", sender_name=None, tokens_used=70)
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", sender_name="alice", tokens_used=30)
+
+        repo = DailyStatsRepository(db=tmp_db)
+        for _ in range(3):
+            assert repo.refresh_stats() is True
+        assert repo.refresh_stats(date="2025-01-15") is True
+        assert repo.refresh_stats(since="2025-01-01") is True
+
+        stats = tmp_db.fetch_all("SELECT sender_name, total_tokens FROM daily_stats")
+        assert sorted((s["sender_name"] or "", s["total_tokens"]) for s in stats) == [
+            ("", 70),
+            ("alice", 30),
+        ]
+
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_refresh_stats_since_only_touches_recent_dates(self, tmp_db):
+        """The request-path refresh re-aggregates date >= since and leaves
+        older dates alone."""
+        _insert_daily_messages_row(tmp_db, date="2025-01-10", tokens_used=100)
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", tokens_used=200)
+        _insert_daily_messages_row(tmp_db, date="2025-01-16", tokens_used=300)
+
+        repo = DailyStatsRepository(db=tmp_db)
+        assert repo.refresh_stats(since="2025-01-15") is True
+
+        stats = tmp_db.fetch_all("SELECT date, total_tokens FROM daily_stats ORDER BY date")
+        assert [(s["date"], s["total_tokens"]) for s in stats] == [
+            ("2025-01-15", 200),
+            ("2025-01-16", 300),
+        ]
+
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_needs_refresh_ignores_null_sender_rows(self, tmp_db):
+        """NULL and non-NULL senders legitimately share a day; that alone must
+        not flag stats as stale (it forced a full refresh on every request)."""
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", sender_name=None)
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", sender_name="alice")
+
+        repo = DailyStatsRepository(db=tmp_db)
+        assert repo.refresh_stats() is True
+        assert repo.needs_refresh() is False
+
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_fetch_script_refresh_does_not_duplicate_null_sender_rows(self, tmp_db):
+        """The fetch scripts' SQLite refresh path had the same NULL-key flaw."""
+        import sqlite3
+        from unittest.mock import patch
+
+        import scripts.shared.db as shared_db
+
+        _insert_daily_messages_row(tmp_db, date="2025-01-15", sender_name=None, tokens_used=70)
+        db_path = tmp_db.db_url.replace("sqlite:///", "", 1)
+
+        with (
+            patch.object(shared_db, "is_postgresql", return_value=False),
+            patch.object(shared_db, "get_connection", side_effect=lambda: sqlite3.connect(db_path)),
+        ):
+            for _ in range(3):
+                shared_db._refresh_daily_stats_for_messages([{"date": "2025-01-15"}])
+
+        stats = tmp_db.fetch_all("SELECT sender_name, total_tokens FROM daily_stats")
+        assert [(s["sender_name"], s["total_tokens"]) for s in stats] == [(None, 70)]
+
+    def test_get_refresh_start_date(self, tmp_db):
+        repo = DailyStatsRepository(db=tmp_db)
+        assert repo.get_refresh_start_date() is None
+
+        _insert_daily_stats_row(tmp_db, date="2025-01-10")
+        _insert_daily_stats_row(tmp_db, date="2025-01-12", sender_name="bob")
+        assert repo.get_refresh_start_date() == "2025-01-12"
+
     def test_needs_refresh_empty(self, tmp_db):
         """Empty daily_stats table needs refresh."""
         repo = DailyStatsRepository(db=tmp_db)

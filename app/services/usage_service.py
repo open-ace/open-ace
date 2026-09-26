@@ -9,6 +9,7 @@ from datetime import date, datetime
 
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
+from app.utils.helpers import to_iso_date
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -316,12 +317,7 @@ class UsageService:
         Returns:
             str: ISO format date string (YYYY-MM-DD).
         """
-        if isinstance(date_value, str):
-            return date_value
-        if isinstance(date_value, datetime):
-            return date_value.date().isoformat()
-        # At this point, date_value is datetime.date
-        return date_value.isoformat()
+        return to_iso_date(date_value) or ""
 
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_trend_data(
