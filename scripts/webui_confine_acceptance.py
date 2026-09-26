@@ -630,7 +630,8 @@ def run_container(record: Record, backend: str = "container") -> None:
         process.terminate()
         escalated = False
         try:
-            process.wait(timeout=5)
+            # Kata: the launcher's own docker rm -f of a VM can take a while
+            process.wait(timeout=20 if kata else 5)
         except subprocess.TimeoutExpired:
             escalated = True  # SIGTERM alone could not stop it: the case under test
             process.kill()

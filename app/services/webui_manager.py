@@ -17,6 +17,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -95,6 +96,9 @@ _CONTAINER_PROBE_REASONS = {
 # pinned image do not change under a running process), a failure briefly.
 _CONTAINER_PROBE_OK_TTL_SECONDS = 3600.0
 _CONTAINER_PROBE_FAIL_TTL_SECONDS = 30.0
+# One probe at a time: under Kata each probe boots a VM (minutes when nested),
+# so concurrent readiness checks wait for the running probe's result instead.
+_CONTAINER_PROBE_LOCK = threading.Lock()
 # Keys the confine wrapper owns or refuses (it sets HOME/PATH/proxy variables
 # itself; the host's own proxy is not reachable from the sandbox anyway).
 _CONFINE_RESERVED_ENV = frozenset(
@@ -2946,9 +2950,11 @@ class WebUIManager:
         pinned image, a gVisor guest kernel and host UNIX-socket access from a
         container — or, for Kata (#3438), /dev/kvm, a hypervisor under the Kata
         shim for the probe container, a guest kernel other than the host's and
-        the stdio channel. Memoized: a success for an hour, a failure for 30 s.
+        the stdio channel. Memoized: a success for an hour, a failure for 30 s;
+        concurrent callers share one running probe.
         """
-        kata = self._confinement_mode() == CONFINEMENT_KATA
+        mode = self._confinement_mode()
+        kata = mode == CONFINEMENT_KATA
         if self._platform != "linux":
             return "confinement_platform_unsupported"
         if not (getattr(self.config, "webui_callback_url", "") or "").strip():
@@ -2957,18 +2963,28 @@ class WebUIManager:
 
         if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
             return "confinement_wrapper_missing"
-        now = time.monotonic()
-        mode = self._confinement_mode()
-        memo: tuple[str, float, str | None] | None = getattr(self, "_container_probe_memo", None)
-        if memo is not None and memo[0] == mode:  # a mode switch re-probes
-            _, stamp, cached = memo
-            ttl = (
-                _CONTAINER_PROBE_OK_TTL_SECONDS
-                if cached is None
-                else _CONTAINER_PROBE_FAIL_TTL_SECONDS
-            )
-            if now - stamp < ttl:
+        hit, cached = self._cached_container_probe(mode)
+        if hit:
+            return cached
+        with _CONTAINER_PROBE_LOCK:
+            hit, cached = self._cached_container_probe(mode)  # a probe that just finished
+            if hit:
                 return cached
+            return self._run_container_probe(mode, kata)
+
+    def _cached_container_probe(self, mode: str) -> tuple[bool, str | None]:
+        """(True, reason) while *mode*'s memoized probe result is fresh."""
+        memo: tuple[str, float, str | None] | None = getattr(self, "_container_probe_memo", None)
+        if memo is None or memo[0] != mode:  # a mode switch re-probes
+            return False, None
+        _, stamp, cached = memo
+        ttl = (
+            _CONTAINER_PROBE_OK_TTL_SECONDS if cached is None else _CONTAINER_PROBE_FAIL_TTL_SECONDS
+        )
+        return time.monotonic() - stamp < ttl, cached
+
+    def _run_container_probe(self, mode: str, kata: bool) -> str | None:
+        now = time.monotonic()
         reason: str | None
         try:
             result = subprocess.run(  # noqa: S603 - fixed wrapper path

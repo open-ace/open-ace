@@ -173,3 +173,52 @@ def test_kata_keeps_the_identity_chain_and_the_local_form(linux_no_opensandbox):
     manager = _manager()
     assert manager._resolve_form("", snapshot=snap) == WEBUI_FORM_LOCAL
     assert manager._resolve_form("sandboxed", snapshot=snap) == WEBUI_FORM_LOCAL
+
+
+def test_concurrent_readiness_checks_share_one_probe():
+    """Under Kata each probe boots a VM: callers wait for the running one."""
+    import threading
+
+    manager = _manager()
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def _slow_probe(*args, **kwargs):
+        calls.append(1)
+        started.set()
+        release.wait(5)
+        return _probe_result(0, "ok")
+
+    results = []
+    with (
+        patch("app.utils.workspace._is_wrapper_available", return_value=True),
+        patch("app.services.webui_manager.subprocess.run", side_effect=_slow_probe),
+    ):
+        workers = [
+            threading.Thread(target=lambda: results.append(manager._container_readiness()))
+            for _ in range(4)
+        ]
+        for worker in workers:
+            worker.start()
+        assert started.wait(5)
+        release.set()
+        for worker in workers:
+            worker.join(5)
+    assert calls == [1]
+    assert results == [None] * 4
+
+
+def test_a_mode_switch_reprobes():
+    manager = _manager()
+    with (
+        patch("app.utils.workspace._is_wrapper_available", return_value=True),
+        patch(
+            "app.services.webui_manager.subprocess.run", return_value=_probe_result(0, "ok")
+        ) as run,
+    ):
+        manager._container_readiness()
+        manager.config.os_user_confinement = "runsc"
+        manager._container_readiness()
+    assert run.call_count == 2
+    assert "--backend" not in run.call_args.args[0]
