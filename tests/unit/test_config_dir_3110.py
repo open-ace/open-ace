@@ -46,7 +46,9 @@ def test_workspace_config_is_loaded_from_openace_config_dir(tmp_path: Path) -> N
     config_dir = tmp_path / "configured"
     config_dir.mkdir()
     (config_dir / "config.json").write_text(
-        json.dumps({"workspace": {"enabled": True, "multi_user_mode": True}}),
+        json.dumps(
+            {"workspace": {"enabled": True, "isolation": {"level": "os_user", "backend": "plain"}}}
+        ),
         encoding="utf-8",
     )
 
@@ -68,7 +70,9 @@ def test_workspace_config_falls_back_to_home_when_override_is_unusable(
     config_dir = isolated_home / ".open-ace"
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text(
-        json.dumps({"workspace": {"enabled": True, "multi_user_mode": True}}),
+        json.dumps(
+            {"workspace": {"enabled": True, "isolation": {"level": "os_user", "backend": "plain"}}}
+        ),
         encoding="utf-8",
     )
 

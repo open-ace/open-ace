@@ -8,7 +8,7 @@
 #   - Run processes as different users (sudo -u)
 #
 # SECURITY REQUIREMENTS (Issue #1893):
-#   1. Set WORKSPACE_MULTI_USER_MODE=true
+#   1. Set WORKSPACE_ISOLATION_BACKEND=plain
 #   2. Set OPENACE_ALLOW_ROOT_MULTI_USER=1 (explicit opt-in)
 #   3. Set strong DB_PASSWORD (NOT ace-secret or other defaults)
 #   4. Set SECRET_KEY, OPENACE_ENCRYPTION_KEY, UPLOAD_AUTH_KEY in production
@@ -18,7 +18,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
 #
 # Alternative using environment variables:
-#   WORKSPACE_MULTI_USER_MODE=true \
+#   WORKSPACE_ISOLATION_BACKEND=plain \
 #   OPENACE_ALLOW_ROOT_MULTI_USER=1 \
 #   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
 #
@@ -36,7 +36,7 @@ services:
 
     environment:
       # Multi-user workspace mode (required)
-      - WORKSPACE_MULTI_USER_MODE=true
+      - WORKSPACE_ISOLATION_BACKEND=plain
       # Explicit root opt-in (Issue #1893)
       - OPENACE_ALLOW_ROOT_MULTI_USER=1
       # IMPORTANT: OPENACE_CONFIG_DIR must match the volume mount path in
@@ -68,7 +68,7 @@ services:
     user: "0"
     environment:
       # Multi-user workspace mode (required)
-      - WORKSPACE_MULTI_USER_MODE=true
+      - WORKSPACE_ISOLATION_BACKEND=plain
       # Workspace base directory - required for _is_docker_multi_user_mode() check (Issue #3134)
       - WORKSPACE_BASE_DIR=/workspace
       # Explicit root opt-in (Issue #1893)

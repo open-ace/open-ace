@@ -144,10 +144,12 @@ def test_policy_accepts_pinned_images(confine, tmp_path, monkeypatch, image):
         monkeypatch,
         {
             "webui": ["/usr/bin/qwen-code-webui"],
-            "container": {"image": image, "runtime": "runsc-openace"},
+            "local-gvisor": {"image": image, "runtime": "runsc-openace"},
         },
     )
-    assert policy.container == confine.ContainerPolicy(image, "runsc-openace", "/usr/bin/docker")
+    assert policy.container("local-gvisor") == confine.ContainerPolicy(
+        image, "runsc-openace", "/usr/bin/docker"
+    )
 
 
 @pytest.mark.parametrize(
@@ -160,7 +162,7 @@ def test_policy_accepts_pinned_images(confine, tmp_path, monkeypatch, image):
 )  # fmt: skip
 def test_policy_rejects_unpinned_or_malformed_container(confine, tmp_path, monkeypatch, container):
     with pytest.raises(confine.ConfineError):
-        _load(confine, tmp_path, monkeypatch, {"webui": ["/w"], "container": container})
+        _load(confine, tmp_path, monkeypatch, {"webui": ["/w"], "local-gvisor": container})
 
 
 # ── planning ────────────────────────────────────────────────────────────────
@@ -175,7 +177,7 @@ def planned_container(confine, monkeypatch):
             "/usr/local/bin:/usr/bin:/bin",
             frozenset(),
             confine.PRIVILEGED_GROUPS,
-            _container(confine),
+            (("local-gvisor", _container(confine)),),
         )
     }
     monkeypatch.setattr(confine, "load_policy", lambda path=None: state["policy"])
@@ -198,7 +200,7 @@ def planned_container(confine, monkeypatch):
             "--account", "alice", "--port", "3150", "--memory-max", "4G", "--cpu-quota", "150",
             "--tasks-max", "512", "--allow", "10.0.0.5:19888",
             "--log-dir", "/tmp/qwen-code-webui-7", "--webui", "/usr/bin/qwen-code-webui",
-            "--backend", "container", "--", "--port", "3150",
+            "--backend", "local-gvisor", "--", "--port", "3150",
         ]  # fmt: skip
         return confine.plan_launch(argv, json.dumps({"OPENAI_API_KEY": "tok"}))
 
@@ -228,8 +230,8 @@ def test_plan_container_launch(confine, planned_container):
 
 
 def test_plan_container_requires_the_policy_section(confine, planned_container):
-    planned_container.state["policy"] = planned_container.state["policy"]._replace(container=None)
-    with pytest.raises(confine.ConfineError, match="no 'container' section"):
+    planned_container.state["policy"] = planned_container.state["policy"]._replace(containers=())
+    with pytest.raises(confine.ConfineError, match="no 'local-gvisor' section"):
         planned_container()
 
 
@@ -267,7 +269,9 @@ def test_prepare_run_dir_refuses_a_writable_root(confine, tmp_path):
 
 @pytest.fixture
 def probe(confine, monkeypatch, capsys, tmp_path):
-    policy = confine.Policy(frozenset(), "/usr/bin", frozenset(), frozenset(), _container(confine))
+    policy = confine.Policy(
+        frozenset(), "/usr/bin", frozenset(), frozenset(), (("local-gvisor", _container(confine)),)
+    )
     monkeypatch.setattr(confine, "load_policy", lambda path=None: policy)
     monkeypatch.setattr(confine, "require_root_controlled_executable", lambda p: None)
     monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: True)
@@ -286,7 +290,7 @@ def probe(confine, monkeypatch, capsys, tmp_path):
             return subprocess.CompletedProcess(argv, rc, stdout=out, stderr="")
 
         monkeypatch.setattr(confine.subprocess, "run", _fake)
-        rc = confine.run_container_probe()
+        rc = confine.run_container_probe("local-gvisor")
         return rc, capsys.readouterr().out.strip().splitlines()[-1]
 
     yield _run

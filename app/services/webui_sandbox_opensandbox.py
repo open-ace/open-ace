@@ -556,7 +556,7 @@ class OpenSandboxWebuiLauncher:
         # The provider resolves its endpoint via the config's default_tier
         # (tenant/project unset); re-point that at THIS pod's tier so the probe
         # verdict matches the runtime class the pod was actually created with
-        # — otherwise a sandbox_tier different from default_tier probes the
+        # — otherwise an isolation.tier different from default_tier probes the
         # wrong tier's declaration (review Q1, multi-tier deployments).
         import dataclasses
 

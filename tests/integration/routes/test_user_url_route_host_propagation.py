@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
+from tests.unit._isolation_helpers import iso
+
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1306)]
 
 # The container-detected IP that browsers cannot reach. Config.url is seeded
@@ -60,7 +62,7 @@ def _stub_manager():
         WorkspaceConfig(
             enabled=True,
             url=UNREACHABLE_CONTAINER_IP,
-            multi_user_mode=False,
+            isolation=iso("shared"),
         )
     )
     manager.stop_cleanup_thread()
@@ -172,7 +174,7 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
         WorkspaceConfig(
             enabled=True,
             url=UNREACHABLE_CONTAINER_IP,
-            multi_user_mode=True,
+            isolation=iso("plain"),
         )
     )
     manager.stop_cleanup_thread()

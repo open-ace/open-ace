@@ -12,6 +12,37 @@ set -e
 
 CONFIG_CHECK_LOG="/tmp/config-check.log"
 
+# ============================================================================
+# Workspace isolation input (Issue #3446)
+# ============================================================================
+# WORKSPACE_ISOLATION_BACKEND chooses workspace.isolation.backend when this
+# entrypoint generates config.json: "shared" (default, one WebUI), "plain"
+# (one OS account per user; needs root) or "opensandbox" (per-user pods on
+# Kubernetes). The confined backends (bwrap, local-gvisor, local-kata) need
+# the package install on a Linux host. The app itself validates config.json.
+export OPENACE_INSTALL_METHOD=docker
+if [ -n "${WORKSPACE_MULTI_USER_MODE:-}" ] || [ -n "${WORKSPACE_REQUIRED_ISOLATION_LEVEL:-}" ]; then
+    echo "ERROR: WORKSPACE_MULTI_USER_MODE / WORKSPACE_REQUIRED_ISOLATION_LEVEL were replaced by"
+    echo "       WORKSPACE_ISOLATION_BACKEND=shared|plain|opensandbox (Issue #3446)."
+    echo "       Multi-user OS-account mode: WORKSPACE_ISOLATION_BACKEND=plain"
+    exit 1
+fi
+WORKSPACE_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-}"
+case "$WORKSPACE_ISOLATION_BACKEND" in
+    ""|shared|plain|opensandbox) ;;
+    bwrap|local-gvisor|local-kata)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND=$WORKSPACE_ISOLATION_BACKEND is not available in the"
+        echo "       Docker install: the image ships no confine wrapper, bubblewrap needs systemd and"
+        echo "       unprivileged user namespaces, and per-user containers would need the host's"
+        echo "       docker.sock. Use \"plain\" or \"opensandbox\", or the package install."
+        exit 1
+        ;;
+    *)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND must be shared, plain or opensandbox (got '$WORKSPACE_ISOLATION_BACKEND')"
+        exit 1
+        ;;
+esac
+
 log_config_check() {
     local status="$1"
     local message="$2"
@@ -28,8 +59,8 @@ output_config_summary() {
     local uid
     uid=$(id -u)
 
-    # Determine mode
-    if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+    # Determine mode: per-user OS accounts need root
+    if [ "${WORKSPACE_ISOLATION_BACKEND}" = "plain" ]; then
         mode="multi-user"
     else
         mode="single-user"
@@ -46,7 +77,7 @@ output_config_summary() {
 
     if [ "$mode" = "multi-user" ]; then
         echo "Multi-user configuration:"
-        echo "  • WORKSPACE_MULTI_USER_MODE: ${WORKSPACE_MULTI_USER_MODE:-<not set>}"
+        echo "  • WORKSPACE_ISOLATION_BACKEND: ${WORKSPACE_ISOLATION_BACKEND:-<not set>}"
         echo "  • OPENACE_ALLOW_ROOT_MULTI_USER: ${OPENACE_ALLOW_ROOT_MULTI_USER:-<not set>}"
         echo "  • OPENACE_CONFIG_DIR: ${OPENACE_CONFIG_DIR:-<not set>}"
         echo "  • WORKSPACE_BASE_DIR: ${WORKSPACE_BASE_DIR:-/workspace}"
@@ -126,13 +157,14 @@ require_root_for_multi_user() {
         echo ""
         echo "Start the container as root AND set required variables:"
         echo "  docker run --user 0 \\"
-        echo "    -e WORKSPACE_MULTI_USER_MODE=true \\"
+        echo "    -e WORKSPACE_ISOLATION_BACKEND=plain \\"
         echo "    -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
         echo "    -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
         echo ""
         echo "Or keep single-user mode (the default):"
-        echo "  - If set via environment: unset WORKSPACE_MULTI_USER_MODE"
-        echo "  - If set via config.json: set 'multi_user_mode': false"
+        echo "  - If set via environment: unset WORKSPACE_ISOLATION_BACKEND"
+        echo "  - If set via config.json: set workspace.isolation to"
+        echo "    {\"level\": \"none\", \"backend\": \"shared\"}"
         log_config_check "ERROR" "Multi-user mode requires root but running as non-root"
         exit 1
     fi
@@ -164,7 +196,7 @@ require_root_for_multi_user() {
 }
 
 # Early fail-fast for the env-var trigger (before any setup work runs).
-if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+if [ "${WORKSPACE_ISOLATION_BACKEND}" = "plain" ]; then
     require_root_for_multi_user
 fi
 
@@ -509,12 +541,12 @@ check_security_baseline() {
     # ---- Root User Check (Issue #1893) ----
     if [ "$(id -u)" = "0" ]; then
         # Running as root - check if properly authorized for multi-user mode
-        if [ "${WORKSPACE_MULTI_USER_MODE}" != "true" ] || [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+        if [ "${WORKSPACE_ISOLATION_BACKEND}" != "plain" ] || [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
             echo "[ERROR] SECURITY: Container running as root without proper authorization."
             echo "        The image defaults to non-root user (uid 1000)."
             echo ""
             echo "If you need multi-user workspace mode:"
-            echo "  1. Set WORKSPACE_MULTI_USER_MODE=true"
+            echo "  1. Set WORKSPACE_ISOLATION_BACKEND=plain"
             echo "  2. Set OPENACE_ALLOW_ROOT_MULTI_USER=1"
             echo "  3. Use: docker run --user 0 ..."
             echo ""
@@ -833,17 +865,15 @@ generate_default_config() {
         fi
     fi
     PORT="${PORT:-19888}"
-    DEFAULT_WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-false}"
-    if [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" != "true" ]; then
-        DEFAULT_WORKSPACE_MULTI_USER_MODE="false"
-    fi
-    # Issue #3374 (PR review round 3): multi-user installs pin an explicit
-    # isolation floor so a later launch-path degradation cannot silently
-    # drop per-user isolation. WORKSPACE_REQUIRED_ISOLATION_LEVEL overrides.
-    DEFAULT_REQUIRED_ISOLATION="${WORKSPACE_REQUIRED_ISOLATION_LEVEL:-}"
-    if [ -z "$DEFAULT_REQUIRED_ISOLATION" ] && [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        DEFAULT_REQUIRED_ISOLATION="os_user"
-    fi
+    # Issue #3446: workspace.isolation {level, backend}; the level is also
+    # the floor, so a later launch-path degradation refuses launches instead
+    # of silently dropping per-user isolation.
+    DEFAULT_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-shared}"
+    case "$DEFAULT_ISOLATION_BACKEND" in
+        plain) DEFAULT_ISOLATION_LEVEL="os_user" ;;
+        opensandbox) DEFAULT_ISOLATION_LEVEL="sandboxed" ;;
+        *) DEFAULT_ISOLATION_LEVEL="none" ;;
+    esac
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -877,8 +907,7 @@ generate_default_config() {
   "workspace": {
     "enabled": true,
     "url": "http://${SERVER_IP}",
-    "multi_user_mode": ${DEFAULT_WORKSPACE_MULTI_USER_MODE},
-    "required_isolation_level": "${DEFAULT_REQUIRED_ISOLATION}",
+    "isolation": {"level": "${DEFAULT_ISOLATION_LEVEL}", "backend": "${DEFAULT_ISOLATION_BACKEND}"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,
@@ -1185,11 +1214,13 @@ fi
 # This ensures the setting works even if docker-compose.yml is missing the env var
 CONFIG_MULTI_USER="false"
 if [ -f "$OPENACE_CONFIG_FILE" ]; then
-    CONFIG_MULTI_USER=$(python3 -c "import json, os; c=json.load(open(os.environ['OPENACE_CONFIG_FILE'])); print('true' if c.get('workspace',{}).get('multi_user_mode',False) else 'false')" 2>/dev/null || echo "false")
+    # OS-account setup is needed for backend "plain" (the only OS-account
+    # backend a Docker install can run; the app refuses the confined ones).
+    CONFIG_MULTI_USER=$(python3 -c "import json, os; c=json.load(open(os.environ['OPENACE_CONFIG_FILE'])); print('true' if (c.get('workspace',{}).get('isolation') or {}).get('backend') == 'plain' else 'false')" 2>/dev/null || echo "false")
 fi
 
-if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then
-    echo "Configuring multi-user workspace mode (env=$WORKSPACE_MULTI_USER_MODE, config=$CONFIG_MULTI_USER)..."
+if [ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then
+    echo "Configuring multi-user workspace mode (env=$WORKSPACE_ISOLATION_BACKEND, config=$CONFIG_MULTI_USER)..."
     # Fail fast if multi-user mode was enabled via config.json but the container
     # is not running as root with the explicit opt-in (see top-of-file guard).
     require_root_for_multi_user

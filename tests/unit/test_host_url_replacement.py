@@ -21,6 +21,7 @@ import pytest
 from flask import Flask, request
 
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1306)]
 
@@ -30,7 +31,7 @@ def test_replace_host_from_request():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",  # Container-detected IP (wrong)
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
@@ -78,7 +79,7 @@ def test_get_user_webui_url_with_host_url():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",  # Container-detected IP (wrong), no port
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
@@ -118,7 +119,7 @@ def test_get_user_webui_url_preserves_port_single_user():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1:3100",  # WebUI port
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
@@ -161,7 +162,7 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",
-        multi_user_mode=True,
+        isolation=iso("plain"),
         port_range_start=3100,
         port_range_end=3200,
     )

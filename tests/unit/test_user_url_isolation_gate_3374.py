@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services import workspace_isolation_contract as wic
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3374)]
 
@@ -13,14 +14,18 @@ MOCK_USER = {"id": 7, "user_id": 7, "username": "alice", "role": "user", "tenant
 
 class _Config:
     enabled = True
-    multi_user_mode = True
-    required_isolation_level = ""
+
+    def __init__(self, isolation):
+        self.isolation = isolation
+
+    @property
+    def multi_user_mode(self):
+        return self.isolation.backend != "shared"
 
 
 class _StubManager:
-    def __init__(self, multi_user_mode=True):
-        self.config = _Config()
-        self.config.multi_user_mode = multi_user_mode
+    def __init__(self, isolation=None):
+        self.config = _Config(isolation or iso("plain"))
         self.launched_with = None
 
     def get_user_webui_url(
@@ -88,7 +93,7 @@ def test_unknown_user_is_404(app, client):
 def test_single_user_mode_preserves_username_fallback(app, client, monkeypatch, query):
     # 回归保护:单用户模式(隔离下限为 none)下,username 回退(既有映射约定)
     # 必须保留——多用户模式的默认 fail-closed 见下方用例(评审 #12)。
-    stub = _StubManager(multi_user_mode=False)
+    stub = _StubManager(isolation=iso("shared"))
     patches = _patch_stack(_db_user(None), stub)
     try:
         resp = _call(client, query)
@@ -285,11 +290,11 @@ def test_https_multi_user_returns_relative_webui_path(app, client, monkeypatch):
     assert resp.get_json()["url"] == "/webui/3100/"
 
 
-def test_invalid_config_floor_falls_back_to_derived_default(app, client, monkeypatch):
-    # 手写的无效 config 下限不得让路由 500(KeyError),回退派生默认
+def test_declared_level_is_the_floor(app, client, monkeypatch):
+    # Issue #3446: the floor is workspace.isolation.level (an invalid value can
+    # no longer reach the route — the config parser refuses it).
     _deployment_supported(monkeypatch)
-    stub = _StubManager()
-    stub.config.required_isolation_level = "bogus"
+    stub = _StubManager(isolation=iso("plain"))
     patches = _patch_stack(_db_user("alice_acct"), stub)
     try:
         resp = _call(client, "")
@@ -334,9 +339,10 @@ def test_package_mode_mappingless_default_is_identity_400(app, client, monkeypat
     assert resp.get_json()["error_code"] == "identity_mapping_missing"
 
 
-def test_package_mode_degraded_default_path_restores_fallback(app, client, monkeypatch):
-    # 探针降级(如缺 wrapper)的包安装形态:快照 none → 下限 none → 默认路径
-    # 保持旧行为(username 回退),修复"全线 400"回归
+def test_package_mode_degraded_default_path_is_refused(app, client, monkeypatch):
+    # Issue #3446: the declared level (os_user) is the floor, so a degraded
+    # launch path (e.g. a missing wrapper) refuses the default path too instead
+    # of silently serving on the shared account with a username fallback.
     _deployment_supported(monkeypatch)
     stub = _DegradedManager()
     patches = _patch_stack(_db_user(None), stub)
@@ -345,8 +351,8 @@ def test_package_mode_degraded_default_path_restores_fallback(app, client, monke
     finally:
         for p in patches:
             p.stop()
-    assert resp.status_code == 200
-    assert resp.get_json()["system_account"] == "alice"
+    assert resp.status_code == 400
+    assert resp.get_json()["error_code"] == "isolation_level_unsupported"
 
 
 def test_package_mode_degraded_explicit_os_user_is_rejected(app, client, monkeypatch):

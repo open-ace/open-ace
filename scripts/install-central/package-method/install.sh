@@ -1364,12 +1364,41 @@ def bash_to_bool(val):
     return val.lower() == 'true'
 
 config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
-config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
-# Issue #3374 (PR review round 5): required_isolation_level is NOT pinned
-# here. This runs before the webui-launch wrapper step, and the wrapper
-# install is non-fatal; pinning 'os_user' on a host without the wrapper
-# rejects every launch at runtime (probe reports launch_path_degraded).
-# The pin happens after the wrapper lands — see pin_workspace_isolation_floor.
+# Issue #3446: isolation is one block, workspace.isolation {level, backend, ...}.
+# Upgrades convert the keys it replaced (the server refuses to start with them).
+ws = config['workspace']
+if not isinstance(ws.get('isolation'), dict):
+    legacy_mode = str(ws.get('os_user_confinement', '') or '').strip().lower()
+    backend = {'bwrap': 'bwrap', 'runsc': 'local-gvisor', 'kata': 'local-kata'}.get(legacy_mode)
+    if backend is None:
+        multi = ws.get('multi_user_mode')
+        if multi is None:
+            multi = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
+        backend = 'plain' if multi else 'shared'
+    level = {'shared': 'none', 'plain': 'os_user', 'bwrap': 'os_user'}.get(backend, 'sandboxed')
+    isolation = {'level': level, 'backend': backend}
+    limits = {}
+    for old_key, new_key in (('confinement_memory_max', 'memory'),
+                             ('confinement_cpu_quota', 'cpu_percent'),
+                             ('confinement_tasks_max', 'tasks')):
+        if old_key in ws and backend in ('bwrap', 'local-gvisor', 'local-kata'):
+            limits[new_key] = ws[old_key]
+    if limits:
+        isolation['limits'] = limits
+    if ws.get('confinement_egress_allow') and backend in ('bwrap', 'local-gvisor', 'local-kata'):
+        isolation['egress_allow'] = list(ws['confinement_egress_allow'])
+    if ws.get('confinement_container_webui') and backend in ('local-gvisor', 'local-kata'):
+        isolation['container_webui'] = ws['confinement_container_webui']
+    ws['isolation'] = isolation
+    print(f"workspace.isolation = {isolation}")
+removed = [k for k in ('multi_user_mode', 'required_isolation_level', 'os_user_confinement',
+                       'sandbox_tier', 'confinement_memory_max', 'confinement_cpu_quota',
+                       'confinement_tasks_max', 'confinement_egress_allow',
+                       'confinement_container_webui') if k in ws]
+for k in removed:
+    del ws[k]
+if removed:
+    print(f"Converted to workspace.isolation and removed: {', '.join(removed)}")
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))
@@ -1840,7 +1869,7 @@ maybe_install_qwen_stack_remote() {
     # pre-workspace API-only deployments are not forced onto the qwen stack
     # (PR #3386 review). An unreadable config also falls back to "missing".
     local flags
-    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False)).lower())"' 2>/dev/null || echo missing)"
+    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(((json.load(open(p)).get(\"workspace\",{}).get(\"isolation\") or {}).get(\"backend\",\"shared\") != \"shared\") or bool(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False))).lower())"' 2>/dev/null || echo missing)"
     if [ "$flags" != "missing" ] && [ -n "$flags" ]; then
         WORKSPACE_ENABLED="${flags%% *}"
         WORKSPACE_MULTI_USER_MODE="${flags##* }"
@@ -2502,8 +2531,8 @@ install_webui_launch_wrapper() {
 }
 
 # Install the confined-launch wrapper + its root-owned policy file (Issue #3431,
-# Option 1). Harmless until an operator sets workspace.os_user_confinement to
-# "bwrap": the wrapper is only invoked on that path. The policy file pins which
+# Option 1). Harmless until an operator sets workspace.isolation.backend to
+# "bwrap", "local-gvisor" or "local-kata": the wrapper is only invoked then. The policy file pins which
 # executables the root wrapper may start as a user and the PATH they see; an
 # existing file keeps its entries and only gains the current webui path. Must
 # run BEFORE configure_sudoers (the rule keys off -x on the wrapper).
@@ -2559,54 +2588,7 @@ os.replace(tmp, path)
     chmod 0644 "$policy"
     print_success "Installed webui-confine wrapper to $dst (policy: $policy)"
     if ! command -v bwrap >/dev/null 2>&1; then
-        print_info "Confined workspaces (workspace.os_user_confinement=\"bwrap\") also need bubblewrap: apt-get install bubblewrap / dnf install bubblewrap"
-    fi
-    return 0
-}
-
-# Pin workspace.required_isolation_level='os_user' for multi-user installs
-# (Issue #3374). Must be called only AFTER install_webui_launch_wrapper and
-# only when the wrapper is executable: the runtime probe keys off the
-# wrapper, so a pin on a wrapper-less host reports launch_path_degraded and
-# rejects every launch — an installed-but-bricked deployment (PR review
-# round 5). Reuses the same executable check the sudoers rule keys off.
-pin_workspace_isolation_floor() {
-    local config_file="$1"
-
-    if ! command -v python3 &>/dev/null; then
-        print_warning "python3 not found; cannot pin required_isolation_level in $config_file"
-        return 1
-    fi
-    if [ ! -f "$config_file" ]; then
-        print_warning "Config file $config_file not found; cannot pin required_isolation_level"
-        return 1
-    fi
-
-    _CONFIG_FILE="$config_file" python3 << 'EOF'
-import json
-import os
-
-path = os.environ['_CONFIG_FILE']
-with open(path, 'r') as f:
-    config = json.load(f)
-
-workspace = config.setdefault('workspace', {})
-# PR review round 6: report only what was actually configured — a flat
-# else would tell single-user/disagreeing configs an isolation floor
-# exists when none was pinned.
-if not workspace.get('multi_user_mode'):
-    print("multi-user mode off; no isolation floor needed")
-elif workspace.get('required_isolation_level'):
-    print("required_isolation_level already set; keeping existing floor")
-else:
-    workspace['required_isolation_level'] = 'os_user'
-    with open(path, 'w') as f:
-        json.dump(config, f, indent=2)
-    print("Pinned workspace.required_isolation_level=os_user")
-EOF
-    if [ $? -ne 0 ]; then
-        print_warning "Failed to pin required_isolation_level in $config_file"
-        return 1
+        print_info "Confined workspaces (workspace.isolation.backend=\"bwrap\") also need bubblewrap: apt-get install bubblewrap / dnf install bubblewrap"
     fi
     return 0
 }
@@ -2901,10 +2883,10 @@ configure_sudoers() {
     fi
     # When confinement is configured, the plain launch rule would let the
     # service account start an UNCONFINED WebUI as any account; omit it.
-    # (Re-run the installer after changing workspace.os_user_confinement.)
+    # (Re-run the installer after changing workspace.isolation.backend.)
     local confine_configured=false
     if [ -n "$confine_rule" ] && [ -f "${config_dir:-}/config.json" ] && \
-       python3 -c 'import json,sys; m=str(json.load(open(sys.argv[1])).get("workspace",{}).get("os_user_confinement","")).strip().lower(); sys.exit(0 if m not in ("","off") else 1)' \
+       python3 -c 'import json,sys; b=(json.load(open(sys.argv[1])).get("workspace",{}).get("isolation") or {}).get("backend",""); sys.exit(0 if b in ("bwrap","local-gvisor","local-kata") else 1)' \
            "${config_dir}/config.json" 2>/dev/null; then
         confine_configured=true
     fi
@@ -2931,7 +2913,7 @@ $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path
         # for the non-confined case) and leave a marker instead.
         current_user_rules=$(printf '%s\n' "$current_user_rules" | grep -v "NOPASSWD: /usr/local/bin/openace-webui-launch ")
         current_user_rules="${current_user_rules}
-# openace-webui-launch rule omitted: workspace.os_user_confinement is set (Issue #3431)"
+# openace-webui-launch rule omitted: workspace.isolation.backend is a confined one (Issue #3431)"
     fi
 
     # Only add webui_local_rule if not empty (and never under confinement:
@@ -4054,9 +4036,9 @@ detect_and_load_local_upgrade() {
             print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
         fi
 
-        # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
-        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        # Read the multi-user setting from the existing config (upgrades respect it):
+        # any isolation backend but "shared" (#3446), or the pre-#3446 multi_user_mode.
+        local multi_user=$(python3 -c "import json; w=json.load(open('$config_file')).get('workspace', {}); i=w.get('isolation'); print(str(i.get('backend', 'shared') != 'shared' if isinstance(i, dict) else w.get('multi_user_mode', False)).lower())" 2>/dev/null)
         if [ -n "$multi_user" ]; then
             WORKSPACE_MULTI_USER_MODE="$multi_user"
             print_info "Read WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE from existing config"
@@ -4699,6 +4681,13 @@ install_local() {
                 print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308, #2290)"
             fi
 
+            # Issue #3446: the app validates workspace.isolation against how it
+            # was installed (the confined backends need the package install).
+            if ! grep -q "^Environment=OPENACE_INSTALL_METHOD=" "$service_file" 2>/dev/null; then
+                sed -i "/^Environment=WORKSPACE_BASE_DIR=/a Environment=OPENACE_INSTALL_METHOD=package" "$service_file"
+                print_info "Set OPENACE_INSTALL_METHOD=package (Issue #3446)"
+            fi
+
             # Check if OPENACE_ENCRYPTION_KEY is missing (PR #2275 follow-up, Issue #2359)
             # Only add if not already configured in service file AND not in secrets.env
             # This prevents overriding user's existing encryption key configuration
@@ -4902,17 +4891,11 @@ install_local() {
         # configure_sudoers (its rule keys off -x on the wrapper).
         install_webui_confine_wrapper "$sudoers_install_dir"
 
-        # Issue #3374 (PR review round 5): pin the isolation floor only when
-        # the launch wrapper actually landed — same executable check the
-        # sudoers rule uses. Without the wrapper the runtime probe reports
-        # launch_path_degraded and a pinned 'os_user' floor would reject
-        # every launch, so leave the floor derived (plus a runtime WARNING)
-        # instead of installing a bricked deployment.
-        if [ -x /usr/local/bin/openace-webui-launch ]; then
-            pin_workspace_isolation_floor "$config_dir/config.json"
-        else
-            print_warning "openace-webui-launch wrapper not installed; NOT pinning required_isolation_level."
-            print_warning "Multi-user workspaces will serve WITHOUT per-user OS isolation until the wrapper is installed (re-run this installer as root)."
+        # Issue #3446: workspace.isolation.level is the floor. Without the
+        # launch wrapper an os_user deployment refuses every workspace launch
+        # (launch_path_degraded) rather than serving on the shared account.
+        if [ ! -x /usr/local/bin/openace-webui-launch ]; then
+            print_warning "openace-webui-launch wrapper not installed: per-user workspaces will be REFUSED until it is (re-run this installer as root)."
         fi
 
         # Install security wrappers BEFORE configure_sudoers (Issue #2349):

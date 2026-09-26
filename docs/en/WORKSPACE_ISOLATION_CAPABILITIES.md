@@ -21,7 +21,7 @@ Endpoint: `GET /api/workspace/isolation-capabilities` (requires a signed-in sess
 ```json
 {
   "local_workspace_multi_user": "supported | unsupported",
-  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | local-container:runsc | local-container:kata | opensandbox:<tier>",
+  "backend": "shared | plain | bwrap | local-gvisor | local-kata | opensandbox:<tier>",
   "isolation_level": "none | os_user | sandboxed",
   "enforced": ["identity", "filesystem", "environment", "process"],
   "unsupported": ["resources", "network_egress", "kernel"],
@@ -52,7 +52,9 @@ Endpoint: `GET /api/workspace/isolation-capabilities` (requires a signed-in sess
       "residuals": [{"code": "shared_project_roots_are_cross_user_by_design", "message": "..."}]
     }
   },
-  "policy_revision": "2026-09-26.2"
+  "policy_revision": "2026-09-26.3",
+  "install_method": "package | docker | dev | unknown",
+  "available_backends": {"local-kata": {"available": false, "reason": "install_method_docker"}, "...": {"available": true}}
 }
 ```
 
@@ -62,13 +64,20 @@ Endpoint: `GET /api/workspace/isolation-capabilities` (requires a signed-in sess
 
   | value | meaning |
   |---|---|
-  | `qwen-code-webui-per-user` | one WebUI process per user |
-  | `qwen-code-webui-per-user-confined` | #3431: as above, and each process runs in a systemd scope + bubblewrap (§5.1) |
-  | `qwen-code-webui-shared` | a single shared instance |
-  | `local-container:runsc` | #3431: sandboxed level, WebUI in a local gVisor container (§5.2) |
-  | `local-container:kata` | #3438: sandboxed level, WebUI in a local Kata container (§5.3) |
+  | `plain` | one WebUI process per user, as that user's OS account |
+  | `bwrap` | #3431: as above, and each process runs in a systemd scope + bubblewrap (§5.1) |
+  | `shared` | a single shared instance |
+  | `local-gvisor` | #3431: sandboxed level, WebUI in a local gVisor container (§5.2) |
+  | `local-kata` | #3438: sandboxed level, WebUI in a local Kata container (§5.3) |
   | `opensandbox:<tier>` | #3378: sandboxed level, WebUI in an OpenSandbox pod of that tier (§6) |
 
+  These are the names of `workspace.isolation.backend` (#3446): the snapshot reports the backend the
+  admin configured. A configured backend that is not ready is reported with `supported: false` and its
+  reason, never replaced by another backend. The level reported is the one verified on this host.
+- **`install_method` / `available_backends`:** how this deployment was installed
+  (`OPENACE_INSTALL_METHOD`) and, for every backend, whether it could be used here at all
+  (`install_method_docker` / `platform_unsupported` when not). Readiness of the configured backend is
+  in `reasons`.
 - **`isolation_level` / `enforced` / `unsupported`:** see §2.
 - **`reasons`:** machine-readable causes when the deployment is unsupported (may be empty).
 - **`entry_point_details`:** added in #3410, and present exactly when `entry_points` is. These are
@@ -100,8 +109,8 @@ Endpoint: `GET /api/workspace/isolation-capabilities` (requires a signed-in sess
 ## 2. Isolation level semantics
 
 The levels are ordered `none < os_user < sandboxed`. The `required_isolation` request parameter and
-the `workspace.required_isolation_level` floor are both compared in this order; a request can only
-raise the requirement, never lower it.
+the floor, `workspace.isolation.level`, are both compared in this order; a request can only raise the
+requirement, never lower it.
 
 | level | meaning |
 |---|---|
@@ -143,7 +152,7 @@ There are four sets of codes, each with a different job.
 |---|---|
 | `webui_disabled` | The WebUI manager is not enabled: there is no interactive workspace runtime |
 | `platform_unsupported` | Not a Linux platform (Windows, macOS, other) |
-| `multi_user_mode_disabled` | Multi-user mode is off (the lightweight single-user mode: an expected state, not a defect) |
+| `isolation_backend_shared` | `workspace.isolation.backend` is `shared` (the lightweight single-user mode: an expected state, not a defect) |
 | `launch_path_degraded` | The WebUI launch path cannot host per-user instances. The message names the specific §3.3 cause, e.g. dev-directory mode or a missing wrapper. The contract and the `/user-url` gate look at the same path, so they never contradict each other |
 | `launch_path_unverified` | On a cold worker the manager is not initialized yet and the probe has not run. The level is **provisional** (the deployment shape qualifies) and the code clears once the manager initializes. Integrators that cache or roll out by revision should check this code too |
 
@@ -180,9 +189,9 @@ Easily confused:
 | `privileged_system_account` | The target system account has uid 0 (e.g. mapped to root) |
 | `reserved_system_account` | The target system account has uid < 1000 (the reserved system range) |
 
-The confinement and local-container modes add their own `confinement_*` codes; see §5.1, §5.2 and §5.3.
+The confined and local-container backends add their own `confinement_*` codes; see §5.1, §5.2 and §5.3.
 
-### 3.4 sandboxed probe and runtime codes (#3378, OpenSandbox pod form)
+### 3.4 sandboxed probe and runtime codes (#3378, opensandbox backend)
 
 The `sandboxed` probe is **zero-pod and fail-closed on configuration**: it decides without creating a
 pod. The codes fall into three groups:
@@ -194,7 +203,7 @@ pod. The codes fall into three groups:
 | code | level | meaning | fix |
 |---|---|---|---|
 | `sandbox_backend_unconfigured` | probe | sandbox-backends.json is missing, unparsable or not configured | Provide or fix the backend config (see [SANDBOX_BACKENDS](SANDBOX_BACKENDS.md) §3) |
-| `sandbox_tier_missing` | probe | `workspace.sandbox_tier` (or the backend's `default_tier`) has no entry in `endpoints` | Fix `sandbox_tier`, or add that tier to `endpoints` |
+| `sandbox_tier_missing` | probe | `workspace.isolation.tier` (or the backend's `default_tier`) has no entry in `endpoints` | Fix `isolation.tier`, or add that tier to `endpoints` |
 | `webui_image_missing` | probe | The tier has no `webui_image` | Configure an image that contains qwen-code-webui (reference build: `scripts/docker/webui-sandbox.Dockerfile`) |
 | `webui_image_not_pinned` | probe | `webui_image` is not digest-pinned (`name@sha256:<64 hex>`) | Use a digest reference: a tag can be re-pointed, which defeats the allowlist |
 | `webui_image_not_allowed` | probe | `webui_image` is not in `image_allowlist` | Add the image to `image_allowlist`, or use an image already on it |
@@ -214,8 +223,8 @@ More detail on two of the codes:
     this process is the only one.
   - The per-instance token secret and instance management are in-process memory. Across replicas,
     about two thirds of token checks would randomly fail with 401.
-  - **The shipped k8s manifest (3 replicas) has exactly this shape, so sandboxed automatically falls
-    back to the os_user chain there.**
+  - **The shipped k8s manifest (3 replicas) has exactly this shape, so the `opensandbox` backend is
+    reported unsupported there and launches are refused.**
 - **`sandbox_runtime_egress_negative_only`:** gVisor and CNI tiers are checked against the
   cluster-level deny-default. That proves a refusal path exists, but not that allowed traffic really
   flows. Only a real read of `/policy` on a sidecar tier upgrades network_egress (T-M).
@@ -347,7 +356,7 @@ wired into the pod.
 
 The local container forms (§5.2, §5.3) keep the os_user matrix: their home is the host directory.
 
-## 5. Multi-user deployment requirements (policy revision 2026-09-16.1)
+## 5. Multi-user deployment requirements
 
 Whether the contract reports `supported/os_user` is decided by the **launch-path readiness probe**
 (§3.3: WebUI resolution, not dev-directory mode, the `openace-webui-launch` wrapper, sudo). The Docker
@@ -358,9 +367,11 @@ Two reference deployments:
 
 1. **Docker multi-user:** the `docker-compose.multi-user.yml` overlay (root +
    `OPENACE_ALLOW_ROOT_MULTI_USER=1` + `WORKSPACE_BASE_DIR=/workspace` +
-   `WORKSPACE_MULTI_USER_MODE=true`). The image ships useradd and the wrappers, and system accounts are
-   provisioned automatically.
-2. **Package multi-user:** the installer's `_WS_MULTI_USER` path (runs as non-root, `/home` layout).
+   `WORKSPACE_ISOLATION_BACKEND=plain`, which the entrypoint writes into the generated config as
+   `workspace.isolation {"level": "os_user", "backend": "plain"}`). The image ships useradd and the
+   wrappers, and system accounts are provisioned automatically.
+2. **Package multi-user:** the installer's multi-user path (runs as non-root, `/home` layout), which
+   writes the same `isolation` block.
    A healthy probe reports os_user. Each user's system account must already exist (resolvable by
    getpwnam, uid ≥ 1000).
 
@@ -370,19 +381,19 @@ production secrets, see the compose comments.
 
 When the probe degrades (dev-directory mode, a missing wrapper, ...), the contract honestly returns
 `launch_path_degraded` unsupported. It **never** silently falls back to the shared account while
-claiming support. In that state the default launch path keeps its existing behaviour, and an explicit
-`required_isolation=os_user` gets a structured refusal.
+claiming support, and because `workspace.isolation.level` is the floor, every launch is then refused
+with a structured error until the launch path is repaired.
 
-**Install method matters for the optional modes below.** The Docker install supports only `none`,
-plain `os_user` and the OpenSandbox pod form; the confinement mode and the local containers (§5.1–§5.3)
-need the package install on a Linux host. See the install-method table in
+**Install method matters for the backends below.** The Docker install supports only `shared`,
+`plain` and `opensandbox`; `bwrap` and the local containers (§5.1–§5.3) need the package install on a
+Linux host, and startup refuses them elsewhere (#3446). See the install-method table in
 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-what-your-install-method-allows).
 
-### 5.1 Optional: os_user confinement (#3431, policy revision 2026-09-25.1)
+### 5.1 Backend `bwrap`: confined OS account (#3431)
 
-`workspace.os_user_confinement = "bwrap"` confines each os_user WebUI at launch. It stays at the
-`os_user` level (the host kernel is shared), but the `resources` and `network_egress` dimensions
-become `enforced`, and `backend` reports `qwen-code-webui-per-user-confined`:
+`workspace.isolation {"level": "os_user", "backend": "bwrap"}` confines each OS-account WebUI at
+launch. It stays at the `os_user` level (the host kernel is shared), but the `resources` and
+`network_egress` dimensions become `enforced`, and `backend` reports `bwrap`:
 
 | layer | mechanism | effect |
 |---|---|---|
@@ -394,7 +405,7 @@ become `enforced`, and `backend` reports `qwen-code-webui-per-user-confined`:
 
 **The egress proxy:**
 - **What it allows:** only allowlisted `host:port` pairs, which are the host:port of
-  `webui_callback_url` plus `confinement_egress_allow`. They come **only from server-side
+  `webui_callback_url` plus `isolation.egress_allow`. They come **only from server-side
   configuration, never from a request's Host header**. Everything else gets 403.
 - **Where decisions are logged:** `/var/log/openace-webui/<uid>.egress.log`, owned by root, mode
   0600.
@@ -423,15 +434,15 @@ become `enforced`, and `backend` reports `qwen-code-webui-per-user-confined`:
   - A connection silent in both directions for 300 seconds is closed.
   - An anonymous client therefore cannot exhaust the scope's task budget.
 
-Settings (`workspace` in `config.json`):
+Settings (`workspace.isolation` in `config.json`; they apply to `bwrap`, `local-gvisor` and
+`local-kata`):
 
 | key | default | meaning |
 |---|---|---|
-| `os_user_confinement` | `""` | `"bwrap"` enables it; `""`/`"off"` disables it; any other value → `confinement_mode_invalid` (`"runsc"` and `"kata"`: §5.2, §5.3) |
-| `confinement_memory_max` | `4G` | systemd `MemoryMax` |
-| `confinement_cpu_quota` | `200` | percent, `CPUQuota` |
-| `confinement_tasks_max` | `512` | `TasksMax` |
-| `confinement_egress_allow` | `[]` | extra allowed `host:port` pairs (`*.domain:port` and `[ipv6]:port` are supported) |
+| `limits.memory` | `4G` | systemd `MemoryMax` (container backends: `--memory`) |
+| `limits.cpu_percent` | `200` | percent, `CPUQuota` (container backends: `--cpus`) |
+| `limits.tasks` | `512` | `TasksMax` (container backends: `--pids-limit` / `--ulimit nproc`) |
+| `egress_allow` | `[]` | extra allowed `host:port` pairs (`*.domain:port` and `[ipv6]:port` are supported) |
 
 **`webui_callback_url` is required.** Without it, the API address would come from the request's Host
 header, which the user controls, so the user could rewrite the allowlist. The probe therefore reports
@@ -470,7 +481,7 @@ enabling it there fails closed with the codes below.
 **Fail closed:** when confinement is configured but the host cannot provide it, the launch-path probe
 reports `launch_path_degraded` with one of these codes in parentheses. It never silently launches
 unconfined:
-- `confinement_mode_invalid`, `confinement_platform_unsupported`, `confinement_wrapper_missing`;
+- `confinement_platform_unsupported`, `confinement_wrapper_missing`;
 - `confinement_bwrap_missing`, `confinement_setpriv_missing`, `confinement_systemd_unavailable`;
 - `confinement_userns_unavailable`, `confinement_bwrap_too_old`, `confinement_policy_invalid`;
 - `confinement_callback_url_missing`, `confinement_check_failed`.
@@ -501,7 +512,7 @@ only the plain os_user dimensions.
 - Acceptance: `scripts/webui_confine_acceptance.py` (needs a disposable Linux host,
   `CONFINE_ACCEPTANCE_DISPOSABLE=1`).
 
-### 5.2 Optional: local container sandbox (`os_user_confinement = "runsc"`, #3431 Option 2, policy revision 2026-09-26.1)
+### 5.2 Backend `local-gvisor`: local gVisor container (#3431 Option 2)
 
 The **sandboxed** level without Kubernetes: each user's WebUI runs in a local Docker container on
 the gVisor (runsc) runtime. It shares the root entry point, the host-side process and the egress proxy
@@ -517,14 +528,14 @@ user's OS account, and the home is still `<base>/<account>` on the host.
 | network | `--network none`. Ingress and egress work as in §5.1: a reverse tunnel, plus an egress proxy that only allows allowlisted `host:port` pairs, reached through UNIX sockets mounted read-only. This needs runsc `--host-uds=open` |
 | environment | The WebUI environment reaches the container on stdin. It never appears on a command line, and `docker inspect` cannot see it |
 
-Snapshot: `isolation_level = sandboxed`, `backend = local-container:runsc`, all seven dimensions
+Snapshot: `isolation_level = sandboxed`, `backend = local-gvisor`, all seven dimensions
 `enforced`. The differences from the OpenSandbox pod form (§6) are **deliberate**:
 
 - **Entry-point matrix:** the os_user one. The home is a host directory, so `/api/fs` and the other
   entry points stay `enforced`.
 - **`/user-url` gate:** it keeps the OS account chain (`system_account` mapping, account checks).
 - **Launch form:** it stays the per-user local process form and **never** routes to the OpenSandbox
-  pod launcher. The pod form is chosen by the `opensandbox:*` backend, not by the level.
+  pod launcher. The pod form is used only for backend `opensandbox`.
 
 Deployment requirements (a Linux package install; a single Docker host is enough):
 
@@ -540,24 +551,24 @@ Deployment requirements (a Linux package install; a single Docker host is enough
 2. The WebUI image: build it with `scripts/docker/webui-sandbox.Dockerfile` (node, python3 and a
    pinned qwen-code-webui), and **pin it by content** in the policy file:
    ```json
-   {"webui": ["/usr/bin/qwen-code-webui"],
-    "container": {"image": "sha256:<64 hex>", "docker": "/usr/bin/docker",
-                  "runtimes": {"runsc": "runsc-openace"}}}
+   {"webui": ["/usr/bin/qwen-code-webui"], "docker": "/usr/bin/docker",
+    "local-gvisor": {"image": "sha256:<64 hex>", "runtime": "runsc-openace"}}
    ```
+   - The section is named after the backend (#3446); `docker` is shared by the container backends.
+     The pre-#3446 `container` section is refused with the conversion in the message.
    - `image` must be `name@sha256:<64 hex>` or a local image ID `sha256:<64 hex>`. A tag can be
      re-pointed, so it is refused.
    - `webui` lists paths **inside the image**.
-   - The older single `runtime` key still means the runsc runtime.
-   - Rerunning the installer keeps the `container` section.
-3. `workspace.os_user_confinement = "runsc"`. `workspace.webui_callback_url` is required (as in
-   §5.1). `confinement_container_webui` changes the WebUI path inside the image (default
-   `/usr/bin/qwen-code-webui`).
+   - Rerunning the installer keeps these sections.
+3. `workspace.isolation {"level": "sandboxed", "backend": "local-gvisor"}`.
+   `workspace.webui_callback_url` is required (as in §5.1). `isolation.container_webui` changes the
+   WebUI path inside the image (default `/usr/bin/qwen-code-webui`).
 
 `fs.protected_symlinks=1` is required (the default on Debian/Ubuntu/RHEL). docker (as root) mounts
 the log directory by path, and this setting stops the account from steering the mount source with a
 symlink in the sticky `/tmp`. Without it the probe reports `confinement_symlinks_unprotected`.
 
-**Readiness:** the manager checks with `sudo -n openace-webui-confine launch --probe` (root):
+**Readiness:** the manager checks with `sudo -n openace-webui-confine launch --probe --backend local-gvisor` (root):
 - the docker CLI is root-controlled;
 - the runtime is registered;
 - the image is present locally (nothing is pulled at launch);
@@ -591,11 +602,11 @@ A success is cached for an hour and a failure for 30 seconds. Reason codes:
 - The image content (node version, toolchain) is the set of tools the agent can use: a product
   decision.
 
-### 5.3 Optional: local Kata container (`os_user_confinement = "kata"`, #3438, policy revision 2026-09-26.2)
+### 5.3 Backend `local-kata`: local Kata container (#3438)
 
 The same local-container form as §5.2 on a **Kata Containers** runtime: each WebUI runs in a
 lightweight virtual machine with its own guest kernel. Snapshot: `isolation_level = sandboxed`,
-`backend = local-container:kata`, all seven dimensions `enforced`. The entry-point matrix, the
+`backend = local-kata`, all seven dimensions `enforced`. The entry-point matrix, the
 identity gate and the local launch form are the same as in §5.2.
 
 Differences from §5.2:
@@ -628,22 +639,24 @@ Deployment requirements:
 2. **Kata ≥ 3.32.0.** Docker 29 puts a `time` namespace into every OCI spec, and older Kata fails with
    `invalid namespace type` (fixed by kata-containers#13082, first shipped in 3.32.0).
 3. **Runtime:**
-   - Putting `containerd-shim-kata-v2` on dockerd's PATH (e.g. `/usr/local/bin`) is enough to use
-     `io.containerd.kata.v2` directly, **without** changing `daemon.json` or restarting Docker.
-     Registering a name in `daemon.json` also works.
-   - The policy file maps each mode to its runtime with `runtimes`:
+   - Installing `containerd-shim-kata-v2` root-owned in a standard system `bin` directory (e.g.
+     `/usr/local/bin`, which is also on dockerd's PATH) is enough to use `io.containerd.kata.v2`
+     directly, **without** changing `daemon.json` or restarting Docker. Registering a name in
+     `daemon.json` also works.
+   - The policy file has a `local-kata` section:
      ```json
-     {"webui": ["/usr/bin/qwen-code-webui"],
-      "container": {"image": "sha256:<64 hex>", "docker": "/usr/bin/docker",
-                    "runtimes": {"runsc": "runsc-openace", "kata": "io.containerd.kata.v2"}}}
+     {"webui": ["/usr/bin/qwen-code-webui"], "docker": "/usr/bin/docker",
+      "local-kata": {"image": "sha256:<64 hex>", "runtime": "io.containerd.kata.v2"}}
      ```
-   - When a shim name is used, the probe requires the shim binary to be root-controlled.
+   - When a shim name is used, the probe looks for the shim only in the standard system `bin`
+     directories and requires it to be root-controlled.
 4. Under nested virtualization the guest boots slowly (about 70 seconds measured with three levels of
    nesting). Kata's default `dial_timeout = 45` is too short there: raise it (e.g. to 180) in
    `/etc/kata-containers/configuration.toml`. On bare metal the default is fine.
-5. `workspace.os_user_confinement = "kata"`; everything else as in §5.2.
+5. `workspace.isolation {"level": "sandboxed", "backend": "local-kata"}`; everything else as in
+   §5.2.
 
-**Readiness:** `sudo -n openace-webui-confine launch --probe --backend kata` (root). In addition to
+**Readiness:** `sudo -n openace-webui-confine launch --probe --backend local-kata` (root). In addition to
 the §5.2 checks, it verifies:
 - `/dev/kvm` exists;
 - a probe container started on the Kata runtime passes a **positive check from the host**. Docker's
@@ -669,9 +682,9 @@ takes about 7 minutes in the worst case, and the manager allows 8. New reason co
   so on), so the usage the host sees is higher than that value.
 - Otherwise as in §5.2.
 
-## 6. sandboxed level on OpenSandbox: requirements and honest statement (semantics last changed in 2026-09-12.2; every snapshot reports the current POLICY_REVISION)
+## 6. Backend `opensandbox`: requirements and honest statement
 
-`sandboxed` on OpenSandbox means the WebUI process runs in an OpenSandbox pod:
+`workspace.isolation {"level": "sandboxed", "backend": "opensandbox"}` means the WebUI process runs in an OpenSandbox pod:
 - one pod per user and instance;
 - a dedicated WebUI image that is digest-pinned and on the image_allowlist;
 - deny-default egress;
@@ -680,8 +693,10 @@ takes about 7 minutes in the worst case, and the manager allows 8. New reason co
 - the identity is a per-instance token secret, which is invalidated when the instance is destroyed.
   There is no OS account or sudo chain.
 
-The probe **does not check the platform or multi_user_mode**: the pod runs on a remote cluster, so
-single-user + sandboxed is a legitimate hardened shape.
+The probe **does not check the platform**: the pod runs on a remote cluster. The pod form is used
+only for this backend (#3446): it is never inferred from a configured `webui_image`, and when its
+probe fails the snapshot is unsupported with the probe's reason; there is no fallback to the
+OS-account form.
 
 Changes in `POLICY_REVISION` 2026-09-12.1:
 - the `sandboxed` level and the zero-pod probe joined the vocabulary;
@@ -691,16 +706,9 @@ Changes in `POLICY_REVISION` 2026-09-12.1:
 
 Changes in `POLICY_REVISION` 2026-09-12.2 (the complete list):
 
-- **T-B gate semantics:** the `required_isolation` floor is a floor, not a target.
-  - The effective requirement is max(pinned floor, request parameter), and the launch form is the
-    **strongest verified form** that meets it (`_resolve_form` derives it from the same capability
-    snapshot).
-  - So in a deployment with `webui_image` configured, a parameter-less `/user-url` takes the sandbox
-    form by default, even when the pin is only `os_user`.
-  - Deployments without `webui_image` behave exactly as before: the os_user chain, and an explicit
-    `os_user` request still requires a system_account mapping.
-  - An explicit `sandboxed` request keeps its fail-closed shape: the probe refuses, the launcher
-    checks again, and there is no silent downgrade to local.
+- **T-B gate semantics** (superseded by #3446, which makes the backend explicit): the launch form was
+  the strongest verified form meeting max(floor, request), so a configured `webui_image` switched
+  default launches to pods. Since #3446 the form follows `workspace.isolation.backend` alone.
 - **Probe reason vocabulary:**
   - Added `sandbox_multi_process_unsupported`. Sandboxed is refused while another web process holds
     a fresh heartbeat, or while an unreadable heartbeat root makes it impossible to prove this process
@@ -763,19 +771,11 @@ long-running process should not rely on a probe from hours ago.
    also lengthen the local WebUI credentials' lifetime.
 4. **HTTPS:** reuse the external reverse proxy's port-range mapping (`/webui/<port>`, see
    [NGINX](NGINX.md)). In the sandboxed form the browser port is the local proxy port, taken from the
-   same port_range (default 3100-3200). Single-user + sandboxed allocates a proxy port instead of the
-   hard-coded 3100.
-5. **`workspace.sandbox_tier` is optional.** It chooses which endpoint tier interactive pods land on;
-   the default is the backend's `default_tier`.
-   - **The pin is a floor, not a target** (the same floor definition as #3375). The effective
-     requirement is max(pinned floor, request parameter), and the launch form is the **strongest
-     verified form** that meets it.
-   - So once `webui_image` is configured (probe passed, capability sandboxed), a parameter-less
-     `/user-url` also takes the sandbox form, even when the pin (e.g. the `os_user` that
-     docker-entrypoint writes by default) is lower. The os_user chain (identity mapping, sudo launch)
-     then does not apply, and the gate admits through the sandboxed branch.
-   - Deployments without `webui_image` behave exactly as before: the os_user chain, and an explicit
-     `os_user` request still requires a system_account mapping.
+   same port_range (default 3100-3200).
+5. **`workspace.isolation.tier` is optional.** It chooses which endpoint tier interactive pods land
+   on; the default is the backend's `default_tier`. The pod's identity is its per-instance token, so
+   the gate admits a `sandboxed` requirement through the sandboxed branch, without the OS-account
+   chain (identity mapping, sudo launch).
 6. **Not verified end to end on a real cluster:** the reachability of the WebUI entry point and the
    pod's 3100 endpoint (#3379). A runtime failure surfaces as `sandbox_endpoint_unresolved` rather
    than hanging silently.
@@ -865,8 +865,8 @@ proxy → gateway → pod → webui → token validation.
   - **Exit:** a process deletes its own heartbeat file on exit (gunicorn `worker_exit` hook + atexit;
     idempotent, fail-soft). **The restart window of a single-process deployment is therefore close to
     zero.** SIGKILL and crashes cannot clean up; a leftover heartbeat expires after at most one
-    freshness window (≤ 660 s), and until then sandboxed is refused and falls back to the os_user
-    chain.
+    freshness window (≤ 660 s), and until then the `opensandbox` backend is reported unsupported and
+    launches are refused.
   - **Sweeps and reconcile:** sweeps are skipped while another fresh heartbeat exists. **Replicas no
     longer kill each other in reconcile:** with 3 replicas or a rolling overlap, a new replica no longer
     sweeps another replica's live pods.
@@ -915,7 +915,7 @@ c = json.load(open(sys.argv[1]))
 NEEDED = ("webui", "filesystem_api", "session_history")    # local workbench entry points
 KNOWN  = {"enforced", "partial", "remote_machine_scope",
           "separate_contract", "sandboxed_entry_not_wired", "disabled"}
-REVIEWED = {"2026-09-26.2"}                                # revisions you have reviewed
+REVIEWED = {"2026-09-26.3"}                                # revisions you have reviewed
 d = c.get("entry_point_details", {})
 ok = (
     c.get("local_workspace_multi_user") == "supported"
@@ -956,41 +956,24 @@ curl -H "Authorization: Bearer <token>" \
   "https://<open-ace>/api/workspace/user-url?required_isolation=os_user"
 ```
 
-**The isolation requirement is server-side** (`workspace.required_isolation_level` in config.json).
+**The isolation requirement is server-side:** `workspace.isolation.level` in config.json is the
+floor for every launch (#3446). The installers and the Docker entrypoint write it together with the
+backend. There is no derived floor: when operator actions degrade the launch path (rerunning the
+installer wipes the wrapper, `webui_path` is pointed at a dev checkout, sudo is removed), launches are
+**refused** with `isolation_level_unsupported` until it is repaired, and a WARNING says so; they are
+never served on the shared account.
 
-**How the multi-user installs pin it:**
-- **Docker install:** writes **`os_user` explicitly**, generated by docker-entrypoint on first start
-  (the `WORKSPACE_REQUIRED_ISOLATION_LEVEL` environment variable overrides it).
-- **Package installer:** pins only **after the `openace-webui-launch` wrapper is actually installed**.
-  It reuses the sudoers rule's executable test `[ -x /usr/local/bin/openace-webui-launch ]`. When the
-  wrapper is missing it **does not pin** and prints a clear installation warning. That avoids
-  producing a deployment that "pins `os_user` without a wrapper" and answers 400 to everything.
-- **Neither:** without an explicit setting, the requirement is **derived** from the level the contract
-  snapshot actually verified.
-
-**Honest statement: the derived value is a mirror, not a floor.** When operator actions degrade the
-launch path (rerunning the installer wipes the wrapper, `webui_path` is pointed at a dev checkout, sudo
-is removed), the derived value drops to `none` with it, and the default path keeps the old behaviour
-(launching as the shared account) instead of failing. Both directions log a WARNING and are visible in
-the response's `isolation.reasons`:
-
-- **A derived deployment** degrades: it keeps serving with weaker isolation, and a WARNING says default
-  launches are no longer isolated per user.
-- **A pinned deployment** degrades: the floor is above what the host can verify, so every launch is
-  refused with `isolation_level_unsupported`, and a WARNING says everything is REJECTed until the
-  launch path is fixed. The refusal never happens silently.
-
-For a real hard floor, keep or set an explicit `required_isolation_level`. The `required_isolation`
-request parameter **can only raise** the requirement, never lower it; an empty or blank parameter
-means the default. The background prestart at login and workspace directory provisioning go through
-the same evaluation, so a launch or provisioning the gate would refuse never happens.
+The `required_isolation` request parameter **can only raise** the requirement, never lower it; an
+empty or blank parameter means the default. The background prestart at login and workspace directory
+provisioning go through the same evaluation, so a launch or provisioning the gate would refuse never
+happens.
 
 - **Success:** the response contains `url`/`token`/`system_account` and `isolation` (a snapshot of the
   deployment's verified posture; the server-side floor makes the default path go through the gate as
   well, so the echo matches the real launch).
 - **Failure:** `success:false` + `error_code` (§3.2) + `reasons` (deployment-level and request-level
   namespaces side by side) + `isolation`.
-- **Single-user mode** (floor none): calls without the parameter keep the existing behaviour.
+- **Backend `shared`** (floor none): calls without the parameter keep the existing behaviour.
 - **Behaviour change:** in multi-user mode, a user with an empty `system_account` gets
   `identity_mapping_missing` 400 on the default path too (no parameter). Login no longer back-fills the
   username convention, so an admin must set the mapping explicitly. When a cached instance's launch
@@ -1046,6 +1029,6 @@ follow-ups. This contract's `entry_points` matrix reflects them faithfully:
    `entry_points`/`entry_point_details` are static audit conclusions versioned by `policy_revision`;
    no automatic check binds each operation's declaration to its implementation yet. Review and the
    matching cases in `tests/` keep them consistent for now.
-9. **The configuration vocabulary is being unified** (#3446): one `workspace.isolation` block with a
-   `level` and a `backend`, the same names in the snapshot and the root policy, and startup validation
-   that knows which backends each install method allows.
+9. ~~One configuration vocabulary~~: **done in #3446** (`workspace.isolation {level, backend}`, the
+   same names in the snapshot and the root policy, startup validation per install method). Follow-up:
+   an `openace isolation check` command and an installer `--isolation` option.

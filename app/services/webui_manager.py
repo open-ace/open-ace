@@ -5,6 +5,7 @@ Manages per-user qwen-code-webui processes in multi-user mode.
 Each user gets an independent webui process running under their system_account.
 """
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -29,6 +30,17 @@ from typing import Any, cast
 import gevent
 from gevent import lock as gevent_lock
 
+from app.services.workspace_isolation_config import (
+    BACKEND_BWRAP,
+    BACKEND_LOCAL_KATA,
+    BACKEND_OPENSANDBOX,
+    BACKEND_SHARED,
+    CONFINED_BACKENDS,
+    CONTAINER_BACKENDS,
+    IsolationConfig,
+    IsolationConfigError,
+    parse_isolation,
+)
 from app.utils.workspace import ensure_system_user as _ensure_user_shared
 from app.utils.workspace import run_as_root_if_needed
 from app.utils.workspace_isolation_aware import get_user_home_for_isolation
@@ -68,17 +80,11 @@ _WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 # namespace, egress only through a host:port allowlist proxy). See
 # scripts/openace-webui-confine.py for the trust split between its modes.
 _WEBUI_CONFINE_WRAPPER = "/usr/local/bin/openace-webui-confine"
-CONFINEMENT_OFF = "off"
-CONFINEMENT_BWRAP = "bwrap"
-# Issue #3431 (Option 2): the same confined launch, with a Docker container on
-# a gVisor runtime as the sandbox. Reported as the sandboxed level
-# (backend local-container:runsc) once the root probe verified the runtime.
-CONFINEMENT_RUNSC = "runsc"
-# Issue #3438: the same container launch on a Kata Containers runtime
-# (backend local-container:kata); the guest is a VM, so the confine wrapper
-# carries ingress/egress over the container's stdio instead of host sockets.
-CONFINEMENT_KATA = "kata"
-_CONTAINER_CONFINEMENT_MODES = (CONFINEMENT_RUNSC, CONFINEMENT_KATA)
+# The confined backends (#3446 names; the wrapper's --backend takes the same):
+# - "bwrap" (#3431 Option 1): systemd scope + bubblewrap, os_user level;
+# - "local-gvisor" (#3431 Option 2): a Docker container on gVisor, sandboxed;
+# - "local-kata" (#3438): a Docker container on Kata; the guest is a VM, so
+#   the wrapper carries ingress/egress over the container's stdio.
 # `openace-webui-confine launch --probe` token -> readiness reason code.
 _CONTAINER_PROBE_REASONS = {
     "policy:invalid": "confinement_policy_invalid",
@@ -307,7 +313,6 @@ class WorkspaceConfig:
 
     enabled: bool = False
     url: str = "http://localhost"
-    multi_user_mode: bool = False
     port_range_start: int = 3100
     port_range_end: int = 3200
     max_instances: int = 30
@@ -320,28 +325,23 @@ class WorkspaceConfig:
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
-    # Issue #3374 review #12: server-side minimum isolation requirement for
-    # user-url launches. Empty string derives the default ("os_user" when
-    # multi_user_mode is on, else "none"); the request parameter can only
-    # raise, never lower, this floor.
-    required_isolation_level: str = ""
-    # Issue #3378: which sandbox-backends.json endpoint tier interactive
-    # sandboxed WebUIs launch on. Empty string falls back to the backend
-    # config's default_tier. Read by the isolation capability probe only.
-    sandbox_tier: str = ""
-    # Issue #3431 (Option 1): confine each os_user WebUI. "" / "off" keeps the
-    # plain sudo -u launch; "bwrap" requires the confine wrapper, systemd and
-    # bubblewrap (fail-closed: an unready host degrades the os_user level
-    # instead of launching unconfined). Any other value is a readiness error.
-    os_user_confinement: str = ""
-    confinement_memory_max: str = "4G"
-    confinement_cpu_quota: int = 200
-    confinement_tasks_max: int = 512
-    # Extra host:port pairs the sandbox may reach, beyond the Open ACE API /
-    # LLM proxy endpoints derived from the launch environment.
-    confinement_egress_allow: tuple[str, ...] = ()
-    # Option 2: the WebUI executable INSIDE the pinned image.
-    confinement_container_webui: str = "/usr/bin/qwen-code-webui"
+    # Issue #3446: the validated ``workspace.isolation`` block — the level (also
+    # the server-side floor for user-url launches), the backend that provides
+    # it, and its tier / limits / egress allowlist / in-image WebUI path.
+    isolation: IsolationConfig = field(default_factory=IsolationConfig)
+
+    @property
+    def multi_user_mode(self) -> bool:
+        """One WebUI instance per user (every backend but ``shared``)."""
+        return self.isolation.backend != BACKEND_SHARED
+
+    @property
+    def isolation_backend(self) -> str:
+        return self.isolation.backend
+
+    @property
+    def isolation_level(self) -> str:
+        return self.isolation.level
 
 
 def read_workspace_config() -> WorkspaceConfig:
@@ -363,10 +363,17 @@ def read_workspace_config() -> WorkspaceConfig:
             config = json.load(f)
 
         workspace = config.get("workspace", {})
+        try:
+            isolation = parse_isolation(workspace)
+        except IsolationConfigError as exc:
+            # Startup already refused this configuration (validate_isolation_config);
+            # a file edited afterwards disables the workspace rather than running
+            # with an isolation nobody asked for.
+            logger.error("Workspace disabled: %s", exc)
+            return WorkspaceConfig()
         return WorkspaceConfig(
             enabled=workspace.get("enabled", False),
             url=workspace.get("url", "http://localhost"),
-            multi_user_mode=workspace.get("multi_user_mode", False),
             port_range_start=workspace.get("port_range_start", 3100),
             port_range_end=workspace.get("port_range_end", 3200),
             max_instances=workspace.get("max_instances", 30),
@@ -375,22 +382,7 @@ def read_workspace_config() -> WorkspaceConfig:
             token_secret=workspace.get("token_secret", ""),
             webui_path=workspace.get("webui_path", ""),
             webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
-            required_isolation_level=(workspace.get("required_isolation_level", "") or "").strip(),
-            sandbox_tier=(workspace.get("sandbox_tier", "") or "").strip(),
-            os_user_confinement=str(workspace.get("os_user_confinement", "") or "").strip().lower(),
-            confinement_memory_max=str(
-                workspace.get("confinement_memory_max", "4G") or "4G"
-            ).strip(),
-            confinement_cpu_quota=int(workspace.get("confinement_cpu_quota", 200) or 200),
-            confinement_tasks_max=int(workspace.get("confinement_tasks_max", 512) or 512),
-            confinement_egress_allow=tuple(
-                str(item).strip()
-                for item in (workspace.get("confinement_egress_allow") or [])
-                if str(item).strip()
-            ),
-            confinement_container_webui=str(
-                workspace.get("confinement_container_webui") or "/usr/bin/qwen-code-webui"
-            ).strip(),
+            isolation=isolation,
         )
     except Exception as e:
         logger.error(f"Error loading config: {e}")
@@ -653,10 +645,14 @@ class WebUIManager:
         # Windows doesn't support multi-user mode
         if self._platform == "windows" and self.config.multi_user_mode:
             logger.warning(
-                "Windows does not support multi-user mode for webui. "
-                "Falling back to single-instance mode."
+                "Windows does not support per-user WebUIs. Falling back to a single "
+                "instance; the configured isolation level stays the floor, so launches "
+                "that need it are refused."
             )
-            self.config.multi_user_mode = False
+            # Only the backend changes: the declared level remains the floor.
+            self.config.isolation = dataclasses.replace(
+                self.config.isolation, backend=BACKEND_SHARED
+            )
 
         logger.info(
             f"WebUIManager initialized: multi_user_mode={self.config.multi_user_mode}, "
@@ -1498,11 +1494,9 @@ class WebUIManager:
         form = self._resolve_form(required_isolation, snapshot=snapshot)
 
         if not self.config.multi_user_mode:
-            if form == WEBUI_FORM_SANDBOXED:
-                # Issue #3378 (D1): single-user + sandboxed swaps the hardcoded
-                # 3100 for a proxy-port allocation — the pod's webui is remote,
-                # the browser reaches it through the local D1 proxy.
-                return self._get_sandboxed_url_single_user(user_id, base_url)
+            # Backend "shared" (#3446): one local WebUI for everyone. The pod
+            # form always runs one pod per user (backend "opensandbox"), so a
+            # single shared pod is no longer a configuration that exists.
             # Single-user mode (docker compose): use fixed WebUI port 3100
             # Issue #3129: Start the single-user WebUI instance if not running
             with self._single_user_lock:
@@ -1627,62 +1621,23 @@ class WebUIManager:
             return instance.url, instance.token
 
     def _resolve_form(self, required_isolation: str, *, snapshot: Any = None) -> str:
-        """Pick the launch form for this request (Issue #3378, review round 1).
+        """Pick the launch form for this request.
 
-        The caller passes the EFFECTIVE requirement — max(server pin floor,
-        request parameter), resolved by the /user-url gate. The pin is a
-        FLOOR, not a target (#3375 semantics): the launch form is the
-        strongest VERIFIED form that satisfies the requirement, derived from
-        the same capability snapshot the contract reports (one source of
-        truth — the previous code mapped every non-sandboxed explicit value
-        to the local form, so a deployment pinned `os_user` by the entrypoint
-        but configured with a webui_image advertised `sandboxed` in its
-        contract while launching local OS processes).
+        Issue #3446: the backend is explicit (``workspace.isolation.backend``),
+        so the form follows it and nothing is inferred: the OpenSandbox pod
+        form for ``opensandbox``, the per-user local form for every other
+        backend (the local containers run INSIDE the local form, through the
+        confine wrapper). The /user-url gate has already refused a requirement
+        the deployment cannot meet, and a backend that is not ready makes the
+        snapshot unsupported instead of falling back to another form.
 
-        F-6.1 (review round 2): a caller that already built a snapshot for its
-        own gate (the /user-url route, the login prestart) passes it in —
-        building a SECOND one here let a heartbeat flip the cached level
-        between the two builds, making the form disagree with the gate that
-        admitted the request (e.g. the gate skipping
-        identity_mapping_missing for a now-`local` launch). None builds it,
-        the historical behavior.
-
-        Consequences: with no sandboxed request parameter, a sandboxed-
-        capable deployment always launches the pod form (even when the pin
-        is merely `os_user`); a deployment without webui_image keeps the
-        local form for every os_user-level requirement; an explicit
-        `sandboxed` requirement keeps its fail-closed shape (the gate
-        already refused unmet requests, and the launcher re-checks the
-        backend so a bypassed gate cannot silently downgrade to local).
+        ``required_isolation`` and ``snapshot`` are accepted for the callers'
+        signature; the decision no longer depends on them.
         """
-        explicit = (required_isolation or "").strip()
-        from app.services.workspace_isolation_contract import (
-            BACKEND_LOCAL_CONTAINER,
-            ISOLATION_LEVEL_SANDBOXED,
-            build_workspace_isolation_snapshot,
-            is_opensandbox_backend,
-        )
-
-        # Issue #3431 Option 2: a local-container sandboxed deployment runs
-        # the sandbox INSIDE the per-user local form (the confined launch), so
-        # neither an explicit sandboxed request nor a sandboxed snapshot may
-        # route it to the OpenSandbox pod launcher. The pod form follows the
-        # opensandbox backend.
-        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
-            if snapshot is None:
-                snapshot = build_workspace_isolation_snapshot(self)
-            if snapshot.backend.startswith(BACKEND_LOCAL_CONTAINER):
-                return WEBUI_FORM_LOCAL
-        if explicit == WEBUI_FORM_SANDBOXED:
+        del required_isolation, snapshot
+        if self.config.isolation.backend == BACKEND_OPENSANDBOX:
             return WEBUI_FORM_SANDBOXED
-        if snapshot is None:
-            snapshot = build_workspace_isolation_snapshot(self)
-        return (
-            WEBUI_FORM_SANDBOXED
-            if snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
-            and is_opensandbox_backend(snapshot.backend)
-            else WEBUI_FORM_LOCAL
-        )
+        return WEBUI_FORM_LOCAL
 
     def _allocate_single_user_port(self) -> int:
         """Pick the single-user instance's port from the configured range.
@@ -1940,9 +1895,7 @@ class WebUIManager:
         if self._sandbox_launcher is None:
             from app.services.webui_sandbox_opensandbox import OpenSandboxWebuiLauncher
 
-            self._sandbox_launcher = OpenSandboxWebuiLauncher(
-                tier=(getattr(self.config, "sandbox_tier", "") or "").strip()
-            )
+            self._sandbox_launcher = OpenSandboxWebuiLauncher(tier=self.config.isolation.tier)
         return self._sandbox_launcher
 
     def _mint_sandboxed_token(
@@ -2096,47 +2049,6 @@ class WebUIManager:
         )
         return instance
 
-    def _get_sandboxed_url_single_user(self, user_id: int, base_url: str) -> tuple[str, str]:
-        """Single-user + sandboxed: proxy-port URL instead of hardcoded 3100.
-
-        Mirrors the local single-user branch's lifecycle (shared instance,
-        restart-on-dead) but every user token is minted with the instance's
-        per-instance secret.
-        """
-        with self._single_user_lock:
-            instance = self._single_user_instance
-            if instance is not None and getattr(instance, "form", "") == WEBUI_FORM_SANDBOXED:
-                if instance.is_alive():
-                    instance.update_activity()
-                    # T-C: mint for the REQUESTER, never the pod creator —
-                    # the shared instance serves every user, and each token
-                    # must validate as the user who asked for it.
-                    token = self._mint_sandboxed_token(instance, requester_id=user_id)
-                    return f"{self._remove_port_from_url(base_url)}:{instance.port}", token
-                logger.warning(
-                    "Single-user sandboxed webui (sandbox=%s) is dead; restarting",
-                    instance.sandbox_id,
-                )
-                self._stop_single_user_instance_internal()
-            elif instance is not None:
-                # Cross-form: the local single-user instance gives way.
-                self._stop_single_user_instance_internal()
-            instance = self._launch_sandboxed(
-                user_id, f"single-user-{user_id}", self._remove_port_from_url(base_url)
-            )
-            self._single_user_instance = instance
-            # F-1 (review round 2): capture the launch branch's url/token INSIDE
-            # _single_user_lock. The reuse branch's _mint_sandboxed_token
-            # REWRITES instance.token under the same lock; reading it after the
-            # release let a user who had been waiting on the lock receive the
-            # token the NEXT user minted (a cross-user credential handoff that
-            # validated against the admin-allowed URL-token paths). The reuse
-            # branch above already returns its own freshly minted local, and the
-            # multi-user branch's returns sit inside self._lock — this was the
-            # only lock-external read of a shared mutable token.
-            launch_url, launch_token = instance.url, instance.token
-        return launch_url, launch_token
-
     def _load_server_config(self) -> dict:
         """Load server configuration from config.json."""
         from app.repositories.database import CONFIG_DIR
@@ -2287,9 +2199,9 @@ class WebUIManager:
         resolved = getattr(self, "_resolved_webui", None)
         webui_cmd: str | None
         webui_dir: str | None
-        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
+        if self._confinement_mode() in CONTAINER_BACKENDS:
             # Issue #3431 Option 2: the executable is a path inside the image.
-            webui_cmd, webui_dir = self.config.confinement_container_webui, None
+            webui_cmd, webui_dir = self.config.isolation.container_webui, None
         elif resolved:
             webui_cmd, webui_dir = resolved
         else:
@@ -2856,7 +2768,7 @@ class WebUIManager:
     def _compute_launch_readiness(self) -> str | None:
         if self._platform not in ("linux", "darwin"):
             return "platform_unsupported"
-        if self._confinement_mode() in _CONTAINER_CONFINEMENT_MODES:
+        if self._confinement_mode() in CONTAINER_BACKENDS:
             # The WebUI runs from the pinned image: no host-side WebUI or
             # openace-webui-launch is involved; the root probe is the check.
             if shutil.which("sudo") is None:
@@ -2891,18 +2803,18 @@ class WebUIManager:
     # ── Issue #3431 (Option 1): confined os_user launch ───────────────
 
     def _confinement_mode(self) -> str:
-        """The configured confinement mode, normalized ("" when unset/non-string)."""
-        mode = getattr(getattr(self, "config", None), "os_user_confinement", "")
-        return mode.strip().lower() if isinstance(mode, str) else ""
+        """The isolation backend when it is a confined one (bwrap / local-*), else ""."""
+        isolation = getattr(getattr(self, "config", None), "isolation", None)
+        backend = getattr(isolation, "backend", "")
+        return backend if backend in CONFINED_BACKENDS else ""
 
     def _confinement_enabled(self) -> bool:
-        """Whether os_user WebUIs must launch confined (any value but off/empty)."""
-        return self._confinement_mode() not in ("", CONFINEMENT_OFF)
+        """Whether WebUIs must launch through the confine wrapper."""
+        return bool(self._confinement_mode())
 
     def confinement_mode(self) -> str:
-        """The configured confinement mode ("" when off), for the contract."""
-        mode = self._confinement_mode()
-        return "" if mode == CONFINEMENT_OFF else mode
+        """The confined backend ("" for none), for the contract."""
+        return self._confinement_mode()
 
     def confinement_active(self) -> bool:
         """Confinement is configured AND this host passed its readiness check."""
@@ -2916,8 +2828,8 @@ class WebUIManager:
         (the Ubuntu 24.04+ AppArmor restriction is the usual failure), and that
         the root-owned policy file lists this WebUI executable.
         """
-        if self._confinement_mode() != CONFINEMENT_BWRAP:
-            return "confinement_mode_invalid"
+        if self._confinement_mode() != BACKEND_BWRAP:
+            return "confinement_mode_invalid"  # pragma: no cover - caller dispatches by mode
         if self._platform != "linux":
             return "confinement_platform_unsupported"
         # The egress allowlist is derived from server-side configuration
@@ -2956,7 +2868,7 @@ class WebUIManager:
         concurrent callers share one running probe.
         """
         mode = self._confinement_mode()
-        kata = mode == CONFINEMENT_KATA
+        kata = mode == BACKEND_LOCAL_KATA
         if self._platform != "linux":
             return "confinement_platform_unsupported"
         if not (getattr(self.config, "webui_callback_url", "") or "").strip():
@@ -2995,7 +2907,8 @@ class WebUIManager:
                     _WEBUI_CONFINE_WRAPPER,
                     "launch",
                     "--probe",
-                    *(["--backend", "kata"] if kata else []),
+                    "--backend",
+                    mode,
                 ],
                 capture_output=True,
                 text=True,
@@ -3043,7 +2956,7 @@ class WebUIManager:
 
         Server-side configuration ONLY — ``webui_callback_url`` (the Open ACE
         API and its LLM proxy, required by the readiness probe) plus
-        ``confinement_egress_allow``. Never the request-derived API URL: its
+        ``workspace.isolation.egress_allow``. Never the request-derived API URL: its
         host comes from the client's Host header.
         """
         from urllib.parse import urlsplit
@@ -3058,7 +2971,7 @@ class WebUIManager:
             host = None
         if host:
             entries.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
-        entries.extend(getattr(self.config, "confinement_egress_allow", ()) or ())
+        entries.extend(self.config.isolation.egress_allow)
         return list(dict.fromkeys(entries))
 
     def _build_confined_command(
@@ -3085,20 +2998,18 @@ class WebUIManager:
             "--port",
             str(port),
             "--memory-max",
-            str(self.config.confinement_memory_max),
+            str(self.config.isolation.memory),
             "--cpu-quota",
-            str(self.config.confinement_cpu_quota),
+            str(self.config.isolation.cpu_percent),
             "--tasks-max",
-            str(self.config.confinement_tasks_max),
+            str(self.config.isolation.tasks),
             "--log-dir",
             webui_log_dir,
         ]
         for entry in self._confinement_allowlist():
             cmd += ["--allow", entry]
-        if self._confinement_mode() == CONFINEMENT_RUNSC:
-            cmd += ["--backend", "container"]
-        elif self._confinement_mode() == CONFINEMENT_KATA:
-            cmd += ["--backend", "kata"]
+        # The wrapper's --backend takes the same names as workspace.isolation.backend.
+        cmd += ["--backend", self._confinement_mode()]
         cmd += [
             "--webui",
             webui_cmd,

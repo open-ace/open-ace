@@ -1972,7 +1972,8 @@ read_existing_config() {
         WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "19888")
         WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
         WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
-        WORKSPACE_MULTI_USER_MODE=$(jq -r '.workspace.multi_user_mode' "$config_file" 2>/dev/null || echo "false")
+        # Issue #3446: any isolation backend but "shared" (pre-#3446: multi_user_mode)
+        WORKSPACE_MULTI_USER_MODE=$(jq -r 'if (.workspace.isolation | type) == "object" then (.workspace.isolation.backend // "shared") != "shared" else (.workspace.multi_user_mode // false) end' "$config_file" 2>/dev/null || echo "false")
         WORKSPACE_PORT_RANGE_START=$(jq -r '.workspace.port_range_start' "$config_file" 2>/dev/null || echo "3100")
         WORKSPACE_PORT_RANGE_END=$(jq -r '.workspace.port_range_end' "$config_file" 2>/dev/null || echo "3200")
         WORKSPACE_MAX_INSTANCES=$(jq -r '.workspace.max_instances' "$config_file" 2>/dev/null || echo "30")
@@ -2645,7 +2646,7 @@ create_config() {
   "workspace": {
     "enabled": $WORKSPACE_ENABLED,
     "url": "$workspace_url_config",
-    "multi_user_mode": true,
+    "isolation": {"level": "os_user", "backend": "plain"},
     "port_range_start": $WORKSPACE_PORT_RANGE_START,
     "port_range_end": $WORKSPACE_PORT_RANGE_END,
     "max_instances": $WORKSPACE_MAX_INSTANCES,
@@ -2658,7 +2659,8 @@ EOF
         workspace_config=$(cat << EOF
   "workspace": {
     "enabled": $WORKSPACE_ENABLED,
-    "url": "$workspace_url_config"
+    "url": "$workspace_url_config",
+    "isolation": {"level": "none", "backend": "shared"}
   }
 EOF
 )
@@ -2811,7 +2813,7 @@ $ports_section
       - SECRET_KEY=$SECRET_KEY
       - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
-      - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+      - WORKSPACE_ISOLATION_BACKEND=$([ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && echo plain || echo shared)
       - WORKSPACE_BASE_DIR=/workspace
       - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -2922,7 +2924,7 @@ UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
 WORKSPACE_ENABLED=$WORKSPACE_ENABLED
 WORKSPACE_URL=$WORKSPACE_URL
 WORKSPACE_PORT=$WORKSPACE_PORT
-WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+WORKSPACE_ISOLATION_BACKEND=$([ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && echo plain || echo shared)
 WORKSPACE_PORT_RANGE_START=$WORKSPACE_PORT_RANGE_START
 WORKSPACE_PORT_RANGE_END=$WORKSPACE_PORT_RANGE_END
 WORKSPACE_MAX_INSTANCES=$WORKSPACE_MAX_INSTANCES

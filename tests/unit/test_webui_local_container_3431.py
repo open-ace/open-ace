@@ -1,7 +1,7 @@
-"""Issue #3431 (Option 2): ``os_user_confinement = "runsc"`` in the manager + contract.
+"""Issue #3431 (Option 2): backend ``local-gvisor`` in the manager + contract (#3446 names).
 
 A local gVisor container is the SANDBOXED level with backend
-``local-container:runsc``, but unlike the OpenSandbox pod form its identity is
+``local-gvisor``, but unlike the OpenSandbox pod form its identity is
 the OS account and its home is the host directory. Pinned here: readiness via
 the root probe (and its memo), the container launch command, the snapshot,
 the entry-point matrix, the /user-url gate's identity chain and the launch
@@ -24,6 +24,7 @@ from app.services.webui_manager import (
     WebUIManager,
     WorkspaceConfig,
 )
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3431)]
 
@@ -31,13 +32,12 @@ pytestmark = [pytest.mark.issue(3431)]
 def _manager(**overrides) -> WebUIManager:
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("local-gvisor"),
         token_secret="secret-3431",
         webui_callback_url="http://10.0.0.5:19888",
-        os_user_confinement="runsc",
     )
     for key, value in overrides.items():
-        setattr(config, key, value)
+        setattr(config, key, value)  # isolation=iso(...) switches the backend
     manager = WebUIManager(config)
     manager._platform = "linux"
     return manager
@@ -63,8 +63,10 @@ def test_runsc_readiness_skips_host_webui_and_runs_the_root_probe():
         assert manager._compute_launch_readiness() is None
         assert manager.confinement_active() is True
     find_webui.assert_not_called()  # the WebUI lives in the image
-    assert run.call_args.args[0] == ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe"]
-    assert manager.confinement_mode() == "runsc"
+    assert run.call_args.args[0] == [
+        "sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe", "--backend", "local-gvisor",
+    ]  # fmt: skip
+    assert manager.confinement_mode() == "local-gvisor"
 
 
 @pytest.mark.parametrize(
@@ -145,7 +147,7 @@ def test_runsc_readiness_requires_linux_and_the_wrapper():
 @patch("app.services.webui_manager.subprocess.Popen")
 @patch("app.services.webui_manager.run_as_root_if_needed")
 def test_runsc_launch_uses_the_container_backend_and_image_webui(mock_chown, mock_popen, mock_pwd):
-    manager = _manager(confinement_container_webui="/usr/bin/qwen-code-webui")
+    manager = _manager()
     mock_pwd.getpwuid.return_value.pw_name = "openace"
     mock_chown.return_value = SimpleNamespace(returncode=0, stderr="")
     with (
@@ -157,7 +159,7 @@ def test_runsc_launch_uses_the_container_backend_and_image_webui(mock_chown, moc
     find_webui.assert_not_called()
     cmd = mock_popen.call_args.args[0]
     assert cmd[:4] == ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch"]
-    assert cmd[cmd.index("--backend") + 1] == "container"
+    assert cmd[cmd.index("--backend") + 1] == "local-gvisor"
     assert cmd[cmd.index("--webui") + 1] == "/usr/bin/qwen-code-webui"
 
 
@@ -165,8 +167,8 @@ def test_runsc_launch_uses_the_container_backend_and_image_webui(mock_chown, moc
 
 
 class _Stub:
-    def __init__(self, *, readiness=None, mode="runsc"):
-        self.config = SimpleNamespace(enabled=True, multi_user_mode=True, sandbox_tier="")
+    def __init__(self, *, readiness=None, mode="local-gvisor"):
+        self.config = SimpleNamespace(enabled=True, isolation=iso(mode or "plain"))
         self._readiness = readiness
         self._mode = mode
 
@@ -197,10 +199,10 @@ def test_local_container_snapshot_is_sandboxed_with_every_dimension(linux_no_ope
     snap = wic.build_workspace_isolation_snapshot(_Stub())
     assert snap.supported is True
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
-    assert snap.backend == "local-container:runsc"
+    assert snap.backend == "local-gvisor"
     assert set(snap.enforced) == set(wic.ALL_DIMENSIONS)
     assert snap.unsupported == ()
-    assert snap.policy_revision == "2026-09-26.2"
+    assert snap.policy_revision == "2026-09-26.3"
 
 
 def test_local_container_keeps_the_os_user_entry_matrix(linux_no_opensandbox):
@@ -257,7 +259,7 @@ def test_launch_form_is_local_for_local_containers(linux_no_opensandbox):
 
 
 def test_launch_form_is_the_pod_for_opensandbox():
-    manager = _manager(os_user_confinement="")
+    manager = _manager(isolation=iso("opensandbox"))
     snap = wic.IsolationCapabilitySnapshot(
         supported=True,
         backend="opensandbox:kata",

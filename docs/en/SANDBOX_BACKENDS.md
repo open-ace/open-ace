@@ -544,16 +544,18 @@ The sandboxed forms that need no Kubernetes — a local gVisor or Kata container
 
 **Configuration.** One key in this file, plus two in config.json:
 
-- `endpoints.<tier>.webui_image` — the pod image; see the §3 bullet. Setting it
-  is what makes the `sandboxed` level probe-able at all, and a passing probe
-  flips the deployment's default launch form to sandboxed.
+- `endpoints.<tier>.webui_image` — the pod image; see the §3 bullet. Pods are
+  launched only when config.json selects this backend (below); the image alone
+  switches nothing (#3446).
 - config.json `workspace.webui_callback_url` — **required**: the static probe
   uses it as the URL the pod reaches the control-plane LLM proxy through. On a
   sidecar tier the control plane's hostname must be in that tier's
   `egress_allow_hosts`; on a CNI tier it must be publicly reachable (loopback,
   private, and cluster-internal addresses are refused at probe time).
-- config.json `workspace.sandbox_tier` — optional; which endpoint tier
-  interactive pods launch on, defaulting to the backend's `default_tier`.
+- config.json `workspace.isolation` — `{"level": "sandboxed", "backend":
+  "opensandbox"}`, plus an optional `"tier"`: which endpoint tier interactive
+  pods launch on, defaulting to the backend's `default_tier`. See the admin
+  guide [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md) §3.6.
 
 **Web-process environment:**
 

@@ -10,19 +10,24 @@ from pathlib import Path
 import pytest
 
 from app.services import workspace_isolation_contract as wic
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3374)]
 
 
 class _StubConfig:
-    def __init__(self, enabled=True, multi_user_mode=True):
+    def __init__(self, enabled=True, isolation=None):
         self.enabled = enabled
-        self.multi_user_mode = multi_user_mode
+        self.isolation = isolation or iso("plain")
+
+    @property
+    def multi_user_mode(self):
+        return self.isolation.backend != "shared"
 
 
 class _StubManager:
-    def __init__(self, enabled=True, multi_user_mode=True, launch_ok=True, launch_reason=None):
-        self.config = _StubConfig(enabled, multi_user_mode)
+    def __init__(self, enabled=True, isolation=None, launch_ok=True, launch_reason=None):
+        self.config = _StubConfig(enabled, isolation)
         self._launch_ok = launch_ok
         self._launch_reason = launch_reason
 
@@ -65,10 +70,10 @@ def test_non_linux_platform_reports_unsupported(monkeypatch, platform):
     snap = wic.build_workspace_isolation_snapshot(_StubManager())
     assert snap.supported is False
     assert _reason_codes(snap) == ["platform_unsupported"]
-    # Issue #3378 form-scoping: the platform gate is os_user-specific — a
-    # passing sandboxed probe overrides it (pods live on a remote cluster).
+    # The platform gate is os_user-specific: the opensandbox backend's pods
+    # live on a remote cluster (#3378), so its probe is not platform-gated.
     _patch_sandbox_probe(monkeypatch, ok=True)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager())
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(isolation=iso("opensandbox")))
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
 
 
@@ -81,13 +86,15 @@ def test_platform_reason_message_has_no_deployment_details(monkeypatch):
 
 def test_single_user_mode_reports_unsupported(monkeypatch):
     _patch_deployment(monkeypatch, docker_multi_user=True)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager(multi_user_mode=False))
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(isolation=iso("shared")))
     assert snap.supported is False
-    assert _reason_codes(snap) == ["multi_user_mode_disabled"]
-    # Issue #3378 form-scoping: single-user + sandboxed is a legitimate
-    # hardening deployment; the mode gate only governs the os_user chain.
+    assert _reason_codes(snap) == ["isolation_backend_shared"]
+    # Issue #3446: nothing is inferred — a passing pod probe does not turn a
+    # "shared" deployment into a sandboxed one; the backend must say so.
     _patch_sandbox_probe(monkeypatch, ok=True)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager(multi_user_mode=False))
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(isolation=iso("shared")))
+    assert _reason_codes(snap) == ["isolation_backend_shared"]
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(isolation=iso("opensandbox")))
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
 
 
@@ -95,8 +102,8 @@ def test_root_single_user_reports_mode_not_mapping(monkeypatch):
     # 顺序保证:multi_user_mode 关闭优先于 docker 多用户判定(root 单用户部署
     # 不误报 identity_mapping_unverified)。
     _patch_deployment(monkeypatch, docker_multi_user=False)
-    snap = wic.build_workspace_isolation_snapshot(_StubManager(multi_user_mode=False))
-    assert _reason_codes(snap) == ["multi_user_mode_disabled"]
+    snap = wic.build_workspace_isolation_snapshot(_StubManager(isolation=iso("shared")))
+    assert _reason_codes(snap) == ["isolation_backend_shared"]
 
 
 def test_package_mode_multi_user_with_healthy_probe_reports_os_user(monkeypatch):
@@ -159,6 +166,8 @@ def test_public_dict_shape(monkeypatch):
         "entry_points",
         "entry_point_details",
         "policy_revision",
+        "install_method",
+        "available_backends",
     }
     assert data["local_workspace_multi_user"] == "supported"
     assert data["entry_points"]["autonomous"] == "separate_contract"
@@ -279,6 +288,7 @@ def test_snapshot_without_manager_reads_disk_config(monkeypatch):
     class _DiskConfig:
         enabled = True
         multi_user_mode = True
+        isolation = iso("plain")
 
     monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
     monkeypatch.setattr(
@@ -312,6 +322,7 @@ def test_cold_worker_snapshot_is_provisional(monkeypatch):
     class _DiskConfig:
         enabled = True
         multi_user_mode = True
+        isolation = iso("plain")
 
     monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
     monkeypatch.setattr(
@@ -324,11 +335,7 @@ def test_cold_worker_snapshot_is_provisional(monkeypatch):
     assert "provisional" in snap.reasons[0].message
 
 
-# --- resolve_required_floor (PR review round 2) ---
-
-
-def _floor_config(explicit=""):
-    return type("C", (), {"required_isolation_level": explicit})()
+# --- resolve_required_floor (Issue #3446: the declared level is the floor) ---
 
 
 def _floor_snapshot(level="os_user"):
@@ -342,33 +349,10 @@ def _floor_snapshot(level="os_user"):
     )
 
 
-def test_floor_defaults_to_verified_snapshot_level():
-    assert wic.resolve_required_floor(_floor_config(""), _floor_snapshot("os_user")) == "os_user"
-    assert wic.resolve_required_floor(_floor_config(""), _floor_snapshot("none")) == "none"
-
-
-def test_floor_explicit_valid_wins():
-    assert wic.resolve_required_floor(_floor_config("none"), _floor_snapshot("os_user")) == "none"
-    assert (
-        wic.resolve_required_floor(_floor_config("os_user"), _floor_snapshot("none")) == "os_user"
-    )
-
-
-def test_floor_invalid_explicit_falls_back_fail_closed(caplog):
-    import logging
-
-    with caplog.at_level(logging.WARNING):
-        assert (
-            wic.resolve_required_floor(_floor_config("strong"), _floor_snapshot("os_user"))
-            == "os_user"
-        )
-    assert any("required_isolation_level" in r.message for r in caplog.records)
-
-
 def _degraded_snapshot():
     return wic.IsolationCapabilitySnapshot(
         supported=False,
-        backend=wic.BACKEND_SHARED,
+        backend=wic.BACKEND_PER_USER,
         isolation_level=wic.ISOLATION_LEVEL_NONE,
         enforced=(),
         unsupported=(),
@@ -376,92 +360,36 @@ def _degraded_snapshot():
     )
 
 
-def test_degraded_multi_user_floor_logs_warning(caplog):
-    # PR review round 3:派生下限只会跟着降——多用户 + 探针降级时必须打
-    # WARNING,让运维动作引发的降级在日志里可见
+@pytest.mark.parametrize("backend", ["shared", "plain", "bwrap", "local-kata", "opensandbox"])
+def test_floor_is_the_declared_level(backend):
+    config = _StubConfig(isolation=iso(backend))
+    floor = wic.resolve_required_floor(config, _floor_snapshot(config.isolation.level))
+    assert floor == config.isolation.level
+
+
+def test_floor_does_not_follow_a_degraded_snapshot_down(caplog):
+    # a degraded os_user deployment REFUSES launches (warned), it does not
+    # derive a lower floor and serve on the shared account
     import logging
 
-    degraded = _degraded_snapshot()
-    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
     with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, degraded) == "none"
-    assert any("launch path degraded" in r.message for r in caplog.records)
-
-
-def test_pinned_floor_above_degraded_snapshot_warns_reject_all(caplog):
-    # PR review round 5:pin os_user + 探针降级 → 运行期全线 400,这一侧必须
-    # 打 WARNING;不能只给结果良性的派生路径(弱隔离继续服务)告警
-    import logging
-
-    degraded = _degraded_snapshot()
-    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "os_user"})()
-    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, degraded) == "os_user"
-    msgs = [r.message for r in caplog.records]
-    assert any("REJECT all launches" in m for m in msgs)
-    # 拒绝路径不应再收到"将继续弱隔离服务"的旧文案
-    assert not any("will NOT be per-user isolated" in m for m in msgs)
-
-    # 运行期结论(钉住 install.sh 审查场景):默认请求 = floor os_user,
-    # 快照只能验证 none → 门闸拒绝 isolation_level_unsupported
+        floor = wic.resolve_required_floor(
+            _StubConfig(isolation=iso("plain")), _degraded_snapshot()
+        )
+    assert floor == "os_user"
+    assert any("REFUSED" in r.message for r in caplog.records)
     rejection = wic.evaluate_isolation_requirement(
-        "os_user", snapshot=degraded, system_account="alice", manager=None
+        floor, snapshot=_degraded_snapshot(), system_account="alice", manager=None
     )
-    assert rejection is not None
-    assert rejection.code == "isolation_level_unsupported"
+    assert rejection is not None and rejection.code == "isolation_level_unsupported"
 
 
-def test_invalid_pin_with_degraded_falls_to_derived_warning(caplog):
-    # PR review round 6:invalid pin 不得打 REJECT 告警——实际 floor 落到
-    # none、默认请求 200 放行,谎称"全线拒绝"比静默更危险
+def test_floor_on_a_healthy_snapshot_is_silent(caplog):
     import logging
 
-    degraded = _degraded_snapshot()
-    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "strong"})()
     with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, degraded) == "none"
-    msgs = [r.message for r in caplog.records]
-    assert not any("REJECT all launches" in m for m in msgs)
-    # 无效值落到派生分支:弱隔离告警 + invalid 告警各一条
-    assert any("will NOT be per-user isolated" in m for m in msgs)
-    assert any("Invalid workspace.required_isolation_level" in m for m in msgs)
-
-
-def test_pinned_floor_on_healthy_snapshot_stays_silent(caplog):
-    # 安装器正常形态(wrapper 已装):pin 不产生任何告警
-    import logging
-
-    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": "os_user"})()
-    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, _floor_snapshot("os_user")) == "os_user"
-    assert not caplog.records
-
-
-def test_healthy_multi_user_floor_is_silent(caplog):
-    import logging
-
-    healthy = _floor_snapshot("os_user")
-    cfg = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
-    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, healthy) == "os_user"
-    assert not caplog.records
-
-
-def test_single_user_degraded_floor_is_silent(caplog):
-    # 单用户形态派生 none 是预期而非降级,不告警
-    import logging
-
-    degraded = wic.IsolationCapabilitySnapshot(
-        supported=False,
-        backend=wic.BACKEND_SHARED,
-        isolation_level=wic.ISOLATION_LEVEL_NONE,
-        enforced=(),
-        unsupported=(),
-        reasons=(wic.IsolationReason("multi_user_mode_disabled", "by design"),),
-    )
-    cfg = type("C", (), {"multi_user_mode": False, "required_isolation_level": ""})()
-    with caplog.at_level(logging.WARNING, logger="app.services.workspace_isolation_contract"):
-        assert wic.resolve_required_floor(cfg, degraded) == "none"
+        wic.resolve_required_floor(_StubConfig(isolation=iso("plain")), _floor_snapshot("os_user"))
+        wic.resolve_required_floor(_StubConfig(isolation=iso("shared")), _floor_snapshot("none"))
     assert not caplog.records
 
 
@@ -604,7 +532,7 @@ class TestEntryPointDetails:
         assert fresh["entry_point_details"]["filesystem_api"]["limitations"] == []
 
     def test_policy_revision(self):
-        assert wic.POLICY_REVISION == "2026-09-26.2"
+        assert wic.POLICY_REVISION == "2026-09-26.3"
 
     def test_unsupported_snapshot_omits_both_maps(self, monkeypatch):
         data = _unsupported(monkeypatch)

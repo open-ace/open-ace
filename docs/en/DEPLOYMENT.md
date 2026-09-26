@@ -54,8 +54,8 @@ relying solely on a manifest `securityContext`. The uid/gid 1000 is stable and
 matches the filesystem ownership baked into the image and the K8s
 `runAsUser`/`runAsGroup: 1000`.
 
-Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
-`workspace.multi_user_mode: true` in config) genuinely needs root — it creates
+Multi-user workspace mode with per-user OS accounts (`WORKSPACE_ISOLATION_BACKEND=plain`, or
+`workspace.isolation.backend: "plain"` in config) genuinely needs root — it creates
 system users (`useradd`), fixes ownership (`chown`), and switches identity
 (`sudo -u <user>`) across `/home`.
 
@@ -98,7 +98,7 @@ docker-compose.multi-user.yml automatically configures:
 #### Option 3: Manual configuration
 
 ```bash
-docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+docker run --user 0 -e WORKSPACE_ISOLATION_BACKEND=plain \
   -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
   -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
@@ -162,10 +162,11 @@ If you already run a single-user deployment, migrate as follows:
 
 #### Migrating from config.json
 
-If you previously set `"multi_user_mode": true` in config.json:
-
-1. Recommended: Use docker-compose.multi-user.yml (see above)
-2. Or set `"multi_user_mode": false` in config.json and use environment variables
+`multi_user_mode`, `required_isolation_level` and the other pre-#3446 isolation keys are no longer
+accepted: the server refuses to start and names the replacement. Replace them with
+`workspace.isolation` (see [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)), e.g.
+`"isolation": {"level": "os_user", "backend": "plain"}` for per-user OS accounts, and set
+`WORKSPACE_ISOLATION_BACKEND=plain` (the multi-user overlay does) instead of `WORKSPACE_MULTI_USER_MODE`.
 
 **Note**: Multi-user mode requires root and is suitable for controlled environments
 only. For production, ensure strong passwords and security keys are set.
@@ -753,7 +754,7 @@ Docker Compose now requires `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_
 
 ## Multi-User Workspace Deployment
 
-When enabling `workspace.multi_user_mode`, Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
+With an OS-account isolation backend (`workspace.isolation.backend` `plain`, `bwrap`, `local-gvisor` or `local-kata`), Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
 
 > To choose between the isolation modes (per-user OS account, confined, local gVisor/Kata container,
 > OpenSandbox pod), configure one and verify what is in force, see the admin guide

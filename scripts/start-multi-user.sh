@@ -151,16 +151,16 @@ fi
 
 # Multi-user mode is configured in the overlay file
 # Check if user is trying to override
-if [ -n "$WORKSPACE_MULTI_USER_MODE" ] && [ "$WORKSPACE_MULTI_USER_MODE" != "true" ]; then
-    echo -e "${YELLOW}⚠ WARNING: WORKSPACE_MULTI_USER_MODE is set to '$WORKSPACE_MULTI_USER_MODE'${NC}"
-    echo "  The overlay file sets WORKSPACE_MULTI_USER_MODE=true"
+if [ -n "$WORKSPACE_ISOLATION_BACKEND" ] && [ "$WORKSPACE_ISOLATION_BACKEND" != "plain" ]; then
+    echo -e "${YELLOW}⚠ WARNING: WORKSPACE_ISOLATION_BACKEND is set to '$WORKSPACE_ISOLATION_BACKEND'${NC}"
+    echo "  The overlay file sets WORKSPACE_ISOLATION_BACKEND=plain"
     echo "  Your environment variable will be overridden by the overlay configuration."
 fi
 
 echo ""
 echo -e "${BLUE}Multi-user mode configuration:${NC}"
 echo "  • Container user: root (user: \"0\")"
-echo "  • WORKSPACE_MULTI_USER_MODE: true (from overlay)"
+echo "  • WORKSPACE_ISOLATION_BACKEND: plain (from overlay)"
 echo "  • OPENACE_ALLOW_ROOT_MULTI_USER: 1 (from overlay)"
 echo "  • OPENACE_CONFIG_DIR: /home/open-ace/.open-ace (from overlay)"
 echo ""

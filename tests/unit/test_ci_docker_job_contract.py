@@ -113,7 +113,7 @@ def test_docker_job_runs_the_multiuser_deployment_smoke():
     assert "--user 0" in run, "production target ends at USER 1000 — the smoke needs root"
     for env in (
         "OPENACE_SECURITY_MODE=development",
-        "WORKSPACE_MULTI_USER_MODE=true",
+        "WORKSPACE_ISOLATION_BACKEND=plain",
         "OPENACE_ALLOW_ROOT_MULTI_USER=1",
         "WORKSPACE_BASE_DIR=/workspace",
     ):

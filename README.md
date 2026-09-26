@@ -198,7 +198,7 @@ docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wa
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | `user: "0"` | 以 root 运行 | 创建系统用户所需 |
-| `WORKSPACE_MULTI_USER_MODE` | `true` | 启用多用户模式 |
+| `WORKSPACE_ISOLATION_BACKEND` | `plain` | 工作区隔离方式:`shared`(单实例)/ `plain`(每用户 OS 账户)/ `opensandbox`(每用户 pod),见 [docs/cn/WORKSPACE_ISOLATION.md](docs/cn/WORKSPACE_ISOLATION.md) |
 | `OPENACE_ALLOW_ROOT_MULTI_USER` | `1` | 显式授权 root 运行 |
 | `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace` | 配置持久化路径 |
 
