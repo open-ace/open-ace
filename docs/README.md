@@ -35,6 +35,9 @@ level of `docs/` and under [security/](security/), [api/](api/) and
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
 | [**TOKEN_ACCOUNTING**](en/TOKEN_ACCOUNTING.md) | Deep dive into Claude / Codex / ZCode / Qwen token collection, computation, storage, and downstream usage |
 | [**WORKSPACE_SESSION_DATA_CONTRACT**](en/WORKSPACE_SESSION_DATA_CONTRACT.md) | Data boundary of the workspace session tables and the product semantics of `request_count` |
+| [**WORKSPACE_ISOLATION**](en/WORKSPACE_ISOLATION.md) | Admin guide: choose, configure and verify isolation between workspace users, and what each install method allows |
+| [**WORKSPACE_ISOLATION_CAPABILITIES**](en/WORKSPACE_ISOLATION_CAPABILITIES.md) | Reference: the versioned isolation capability contract, reason codes and integrator usage |
+| [**SANDBOX_BACKENDS**](en/SANDBOX_BACKENDS.md) | Reference: where autonomous agents execute — sandbox backends, capabilities, and trade-offs |
 
 ### Engineering reference (top level)
 
@@ -42,9 +45,7 @@ level of `docs/` and under [security/](security/), [api/](api/) and
 |----------|-------------|----------|
 | [**TEST_LAYERS**](TEST_LAYERS.md) | Test taxonomy, placement, and CI execution semantics — the authoritative spec | 中文 |
 | [**MODEL_GATEWAY**](MODEL_GATEWAY.md) | LiteLLM-compatible model gateway — routing, config, failover | English |
-| [**SANDBOX_BACKENDS**](SANDBOX_BACKENDS.md) | Where autonomous agents execute — sandbox backends, capabilities, and trade-offs | English |
 | [**TRANSCRIPT_CONTRACT**](TRANSCRIPT_CONTRACT.md) | Pinned contract for remote session transcripts, `content_blocks`, and replay | English |
-| [**WORKSPACE_ISOLATION_CAPABILITIES**](WORKSPACE_ISOLATION_CAPABILITIES.md) | Versioned capability contract for local multi-user workspace isolation | 中文 |
 | [**GH_CLI_VERSION_COMPATIBILITY**](GH_CLI_VERSION_COMPATIBILITY.md) | gh CLI version matrix, pinning policy, and audit notes | 中文 |
 | [**TENANT_ADMIN_PERMISSIONS**](TENANT_ADMIN_PERMISSIONS.md) | Tenant-admin permission model (issue #2179) | 中文 |
 | [**REPOSITORY_SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist | English |
@@ -63,7 +64,7 @@ Launch and outreach materials live in [marketing/](marketing/README.md).
 | New to Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
 | Autonomous development maintainer | AUTONOMOUS_DEVELOPMENT → ARCHITECTURE → SANDBOX_BACKENDS |
 | Frontend developer | FRONTEND_GUIDE → DEVELOPMENT |
-| DevOps / Deployment | DEPLOYMENT → KUBERNETES → NGINX |
+| DevOps / Deployment | DEPLOYMENT → WORKSPACE_ISOLATION → KUBERNETES → NGINX |
 | API integrator | API → PERMISSION_MODEL → CONCEPTS |
 | Managing remote machines | REMOTE_WORKSPACE → REMOTE_AGENT |
 | Growing the project | MARKETING → REPOSITORY_SETUP |
@@ -100,12 +101,16 @@ Launch and outreach materials live in [marketing/](marketing/README.md).
 | [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
 | [**TOKEN_ACCOUNTING**](cn/TOKEN_ACCOUNTING.md) | Claude / Codex / ZCode / Qwen token 抓取、计算、落库和下游消费链路说明 |
 | [**WORKSPACE_SESSION_DATA_CONTRACT**](cn/WORKSPACE_SESSION_DATA_CONTRACT.md) | Workspace 会话三表的数据边界与 `request_count` 产品语义 |
+| [**WORKSPACE_ISOLATION**](cn/WORKSPACE_ISOLATION.md) | 管理员指南:选择、配置并验证工作区用户之间的隔离,以及每种安装方式允许哪些隔离 |
+| [**WORKSPACE_ISOLATION_CAPABILITIES**](cn/WORKSPACE_ISOLATION_CAPABILITIES.md) | 参考:版本化的隔离能力契约、原因码与接入方用法 |
+| [**SANDBOX_BACKENDS**](cn/SANDBOX_BACKENDS.md) | 参考:自主 agent 在哪里执行——沙箱后端、能力与取舍 |
 
 ### 工程参考（顶层）
 
 见上方英文区 "Engineering reference" 表格（TEST_LAYERS、MODEL_GATEWAY、
-SANDBOX_BACKENDS、TRANSCRIPT_CONTRACT、WORKSPACE_ISOLATION_CAPABILITIES、
-GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、REPOSITORY_SETUP）。
+TRANSCRIPT_CONTRACT、GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、
+REPOSITORY_SETUP）。SANDBOX_BACKENDS 与 WORKSPACE_ISOLATION_CAPABILITIES 已有中英双语版本,
+列在上面的指南表中。
 安全规范在 [security/](security/)，API 参考在 [api/](api/)，自主开发阶段契约在
 [architecture/](architecture/)。过程性文档（修复复盘、runbook、审计、agent 交接）
 归档于 [dev-notes/](dev-notes/README.md)，发布传播材料在
@@ -118,7 +123,7 @@ GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、REPOSITORY_SETUP）。
 | 初次了解 Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
 | 自主开发维护者 | AUTONOMOUS_DEVELOPMENT → ARCHITECTURE → SANDBOX_BACKENDS |
 | 前端开发者 | FRONTEND_GUIDE → DEVELOPMENT |
-| 运维 / 部署 | DEPLOYMENT → KUBERNETES → NGINX |
+| 运维 / 部署 | DEPLOYMENT → WORKSPACE_ISOLATION → KUBERNETES → NGINX |
 | API 集成 | API → PERMISSION_MODEL → CONCEPTS |
 | 管理远程机器 | REMOTE_WORKSPACE → REMOTE_AGENT |
 | 推广项目 | MARKETING → REPOSITORY_SETUP |

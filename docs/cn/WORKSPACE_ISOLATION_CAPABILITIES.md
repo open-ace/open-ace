@@ -1,9 +1,15 @@
 # Workspace Isolation Capabilities
 
+[English](../en/WORKSPACE_ISOLATION_CAPABILITIES.md) · 管理员指南:[WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)
+
 Open ACE 为本地交互工作区(聊天 WebUI、文件接口、会话历史)提供**版本化的多用户
 隔离能力契约**。管理员与可信接入方应通过 API 查询实际生效的能力,而不是依赖
 README 声明或客户端传入的 capability 布尔值。本文档说明契约语义、部署要求、
-reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxed)。
+reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxed)、#3431(约束与本机
+gVisor 容器)、#3438(本机 Kata 容器)。
+
+本文是**参考文档**。要选择并配置一种隔离方式,请先看管理员指南
+[WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)。
 
 ## 1. 能力契约字段
 
@@ -12,7 +18,7 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 ```json
 {
   "local_workspace_multi_user": "supported | unsupported",
-  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | local-container:runsc | opensandbox:<tier>",
+  "backend": "qwen-code-webui-per-user | qwen-code-webui-per-user-confined | qwen-code-webui-shared | local-container:runsc | local-container:kata | opensandbox:<tier>",
   "isolation_level": "none | os_user | sandboxed",
   "enforced": ["identity", "filesystem", "environment", "process"],
   "unsupported": ["resources", "network_egress", "kernel"],
@@ -51,7 +57,8 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 - `backend`:实际运行器——`qwen-code-webui-per-user`(每用户独立 WebUI 进程)、
   `qwen-code-webui-per-user-confined`(#3431:同上,且每个进程运行在 systemd
   scope + bubblewrap 约束内,见 §5.1)、`qwen-code-webui-shared`(共享单实例)或
-  `local-container:runsc`(#3431:sandboxed 等级,WebUI 运行于本机 gVisor 容器,见 §5.2)或
+  `local-container:runsc`(#3431:sandboxed 等级,WebUI 运行于本机 gVisor 容器,见 §5.2)、
+  `local-container:kata`(#3438:sandboxed 等级,WebUI 运行于本机 Kata 容器,见 §5.3)或
   `opensandbox:<tier>`(#3378:sandboxed 等级,WebUI 运行于该 tier 的 OpenSandbox pod)。
 - `isolation_level` / `enforced` / `unsupported`:见下节。
 - `reasons`:unsupported 时的机器可读原因(可能为空)。
@@ -84,14 +91,14 @@ reason code 对照与已知缺口。关联 issue:#3374(os_user)、#3378(sandboxe
 |---|---|
 | `none` | 所有本地交互会话共享同一服务账户运行,无用户间文件/环境/进程隔离(单用户轻量模式,by design) |
 | `os_user` | 每用户独立系统账户与 HOME/TMP/XDG;WebUI 进程以该用户 UID 经 `sudo -u` 启动;子进程环境为显式白名单(真实模型 API key 永不进入,以代理 token 替代);文件接口应用层 home 子树锁 + OS 权限 |
-| `sandboxed` | 每用户 WebUI 进程运行于 OpenSandbox pod(#3378):每实例独立 pod、digest-pinned 且在 image_allowlist 的专属 webui 镜像、deny-default 出口、恒有资源边界;身份为 per-instance token secret(非 OS 账户,实例销毁即失效);浏览器经控制面本地端口代理访问。部署要求与诚实边界见 §6 |
+| `sandboxed` | 每用户 WebUI 运行在拥有独立内核边界的沙箱里:OpenSandbox pod(#3378,§6)或本机容器(#3431/#3438,§5.2、§5.3)。以下为 pod 形态:每用户 WebUI 进程运行于 OpenSandbox pod(#3378):每实例独立 pod、digest-pinned 且在 image_allowlist 的专属 webui 镜像、deny-default 出口、恒有资源边界;身份为 per-instance token secret(非 OS 账户,实例销毁即失效);浏览器经控制面本地端口代理访问。部署要求与诚实边界见 §6 |
 
 **边界声明**:`os_user` 共享宿主内核,没有命名空间隔离、没有网络出口策略——
 "分目录/更换 HOME"不构成强运行时隔离。`resources`、`network_egress` 与
-`kernel` 三个维度对 `os_user` 始终列在 `unsupported`(交互 WebUI 无 per-task
-cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。`sandboxed`
-等级的维度语义与验证边界见 §6.1。autonomous 任务的资源与沙箱策略沿用独立的
-#2022 sandbox 契约(`sandbox_effective_policy`),见 `docs/SANDBOX_BACKENDS.md`。
+`kernel` 三个维度对**普通** `os_user` 始终列在 `unsupported`(交互 WebUI 无 per-task
+cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。约束模式(§5.1)会补上
+`resources` 与 `network_egress`。`sandboxed` 等级的维度语义与验证边界见 §5.2、§5.3 与 §6.1。autonomous 任务的资源与沙箱策略沿用独立的
+#2022 sandbox 契约(`sandbox_effective_policy`),见 [SANDBOX_BACKENDS](SANDBOX_BACKENDS.md)。
 
 **平台边界**:仅 Linux 部署可申报 `os_user`。macOS 跳过系统用户创建,Open ACE
 无法建立/验证身份映射;Windows 强制单实例。两者契约均为
@@ -99,7 +106,7 @@ cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。`
 
 ## 3. Reason Code 对照
 
-三套代码,职责不同:
+四套代码,职责不同:
 
 ### 3.1 契约 `reasons[]`(部署级:为什么整体 unsupported)
 
@@ -120,7 +127,7 @@ cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。`
 | `identity_mapping_missing` | 用户在数据库中无 `system_account` 映射;显式要求隔离时不做 username 静默回退(**仅 os_user 链**;sandboxed 的身份是 per-instance token,不查 OS 账户) |
 | `per_user_launch_unavailable` | 启动路径无法以该用户 UID 运行(message 内嵌 §3.3 的原因码;**仅 os_user 链**) |
 
-`sandboxed` 请求的门闸是能力探测本身:等级不满足时按 §3.4 的探测码
+OpenSandbox pod 形态下,`sandboxed` 请求的门闸是能力探测本身(本机容器形态 §5.2/§5.3 仍走 os_user 身份链):等级不满足时按 §3.4 的探测码
 (优先)或 `isolation_level_unsupported` 拒绝,不产生
 `identity_mapping_missing`/`per_user_launch_unavailable`。
 
@@ -140,6 +147,8 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `privileged_system_account` | 目标系统账户 uid 为 0(如映射到 root) |
 | `reserved_system_account` | 目标系统账户 uid < 1000(系统保留段) |
 
+约束模式与本机容器模式另有各自的 `confinement_*` 原因码,见 §5.1、§5.2、§5.3。
+
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
 `sandboxed` 等级的探测是**零 pod、配置面 fail-closed** 的(不创建 pod 即可
@@ -148,7 +157,7 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 
 | code | 级别 | 含义 | 修复动作 |
 |---|---|---|---|
-| `sandbox_backend_unconfigured` | 探测 | sandbox-backends.json 缺失、不可解析或未配置 | 提供/修复后端配置(见 `docs/sandbox-backends.md` §3) |
+| `sandbox_backend_unconfigured` | 探测 | sandbox-backends.json 缺失、不可解析或未配置 | 提供/修复后端配置(见 [SANDBOX_BACKENDS](SANDBOX_BACKENDS.md) §3) |
 | `sandbox_tier_missing` | 探测 | `workspace.sandbox_tier`(或后端 `default_tier`)在 `endpoints` 中无对应条目 | 修正 `sandbox_tier` 或在 `endpoints` 补齐该 tier |
 | `webui_image_missing` | 探测 | 该 tier 未配置 `webui_image` | 配置含 qwen-code-webui 的镜像(参考构建:`scripts/docker/webui-sandbox.Dockerfile`) |
 | `webui_image_not_pinned` | 探测 | `webui_image` 非 digest-pinned(`name@sha256:<64 hex>`) | 改用 digest 引用——tag 可被重指向,会架空白名单 |
@@ -246,7 +255,8 @@ pod 内,由 webui 自带的 in-pod 文件浏览承载。这三个入口在 sandb
 `sandboxed_entry_not_wired`;`filesystem_api` 的 `boundary` 改为说明未接线,且不再
 携带只描述 host 树的 residuals。`session_history` 仍 `enforced`
 (per-pod 快照存储);`autonomous` 仍 `separate_contract`。os_user/none 快照的
-矩阵取值见上表(#3410 重标定);`filesystem_api` 在 sandboxed 下与 os_user 下的取值
+矩阵取值见上表(#3410 重标定);本机容器形态(§5.2、§5.3)沿用 os_user 矩阵,因为其 home 是宿主目录。
+`filesystem_api` 在 sandboxed 下与 os_user 下的取值
 不同是**刻意**的——本地强制不等于已接线到 pod。
 
 ## 5. 多用户模式部署要求(policy revision 2026-09-16.1)
@@ -268,6 +278,10 @@ wrapper 齐备)同样可以验证并强制 os_user。
 unsupported——**不会**静默降级到共享账户后宣称支持;该形态下默认启动路径保持
 既有行为,显式 `required_isolation=os_user` 得到结构化拒绝。
 
+**安装方式决定下面的可选形态能否使用**:Docker 安装只支持 `none`、普通 `os_user` 与 OpenSandbox pod
+形态;约束模式与本机容器(§5.1–§5.3)需要 Linux 主机上的包安装。见
+[WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-安装方式决定了哪些可用) 中的安装方式对照表。
+
 ### 5.1 可选:os_user 约束(confinement,#3431,policy revision 2026-09-25.1)
 
 `workspace.os_user_confinement = "bwrap"` 让每个 os_user WebUI 在启动时被约束,
@@ -286,7 +300,7 @@ unsupported——**不会**静默降级到共享账户后宣称支持;该形态�
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `os_user_confinement` | `""` | `"bwrap"` 启用;`""`/`"off"` 关闭;其它值 → `confinement_mode_invalid` |
+| `os_user_confinement` | `""` | `"bwrap"` 启用;`""`/`"off"` 关闭;其它值 → `confinement_mode_invalid`(`"runsc"` 与 `"kata"` 见 §5.2、§5.3) |
 | `confinement_memory_max` | `4G` | systemd `MemoryMax` |
 | `confinement_cpu_quota` | `200` | 百分比,`CPUQuota` |
 | `confinement_tasks_max` | `512` | `TasksMax` |
@@ -376,10 +390,12 @@ gVisor(runsc)。与 §5.1 共用同一个 root 入口、宿主侧进程与出口
    qwen-code-webui),并在策略文件里**按内容固定**:
    ```json
    {"webui": ["/usr/bin/qwen-code-webui"],
-    "container": {"image": "sha256:<64 hex>", "runtime": "runsc-openace", "docker": "/usr/bin/docker"}}
+    "container": {"image": "sha256:<64 hex>", "docker": "/usr/bin/docker",
+                  "runtimes": {"runsc": "runsc-openace"}}}
    ```
    `image` 必须是 `name@sha256:<64 hex>` 或本地镜像 ID `sha256:<64 hex>`(tag 可被改指,拒绝);
-   `webui` 列出的是**镜像内**的路径;installer 重跑会保留 `container` 段。
+   `webui` 列出的是**镜像内**的路径;旧的单个 `runtime` 键仍表示 runsc 运行时;installer 重跑会保留
+   `container` 段。
 3. `workspace.os_user_confinement = "runsc"`,`workspace.webui_callback_url` 必填(同 §5.1);
    可用 `confinement_container_webui` 改镜像内 WebUI 路径(默认 `/usr/bin/qwen-code-webui`)。
 
@@ -397,8 +413,8 @@ root 所控、运行时已注册、镜像已在本地(启动时不拉取)、容�
 
 生命周期:root 启动进程在容器存活期间一直作为父进程——manager 对 sudo 发 SIGTERM → 转发给 docker
 CLI → 容器 → WebUI 退出、`--rm` 删除容器;manager 升级为 SIGKILL(sudo 不转发)时,root 启动进程
-发现自己被重新挂接,直接 `docker rm -f` 该容器。同一端口上遗留的旧容器在启动前被移除,运行目录在
-结束时清理。若宿主侧进程意外消失,容器内的看门狗约 30 秒后停止 WebUI,`--rm` 删除容器。
+发现自己被重新挂接,按 root 所有的 cid 文件中记录的 id 对该容器执行 `docker rm -f`;宿主侧进程退出时,
+root 启动进程同样删除容器。同一端口上遗留的旧容器在启动前被移除,运行目录在结束时清理。若宿主侧进程意外消失,容器内的看门狗约 30 秒后停止 WebUI,`--rm` 删除容器。
 
 **诚实声明**:
 
@@ -528,7 +544,7 @@ unverified**,这是有意的诚实契约(T-L:失败即撤销、条目带 1h 时�
    其 LLM 凭证;不需要为申报 sandboxed 抬高
    `OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES`(抬高会连带拉长本地 webui 凭据
    寿命)。
-4. HTTPS:沿用外部反代的端口段映射(`/webui/<port>`,见 `docs/cn/NGINX.md`)
+4. HTTPS:沿用外部反代的端口段映射(`/webui/<port>`,见 [NGINX](NGINX.md))
    ——sandboxed 形态的浏览器端口是本地代理端口,取自同一 port_range
    (默认 3100-3200);单用户 + sandboxed 以代理端口分配替代硬编码 3100。
 5. `workspace.sandbox_tier` 可选:指定交互 pod 落在哪个 endpoint tier,缺省用
@@ -562,9 +578,9 @@ token 随每次 `/user-url` 命中以 per-instance secret 重铸;健康检查用
 - **配置面探测 ≠ per-pod 验证**:静态 enforced 五维依据配置事实;kernel/
   network_egress 待首个 pod boot probe;**控制面重启后回退 unverified**;
   probe 失败即撤销该 tier memo,条目 1h 过期(T-L)。
-- **Kata 的 kernel 验证仅负向**(只能排除 gVisor,不能与未隔离 runc 区分):
+- **pod 内 Kata 的 kernel 验证仅负向**(单向判定:只能排除 gVisor,不能与未隔离 runc 区分):
   kernel 保持 unsupported + `sandbox_runtime_kata_negative_only`;gVisor 正向
-  识别才升级 enforced。
+  识别才升级 enforced。(§5.3 的本机 Kata 容器改为在宿主侧正向确认 Kata。)
 - **gVisor/CNI tier 的出口验证仅负向**(集群级 deny-default 对照:证明拒绝
   路径存在,不能证明放行真的生效;config 层已禁止 gVisor tier 申报 sidecar):
   network_egress 保持 unsupported + `sandbox_runtime_egress_negative_only`;
@@ -623,8 +639,8 @@ curl -H "Authorization: Bearer <token>" \
   iframe 调用方不在此端点服务范围内(iframe 流程使用各自的 per-resource token)。
 
 **安全准入示例(#3410)**。下面这段判定与单元测试
-`TestDocumentedAdmissionPredicate`(`tests/unit/test_workspace_isolation_contract_3374.py`)
-**逐项一致**——改一处必须改另一处,否则文档会随版本漂移:
+`TestDocumentedAdmissionPredicate`(`tests/unit/test_workspace_isolation_contract_3374.py`,
+它直接执行本文中英两个版本里的这段代码)**逐项一致**——改一处必须改另一处,否则文档会随版本漂移:
 
 ```bash
 curl -s -H "Authorization: Bearer <token>" \
@@ -704,7 +720,7 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
 
 探针取舍说明:`supports_per_user_launch`/`per_user_launch_readiness` 以
 **probe-only** 方式解析 WebUI 可执行文件(绝不触发 npm build);就绪结果
-(含降级态)在进程内按 30 秒 TTL 双向记忆化,成功解析额外永久缓存。sudo
+(含降级态)在进程内按 30 秒 TTL 双向记忆化(以检查**结束**时刻计时),成功解析额外永久缓存。sudo
 路径的真实前置是 `openace-webui-launch` 包装器已安装且可执行(sudoers 规则
 本身无法廉价验证);目标系统账户拒绝 uid 0 与保留段(uid<1000)。
 
@@ -724,7 +740,8 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
    全线 400、`<base>/<account>` 0755。
 3. *(编号保留,原条目已关闭)*
 4. WebUI `token_secret` 未持久化时重启导致已发 token 失效的加固。
-5. 交互工作区 `sandboxed` 等级:#3378 已交付(§6);遗留 follow-up:真实集群
+5. 交互工作区 `sandboxed` 等级:#3378 已交付(§6),不依赖 Kubernetes 的形态由 #3431/#3438 交付
+   (§5.2、§5.3);遗留 follow-up:真实集群
    端到端验收(#3379,含 3100 端点可达性验证)、`terminal`/`vscode`/`fs` 入口
    沙箱接线、webui 历史 quota/GC、多 web 副本下的 token 校验/实例管理
    (reconcile 已心跳互斥,但 pod 归属仍是单进程内存态)。
@@ -740,3 +757,5 @@ installer 冲掉 wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时
 8. **入口矩阵与代码的 conformance 绑定**:`entry_points`/`entry_point_details` 是
    随 `policy_revision` 版本化的静态审计结论,尚无自动检查把每个操作的声明与其实现
    绑定;声明与实现的一致性目前由评审与 `tests/` 中的对应用例保证。
+9. **配置词汇统一中**(#3446):一个 `workspace.isolation` 配置块写明 `level` 与 `backend`,快照与
+   root 策略文件使用同一套名称,启动时校验会知道每种安装方式允许哪些 backend。

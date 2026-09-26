@@ -102,7 +102,7 @@ Both tiers run agent workloads; what differs is egress. gVisor cannot run the
 egress sidecar, so its tier enforces only `networkpolicy.yaml` — CIDR-based,
 identical for every sandbox, public internet open — and does not declare
 `network_egress_policy`. Route a tenant whose egress must be allowlisted to the
-Kata tier. See `docs/SANDBOX_BACKENDS.md` §7 for exactly what that costs.
+Kata tier. See `docs/en/SANDBOX_BACKENDS.md` §7 for exactly what that costs.
 
 ## Applying
 

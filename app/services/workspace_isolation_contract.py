@@ -6,7 +6,7 @@ runtime state only (webui manager config, environment, euid, platform).
 It deliberately never upgrades the reported isolation level: ``os_user``
 means per-user OS accounts on a shared host kernel, not strong runtime
 isolation (no namespaces, no egress policy). Reason messages stay free of
-deployment specifics; see docs/WORKSPACE_ISOLATION_CAPABILITIES.md for
+deployment specifics; see docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md for
 deployment requirements. Bump POLICY_REVISION whenever derivation semantics
 or the entry-point matrix change.
 
@@ -511,7 +511,7 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
         "covered_by_isolation_level": False,
         "operations": [{"name": "task-execution", "roots": [], "symlink_policy": _SYMLINK_NA}],
         "access_control": ["sandbox_effective_policy"],
-        "boundary": "Governed by the #2022 sandbox contract; see docs/SANDBOX_BACKENDS.md.",
+        "boundary": "Governed by the #2022 sandbox contract; see docs/en/SANDBOX_BACKENDS.md.",
         "limitations": [
             {
                 "code": "separate_contract",
