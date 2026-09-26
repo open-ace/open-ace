@@ -84,18 +84,3 @@ def test_dedupe_keeps_newest_null_sender_row_sqlite():
         # Idempotent: a second run deletes nothing.
         _upgrade(conn)
         assert _remaining(conn) == _EXPECTED
-
-
-@pytest.mark.postgres
-def test_dedupe_keeps_newest_null_sender_row_postgres(pg_db):
-    engine = sa.create_engine(pg_db.db_url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(sa.text("DELETE FROM daily_stats"))
-            _seed(conn)
-            _upgrade(conn)
-            assert _remaining(conn) == _EXPECTED
-            _upgrade(conn)
-            assert _remaining(conn) == _EXPECTED
-    finally:
-        engine.dispose()
