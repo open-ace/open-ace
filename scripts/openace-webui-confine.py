@@ -1507,7 +1507,7 @@ def _docker_remove_id(docker: str, cidfile: str) -> bool:
     try:
         with open(cidfile, encoding="ascii") as handle:
             cid = handle.read().strip()
-    except OSError:
+    except (OSError, ValueError):  # ValueError: undecodable contents
         return False
     if not re.fullmatch(r"[0-9a-f]{64}", cid):
         return False
@@ -1540,8 +1540,14 @@ def _reap_supervisor(pid: int, grace: float = 10.0) -> None:
         time.sleep(0.2)
     with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGKILL)
-    with contextlib.suppress(ChildProcessError):
-        os.waitpid(pid, 0)
+    deadline = time.monotonic() + 2  # bounded: a child stuck in D state
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                return
+        except ChildProcessError:
+            return
+        time.sleep(0.1)
 
 
 def sweep_stale_run_dirs(prefix: str, run_root: str = RUN_ROOT) -> None:
