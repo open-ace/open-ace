@@ -417,7 +417,7 @@ def test_probe_claims_carry_the_one_directional_caveat():
         r"do not rely on it",
         re.I,
     )
-    kernel_topic = re.compile(r"kernel|/proc/version", re.I)
+    kernel_topic = re.compile(r"kernel|/proc/version|内核", re.I)
     offenders = []
     for path in (*_sandbox_backend_docs(root), _DIR / "README.md"):
         text = path.read_text(encoding="utf-8")

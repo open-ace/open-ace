@@ -246,7 +246,7 @@ def _sanitize_filename(name: str) -> str | None:
 # dirs AS CONFIGURED, so a home that resolves outside every configured base is
 # rejected before this code runs. Point <base>/<account> only at a location
 # inside a configured base (or list the volume in WORKSPACE_BASE_DIR). See
-# docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4 "部署前提".
+# docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4 "Deployment preconditions".
 
 _UPLOAD_TMP_PREFIX = ".openace-upload-"
 

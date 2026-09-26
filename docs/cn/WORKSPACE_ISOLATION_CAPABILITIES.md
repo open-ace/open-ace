@@ -95,9 +95,9 @@ gVisor 容器)、#3438(本机 Kata 容器)。
 
 **边界声明**:`os_user` 共享宿主内核,没有命名空间隔离、没有网络出口策略——
 "分目录/更换 HOME"不构成强运行时隔离。`resources`、`network_egress` 与
-`kernel` 三个维度对 `os_user` 始终列在 `unsupported`(交互 WebUI 无 per-task
-cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。`sandboxed`
-等级的维度语义与验证边界见 §6.1。autonomous 任务的资源与沙箱策略沿用独立的
+`kernel` 三个维度对**普通** `os_user` 始终列在 `unsupported`(交互 WebUI 无 per-task
+cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。约束模式(§5.1)会补上
+`resources` 与 `network_egress`。`sandboxed` 等级的维度语义与验证边界见 §5.2、§5.3 与 §6.1。autonomous 任务的资源与沙箱策略沿用独立的
 #2022 sandbox 契约(`sandbox_effective_policy`),见 [SANDBOX_BACKENDS](SANDBOX_BACKENDS.md)。
 
 **平台边界**:仅 Linux 部署可申报 `os_user`。macOS 跳过系统用户创建,Open ACE
@@ -106,7 +106,7 @@ cgroup,仅实例数上限与空闲清理;无出口策略;共享宿主内核)。`
 
 ## 3. Reason Code 对照
 
-三套代码,职责不同:
+四套代码,职责不同:
 
 ### 3.1 契约 `reasons[]`(部署级:为什么整体 unsupported)
 
@@ -146,6 +146,8 @@ vs `identity_mapping_missing`(用户级,门闸拒绝"这个用户没有身份映
 | `sudo_unavailable` | 无 sudo 二进制 |
 | `privileged_system_account` | 目标系统账户 uid 为 0(如映射到 root) |
 | `reserved_system_account` | 目标系统账户 uid < 1000(系统保留段) |
+
+约束模式与本机容器模式另有各自的 `confinement_*` 原因码,见 §5.1、§5.2、§5.3。
 
 ### 3.4 sandboxed 探测与运行期原因码(#3378)
 
@@ -253,7 +255,8 @@ pod 内,由 webui 自带的 in-pod 文件浏览承载。这三个入口在 sandb
 `sandboxed_entry_not_wired`;`filesystem_api` 的 `boundary` 改为说明未接线,且不再
 携带只描述 host 树的 residuals。`session_history` 仍 `enforced`
 (per-pod 快照存储);`autonomous` 仍 `separate_contract`。os_user/none 快照的
-矩阵取值见上表(#3410 重标定);`filesystem_api` 在 sandboxed 下与 os_user 下的取值
+矩阵取值见上表(#3410 重标定);本机容器形态(§5.2、§5.3)沿用 os_user 矩阵,因为其 home 是宿主目录。
+`filesystem_api` 在 sandboxed 下与 os_user 下的取值
 不同是**刻意**的——本地强制不等于已接线到 pod。
 
 ## 5. 多用户模式部署要求(policy revision 2026-09-16.1)

@@ -85,6 +85,7 @@ The default: `"multi_user_mode": false`. Nothing else to do.
 - **Docker install:** use the multi-user overlay (it runs the container as root so it can create
   accounts):
   ```bash
+  ./scripts/bootstrap-compose-env.sh
   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
   ```
   See [DEPLOYMENT](DEPLOYMENT.md#multi-user-workspace-deployment).
@@ -113,10 +114,10 @@ Package install on Linux with systemd, `bubblewrap` ≥ 0.8 and `setpriv`. On Ub
 }
 ```
 
-- `webui_callback_url` is **required**: it is the only address the sandbox may reach (the Open ACE
-  API and LLM proxy), taken from server configuration rather than from the request.
-- `confinement_egress_allow` adds `host:port` pairs; everything else is refused and logged to
-  `/var/log/openace-webui/<uid>.egress.log`.
+- `webui_callback_url` is **required**: it defines the Open ACE API / LLM proxy address the sandbox
+  may reach, taken from server configuration rather than from the request.
+- `confinement_egress_allow` adds further `host:port` pairs. Everything else is refused, and every
+  decision is logged to `/var/log/openace-webui/<uid>.egress.log`.
 - Rerun the package installer after enabling it: it installs `/usr/local/bin/openace-webui-confine`,
   the root-owned policy `/etc/openace/webui-confine.json` and the sudoers rule, and removes the rule
   that could start an unconfined WebUI.
@@ -138,7 +139,10 @@ Package install on Linux with Docker and gVisor. Three pieces:
     "container": {"image": "sha256:<64 hex>", "docker": "/usr/bin/docker",
                   "runtimes": {"runsc": "runsc-openace"}}}
    ```
-3. **`config.json`:** the same block as §3.3 with `"os_user_confinement": "runsc"`.
+3. **`config.json`:** the same block as §3.3 with `"os_user_confinement": "runsc"`, then rerun the
+   package installer (it removes the sudoers rule that could start an unconfined WebUI).
+
+The host must also have `fs.protected_symlinks=1` (the default on Debian/Ubuntu/RHEL).
 
 Reference: [capabilities §5.2](WORKSPACE_ISOLATION_CAPABILITIES.md#52-optional-local-container-sandbox-os_user_confinement--runsc-3431-option-2-policy-revision-2026-09-261).
 
@@ -147,14 +151,17 @@ Reference: [capabilities §5.2](WORKSPACE_ISOLATION_CAPABILITIES.md#52-optional-
 Package install on a Linux host with `/dev/kvm` (bare metal, or a VM with nested virtualization),
 Docker, and **Kata ≥ 3.32.0** (older Kata fails on Docker 29 with `invalid namespace type`).
 
-1. **Runtime:** put `containerd-shim-kata-v2` on dockerd's PATH (e.g. `/usr/local/bin`); no
-   `daemon.json` change or Docker restart is needed. Under nested virtualization, raise
-   `dial_timeout` (e.g. to 180) in `/etc/kata-containers/configuration.toml`.
+1. **Runtime:** install `containerd-shim-kata-v2` as a root-owned binary in `/usr/local/bin` (or
+   another standard system `bin` directory; the readiness probe only looks in those, so a shim that
+   is only on dockerd's PATH, e.g. in `/opt/kata/bin`, is reported as missing). No `daemon.json`
+   change or Docker restart is needed. Under nested virtualization, raise `dial_timeout` (e.g. to
+   180) in `/etc/kata-containers/configuration.toml`.
 2. **Root policy:** add the Kata runtime to the same `container` section:
    ```json
    "runtimes": {"runsc": "runsc-openace", "kata": "io.containerd.kata.v2"}
    ```
-3. **`config.json`:** the same block as §3.3 with `"os_user_confinement": "kata"`.
+3. **`config.json`:** the same block as §3.3 with `"os_user_confinement": "kata"`, then rerun the
+   package installer. `fs.protected_symlinks=1` is required here too.
 
 Traffic between the host and the Kata VM runs over the container's stdin/stdout, so the VM has no
 network interface at all; large downloads through the egress proxy are slower than with gVisor.
@@ -168,16 +175,28 @@ A Kubernetes cluster running OpenSandbox (see [SANDBOX_BACKENDS](SANDBOX_BACKEND
 `image_allowlist`; then in `config.json`:
 
 ```json
-"workspace": {"enabled": true, "webui_callback_url": "https://openace.example.com", "sandbox_tier": "kata"}
+"workspace": {
+  "enabled": true,
+  "multi_user_mode": true,
+  "webui_callback_url": "https://openace.example.com",
+  "sandbox_tier": "kata",
+  "required_isolation_level": "sandboxed"
+}
 ```
 
+- **`multi_user_mode: true` is what makes it one pod per user.** Without it, Open ACE runs a single
+  shared pod for every user: the snapshot still says `sandboxed`, but users are not separated from
+  each other. In the Docker install, multi-user mode needs the root overlay from §3.2.
+- **Pin `required_isolation_level: "sandboxed"`.** If the OpenSandbox probe fails (a missing
+  `webui_callback_url`, an image problem, several web processes), the deployment falls back to the
+  `os_user` form. With the pin, launches are refused instead of silently running as plain `os_user`.
 - `sandbox_tier` is optional (default: the backend's `default_tier`).
 - Only a **single web process** can host pods today; a multi-replica deployment falls back to
   `os_user` with `sandbox_multi_process_unsupported`.
 - Do not also set `os_user_confinement` to `runsc` or `kata`. When both are configured and the
   OpenSandbox probe passes, the pod form wins and the local container setting is silently ignored.
 
-Reference: [capabilities §6](WORKSPACE_ISOLATION_CAPABILITIES.md) and [SANDBOX_BACKENDS §8](SANDBOX_BACKENDS.md#8-interactive-workspaces-the-sandboxed-isolation-level).
+Reference: [capabilities §6](WORKSPACE_ISOLATION_CAPABILITIES.md#6-sandboxed-level-on-opensandbox-requirements-and-honest-statement-semantics-last-changed-in-2026-09-122-every-snapshot-reports-the-current-policy_revision) and [SANDBOX_BACKENDS §8](SANDBOX_BACKENDS.md#8-interactive-workspaces-the-sandboxed-isolation-level).
 
 ## 4. Verify what is in force
 
@@ -192,22 +211,26 @@ Check three fields:
 
 - `isolation_level` and `backend`: do they match the mode you configured (§1)?
 - `local_workspace_multi_user`: `supported`, or `unsupported` with `reasons`.
-- `reasons[].message`: when a mode is configured but the host cannot provide it, the deployment
-  **never silently runs weaker**. It reports `launch_path_degraded` with the precise cause in
-  parentheses.
+- `reasons[]`: why the deployment is below what you configured. The two families behave differently:
+  - **Confined and local-container modes** (`bwrap`, `runsc`, `kata`) fail closed. When the host
+    cannot provide the mode, the deployment reports `launch_path_degraded` with the precise
+    `confinement_*` cause in parentheses and never starts an unconfined WebUI.
+  - **OpenSandbox pods** fall back. When the pod probe fails, the snapshot reports the `os_user`
+    level with the `sandbox_*` reason as a separate entry, and users get plain `os_user` WebUIs unless
+    you pinned `required_isolation_level: "sandboxed"` (§3.6, §5).
 
-The causes you are most likely to meet:
+The codes you are most likely to meet:
 
 | code | fix |
 |---|---|
 | `confinement_callback_url_missing` | set `workspace.webui_callback_url` |
 | `confinement_wrapper_missing` | install the confine wrapper (package installer); in the Docker install, see §2 |
 | `confinement_systemd_unavailable`, `confinement_userns_unavailable` | the host lacks systemd or unprivileged user namespaces (Ubuntu 24.04+: load `bwrap-userns-restrict`); in the Docker install, see §2 |
-| `confinement_runtime_missing` | register the gVisor runtime / put the Kata shim on dockerd's PATH |
+| `confinement_runtime_missing` | register the gVisor runtime / install the Kata shim root-owned in `/usr/local/bin` (§3.5) |
 | `confinement_image_missing` | build the WebUI image on this host; nothing is pulled at launch |
 | `confinement_kvm_unavailable` | Kata needs `/dev/kvm` |
 | `confinement_kernel_unverified` | the runtime is not the one configured (e.g. runc named as Kata) |
-| `sandbox_backend_unconfigured`, `webui_image_*`, `sandbox_proxy_unreachable` | OpenSandbox pod configuration; see [capabilities §3.4](WORKSPACE_ISOLATION_CAPABILITIES.md#34-sandboxed-probe-and-runtime-codes-3378-opensandbox-pod-form) |
+| `webui_image_*`, `sandbox_proxy_unreachable`, `sandbox_multi_process_unsupported` | OpenSandbox pod configuration (a separate `reasons[]` entry, not a `launch_path_degraded` cause); see [capabilities §3.4](WORKSPACE_ISOLATION_CAPABILITIES.md#34-sandboxed-probe-and-runtime-codes-3378-opensandbox-pod-form) |
 
 The complete list is in [capabilities §3](WORKSPACE_ISOLATION_CAPABILITIES.md#3-reason-codes).
 
@@ -215,9 +238,9 @@ The complete list is in [capabilities §3](WORKSPACE_ISOLATION_CAPABILITIES.md#3
 
 `workspace.required_isolation_level` (`none`, `os_user` or `sandboxed`) is a floor: every workspace
 launch that the deployment cannot isolate at that level is refused with a structured error instead of
-starting with weaker isolation. The multi-user installers pin `os_user`. Without it, the requirement
-mirrors whatever the deployment currently verifies, which can silently drop if the launch path
-degrades. A request can raise the requirement (`/api/workspace/user-url?required_isolation=sandboxed`)
+starting with weaker isolation. The multi-user installers pin `os_user`; for the sandboxed modes, pin
+`sandboxed` yourself. Without a pin, the requirement mirrors whatever the deployment currently
+verifies, which can silently drop if the launch path degrades. A request can raise the requirement (`/api/workspace/user-url?required_isolation=sandboxed`)
 but never lower it.
 
 Reference: [capabilities §7](WORKSPACE_ISOLATION_CAPABILITIES.md#7-for-integrators).
@@ -226,7 +249,9 @@ Reference: [capabilities §7](WORKSPACE_ISOLATION_CAPABILITIES.md#7-for-integrat
 
 - **Choosing the Docker install and then wanting a local sandbox.** See §2: plan the install method
   around the isolation you need.
-- **Forgetting `webui_callback_url`.** Every confined and sandboxed mode refuses to run without it.
+- **Forgetting `webui_callback_url`.** The confined and local-container modes refuse to run without
+  it; the OpenSandbox pod mode falls back to `os_user` (pin `sandboxed` to turn that into a refusal).
+- **Pod mode without `multi_user_mode: true`.** Every user then shares one pod (§3.6).
 - **A broad `confinement_egress_allow` entry.** The egress proxy decides on host names and does not
   inspect TLS; allowing `*.example.com:443` allows exfiltration to anything under it.
 - **Adding a user to a privileged group** (`sudo`, `docker`, `kvm`, `adm`, ...). The confined and
