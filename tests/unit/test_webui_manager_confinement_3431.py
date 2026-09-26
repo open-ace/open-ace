@@ -300,7 +300,7 @@ def test_confined_snapshot_adds_resources_and_egress(linux_no_sandbox):
         "identity", "filesystem", "environment", "process", "resources", "network_egress",
     }  # fmt: skip
     assert snap.unsupported == ("kernel",)
-    assert snap.policy_revision == "2026-09-26.1"
+    assert snap.policy_revision == "2026-09-26.2"
 
 
 def test_unconfined_os_user_snapshot_is_unchanged(linux_no_sandbox):

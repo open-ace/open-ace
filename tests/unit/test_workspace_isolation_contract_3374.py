@@ -604,7 +604,7 @@ class TestEntryPointDetails:
         assert fresh["entry_point_details"]["filesystem_api"]["limitations"] == []
 
     def test_policy_revision(self):
-        assert wic.POLICY_REVISION == "2026-09-26.1"
+        assert wic.POLICY_REVISION == "2026-09-26.2"
 
     def test_unsupported_snapshot_omits_both_maps(self, monkeypatch):
         data = _unsupported(monkeypatch)

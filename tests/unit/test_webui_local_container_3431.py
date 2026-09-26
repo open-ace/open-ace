@@ -200,7 +200,7 @@ def test_local_container_snapshot_is_sandboxed_with_every_dimension(linux_no_ope
     assert snap.backend == "local-container:runsc"
     assert set(snap.enforced) == set(wic.ALL_DIMENSIONS)
     assert snap.unsupported == ()
-    assert snap.policy_revision == "2026-09-26.1"
+    assert snap.policy_revision == "2026-09-26.2"
 
 
 def test_local_container_keeps_the_os_user_entry_matrix(linux_no_opensandbox):

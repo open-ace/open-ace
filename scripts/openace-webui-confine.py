@@ -63,12 +63,13 @@ import shutil
 import signal
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 # ── Shared constants ────────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ SUPERVISOR_WATCH_SECONDS = 30.0
 CONTAINER_MIN_HOST_PIDS = 256  # gVisor sentry host-thread floor (--pids-limit)
 CONTAINER_REMOVE_WAIT_SECONDS = 30.0
 PROTECTED_SYMLINKS = "/proc/sys/fs/protected_symlinks"
+KVM_DEVICE = "/dev/kvm"
 
 
 def symlinks_protected(path: str = PROTECTED_SYMLINKS) -> bool:
@@ -189,8 +191,9 @@ class ContainerPolicy(NamedTuple):
     """The policy's ``container`` section (Option 2 backend)."""
 
     image: str  # name@sha256:<64 hex> or a local image id sha256:<64 hex>
-    runtime: str  # a Docker runtime name registered for runsc --host-uds=open
+    runtime: str  # gVisor: a Docker runtime registered for runsc --host-uds=open ("" = none)
     docker: str  # absolute path of the docker CLI
+    kata_runtime: str = ""  # Kata (#3438): a registered name or io.containerd.kata.v2
 
 
 class Policy(NamedTuple):
@@ -534,18 +537,29 @@ def load_policy(path: str = CONFIG_PATH) -> Policy:
         if not isinstance(raw_container, dict):
             raise ConfineError(f"policy file {path}: 'container' must be an object")
         image = raw_container.get("image", "")
-        runtime = raw_container.get("runtime", "")
+        # ``runtimes`` maps a confinement mode to its Docker runtime; the
+        # older single ``runtime`` key is the gVisor one.
+        runtimes = raw_container.get("runtimes", {})
+        if not isinstance(runtimes, dict) or set(runtimes) - {"runsc", "kata"}:
+            raise ConfineError(
+                f"policy file {path}: container.runtimes may only map 'runsc' and 'kata'"
+            )
+        runtime = runtimes.get("runsc", raw_container.get("runtime", ""))
+        kata_runtime = runtimes.get("kata", "")
         docker = raw_container.get("docker", "/usr/bin/docker")
         if not isinstance(image, str) or not IMAGE_RE.fullmatch(image):
             raise ConfineError(
                 f"policy file {path}: container.image must be pinned by digest "
                 "(name@sha256:<64 hex>) or be a local image id (sha256:<64 hex>)"
             )
-        if not isinstance(runtime, str) or not RUNTIME_RE.fullmatch(runtime):
-            raise ConfineError(f"policy file {path}: container.runtime is not a runtime name")
+        for what, value in (("runsc", runtime), ("kata", kata_runtime)):
+            if not isinstance(value, str) or (value and not RUNTIME_RE.fullmatch(value)):
+                raise ConfineError(f"policy file {path}: the {what} runtime is not a runtime name")
+        if not runtime and not kata_runtime:
+            raise ConfineError(f"policy file {path}: container names no runtime")
         if not isinstance(docker, str) or not os.path.isabs(docker):
             raise ConfineError(f"policy file {path}: container.docker must be an absolute path")
-        container = ContainerPolicy(image, runtime, docker)
+        container = ContainerPolicy(image, runtime, docker, kata_runtime)
     return Policy(webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied), container)
 
 
@@ -654,19 +668,27 @@ def build_docker_argv(
     script: str,
     webui_argv: Sequence[str],
     cidfile: str | None = None,
+    kata: bool = False,
 ) -> list[str]:
     """The fixed ``docker run`` command line for the container backend.
 
     Every option is built here; nothing from the caller reaches docker except
     validated values. No environment is on the command line: ``inner`` reads
     it from stdin (``-i``), so ``docker inspect`` does not show it either.
+
+    *kata* (#3438): the Kata runtime, whose guest cannot reach host UNIX
+    sockets. No socket directory is mounted; ``inner`` speaks the stdio
+    channel instead (see :class:`Mux`), and the task bound is the guest's own.
     """
+    runtime = container.kata_runtime if kata else container.runtime
+    if not runtime:
+        raise ConfineError(f"the policy names no {'kata' if kata else 'runsc'} runtime")
     argv = [
         container.docker, "run", "--rm", "-i", "--init",
         "--name", f"openace-webui-{uid}-{port}",
         "--label", "org.openace.confine=1", "--label", f"org.openace.uid={uid}",
         *(["--cidfile", cidfile] if cidfile else []),
-        "--runtime", container.runtime,
+        "--runtime", runtime,
         "--network", "none",
         "--user", f"{uid}:{gid}",
     ]  # fmt: skip
@@ -679,22 +701,27 @@ def build_docker_argv(
         "--cpus", f"{cpu_quota / 100:.2f}",
         # Under gVisor, --pids-limit bounds the SENTRY's host threads (it
         # needs a few hundred); the container's own processes are bounded by
-        # RLIMIT_NPROC, which the gVisor kernel enforces per uid.
-        "--pids-limit", str(max(tasks_max, CONTAINER_MIN_HOST_PIDS)),
+        # RLIMIT_NPROC, which the gVisor kernel enforces per uid. Under Kata
+        # both apply inside the guest.
+        "--pids-limit", str(tasks_max if kata else max(tasks_max, CONTAINER_MIN_HOST_PIDS)),
         "--ulimit", f"nproc={tasks_max}:{tasks_max}",
         "--mount", f"type=bind,src={_mount_safe(home)},dst={home}",
     ]  # fmt: skip
     if shared:
         argv += ["--mount", f"type=bind,src={_mount_safe(shared)},dst={shared}"]
-    argv += [
-        "--mount", f"type=bind,src={_mount_safe(log_dir)},dst={log_dir}",
+    argv += ["--mount", f"type=bind,src={_mount_safe(log_dir)},dst={log_dir}"]
+    if not kata:
         # READ-ONLY, as with bubblewrap: the container only connects out.
-        "--mount", f"type=bind,src={_mount_safe(run_dir)},dst={INNER_SOCKET_DIR},readonly",
+        argv += [
+            "--mount", f"type=bind,src={_mount_safe(run_dir)},dst={INNER_SOCKET_DIR},readonly",
+        ]  # fmt: skip
+    argv += [
         "--mount", f"type=bind,src={_mount_safe(script)},dst={CONTAINER_SCRIPT},readonly",
         "--workdir", home,
         "--entrypoint", "python3",
         container.image,
         "-I", CONTAINER_SCRIPT, "inner", "--env-stdin", "--watch-supervisor",
+        *(["--transport", "stdio"] if kata else []),
         "--port", str(port), "--", *webui_argv,
     ]  # fmt: skip
     return argv
@@ -1204,6 +1231,310 @@ class EgressProxy:
         )
 
 
+# ── Stdio multiplexer (Kata backend) ────────────────────────────────────────
+#
+# Under Kata the container is a virtual machine: bind mounts reach it through
+# virtio-fs, where connect() on a host UNIX socket file never reaches the
+# host listener. The Kata backend therefore keeps ``--network none`` and
+# carries every ingress and egress stream as frames over the container's
+# attached stdin/stdout — no bridge, no firewall rules, nothing on the host a
+# guest could connect to. Each stream has its own credit window, so a slow
+# reader stalls only its own stream, never the pipe.
+#
+# Frame: type (1 byte), stream id (4 bytes), payload length (2 bytes), payload.
+# The host opens INGRESS streams (odd ids), the container EGRESS ones (even).
+
+MUX_HEADER = struct.Struct(">BIH")
+MUX_OPEN, MUX_DATA, MUX_CLOSE, MUX_RESET, MUX_CREDIT, MUX_PING = range(1, 7)
+_MUX_TYPES = frozenset(range(1, 7))
+MUX_KIND_INGRESS = b"I"
+MUX_KIND_EGRESS = b"E"
+MUX_CHUNK = 32 * 1024  # largest DATA payload
+MUX_WINDOW = 256 * 1024  # bytes in flight per stream and direction
+MUX_MAX_STREAMS = 256  # concurrent streams opened by the peer
+MUX_PING_SECONDS = 5.0
+MUX_DEAD_SECONDS = 30.0  # no frame for this long: the other side is gone
+_MUX_EOF = b""  # inbox marker: the peer half-closed
+_MUX_ABORT = None  # inbox marker: the stream was reset
+
+
+class MuxError(Exception):
+    """The peer broke the framing protocol: the whole channel is dropped."""
+
+
+class _MuxStream:
+    def __init__(self, sid: int, local: socket.socket) -> None:
+        self.sid = sid
+        self.local = local  # our end of the stream (a socketpair end or a client)
+        self.credit = MUX_WINDOW  # bytes we may still send
+        self.buffered = 0  # bytes received and not yet delivered to ``local``
+        self.inbox: queue.Queue[bytes | None] = queue.Queue()
+        self.cond = threading.Condition()
+        self.reset = False
+        self.peer_closed = False  # the peer half-closed: no DATA may follow
+
+
+class Mux:
+    """One side of the stdio channel.
+
+    *accept* maps a stream kind the PEER may open to a handler that is given
+    a connected socket (a socketpair end) in its own thread. The peer can
+    never open any other kind, exceed a stream's window, or hold more than
+    *max_streams* streams: a framing violation ends the channel, which ends
+    the launch (fail closed).
+    """
+
+    def __init__(
+        self,
+        rfd: int,
+        wfd: int,
+        *,
+        initiator: bool,
+        accept: dict[bytes, Callable[[socket.socket], None]],
+        max_streams: int = MUX_MAX_STREAMS,
+    ) -> None:
+        self._reader = os.fdopen(rfd, "rb", buffering=PIPE_BUFFER)
+        self._wfd = wfd
+        self._wlock = threading.Lock()
+        self._lock = threading.Lock()
+        self._streams: dict[int, _MuxStream] = {}
+        self._next_id = 1 if initiator else 2
+        self._peer_parity = 0 if initiator else 1
+        self._accept = accept
+        self._max_streams = max_streams
+        self.closed = threading.Event()
+        self.last_frame = time.monotonic()
+
+    # -- writing ----------------------------------------------------------
+
+    def _send(self, ftype: int, sid: int, payload: bytes = b"") -> None:
+        data = MUX_HEADER.pack(ftype, sid, len(payload)) + payload
+        with self._wlock:
+            if self.closed.is_set():
+                raise OSError("mux closed")
+            view = memoryview(data)
+            while view:
+                try:
+                    written = os.write(self._wfd, view)
+                except OSError:
+                    self.close()
+                    raise
+                view = view[written:]
+
+    def ping(self) -> None:
+        with contextlib.suppress(OSError):
+            self._send(MUX_PING, 0)
+
+    # -- streams ----------------------------------------------------------
+
+    def open(self, kind: bytes, local: socket.socket) -> None:
+        """Open a stream of *kind* to the peer, bridged to *local*; blocks
+        until the stream is over, then closes *local*."""
+        with self._lock:
+            ours_open = sum(1 for s in self._streams if s % 2 != self._peer_parity)
+            if ours_open >= self._max_streams or self.closed.is_set():
+                with contextlib.suppress(OSError):
+                    local.close()
+                return
+            sid = self._next_id
+            self._next_id += 2
+            stream = _MuxStream(sid, local)
+            self._streams[sid] = stream
+        try:
+            self._send(MUX_OPEN, sid, kind)
+        except OSError:
+            self._forget(stream)
+            return
+        self._run_stream(stream)
+
+    def _run_stream(self, stream: _MuxStream) -> None:
+        deliver = threading.Thread(target=self._deliver, args=(stream,), daemon=True)
+        try:
+            deliver.start()
+        except RuntimeError:
+            self._abort(stream)
+            self._forget(stream)
+            return
+        self._pump_out(stream)
+        deliver.join()
+        self._forget(stream)
+
+    def _pump_out(self, stream: _MuxStream) -> None:
+        """local -> peer, within the credit the peer granted."""
+        try:
+            while True:
+                with stream.cond:
+                    while stream.credit <= 0 and not stream.reset and not self.closed.is_set():
+                        stream.cond.wait(1.0)
+                    if stream.reset or self.closed.is_set():
+                        return
+                    budget = min(MUX_CHUNK, stream.credit)
+                chunk = stream.local.recv(budget)
+                if stream.reset:
+                    return
+                if not chunk:
+                    self._send(MUX_CLOSE, stream.sid)
+                    return
+                with stream.cond:
+                    stream.credit -= len(chunk)
+                self._send(MUX_DATA, stream.sid, chunk)
+        except OSError:
+            self._abort(stream)
+
+    def _deliver(self, stream: _MuxStream) -> None:
+        """peer -> local; each delivered chunk is credited back."""
+        try:
+            while True:
+                item = stream.inbox.get()
+                if item is _MUX_ABORT:
+                    return
+                if item == _MUX_EOF:
+                    with contextlib.suppress(OSError):
+                        stream.local.shutdown(socket.SHUT_WR)
+                    return
+                stream.local.sendall(item)
+                with stream.cond:
+                    stream.buffered -= len(item)
+                self._send(MUX_CREDIT, stream.sid, struct.pack(">I", len(item)))
+        except OSError:
+            self._abort(stream)
+
+    def _abort(self, stream: _MuxStream) -> None:
+        with stream.cond:
+            first = not stream.reset
+            stream.reset = True
+            stream.cond.notify_all()
+        if first:
+            stream.inbox.put(_MUX_ABORT)
+            with contextlib.suppress(OSError):
+                stream.local.shutdown(socket.SHUT_RDWR)  # wakes a blocked recv
+            with contextlib.suppress(OSError):
+                self._send(MUX_RESET, stream.sid)
+
+    def _forget(self, stream: _MuxStream) -> None:
+        with self._lock:
+            self._streams.pop(stream.sid, None)
+        with contextlib.suppress(OSError):
+            stream.local.close()
+
+    def _accept_stream(self, sid: int, kind: bytes) -> None:
+        handler = self._accept.get(kind)
+        with self._lock:
+            peer_open = sum(1 for s in self._streams if s % 2 == self._peer_parity)
+            if sid in self._streams:
+                raise MuxError(f"stream {sid} opened twice")
+            refused = handler is None or peer_open >= self._max_streams
+            if not refused:
+                ours, theirs = socket.socketpair()
+                stream = _MuxStream(sid, ours)
+                self._streams[sid] = stream
+        if refused:
+            with contextlib.suppress(OSError):
+                self._send(MUX_RESET, sid)
+            return
+
+        def _handle() -> None:
+            try:
+                handler(theirs)  # type: ignore[misc]
+            finally:
+                with contextlib.suppress(OSError):
+                    theirs.close()
+
+        try:
+            threading.Thread(target=_handle, daemon=True, name="mux-accept").start()
+            threading.Thread(
+                target=self._run_stream, args=(stream,), daemon=True, name="mux-stream"
+            ).start()
+        except RuntimeError:
+            self._abort(stream)
+            self._forget(stream)
+            with contextlib.suppress(OSError):
+                theirs.close()
+
+    # -- reading ----------------------------------------------------------
+
+    def _read_exact(self, size: int) -> bytes:
+        data = self._reader.read(size) if size else b""
+        if len(data) != size:
+            raise EOFError
+        return data
+
+    def run(self) -> None:
+        """Read frames until EOF or a protocol violation; then close."""
+        try:
+            while True:
+                ftype, sid, length = MUX_HEADER.unpack(self._read_exact(MUX_HEADER.size))
+                if length > MUX_CHUNK:
+                    raise MuxError("frame too large")
+                payload = self._read_exact(length)
+                self.last_frame = time.monotonic()
+                if ftype not in _MUX_TYPES:
+                    raise MuxError(f"unknown frame type {ftype}")
+                if ftype == MUX_PING:
+                    continue
+                if ftype == MUX_OPEN:
+                    if sid % 2 != self._peer_parity or sid == 0:
+                        raise MuxError(f"stream id {sid} is not the peer's to open")
+                    self._accept_stream(sid, payload)
+                    continue
+                with self._lock:
+                    stream = self._streams.get(sid)
+                if stream is None:
+                    continue  # a stream that already ended; late frames are harmless
+                if ftype == MUX_DATA:
+                    if stream.peer_closed:
+                        raise MuxError(f"stream {sid} sent data after closing")
+                    if not length:
+                        continue  # an empty chunk carries nothing (and is not EOF)
+                    with stream.cond:
+                        stream.buffered += length
+                        if stream.buffered > MUX_WINDOW:
+                            raise MuxError(f"stream {sid} overran its window")
+                    if not stream.reset:
+                        stream.inbox.put(payload)
+                elif ftype == MUX_CLOSE:
+                    if not stream.peer_closed:
+                        stream.peer_closed = True
+                        stream.inbox.put(_MUX_EOF)
+                elif ftype == MUX_RESET:
+                    with stream.cond:
+                        stream.reset = True
+                        stream.cond.notify_all()
+                    stream.inbox.put(_MUX_ABORT)
+                    with contextlib.suppress(OSError):
+                        stream.local.shutdown(socket.SHUT_RDWR)
+                elif ftype == MUX_CREDIT:
+                    if length != 4:
+                        raise MuxError("bad credit frame")
+                    (grant,) = struct.unpack(">I", payload)
+                    with stream.cond:
+                        stream.credit += grant
+                        if stream.credit > MUX_WINDOW:
+                            raise MuxError(f"stream {sid} was credited beyond its window")
+                        stream.cond.notify_all()
+        except (EOFError, OSError, ValueError, MuxError, struct.error) as exc:
+            if isinstance(exc, MuxError):
+                print(f"openace-webui-confine: channel closed: {exc}", file=sys.stderr)
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self.closed.is_set():
+            return
+        self.closed.set()
+        with self._lock:
+            streams = list(self._streams.values())
+        for stream in streams:
+            with stream.cond:
+                stream.reset = True
+                stream.cond.notify_all()
+            stream.inbox.put(_MUX_ABORT)
+            with contextlib.suppress(OSError):
+                stream.local.shutdown(socket.SHUT_RDWR)
+        # The write end stays open (a writer may be blocked on it); the
+        # process exits right after the channel closes.
+
+
 # ── Mode: launch (root) ─────────────────────────────────────────────────────
 
 
@@ -1220,7 +1551,8 @@ def _launch_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow", action="append", default=[])
     parser.add_argument("--log-dir", required=True)
     parser.add_argument("--webui", required=True)
-    parser.add_argument("--backend", choices=("bwrap", "container"), default="bwrap")
+    # container = Docker on gVisor (#3431 Option 2); kata = Docker on Kata (#3438)
+    parser.add_argument("--backend", choices=("bwrap", "container", "kata"), default="bwrap")
     parser.add_argument("webui_args", nargs=argparse.REMAINDER)
     return parser
 
@@ -1263,7 +1595,7 @@ def plan_launch(
         env = validate_env(json.loads(env_text or "{}"))
     except json.JSONDecodeError as exc:
         raise ConfineError(f"environment on stdin is not JSON: {exc}") from None
-    if args.backend == "container":
+    if args.backend in ("container", "kata"):
         return _plan_container(
             args, policy, entry, port, cpu, tasks, allow, webui, webui_args,
             log_dir, base, home, shared, env,
@@ -1348,7 +1680,10 @@ def _plan_container(
     """
     if policy.container is None:
         raise ConfineError("the policy file has no 'container' section")
+    kata = args.backend == "kata"
     require_root_controlled_executable(policy.container.docker)
+    if kata and not os.path.exists(KVM_DEVICE):
+        raise ConfineError(f"the kata backend needs {KVM_DEVICE}")
     if not symlinks_protected():
         raise ConfineError("fs.protected_symlinks must be 1 for the container backend")
     if shutil.which("setpriv", path=SAFE_PATH) is None:
@@ -1377,9 +1712,12 @@ def _plan_container(
         cidfile=cidfile,
         script=script,
         webui_argv=[webui, *webui_args],
+        kata=kata,
     )
     payload: dict[str, object] = {
         "backend": "container",
+        # Kata's guest cannot reach host UNIX sockets: the stdio channel.
+        "transport": "stdio" if kata else "uds",
         "account": entry.pw_name,
         "uid": entry.pw_uid,
         "gid": entry.pw_gid,
@@ -1586,8 +1924,14 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
     successor launch that already took the name is never touched. Each
     launch has its own run directory. A container left over from a previous
     launch on the same port is removed (and waited for) before starting.
+
+    With the stdio transport (Kata, #3438) the launcher creates the two pipes
+    of the channel: the docker CLI gets the container's ends, the supervisor
+    inherits the host's ends, and the environment line is queued in the
+    stdin pipe before either starts.
     """
     uid, gid = int(payload["uid"]), int(payload["gid"])
+    stdio = payload.get("transport") == "stdio"
     docker = docker_argv[0]
     name = docker_argv[docker_argv.index("--name") + 1]
     run_dir = str(payload["socket_dir"])
@@ -1613,6 +1957,15 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
     signal.signal(signal.SIGINT, _forward)
     supervisor = 0
     removed = False
+    held: set[int] = set()  # channel pipe ends still open in this process
+
+    def _release(*fds: int) -> None:
+        for fd in fds:
+            if fd in held:
+                held.discard(fd)
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
     try:
         sweep_stale_run_dirs(os.path.basename(run_dir).rsplit("-", 1)[0])
         _docker_remove(docker, name)
@@ -1621,6 +1974,14 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
             os.unlink(cidfile)  # root-owned directory; docker refuses an existing file
         log_fd = open_root_egress_log(uid)
         supervisor_payload["log_fd"] = log_fd
+        if stdio:
+            to_guest_r, to_guest_w = os.pipe()  # supervisor -> container stdin
+            from_guest_r, from_guest_w = os.pipe()  # container stdout -> supervisor
+            held.update((to_guest_r, to_guest_w, from_guest_r, from_guest_w))
+            os.write(to_guest_w, inner_env)  # the first line ``inner`` reads
+            for fd in (from_guest_r, to_guest_w):
+                os.set_inheritable(fd, True)
+            supervisor_payload["mux_fds"] = [from_guest_r, to_guest_w]
         data = json.dumps(supervisor_payload).encode()
         supervisor = os.fork()
         if supervisor == 0:  # pragma: no cover - exercised by the acceptance run
@@ -1629,15 +1990,25 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
             finally:
                 os._exit(70)
         os.close(log_fd)  # only the supervisor writes the audit log
+        if stdio:
+            # Only the supervisor may hold the host ends: its exit is then
+            # the container's stdin EOF, and the CLI's exit its channel EOF.
+            _release(from_guest_r, to_guest_w)
         if pending:
             return 0  # stopped before docker started
-        container = subprocess.Popen(  # noqa: S603 - fixed argv
-            docker_argv, stdin=subprocess.PIPE, env=_docker_env()
-        )
-        with contextlib.suppress(BrokenPipeError):  # docker may exit at once
-            assert container.stdin is not None
-            container.stdin.write(inner_env)
-            container.stdin.close()
+        if stdio:
+            container = subprocess.Popen(  # noqa: S603 - fixed argv
+                docker_argv, stdin=to_guest_r, stdout=from_guest_w, env=_docker_env()
+            )
+            _release(to_guest_r, from_guest_w)
+        else:
+            container = subprocess.Popen(  # noqa: S603 - fixed argv
+                docker_argv, stdin=subprocess.PIPE, env=_docker_env()
+            )
+            with contextlib.suppress(BrokenPipeError):  # docker may exit at once
+                assert container.stdin is not None
+                container.stdin.write(inner_env)
+                container.stdin.close()
         # A stop that raced Popen is still forwarded, but the docker CLI may
         # not have installed its signal proxy yet and die without stopping the
         # container: the id-based removal in ``finally`` covers that.
@@ -1651,6 +2022,7 @@ def _run_launch_container(docker_argv: list[str], payload: dict[str, object]) ->
                     # sudo was killed: nothing will signal us again.
                     removed = _docker_remove_id(docker, cidfile)
     finally:
+        _release(*held)
         if container is not None and not removed:
             # Idempotent: a container that exited under --rm is already gone.
             # Covers a docker CLI that died before proxying a stop signal.
@@ -1669,7 +2041,10 @@ def run_launch(argv: Sequence[str]) -> int:
     if os.geteuid() != 0:
         raise ConfineError("launch must run as root (via sudo)")
     if list(argv[:1]) == ["--probe"]:
-        return run_container_probe()
+        rest = list(argv[1:])
+        if rest not in ([], ["--backend", "container"], ["--backend", "kata"]):
+            raise ConfineError("usage: launch --probe [--backend container|kata]")
+        return run_container_probe(backend=rest[1] if rest else "container")
     systemd_argv, payload = plan_launch(argv, sys.stdin.read())
     if payload.get("backend") == "container":
         return _run_launch_container(systemd_argv, payload)
@@ -1719,23 +2094,51 @@ def run_supervise() -> int:
             proxy.flush()
 
     threading.Thread(target=_flusher, daemon=True, name="log-flush").start()
-    egress_listener = _unix_listener(os.path.join(socket_dir, EGRESS_SOCKET))
-    threading.Thread(
-        target=_serve, args=(egress_listener, proxy.handle, "egress"), daemon=True
-    ).start()
+    serve_client: Callable[[socket.socket], None]
+    if payload.get("transport") == "stdio":
+        # Kata (#3438): both directions travel over the container's stdio.
+        mux_in, mux_out = (int(fd) for fd in payload["mux_fds"])
+        mux = Mux(mux_in, mux_out, initiator=True, accept={MUX_KIND_EGRESS: proxy.handle})
+        threading.Thread(target=mux.run, daemon=True, name="mux").start()
 
-    tunnels = TunnelPool()
-    tunnel_listener = _unix_listener(os.path.join(socket_dir, TUNNEL_SOCKET))
+        def _pinger() -> None:
+            while not mux.closed.wait(MUX_PING_SECONDS):
+                mux.ping()
 
-    def _accept_tunnels() -> None:
-        while True:
+        threading.Thread(target=_pinger, daemon=True, name="mux-ping").start()
+
+        def serve_client(client: socket.socket) -> None:
+            ours, theirs = socket.socketpair()
             try:
-                conn, _ = tunnel_listener.accept()
-            except OSError:
+                threading.Thread(
+                    target=mux.open, args=(MUX_KIND_INGRESS, ours), daemon=True
+                ).start()
+            except RuntimeError:
+                for sock in (ours, theirs, client):
+                    with contextlib.suppress(OSError):
+                        sock.close()
                 return
-            tunnels.add(conn)
+            splice(client, theirs, idle=INGRESS_IDLE_SECONDS)
 
-    threading.Thread(target=_accept_tunnels, daemon=True, name="tunnels").start()
+    else:
+        egress_listener = _unix_listener(os.path.join(socket_dir, EGRESS_SOCKET))
+        threading.Thread(
+            target=_serve, args=(egress_listener, proxy.handle, "egress"), daemon=True
+        ).start()
+
+        tunnels = TunnelPool()
+        tunnel_listener = _unix_listener(os.path.join(socket_dir, TUNNEL_SOCKET))
+
+        def _accept_tunnels() -> None:
+            while True:
+                try:
+                    conn, _ = tunnel_listener.accept()
+                except OSError:
+                    return
+                tunnels.add(conn)
+
+        threading.Thread(target=_accept_tunnels, daemon=True, name="tunnels").start()
+        serve_client = tunnels.serve_client
 
     ingress_listener = socket.socket(
         socket.AF_INET6 if ":" in payload["bind_host"] else socket.AF_INET, socket.SOCK_STREAM
@@ -1747,7 +2150,7 @@ def run_supervise() -> int:
         target=_serve,
         args=(
             ingress_listener,
-            tunnels.serve_client,
+            serve_client,
             "ingress",
             _ingress_limit(payload),
             max(2, _ingress_limit(payload) // 2),  # one host: at most half
@@ -1816,6 +2219,17 @@ def _supervise_until_parent_exits(parent: int, socket_dir: str, proxy: EgressPro
 # ── Mode: inner (inside the sandbox) ────────────────────────────────────────
 
 
+def _read_line(fd: int, limit: int = PIPE_BUFFER) -> str:
+    """One newline-terminated line from *fd*, byte by byte (no read-ahead)."""
+    data = bytearray()
+    while len(data) < limit:
+        byte = os.read(fd, 1)
+        if not byte or byte == b"\n":
+            return data.decode("utf-8")
+        data += byte
+    raise ConfineError("environment line too long")
+
+
 def run_inner(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="openace-webui-confine inner", add_help=False, allow_abbrev=False
@@ -1823,25 +2237,50 @@ def run_inner(argv: Sequence[str]) -> int:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--env-stdin", action="store_true")
     parser.add_argument("--watch-supervisor", action="store_true")
+    parser.add_argument("--transport", choices=("uds", "stdio"), default="uds")
     parser.add_argument("webui_argv", nargs=argparse.REMAINDER)
     args = parser.parse_args(list(argv))
     webui_argv = list(args.webui_argv)
     if webui_argv[:1] == ["--"]:
         webui_argv = webui_argv[1:]
+    stdio = args.transport == "stdio"
     if args.env_stdin:
         # Container backend: the environment arrives on stdin, never on a
         # command line or in the container's (inspectable) configuration.
-        env = json.loads(sys.stdin.readline() or "{}")
+        # With the stdio channel the frames follow on the same descriptor:
+        # read exactly one line, unbuffered.
+        line = _read_line(0) if stdio else sys.stdin.readline()
+        env = json.loads(line or "{}")
         if not isinstance(env, dict):
             raise ConfineError("environment on stdin must be a JSON object")
         os.environ.update({str(k): str(v) for k, v in env.items()})
 
-    threading.Thread(
-        target=_run_tunnel_pool,
-        args=(os.path.join(INNER_SOCKET_DIR, TUNNEL_SOCKET), args.port),
-        daemon=True,
-        name="tunnel-pool",
-    ).start()
+    mux: Mux | None = None
+    if stdio:
+        # fd 1 becomes the channel; anything else writing to stdout (the
+        # WebUI, a stray print) goes to stderr instead of corrupting frames.
+        channel_out = os.dup(1)
+        os.dup2(2, 1)
+
+        def _to_webui(conn: socket.socket) -> None:
+            try:
+                upstream = socket.create_connection(("127.0.0.1", args.port), timeout=10)
+                upstream.settimeout(None)
+            except OSError:
+                with contextlib.suppress(OSError):
+                    conn.close()
+                return
+            splice(conn, upstream, idle=INGRESS_IDLE_SECONDS)
+
+        mux = Mux(0, channel_out, initiator=False, accept={MUX_KIND_INGRESS: _to_webui})
+        threading.Thread(target=mux.run, daemon=True, name="mux").start()
+    else:
+        threading.Thread(
+            target=_run_tunnel_pool,
+            args=(os.path.join(INNER_SOCKET_DIR, TUNNEL_SOCKET), args.port),
+            daemon=True,
+            name="tunnel-pool",
+        ).start()
 
     proxy_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     proxy_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1864,6 +2303,9 @@ def run_inner(argv: Sequence[str]) -> int:
     )
 
     def _to_proxy(conn: socket.socket) -> None:
+        if mux is not None:
+            mux.open(MUX_KIND_EGRESS, conn)
+            return
         upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             upstream.connect(os.path.join(INNER_SOCKET_DIR, EGRESS_SOCKET))
@@ -1887,10 +2329,15 @@ def run_inner(argv: Sequence[str]) -> int:
         # Container backend: nothing kills the container if the docker CLI
         # is SIGKILLed; with the supervisor gone there is no ingress or
         # egress anyway, so stop the WebUI and let --rm remove the container.
+        def _supervisor_gone() -> bool:
+            if mux is not None:  # the host pings every MUX_PING_SECONDS
+                return mux.closed.is_set() or (time.monotonic() - mux.last_frame > MUX_DEAD_SECONDS)
+            return TUNNEL_HEALTH.supervisor_gone(SUPERVISOR_WATCH_SECONDS)
+
         def _watch() -> None:
             while child.poll() is None:
                 time.sleep(2.0)
-                if TUNNEL_HEALTH.supervisor_gone(SUPERVISOR_WATCH_SECONDS):
+                if _supervisor_gone():
                     child.terminate()
                     return
 
@@ -1910,7 +2357,132 @@ PROBE_PROGRAM = (
 )
 
 
-def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
+KATA_PROBE_PROGRAM = (
+    "import os, sys\n"
+    "sys.stdout.write(os.uname().release + '\\n'); sys.stdout.flush()\n"
+    "line = sys.stdin.readline()\n"
+    "sys.stdout.write('echo:' + line); sys.stdout.flush()\n"
+)
+KATA_PROBE_BOOT_SECONDS = 180.0  # a nested-virtualization guest boots in ~70 s
+KATA_SHIM = "containerd-shim-kata-v2"
+HYPERVISORS = ("cloud-hypervisor", "firecracker", "stratovirt")
+SHIM_RUNTIME_RE = re.compile(r"^io\.containerd\.([a-z0-9]+)\.v2$")
+
+
+def kata_evidence(pid: int, cid: str, proc: str = "/proc") -> bool:
+    """Host-side proof that container *cid* runs under Kata.
+
+    Docker reports a Kata container's ``State.Pid`` as the HYPERVISOR process
+    (under runc it is the container's own init), and that process's parent is
+    the Kata shim started for exactly this container id. Both are read from
+    /proc; anything unreadable is "no evidence" (fail closed).
+    """
+    try:
+        exe = os.path.basename(os.readlink(f"{proc}/{pid}/exe"))
+        with open(f"{proc}/{pid}/stat", encoding="utf-8") as handle:
+            ppid = int(handle.read().rsplit(")", 1)[1].split()[1])
+        shim_exe = os.path.basename(os.readlink(f"{proc}/{ppid}/exe"))
+        with open(f"{proc}/{ppid}/cmdline", "rb") as handle:
+            shim_args = handle.read().split(b"\0")
+    except (OSError, ValueError, IndexError):
+        return False
+    hypervisor = exe.startswith("qemu-system-") or exe in HYPERVISORS
+    target = cid.encode()
+    for_this_container = any(
+        shim_args[i] == b"-id" and shim_args[i + 1] == target for i in range(len(shim_args) - 1)
+    )
+    return hypervisor and shim_exe == KATA_SHIM and for_this_container
+
+
+def _kata_runtime_available(runtime: str, registered: dict) -> bool:
+    """A registered Docker runtime name, or a containerd shim name whose
+    binary is on the daemon's PATH (``--runtime io.containerd.kata.v2``
+    needs no daemon.json entry)."""
+    if runtime in registered:
+        return True
+    match = SHIM_RUNTIME_RE.fullmatch(runtime)
+    if match is None:
+        return False
+    shim = shutil.which(f"containerd-shim-{match.group(1)}-v2", path=SAFE_PATH)
+    if shim is None:
+        return False
+    try:
+        require_root_controlled_executable(shim)
+    except ConfineError:
+        return False
+    return True
+
+
+def _run_kata_probe(container: ContainerPolicy, docker, run_root: str = RUN_ROOT) -> str:
+    """Boot one probe container on the Kata runtime; return a probe token."""
+    probe_dir = os.path.join(run_root, f"probe-{os.getpid()}")
+    cidfile = os.path.join(probe_dir, "probe.cid")
+    prepare_run_dir(probe_dir, 0, 0)  # root only: docker writes the cid file
+    proc: subprocess.Popen | None = None
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - fixed argv
+            [container.docker, "run", "--rm", "-i", "--cidfile", cidfile,
+             "--runtime", container.kata_runtime, "--network", "none",
+             "--user", "65534:65534", "--read-only", "--cap-drop", "ALL",
+             "--security-opt", "no-new-privileges",
+             "--entrypoint", "python3", container.image, "-I", "-c", KATA_PROBE_PROGRAM],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=_docker_env(),
+        )  # fmt: skip
+        lines: queue.Queue[bytes] = queue.Queue()
+
+        def _read() -> None:
+            assert proc is not None and proc.stdout is not None
+            for raw in proc.stdout:
+                lines.put(raw)
+            lines.put(b"")
+
+        threading.Thread(target=_read, daemon=True).start()
+        try:
+            release = lines.get(timeout=KATA_PROBE_BOOT_SECONDS).decode().strip()
+        except queue.Empty:
+            return "probe:failed"
+        if not release:
+            return "probe:failed"
+        try:
+            with open(cidfile, encoding="ascii") as handle:
+                cid = handle.read().strip()
+            inspect = docker("inspect", "--format", "{{.State.Pid}}", cid)
+            pid = int(inspect.stdout.strip())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return "probe:failed"
+        if not re.fullmatch(r"[0-9a-f]{64}", cid) or not kata_evidence(pid, cid):
+            return "kernel:unverified"
+        if release == os.uname().release:
+            return "kernel:unverified"  # the guest must not run the host kernel
+        assert proc.stdin is not None
+        try:
+            proc.stdin.write(b"ping\n")
+            proc.stdin.flush()
+            echo = lines.get(timeout=30).decode().strip()
+        except (OSError, queue.Empty):
+            echo = ""
+        if echo != "echo:ping":
+            return "channel:failed"
+        return "ok"
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"# {exc}", file=sys.stderr)
+        return "probe:failed"
+    finally:
+        if proc is not None:
+            with contextlib.suppress(OSError):
+                assert proc.stdin is not None
+                proc.stdin.close()
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            _docker_remove_id(container.docker, cidfile)
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
+def run_container_probe(policy_path: str = CONFIG_PATH, backend: str = "container") -> int:
     """Print ``ok`` or one reason token; used by the manager's readiness check.
 
     Verifies what the container backend's guarantees rest on: the docker CLI
@@ -1929,8 +2501,16 @@ def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
         print("policy:invalid")
         return 1
     container = policy.container
+    kata = backend == "kata"
+    if not (container.kata_runtime if kata else container.runtime):
+        print("# the policy names no runtime for this backend", file=sys.stderr)
+        print("policy:invalid")
+        return 1
     if not symlinks_protected():
         print("symlinks:unprotected")
+        return 1
+    if kata and not os.path.exists(KVM_DEVICE):
+        print("kvm:unavailable")
         return 1
     env = {"PATH": SAFE_PATH, "LANG": "C.UTF-8"}
 
@@ -1952,12 +2532,20 @@ def run_container_probe(policy_path: str = CONFIG_PATH) -> int:
         runtimes = json.loads(info.stdout or "{}")
     except json.JSONDecodeError:
         runtimes = {}
-    if container.runtime not in runtimes:
+    if not (
+        _kata_runtime_available(container.kata_runtime, runtimes)
+        if kata
+        else container.runtime in runtimes
+    ):
         print("runtime:missing")
         return 1
     if _docker("image", "inspect", "--format", "{{.Id}}", container.image).returncode != 0:
         print("image:missing")
         return 1
+    if kata:
+        token = _run_kata_probe(container, _docker)
+        print(token)
+        return 0 if token == "ok" else 1
     probe_dir = os.path.join(RUN_ROOT, f"probe-{os.getpid()}")
     received: list[bytes] = []
     try:
