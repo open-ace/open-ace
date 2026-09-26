@@ -281,6 +281,7 @@ class MessageService:
             tool_name=tool_name,
             host_name=host_name,
             sender_name=sender_name,
+            role=role,
             search=search,
             tenant_id=tenant_id,
         )

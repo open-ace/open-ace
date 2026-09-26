@@ -157,6 +157,12 @@ class TestSiblingEndpointsTenantScope:
             "count": 3
         }
 
+    def test_messages_count_honours_role_filter(self, client):
+        """``MessageService.count_messages`` used to drop ``role`` on the floor."""
+        path = f"/api/messages/count?date={DATE}&role="
+        assert _get(client, path + "user", PLATFORM_ADMIN).get_json() == {"count": 3}
+        assert _get(client, path + "assistant", PLATFORM_ADMIN).get_json() == {"count": 0}
+
     def test_conversation_history_scoped(self, client):
         # Conversations are grouped per sender, so conv-t1 yields two rows.
         body = _get(client, f"/api/conversation-history?date={DATE}", TENANT1_USER).get_json()
