@@ -4,26 +4,43 @@ Open ACE - Messages Routes
 API routes for message data operations.
 """
 
-import time
-from typing import Any
-
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
+from app.auth.permissions import is_platform_admin_role
 from app.services.message_service import MessageService
+from app.utils.request_context import get_current_tenant_id
 
 messages_bp = Blueprint("messages", __name__)
 message_service = MessageService()
-
-# Simple in-memory cache for expensive queries
-_senders_cache: dict[str, Any] = {"data": None, "timestamp": 0}
-_senders_cache_ttl = 300  # 5 minutes
 
 
 @messages_bp.before_request
 @auth_required
 def _require_auth():
     pass
+
+
+@messages_bp.before_request
+def _resolve_tenant_scope():
+    """Scope every messages endpoint to the caller's tenant (Issue #3440).
+
+    Platform admins keep global scope (``g.messages_tenant_id = None``);
+    everyone else -- including ``tenant_admin`` -- is pinned to their own
+    tenant. A non-platform-admin with no tenant is denied rather than handed
+    ``None``, which the repository layer treats as "no tenant filter".
+
+    ``require_tenant_scope()`` is deliberately not used: it treats
+    ``tenant_admin`` as a global admin.
+    """
+    if is_platform_admin_role(getattr(g, "user_role", None)):
+        g.messages_tenant_id = None
+        return None
+    tenant_id = get_current_tenant_id()
+    if tenant_id is None:
+        return jsonify({"error": "Tenant scope required"}), 403
+    g.messages_tenant_id = tenant_id
+    return None
 
 
 @messages_bp.route("/messages")
@@ -51,29 +68,20 @@ def api_messages():
         search=search,
         limit=limit,
         offset=offset,
+        tenant_id=g.messages_tenant_id,
     )
     return jsonify(result)
 
 
 @messages_bp.route("/senders")
 def api_senders():
-    """Get list of all senders (cached for 5 minutes)."""
+    """Get the senders visible to the caller.
+
+    Cached for 5 minutes by ``MessageService.get_all_senders``, keyed by
+    host and tenant, so one tenant's list is never served to another.
+    """
     host = request.args.get("host")
-    now = time.time()
-    if host:
-        # Host-specific queries are less common, skip cache
-        senders = message_service.get_all_senders(host_name=host)
-        return jsonify(senders)
-
-    if (
-        _senders_cache["data"] is not None
-        and (now - _senders_cache["timestamp"]) < _senders_cache_ttl
-    ):
-        return jsonify(_senders_cache["data"])
-
-    senders = message_service.get_all_senders()
-    _senders_cache["data"] = senders
-    _senders_cache["timestamp"] = now
+    senders = message_service.get_all_senders(host_name=host, tenant_id=g.messages_tenant_id)
     return jsonify(senders)
 
 
@@ -98,6 +106,7 @@ def api_conversation_history():
         sender_name=sender,
         limit=limit,
         offset=offset,
+        tenant_id=g.messages_tenant_id,
     )
     total = message_service.count_conversations(
         date=date,
@@ -106,6 +115,7 @@ def api_conversation_history():
         tool_name=tool,
         host_name=host,
         sender_name=sender,
+        tenant_id=g.messages_tenant_id,
     )
     return jsonify({"data": conversations, "total": total})
 
@@ -124,14 +134,16 @@ def api_conversation_timeline(session_id):
         raw_limit = 100
     limit = min(raw_limit, 500)
     offset = request.args.get("offset", default=0, type=int) or 0
-    messages = message_service.get_conversation_timeline(session_id, limit=limit, offset=offset)
+    messages = message_service.get_conversation_timeline(
+        session_id, limit=limit, offset=offset, tenant_id=g.messages_tenant_id
+    )
     return jsonify(messages)
 
 
 @messages_bp.route("/conversation-details/<path:session_id>")
 def api_conversation_details(session_id):
     """Get details of a conversation."""
-    details = message_service.get_conversation_details(session_id)
+    details = message_service.get_conversation_details(session_id, tenant_id=g.messages_tenant_id)
     if details:
         return jsonify(details)
     return jsonify({"error": "Conversation not found"}), 404
@@ -158,5 +170,6 @@ def api_messages_count():
         sender_name=sender,
         role=role,
         search=search,
+        tenant_id=g.messages_tenant_id,
     )
     return jsonify({"count": count})
