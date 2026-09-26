@@ -395,15 +395,16 @@ def _load(confine, tmp_path, monkeypatch, data):
     path.write_text(json.dumps(data))
     real_fstat, real_lstat = os.fstat, os.lstat
 
-    class _Root:
-        def __init__(self, st):
-            self._st = st
+    def _root(result):
+        # as if root owned the file and every directory above it, none of
+        # them group/world-writable (CI's tmp_path sits under a 1777 /tmp)
+        fields = list(result)
+        fields[0] = result.st_mode & ~0o022
+        fields[4] = 0
+        return os.stat_result(fields)
 
-        def __getattr__(self, name):
-            return 0 if name == "st_uid" else getattr(self._st, name)
-
-    monkeypatch.setattr(confine.os, "fstat", lambda fd: _Root(real_fstat(fd)))
-    monkeypatch.setattr(confine.os, "lstat", lambda p: _Root(real_lstat(p)))
+    monkeypatch.setattr(confine.os, "fstat", lambda fd: _root(real_fstat(fd)))
+    monkeypatch.setattr(confine.os, "lstat", lambda p: _root(real_lstat(p)))
     return confine.load_policy(str(path))
 
 
