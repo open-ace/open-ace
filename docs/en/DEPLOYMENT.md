@@ -63,6 +63,12 @@ system users (`useradd`), fixes ownership (`chown`), and switches identity
 
 ### Multi-User Workspace Deployment
 
+> **Isolation and the Docker install.** The Docker install supports the `none` and per-user
+> `os_user` levels, plus `sandboxed` through OpenSandbox pods on Kubernetes. The confined `os_user`
+> mode and the local gVisor/Kata sandboxes need the package install on a Linux host. Choose your
+> install method with [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-what-your-install-method-allows)
+> in mind.
+
 #### Option 1: One-click startup script (recommended)
 
 ```bash
@@ -748,6 +754,11 @@ Docker Compose now requires `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_
 ## Multi-User Workspace Deployment
 
 When enabling `workspace.multi_user_mode`, Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
+
+> To choose between the isolation modes (per-user OS account, confined, local gVisor/Kata container,
+> OpenSandbox pod), configure one and verify what is in force, see the admin guide
+> [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md). The package installer sets up the sudoers rules
+> and wrappers for you; the manual configuration below is for installs without it.
 
 ### Prerequisites
 

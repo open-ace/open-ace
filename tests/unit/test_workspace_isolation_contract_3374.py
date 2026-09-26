@@ -617,18 +617,22 @@ class TestDocumentedAdmissionPredicate:
     """The §7 doc example must be executable, not prose that rots on a bump.
 
     These tests RUN the fenced snippet from
-    docs/WORKSPACE_ISOLATION_CAPABILITIES.md §7 (#3410 review: a re-implemented
+    docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §7 (#3410 review: a re-implemented
     copy could drift from the doc unnoticed).
     """
 
-    DOC = Path(__file__).resolve().parents[2] / "docs" / "WORKSPACE_ISOLATION_CAPABILITIES.md"
+    DOCS = Path(__file__).resolve().parents[2] / "docs"
 
-    @classmethod
-    def _snippet(cls) -> str:
+    @pytest.fixture(autouse=True, params=["en", "cn"])
+    def _doc(self, request):
+        """Both language versions carry the snippet; each must stay executable."""
+        self.doc = self.DOCS / request.param / "WORKSPACE_ISOLATION_CAPABILITIES.md"
+
+    def _snippet(self) -> str:
         match = re.search(
-            r"python3 - caps\.json <<'PY'\n(.*?)\nPY\n", cls.DOC.read_text(encoding="utf-8"), re.S
+            r"python3 - caps\.json <<'PY'\n(.*?)\nPY\n", self.doc.read_text(encoding="utf-8"), re.S
         )
-        assert match, "the §7 admission snippet is missing from the doc"
+        assert match, f"the §7 admission snippet is missing from {self.doc}"
         return match.group(1)
 
     def _accept(self, caps, tmp_path, monkeypatch) -> bool:

@@ -874,7 +874,7 @@ class OpenSandboxProvider:
             # every scheduler sweep would destroy live user webuis. Their
             # lifecycle belongs to the WEB process's generation reconcile
             # (app/services/webui_sandbox_opensandbox.py). Declared in
-            # docs/sandbox-backends.md.
+            # docs/en/SANDBOX_BACKENDS.md.
             if metadata.get(policy_mod.WEBUI_METADATA_KIND) == policy_mod.WEBUI_METADATA_KIND_VALUE:
                 continue
             if not sandbox_id or sandbox_id in live:
@@ -932,7 +932,7 @@ class OpenSandboxProvider:
           positive check would need a hypervisor signal (DMI product name), and
           that differs per Kata hypervisor (qemu / fc / clh) — shipping one
           untested risks refusing legitimate deployments, so the asymmetry is
-          documented rather than papered over. ``docs/SANDBOX_BACKENDS.md`` §5
+          documented rather than papered over. ``docs/en/SANDBOX_BACKENDS.md`` §5
           states the same limitation.
         """
         if self._probes_passed:

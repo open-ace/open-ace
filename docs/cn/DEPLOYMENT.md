@@ -62,6 +62,10 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 
 ### 多用户工作区部署
 
+> **隔离与 Docker 安装。** Docker 安装支持 `none` 与每用户 `os_user` 等级,以及通过 Kubernetes 上的 OpenSandbox pod
+> 实现的 `sandboxed`。受约束的 `os_user` 与本机 gVisor/Kata 沙箱需要 Linux 主机上的包安装。选择安装方式前请先看
+> [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-安装方式决定了哪些可用)。
+
 #### 方式一：一键启动脚本（推荐）
 
 ```bash
@@ -741,6 +745,10 @@ Docker Compose 现在要求显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY` 
 ## 多用户工作区部署
 
 启用 `workspace.multi_user_mode` 时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
+
+> 如何在几种隔离方式(每用户 OS 账户、受约束、本机 gVisor/Kata 容器、OpenSandbox pod)之间选择、如何配置并验证
+> 实际生效的隔离,见管理员指南 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)。包安装脚本会为你配置 sudoers
+> 规则与 wrapper;下面的手工配置适用于不使用安装脚本的安装。
 
 ### 前提条件
 

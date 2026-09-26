@@ -12,7 +12,7 @@
 # that tier gets everything below and nothing more: no per-sandbox policy, and
 # no FQDN allowlist — every public host stays reachable. `derive_capabilities`
 # accordingly does NOT declare NETWORK_EGRESS_POLICY for such a tier. See
-# docs/SANDBOX_BACKENDS.md §7.
+# docs/en/SANDBOX_BACKENDS.md §7.
 #
 # `podSelector` matches labels the SANDBOX POD carries, which come from
 # `spec.template.metadata.labels` in configmap-sandbox-template.yaml — not from
