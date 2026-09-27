@@ -823,6 +823,11 @@ generate_default_config() {
     # Skip if config already exists (user-mounted or previously generated)
     if [ -f "$CONFIG_FILE" ]; then
         echo "Config file exists at $CONFIG_FILE, skipping generation."
+        # Issue #3446: a config.json an older entrypoint generated carries the
+        # keys workspace.isolation replaced; the app refuses to start with them.
+        # A read-only mount cannot be converted: the app then names each key.
+        python3 /app/scripts/convert_workspace_isolation.py "$CONFIG_FILE" || \
+            echo "WARNING: could not convert $CONFIG_FILE to workspace.isolation (Issue #3446)"
         return 0
     fi
 

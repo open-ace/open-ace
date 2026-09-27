@@ -40,6 +40,12 @@ at startup with the list of allowed backends. So does any of the keys this block
 (`multi_user_mode`, `required_isolation_level`, `os_user_confinement`, `sandbox_tier`,
 `confinement_*`); the message names the replacement.
 
+Upgrading converts them for you: the package installer (fresh install, local and remote upgrade) and
+the Docker entrypoint (every start) run `scripts/convert_workspace_isolation.py` on `config.json`.
+It keeps an OpenSandbox deployment on `opensandbox` (with its tier) and keeps a declared floor, and
+prints the block it wrote. A config.json mounted read-only is not converted; convert it yourself with
+`python3 scripts/convert_workspace_isolation.py /path/to/config.json`.
+
 Rules of thumb:
 - **Trusted users on one machine:** `plain`.
 - **Agents that run untrusted code, or users who must not affect each other's resources or network:**

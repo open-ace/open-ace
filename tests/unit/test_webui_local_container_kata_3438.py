@@ -3,8 +3,8 @@
 The Kata backend is the local-container form of #3431 Option 2 on a Kata
 Containers runtime: SANDBOXED with backend ``local-kata``, identity
 still the OS account, home still the host directory. Pinned here: the root
-probe command (``--backend kata``, the longer boot budget) and its reason
-tokens, the ``--backend kata`` launch, the snapshot and the local launch form.
+probe command (``--backend local-kata``, the longer boot budget) and its reason
+tokens, the ``--backend local-kata`` launch, the snapshot and the local launch form.
 """
 
 from __future__ import annotations

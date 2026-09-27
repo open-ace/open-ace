@@ -1,11 +1,11 @@
 """Issue #3431 (Option 2): container backend of scripts/openace-webui-confine.py.
 
-Pins the root decisions of ``launch --backend container`` without root or
+Pins the root decisions of ``launch --backend local-gvisor`` without root or
 Docker: the exact ``docker run`` command line, the container planning
 (policy section, groups, mount-path safety), the root-owned run directory,
 the probe's reason tokens, and ``inner``'s stdin environment + supervisor
 watchdog input. The real gVisor run is scripts/webui_confine_acceptance.py
-with ``--backend container`` on a disposable Docker + runsc host.
+with ``CONFINE_ACCEPTANCE_BACKEND=local-gvisor`` on a disposable Docker + runsc host.
 """
 
 from __future__ import annotations

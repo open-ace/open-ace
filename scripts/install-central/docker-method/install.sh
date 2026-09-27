@@ -43,12 +43,29 @@ NON_INTERACTIVE=false
 DOCKER_INSTALL_MIRROR="${DOCKER_INSTALL_MIRROR:-}"
 
 # Config defaults (can be overridden by environment variables)
+docker_isolation_backend() {
+    if [ -n "$WORKSPACE_ISOLATION_BACKEND" ]; then
+        echo "$WORKSPACE_ISOLATION_BACKEND"
+    elif [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        echo plain
+    else
+        echo shared
+    fi
+}
+
 HOST_NAME="${HOST_NAME:-}"
 WORKSPACE_ENABLED="${WORKSPACE_ENABLED:-true}"
 WORKSPACE_URL="${WORKSPACE_URL:-http://localhost:3000}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-}"
 # Multi-user workspace mode defaults
 WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-true}"
+# Issue #3446: workspace.isolation.backend (shared | plain | opensandbox in
+# Docker). Unset: plain when multi-user mode is on, else shared. Only "plain"
+# (per-user OS accounts) needs the container to run as root.
+WORKSPACE_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-}"
+if [ -n "$WORKSPACE_ISOLATION_BACKEND" ]; then
+    WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
+fi
 WORKSPACE_PORT_RANGE_START="${WORKSPACE_PORT_RANGE_START:-3100}"
 WORKSPACE_PORT_RANGE_END="${WORKSPACE_PORT_RANGE_END:-3200}"
 WORKSPACE_MAX_INSTANCES="${WORKSPACE_MAX_INSTANCES:-30}"
@@ -1972,8 +1989,11 @@ read_existing_config() {
         WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "19888")
         WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
         WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
-        # Issue #3446: any isolation backend but "shared" (pre-#3446: multi_user_mode)
-        WORKSPACE_MULTI_USER_MODE=$(jq -r 'if (.workspace.isolation | type) == "object" then (.workspace.isolation.backend // "shared") != "shared" else (.workspace.multi_user_mode // false) end' "$config_file" 2>/dev/null || echo "false")
+        # Issue #3446: workspace.isolation.backend (pre-#3446 keys: the
+        # entrypoint converts them on start; read them the same way here).
+        WORKSPACE_ISOLATION_BACKEND=$(jq -r 'if (.workspace.isolation | type) == "object" then (.workspace.isolation.backend // "shared") elif ((.workspace.required_isolation_level // "") == "sandboxed") or ((.workspace.sandbox_tier // "") != "") then "opensandbox" elif (.workspace.multi_user_mode // false) then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
+        # Multi-user mode here means per-user OS accounts: root in the container.
+        WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
         WORKSPACE_PORT_RANGE_START=$(jq -r '.workspace.port_range_start' "$config_file" 2>/dev/null || echo "3100")
         WORKSPACE_PORT_RANGE_END=$(jq -r '.workspace.port_range_end' "$config_file" 2>/dev/null || echo "3200")
         WORKSPACE_MAX_INSTANCES=$(jq -r '.workspace.max_instances' "$config_file" 2>/dev/null || echo "30")
@@ -2634,13 +2654,19 @@ create_config() {
 
     # Generate token secret if not provided and multi-user mode is enabled
     local workspace_token_secret="$WORKSPACE_TOKEN_SECRET"
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && [ -z "$workspace_token_secret" ]; then
+    if [ "$(docker_isolation_backend)" != "shared" ] && [ -z "$workspace_token_secret" ]; then
         workspace_token_secret=$(openssl rand -hex 32)
         print_info "  - 生成 Workspace Token Secret: $workspace_token_secret"
     fi
 
     # Build workspace config
     local workspace_config=""
+    local isolation_backend isolation_level
+    isolation_backend=$(docker_isolation_backend)
+    case "$isolation_backend" in
+        opensandbox) isolation_level="sandboxed" ;;
+        *) isolation_backend="shared"; isolation_level="none" ;;
+    esac
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         workspace_config=$(cat << EOF
   "workspace": {
@@ -2660,7 +2686,8 @@ EOF
   "workspace": {
     "enabled": $WORKSPACE_ENABLED,
     "url": "$workspace_url_config",
-    "isolation": {"level": "none", "backend": "shared"}
+    "isolation": {"level": "$isolation_level", "backend": "$isolation_backend"},
+    "token_secret": "$workspace_token_secret"
   }
 EOF
 )
@@ -2813,7 +2840,7 @@ $ports_section
       - SECRET_KEY=$SECRET_KEY
       - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
-      - WORKSPACE_ISOLATION_BACKEND=$([ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && echo plain || echo shared)
+      - WORKSPACE_ISOLATION_BACKEND=$(docker_isolation_backend)
       - WORKSPACE_BASE_DIR=/workspace
       - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -2924,7 +2951,7 @@ UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
 WORKSPACE_ENABLED=$WORKSPACE_ENABLED
 WORKSPACE_URL=$WORKSPACE_URL
 WORKSPACE_PORT=$WORKSPACE_PORT
-WORKSPACE_ISOLATION_BACKEND=$([ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && echo plain || echo shared)
+WORKSPACE_ISOLATION_BACKEND=$(docker_isolation_backend)
 WORKSPACE_PORT_RANGE_START=$WORKSPACE_PORT_RANGE_START
 WORKSPACE_PORT_RANGE_END=$WORKSPACE_PORT_RANGE_END
 WORKSPACE_MAX_INSTANCES=$WORKSPACE_MAX_INSTANCES
@@ -3609,6 +3636,11 @@ if [ "$NON_INTERACTIVE" = false ]; then
         echo -e "${YELLOW}需要配置 sudo 和安装 qwen-code-webui，详见部署文档${NC}"
         prompt_yesno "启用多用户模式?" "y" enable_multi_user
         WORKSPACE_MULTI_USER_MODE=$([ "$enable_multi_user" = "yes" ] && echo "true" || echo "false")
+        # The answer decides plain vs shared; an opensandbox choice from the
+        # environment stays unless the admin asked for OS-account mode.
+        if [ "$WORKSPACE_ISOLATION_BACKEND" != "opensandbox" ] || [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+            WORKSPACE_ISOLATION_BACKEND=""
+        fi
         if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
             prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
             prompt_input "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END

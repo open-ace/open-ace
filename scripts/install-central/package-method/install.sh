@@ -1323,6 +1323,20 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Issue #3446: convert config.json to workspace.isolation {level, backend}.
+# The server refuses to start with the keys the block replaced, and
+# configure_sudoers reads isolation.backend, so EVERY install and upgrade path
+# runs this before the sudoers rules are written. Idempotent.
+convert_workspace_isolation_config() {
+    local config_file="$1"
+    shift
+    [ -f "$config_file" ] || return 0
+    if ! python3 "$SOURCE_DIR/scripts/convert_workspace_isolation.py" "$config_file" "$@"; then
+        print_error "Could not convert $config_file to workspace.isolation (Issue #3446)"
+        return 1
+    fi
+}
+
 # Update config.json with workspace settings
 update_config_workspace() {
     local config_file="$1"
@@ -1335,13 +1349,18 @@ update_config_workspace() {
 
     print_info "Updating workspace configuration in $config_file..."
 
+    # Issue #3446: workspace.isolation {level, backend}; converts the keys it
+    # replaced, or writes the wizard's choice into a config that has neither.
+    local multi_default="false"
+    [ "$(echo "${WORKSPACE_MULTI_USER_MODE:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ] && multi_default="true"
+    convert_workspace_isolation_config "$config_file" --default-multi-user "$multi_default" || return 1
+
     # Use Python to update JSON
     # Convert bash "true"/"false" to Python True/False
     if command -v python3 &>/dev/null; then
         # Use environment variables to pass values safely (avoids special character issues in heredoc)
         export _CONFIG_FILE="$config_file"
         export _WS_ENABLED="$WORKSPACE_ENABLED"
-        export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
         export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
         export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
         export _WS_MAX_INSTANCES="$WORKSPACE_MAX_INSTANCES"
@@ -1364,41 +1383,6 @@ def bash_to_bool(val):
     return val.lower() == 'true'
 
 config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
-# Issue #3446: isolation is one block, workspace.isolation {level, backend, ...}.
-# Upgrades convert the keys it replaced (the server refuses to start with them).
-ws = config['workspace']
-if not isinstance(ws.get('isolation'), dict):
-    legacy_mode = str(ws.get('os_user_confinement', '') or '').strip().lower()
-    backend = {'bwrap': 'bwrap', 'runsc': 'local-gvisor', 'kata': 'local-kata'}.get(legacy_mode)
-    if backend is None:
-        multi = ws.get('multi_user_mode')
-        if multi is None:
-            multi = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
-        backend = 'plain' if multi else 'shared'
-    level = {'shared': 'none', 'plain': 'os_user', 'bwrap': 'os_user'}.get(backend, 'sandboxed')
-    isolation = {'level': level, 'backend': backend}
-    limits = {}
-    for old_key, new_key in (('confinement_memory_max', 'memory'),
-                             ('confinement_cpu_quota', 'cpu_percent'),
-                             ('confinement_tasks_max', 'tasks')):
-        if old_key in ws and backend in ('bwrap', 'local-gvisor', 'local-kata'):
-            limits[new_key] = ws[old_key]
-    if limits:
-        isolation['limits'] = limits
-    if ws.get('confinement_egress_allow') and backend in ('bwrap', 'local-gvisor', 'local-kata'):
-        isolation['egress_allow'] = list(ws['confinement_egress_allow'])
-    if ws.get('confinement_container_webui') and backend in ('local-gvisor', 'local-kata'):
-        isolation['container_webui'] = ws['confinement_container_webui']
-    ws['isolation'] = isolation
-    print(f"workspace.isolation = {isolation}")
-removed = [k for k in ('multi_user_mode', 'required_isolation_level', 'os_user_confinement',
-                       'sandbox_tier', 'confinement_memory_max', 'confinement_cpu_quota',
-                       'confinement_tasks_max', 'confinement_egress_allow',
-                       'confinement_container_webui') if k in ws]
-for k in removed:
-    del ws[k]
-if removed:
-    print(f"Converted to workspace.isolation and removed: {', '.join(removed)}")
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))
@@ -2884,9 +2868,11 @@ configure_sudoers() {
     # When confinement is configured, the plain launch rule would let the
     # service account start an UNCONFINED WebUI as any account; omit it.
     # (Re-run the installer after changing workspace.isolation.backend.)
+    # A legacy os_user_confinement still counts (fail closed if a config
+    # escaped conversion).
     local confine_configured=false
     if [ -n "$confine_rule" ] && [ -f "${config_dir:-}/config.json" ] && \
-       python3 -c 'import json,sys; b=(json.load(open(sys.argv[1])).get("workspace",{}).get("isolation") or {}).get("backend",""); sys.exit(0 if b in ("bwrap","local-gvisor","local-kata") else 1)' \
+       python3 -c 'import json,sys; w=json.load(open(sys.argv[1])).get("workspace") or {}; b=(w.get("isolation") or {}).get("backend",""); c=str(w.get("os_user_confinement") or "").strip().lower(); sys.exit(0 if b in ("bwrap","local-gvisor","local-kata") or c not in ("","off") else 1)' \
            "${config_dir}/config.json" 2>/dev/null; then
         confine_configured=true
     fi
@@ -4620,6 +4606,11 @@ install_local() {
         maybe_install_qwen_stack
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
+
+    # Issue #3446: upgrades too (update_config_workspace runs on fresh
+    # installs only), before configure_sudoers reads isolation.backend and
+    # before the upgraded server refuses the replaced keys.
+    convert_workspace_isolation_config "$config_dir/config.json" || exit 1
 
     # Install systemd service if requested
     if [ "$INSTALL_SERVICE" = "yes" ]; then
@@ -6359,6 +6350,13 @@ do_upgrade_remote() {
     fi
     scp -r "$SOURCE_DIR"/* "$remote:$target_path/"
 
+    # Issue #3446: convert the remote config.json to workspace.isolation
+    # before the upgraded server (which refuses the replaced keys) restarts.
+    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
+        print_error "Could not convert the remote config.json to workspace.isolation (Issue #3446)"
+        exit 1
+    fi
+
     # Upgrade did not historically run the remote dependency probe. The
     # credentialless launcher requires these runtime tools as well as the
     # existing native Python build dependencies.
@@ -6529,6 +6527,12 @@ do_upgrade_remote() {
     if ssh "$remote" "command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1"; then
         print_info "Checking systemd service on remote..."
         local service_file="/etc/systemd/system/open-ace.service"
+        # Issue #3446: the app checks the isolation backend against the install
+        # method at startup; set it before the restart below.
+        if ! ssh "$remote" "grep -q '^Environment=OPENACE_INSTALL_METHOD=' $service_file 2>/dev/null"; then
+            ssh "$remote" "sudo sed -i '/^Environment=HOME=/a Environment=OPENACE_INSTALL_METHOD=package' $service_file" && \
+                print_info "Set OPENACE_INSTALL_METHOD=package on remote (Issue #3446)"
+        fi
         local current_secret=$(ssh "$remote" "grep '^Environment=SECRET_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
         if [ -z "$current_secret" ]; then
             print_warning "Adding missing SECRET_KEY to systemd service on remote..."
