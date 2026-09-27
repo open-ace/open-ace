@@ -315,7 +315,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. Pin a specific version (in .env)
-echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.0.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.1.0" >> .env
 
 # 2. Pull and recreate the container
 docker compose pull
@@ -627,6 +627,14 @@ python3 scripts/manage.py remote sync     # Sync files to remote
 ```
 
 ## Upgrading
+
+> **Upgrading to v2.1**: workspace isolation moved to one `workspace.isolation {"level", "backend"}`
+> block (Issue #3446), and the server refuses to start on the old keys (`multi_user_mode`,
+> `required_isolation_level`, `os_user_confinement`, ...). Package and Docker installs convert
+> the config automatically; source installs and read-only mounted configs must run
+> `python3 scripts/convert_workspace_isolation.py <path/to/config.json>` first. Docker: use `WORKSPACE_ISOLATION_BACKEND`
+> instead of `WORKSPACE_MULTI_USER_MODE`. See [Workspace isolation](./WORKSPACE_ISOLATION.md).
+> Run `alembic upgrade head` (v2.1 adds two indexes, built without blocking writes on PostgreSQL).
 
 > **Upgrading from v1.x to v2.0**: check these before restarting on v2.0.
 > 1. Python 3.10+ is required for source and package installs.
