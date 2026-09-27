@@ -121,8 +121,11 @@ def test_legacy_keys_map_to_one_block(tmp_path, legacy, expected):
     assert result["enabled"] is True
 
 
+IMAGE = "ghcr.io/open-ace/webui@sha256:" + "a" * 64
+
+
 def _backends(path: Path, tier: str = "std", **extra) -> Path:
-    endpoints = {tier: {"webui_image": "img@sha256:x"}, **extra}
+    endpoints = {tier: {"webui_image": IMAGE}, **extra}
     path.write_text(json.dumps({"default_tier": tier, "endpoints": endpoints}))
     return path
 
@@ -133,7 +136,6 @@ def _backends(path: Path, tier: str = "std", **extra) -> Path:
         {"multi_user_mode": True},
         # Single-user deployments ran the WebUI in a pod too (B2, round 2).
         {"multi_user_mode": False},
-        {},
         # The OpenSandbox check came first: pods beat local confinement.
         {"multi_user_mode": True, "os_user_confinement": "bwrap"},
         {"multi_user_mode": True, "os_user_confinement": "kata"},
@@ -151,7 +153,7 @@ def test_named_tier_and_env_path_are_honoured(tmp_path, monkeypatch):
         json.dumps(
             {
                 "default_tier": "std",
-                "endpoints": {"std": {}, "gold": {"webui_image": "img@sha256:x"}},
+                "endpoints": {"std": {}, "gold": {"webui_image": IMAGE}},
             }
         )
     )
@@ -217,7 +219,7 @@ def test_already_converted_config_is_left_byte_for_byte(tmp_path):
     text = '{"workspace": {"isolation": {"level": "os_user", "backend": "bwrap"}}}'
     path.write_text(text)
     assert conv.main([str(path)]) == 0
-    assert conv.main([str(path), "--default-multi-user", "true"]) == 0
+    assert conv.main([str(path), "--multi-user", "true"]) == 0
     assert path.read_text() == text
 
 
@@ -230,16 +232,58 @@ def test_stale_keys_beside_a_block_are_removed_and_the_block_wins(tmp_path, caps
     assert 'removed os_user_confinement="bwrap"' in capsys.readouterr().out
 
 
-def test_default_applies_only_when_the_config_states_nothing(tmp_path):
-    assert _run(tmp_path, {}, "--default-multi-user", "true")["isolation"]["backend"] == "plain"
-    assert _run(tmp_path, {}, "--default-multi-user", "false")["isolation"]["backend"] == "shared"
-    assert (
-        _run(tmp_path, {"multi_user_mode": False}, "--default-multi-user", "true")["isolation"][
-            "backend"
-        ]
-        == "shared"
-    )
-    assert "isolation" not in _run(tmp_path, {})
+@pytest.mark.parametrize(
+    ("workspace", "answer", "backend"),
+    [
+        ({}, "true", "plain"),
+        ({}, "false", "shared"),
+        # The shipped sample's block is the default, not a choice (B1, round 3).
+        ({"isolation": {"level": "none", "backend": "shared"}}, "true", "plain"),
+        ({"isolation": {"level": "os_user", "backend": "plain"}}, "false", "shared"),
+        # The old installer wrote multi_user_mode from the wizard on every run.
+        ({"multi_user_mode": False}, "true", "plain"),
+        # Another backend is a deliberate choice: kept.
+        ({"isolation": {"level": "os_user", "backend": "bwrap"}}, "false", "bwrap"),
+        ({"isolation": {"level": "sandboxed", "backend": "opensandbox"}}, "true", "opensandbox"),
+        ({"multi_user_mode": True, "os_user_confinement": "kata"}, "false", "local-kata"),
+    ],
+)
+def test_installer_answer_sets_plain_or_shared(tmp_path, workspace, answer, backend):
+    result = _run(tmp_path, workspace, "--multi-user", answer)
+    assert result["isolation"]["backend"] == backend
+
+
+def test_fresh_install_from_the_shipped_sample_honours_the_wizard(tmp_path):
+    sample = json.loads((ROOT / "config" / "config.json.sample").read_text())
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(sample))
+    assert conv.main([str(path), "--multi-user", "true"]) == 0
+    workspace = json.loads(path.read_text())["workspace"]
+    assert workspace["isolation"] == {"level": "os_user", "backend": "plain"}
+    parse_isolation(workspace)
+
+
+def test_no_old_keys_means_no_inference(tmp_path):
+    """A new-format config without the block is "shared", even beside a
+    sandbox-backends.json with a usable image (N1, round 3)."""
+    _backends(tmp_path / "sandbox-backends.json")
+    assert "isolation" not in _run(tmp_path, {"enabled": True})
+
+
+@pytest.mark.parametrize(
+    "backends",
+    [
+        {"default_tier": "std", "endpoints": {"std": {"webui_image": "webui:latest"}}},
+        {
+            "default_tier": "std",
+            "image_allowlist": ["other@sha256:" + "b" * 64],
+            "endpoints": {"std": {"webui_image": "ghcr.io/x@sha256:" + "a" * 64}},
+        },
+    ],
+)
+def test_an_unpinned_or_unlisted_image_fell_back_to_local(tmp_path, backends):
+    (tmp_path / "sandbox-backends.json").write_text(json.dumps(backends))
+    assert _run(tmp_path, {"multi_user_mode": True})["isolation"]["backend"] == "plain"
 
 
 def test_second_run_is_a_no_op(tmp_path):
@@ -303,6 +347,29 @@ def test_single_file_bind_mount_is_rewritten_in_place(tmp_path, monkeypatch):
     assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
 
 
+def test_root_does_not_follow_a_link_to_another_owners_file(tmp_path, monkeypatch):
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"workspace": {"multi_user_mode": True}}))
+    link = tmp_path / "config.json"
+    link.symlink_to(real)
+    monkeypatch.setattr(conv.os, "geteuid", lambda: 0, raising=False)
+    link_path = str(link)
+    real_lstat = os.lstat
+
+    def lstat(path, *a, **k):  # the link belongs to someone else (the service account)
+        st = real_lstat(path, *a, **k)
+        if os.fspath(path) != link_path:
+            return st
+        fields = list(st)
+        fields[4] = st.st_uid + 1
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(conv.os, "lstat", lstat)
+    before = real.read_text()
+    assert conv.main([str(link)]) == 1
+    assert real.read_text() == before
+
+
 def test_unreadable_config_fails(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{not json")
@@ -359,33 +426,55 @@ def test_package_installer_converts_the_remote_config_on_upgrade_and_fresh_insta
     assert fresh.index('scp -r "$SOURCE_DIR"') < call
 
 
-def _sudoers_confined_check() -> str:
+def _sudoers_omits_launch_rule(config_dir: Path, *, wrapper_installed: bool = True) -> bool:
+    """Run configure_sudoers' decision block: is the unconfined launch rule omitted?"""
     body = _function_body(PACKAGE_INSTALLER.read_text(), "configure_sudoers")
-    match = re.search(r"python3 -c '([^']+)'", body[body.index("confine_configured=false") :])
-    assert match
-    return match.group(1)
+    start = body.index("    local confine_configured=false")
+    end = body.index("    local security_wrapper_rules=")
+    rule = "svc ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-confine launch *"
+    script = (
+        f"decide() {{\n local config_dir={str(config_dir)!r}\n"
+        f" local confine_rule={rule if wrapper_installed else ''!r}\n"
+        f"{body[start:end]}\n echo $confine_configured\n}}\ndecide\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
+    return out.stdout.strip() == "true"
 
 
 @pytest.mark.parametrize(
-    ("workspace", "confined"),
+    ("workspace", "omitted"),
     [
         ({"isolation": {"level": "os_user", "backend": "bwrap"}}, True),
         ({"isolation": {"level": "sandboxed", "backend": "local-kata"}}, True),
         ({"isolation": {"level": "os_user", "backend": "plain"}}, False),
-        ({"isolation": {"level": "sandboxed", "backend": "opensandbox"}}, False),
+        # opensandbox never launches OS-account WebUIs here (B2, round 3).
+        ({"isolation": {"level": "sandboxed", "backend": "opensandbox"}}, True),
         ({}, False),
         # A config that escaped conversion still keeps the unconfined rule out.
         ({"multi_user_mode": True, "os_user_confinement": "runsc"}, True),
         ({"multi_user_mode": True, "os_user_confinement": "off"}, False),
+        ({"multi_user_mode": True, "os_user_confinement": 0}, True),
     ],
 )
-def test_sudoers_confined_check(tmp_path, workspace, confined):
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"workspace": workspace}))
-    rc = subprocess.run(
-        [sys.executable, "-c", _sudoers_confined_check(), str(path)], check=False
-    ).returncode
-    assert (rc == 0) is confined
+def test_sudoers_launch_rule_decision(tmp_path, workspace, omitted):
+    (tmp_path / "config.json").write_text(json.dumps({"workspace": workspace}))
+    assert _sudoers_omits_launch_rule(tmp_path) is omitted
+
+
+def test_sudoers_keeps_opensandbox_hosts_without_the_wrapper_closed(tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"workspace": {"isolation": {"level": "sandboxed", "backend": "opensandbox"}}})
+    )
+    assert _sudoers_omits_launch_rule(tmp_path, wrapper_installed=False) is True
+
+
+def test_a_confined_host_converted_to_opensandbox_does_not_regain_the_rule(tmp_path):
+    """Legacy bwrap + a usable webui_image: the converter picks opensandbox and
+    drops bwrap; sudoers must still leave the unconfined launch rule out."""
+    _backends(tmp_path / "sandbox-backends.json")
+    workspace = _run(tmp_path, {"multi_user_mode": True, "os_user_confinement": "bwrap"})
+    assert workspace["isolation"]["backend"] == "opensandbox"
+    assert _sudoers_omits_launch_rule(tmp_path) is True
 
 
 def test_docker_entrypoint_converts_an_existing_config():

@@ -1334,8 +1334,9 @@ convert_workspace_isolation_config() {
     # The server finds sandbox-backends.json through OPENACE_SANDBOX_BACKENDS
     # in its unit; the converter must look at the same file.
     local sandbox_backends="${OPENACE_SANDBOX_BACKENDS:-}"
-    if [ -z "$sandbox_backends" ] && [ -f /etc/systemd/system/open-ace.service ]; then
-        sandbox_backends=$(sed -n 's/^Environment=OPENACE_SANDBOX_BACKENDS=//p' /etc/systemd/system/open-ace.service | tail -1)
+    if [ -z "$sandbox_backends" ] && command -v systemctl &>/dev/null; then
+        # The unit's effective environment (drop-ins and quoting included).
+        sandbox_backends=$(systemctl show -p Environment --value open-ace.service 2>/dev/null | tr ' ' '\n' | sed -n 's/^"\{0,1\}OPENACE_SANDBOX_BACKENDS=//p' | tr -d '"' | tail -1)
     fi
     if ! OPENACE_SANDBOX_BACKENDS="$sandbox_backends" \
         python3 "$SOURCE_DIR/scripts/convert_workspace_isolation.py" "$config_file" "$@"; then
@@ -1349,7 +1350,7 @@ convert_workspace_isolation_config() {
 convert_workspace_isolation_config_remote() {
     local remote="$1"
     local target_path="$2"
-    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then sb=\$(sed -n 's/^Environment=OPENACE_SANDBOX_BACKENDS=//p' /etc/systemd/system/open-ace.service 2>/dev/null | tail -1); OPENACE_SANDBOX_BACKENDS=\"\$sb\" python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
+    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then sb=\$(systemctl show -p Environment --value open-ace.service 2>/dev/null | tr ' ' '\\n' | sed -n 's/^OPENACE_SANDBOX_BACKENDS=//p' | tail -1); OPENACE_SANDBOX_BACKENDS=\"\$sb\" python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
         print_error "Could not convert the remote config.json to workspace.isolation (Issue #3446); fix it by hand, see docs/en/WORKSPACE_ISOLATION.md"
         exit 1
     fi
@@ -1368,10 +1369,12 @@ update_config_workspace() {
     print_info "Updating workspace configuration in $config_file..."
 
     # Issue #3446: workspace.isolation {level, backend}; converts the keys it
-    # replaced, or writes the wizard's choice into a config that has neither.
+    # replaced, and applies the wizard's multi-user answer as plain / shared
+    # (as the old installer wrote multi_user_mode) unless the config names
+    # another backend (bwrap, local-*, opensandbox), which is kept.
     local multi_default="false"
     [ "$(echo "${WORKSPACE_MULTI_USER_MODE:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ] && multi_default="true"
-    convert_workspace_isolation_config "$config_file" --default-multi-user "$multi_default" || return 1
+    convert_workspace_isolation_config "$config_file" --multi-user "$multi_default" || return 1
 
     # Use Python to update JSON
     # Convert bash "true"/"false" to Python True/False
@@ -2887,11 +2890,17 @@ configure_sudoers() {
     # service account start an UNCONFINED WebUI as any account; omit it.
     # (Re-run the installer after changing workspace.isolation.backend.)
     # A legacy os_user_confinement still counts (fail closed if a config
-    # escaped conversion).
+    # escaped conversion). Issue #3446: backend "opensandbox" never launches
+    # an OS-account WebUI on this host, so it does not get the rule either
+    # (a host confined before conversion must not regain it that way).
+    # confine_configured means "omit the unconfined launch rules".
     local confine_configured=false
-    if [ -n "$confine_rule" ] && [ -f "${config_dir:-}/config.json" ] && \
-       python3 -c 'import json,sys; w=json.load(open(sys.argv[1])).get("workspace") or {}; b=(w.get("isolation") or {}).get("backend",""); c=str(w.get("os_user_confinement") or "").strip().lower(); sys.exit(0 if b in ("bwrap","local-gvisor","local-kata") or c not in ("","off") else 1)' \
-           "${config_dir}/config.json" 2>/dev/null; then
+    local isolation_class=""
+    if [ -f "${config_dir:-}/config.json" ]; then
+        isolation_class=$(python3 -c 'import json,sys; w=json.load(open(sys.argv[1])).get("workspace") or {}; b=(w.get("isolation") or {}).get("backend",""); c=w.get("os_user_confinement"); print("confined" if b in ("bwrap","local-gvisor","local-kata") or (c is not None and str(c).strip().lower() not in ("","off")) else "remote" if b == "opensandbox" else "local")' \
+            "${config_dir}/config.json" 2>/dev/null || echo "")
+    fi
+    if { [ -n "$confine_rule" ] && [ "$isolation_class" = confined ]; } || [ "$isolation_class" = remote ]; then
         confine_configured=true
     fi
 
@@ -2917,7 +2926,7 @@ $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path
         # for the non-confined case) and leave a marker instead.
         current_user_rules=$(printf '%s\n' "$current_user_rules" | grep -v "NOPASSWD: /usr/local/bin/openace-webui-launch ")
         current_user_rules="${current_user_rules}
-# openace-webui-launch rule omitted: workspace.isolation.backend is a confined one (Issue #3431)"
+# openace-webui-launch rule omitted: workspace.isolation.backend is confined or opensandbox (Issues #3431, #3446)"
     fi
 
     # Only add webui_local_rule if not empty (and never under confinement:

@@ -8,7 +8,10 @@ of them is present, so every install and upgrade path runs this script first:
 the package installer (fresh install, local upgrade, remote upgrade) and the
 Docker entrypoint (a config.json its older self generated).
 
-    convert_workspace_isolation.py CONFIG_JSON [--default-multi-user true|false]
+    convert_workspace_isolation.py CONFIG_JSON [--multi-user true|false]
+
+``--multi-user`` is the package installer wizard's answer: it sets ``plain``
+or ``shared`` unless the config names another backend, which it keeps.
 
 The script is idempotent: a config that already uses ``workspace.isolation``
 and has none of the removed keys is left byte-for-byte alone. It rewrites the
@@ -93,8 +96,17 @@ def _sandbox_backends_file(config_path: str) -> str | None:
     return None
 
 
+_DIGEST_PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
+
+
 def _has_webui_image(config_path: str, tier: str) -> bool:
-    """Whether the OpenSandbox config gives the (default) tier a webui_image."""
+    """Whether the OpenSandbox config gives the (default) tier a usable webui_image.
+
+    Usable as the old capability probe judged it statically: digest-pinned and,
+    when the file has an image_allowlist, on it. Anything else fell back to the
+    local form. (Its runtime checks, such as the API key variable, cannot be
+    judged here.)
+    """
     path = _sandbox_backends_file(config_path)
     if path is None:
         return False
@@ -104,7 +116,11 @@ def _has_webui_image(config_path: str, tier: str) -> bool:
         endpoints = raw.get("endpoints") or {}
         tier = tier or str(raw.get("default_tier") or "").strip()
         endpoint = endpoints.get(tier) or {}
-        return bool(str(endpoint.get("webui_image") or "").strip())
+        image = str(endpoint.get("webui_image") or "").strip()
+        allowlist = raw.get("image_allowlist") or []
+        if not image or not _DIGEST_PINNED.search(image):
+            return False
+        return not allowlist or image in allowlist
     except (OSError, ValueError, AttributeError):
         return False
 
@@ -137,9 +153,35 @@ def _limits(ws: dict[str, Any], notes: list[str]) -> dict[str, Any]:
 
 
 def convert_workspace(
-    ws: dict[str, Any], config_path: str, default_multi_user: bool | None
+    ws: dict[str, Any], config_path: str, multi_user_answer: bool | None = None
 ) -> tuple[bool, list[str]]:
-    """Convert ``ws`` in place. Returns (changed, human-readable notes)."""
+    """Convert ``ws`` in place. Returns (changed, human-readable notes).
+
+    ``multi_user_answer`` is the package installer wizard's "multi-user mode?"
+    answer on a fresh install: it picks ``plain`` or ``shared`` unless the
+    config already names another backend (a deliberate choice it keeps).
+    """
+    changed, notes = _convert_legacy(ws, config_path, multi_user_answer)
+    if multi_user_answer is None:
+        return changed, notes
+    block = ws.get("isolation")
+    wanted = "plain" if multi_user_answer else "shared"
+    if block is None or (
+        isinstance(block, dict)
+        and block.get("backend") in ("shared", "plain")
+        and block.get("backend") != wanted
+    ):
+        ws["isolation"] = {"level": _BACKEND_LEVEL[wanted], "backend": wanted}
+        notes.append(f'installer choice: workspace.isolation.backend = "{wanted}"')
+        return True, notes
+    if isinstance(block, dict) and block.get("backend") not in ("shared", "plain", wanted):
+        notes.append(f'kept workspace.isolation.backend "{block.get("backend")}"')
+    return changed, notes
+
+
+def _convert_legacy(
+    ws: dict[str, Any], config_path: str, multi_user_answer: bool | None
+) -> tuple[bool, list[str]]:
     notes: list[str] = []
     present = [key for key in REMOVED_KEYS if key in ws]
 
@@ -152,8 +194,10 @@ def convert_workspace(
             )
         return bool(present), notes
 
-    if not present and default_multi_user is None and not _has_webui_image(config_path, ""):
-        return False, notes  # nothing to convert; the server default (shared) applies
+    if not present:
+        # Nothing to convert. A config without the block means "shared" in the
+        # new format; never infer pods from sandbox-backends.json alone.
+        return False, notes
 
     # Each key is read exactly as the pre-#3446 server read it.
     required = str(ws.get("required_isolation_level") or "").strip().lower()
@@ -162,7 +206,7 @@ def convert_workspace(
     if "multi_user_mode" in ws:
         multi_user = bool(ws["multi_user_mode"])  # truthiness, as before ("false" is true)
     else:
-        multi_user = bool(default_multi_user)
+        multi_user = bool(multi_user_answer)
 
     # The old server refused every launch for an unknown confinement value
     # (confinement_mode_invalid) and the installer left the unconfined launch
@@ -233,7 +277,13 @@ def _write_atomic(path: str, config: dict[str, Any]) -> None:
     swapped-in symlink must not receive them). A single-file bind mount cannot
     be replaced (EBUSY); it is rewritten in place instead.
     """
-    path = os.path.realpath(path)
+    target = os.path.realpath(path)
+    if os.path.islink(path) and hasattr(os, "geteuid") and os.geteuid() == 0:
+        # Root following a link the service account planted would rewrite
+        # any root-owned JSON file: only follow links whose owner owns the target.
+        if os.lstat(path).st_uid != os.stat(target).st_uid:
+            raise OSError(errno.EPERM, f"refusing to follow {path} -> {target}: different owners")
+    path = target
     text = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
     st = os.stat(path)
     fd, tmp = tempfile.mkstemp(prefix=".config.json.", dir=os.path.dirname(path))
@@ -266,12 +316,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("config", help="path to config.json")
     parser.add_argument(
-        "--default-multi-user",
+        "--multi-user",
         choices=("true", "false"),
-        help="per-user (plain) or shared WebUI when the config states neither",
+        help="the installer's answer: plain or shared, unless another backend is configured",
     )
     args = parser.parse_args(argv)
-    default = None if args.default_multi_user is None else args.default_multi_user == "true"
+    default = None if args.multi_user is None else args.multi_user == "true"
 
     try:
         with open(args.config, encoding="utf-8") as fh:

@@ -1999,12 +1999,15 @@ read_existing_config() {
         # Issue #3446: workspace.isolation.backend. A pre-#3446 config is
         # read with the rules the entrypoint's converter applies on start
         # (scripts/convert_workspace_isolation.py), so compose and config agree.
-        WORKSPACE_ISOLATION_BACKEND=$(jq -r '.workspace as $w | ($w.multi_user_mode | . != null and . != false and . != 0 and . != "" and . != [] and . != {}) as $multi | (($w.required_isolation_level // "") | ascii_downcase) as $req | if ($w.isolation | type) == "object" then ($w.isolation.backend // "shared") elif $req == "sandboxed" then "opensandbox" elif (($w.os_user_confinement // "") | tostring | ascii_downcase) as $c | ($c != "" and $c != "off") then "unsupported" elif $multi or $req == "os_user" then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
-        # A tier with a webui_image in sandbox-backends.json ran pods (converter rule).
-        local sandbox_backends_file
+        WORKSPACE_ISOLATION_BACKEND=$(jq -r 'def truthy: . != null and . != false and . != 0 and . != "" and . != [] and . != {}; def text: if truthy then tostring | ascii_downcase | ltrimstr(" ") | rtrimstr(" ") else "" end; .workspace as $w | ($w.required_isolation_level | text) as $req | ($w.os_user_confinement | text) as $c | if ($w.isolation | type) == "object" then ($w.isolation.backend // "shared") elif $c != "" and $c != "off" then "unsupported" elif $req == "sandboxed" then "opensandbox" elif ($w.multi_user_mode | truthy) or $req == "os_user" then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
+        # A tier with a usable (digest-pinned, allowlisted) webui_image in
+        # sandbox-backends.json ran pods; only a config still carrying the
+        # old keys is read that way (converter rule).
+        local sandbox_backends_file legacy_keys
         sandbox_backends_file="$(dirname "$config_file")/sandbox-backends.json"
-        if [ "$(jq -r '(.workspace.isolation | type) == "object"' "$config_file" 2>/dev/null)" = "false" ] && [ -f "$sandbox_backends_file" ] && \
-           [ -n "$(jq -r --arg t "$(jq -r '.workspace.sandbox_tier // ""' "$config_file" 2>/dev/null)" '(if $t != "" then $t else .default_tier end) as $tier | .endpoints[$tier].webui_image // ""' "$sandbox_backends_file" 2>/dev/null)" ]; then
+        legacy_keys=$(jq -r '(.workspace // {}) | ((.isolation | type) != "object") and (has("multi_user_mode") or has("required_isolation_level") or has("os_user_confinement") or has("sandbox_tier") or (keys | any(startswith("confinement_"))))' "$config_file" 2>/dev/null || echo false)
+        if [ "$legacy_keys" = "true" ] && [ -f "$sandbox_backends_file" ] && \
+           [ "$(jq -r --arg t "$(jq -r '.workspace.sandbox_tier // "" | tostring' "$config_file" 2>/dev/null)" '(if $t != "" then $t else .default_tier end) as $tier | (.endpoints[$tier].webui_image // "" | tostring) as $img | (.image_allowlist // []) as $allow | ($img | test("@sha256:[0-9a-f]{64}$")) and (($allow | length) == 0 or ($allow | index($img)) != null)' "$sandbox_backends_file" 2>/dev/null)" = "true" ]; then
             WORKSPACE_ISOLATION_BACKEND="opensandbox"
         fi
         case "$WORKSPACE_ISOLATION_BACKEND" in
