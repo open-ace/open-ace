@@ -63,6 +63,13 @@ WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-true}"
 # Docker). Unset: plain when multi-user mode is on, else shared. Only "plain"
 # (per-user OS accounts) needs the container to run as root.
 WORKSPACE_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-}"
+case "$WORKSPACE_ISOLATION_BACKEND" in
+    ""|shared|plain|opensandbox) ;;
+    *)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND must be shared, plain or opensandbox in the Docker install (got '$WORKSPACE_ISOLATION_BACKEND'); bwrap / local-gvisor / local-kata need the package install on a Linux host (docs/en/WORKSPACE_ISOLATION.md)" >&2
+        exit 1
+        ;;
+esac
 if [ -n "$WORKSPACE_ISOLATION_BACKEND" ]; then
     WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
 fi
@@ -1989,9 +1996,24 @@ read_existing_config() {
         WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "19888")
         WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
         WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
-        # Issue #3446: workspace.isolation.backend (pre-#3446 keys: the
-        # entrypoint converts them on start; read them the same way here).
-        WORKSPACE_ISOLATION_BACKEND=$(jq -r 'if (.workspace.isolation | type) == "object" then (.workspace.isolation.backend // "shared") elif ((.workspace.required_isolation_level // "") == "sandboxed") or ((.workspace.sandbox_tier // "") != "") then "opensandbox" elif (.workspace.multi_user_mode // false) then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
+        # Issue #3446: workspace.isolation.backend. A pre-#3446 config is
+        # read with the rules the entrypoint's converter applies on start
+        # (scripts/convert_workspace_isolation.py), so compose and config agree.
+        WORKSPACE_ISOLATION_BACKEND=$(jq -r '.workspace as $w | ($w.multi_user_mode | . != null and . != false and . != 0 and . != "" and . != [] and . != {}) as $multi | (($w.required_isolation_level // "") | ascii_downcase) as $req | if ($w.isolation | type) == "object" then ($w.isolation.backend // "shared") elif $req == "sandboxed" then "opensandbox" elif (($w.os_user_confinement // "") | tostring | ascii_downcase) as $c | ($c != "" and $c != "off") then "unsupported" elif $multi or $req == "os_user" then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
+        # A tier with a webui_image in sandbox-backends.json ran pods (converter rule).
+        local sandbox_backends_file
+        sandbox_backends_file="$(dirname "$config_file")/sandbox-backends.json"
+        if [ "$(jq -r '(.workspace.isolation | type) == "object"' "$config_file" 2>/dev/null)" = "false" ] && [ -f "$sandbox_backends_file" ] && \
+           [ -n "$(jq -r --arg t "$(jq -r '.workspace.sandbox_tier // ""' "$config_file" 2>/dev/null)" '(if $t != "" then $t else .default_tier end) as $tier | .endpoints[$tier].webui_image // ""' "$sandbox_backends_file" 2>/dev/null)" ]; then
+            WORKSPACE_ISOLATION_BACKEND="opensandbox"
+        fi
+        case "$WORKSPACE_ISOLATION_BACKEND" in
+            shared|plain|opensandbox) ;;
+            *)
+                print_error "$config_file: workspace isolation backend '$WORKSPACE_ISOLATION_BACKEND' cannot run in the Docker install (os_user_confinement / bwrap / local-* need the package install); set workspace.isolation.backend to shared, plain or opensandbox"
+                return 1
+                ;;
+        esac
         # Multi-user mode here means per-user OS accounts: root in the container.
         WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
         WORKSPACE_PORT_RANGE_START=$(jq -r '.workspace.port_range_start' "$config_file" 2>/dev/null || echo "3100")

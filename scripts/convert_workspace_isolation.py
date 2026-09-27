@@ -13,7 +13,14 @@ Docker entrypoint (a config.json its older self generated).
 The script is idempotent: a config that already uses ``workspace.isolation``
 and has none of the removed keys is left byte-for-byte alone. It rewrites the
 file only when something changed (atomically, keeping owner and mode), prints
-what it did, and exits non-zero only when the file cannot be read or written.
+what it did, and exits 1 when the file cannot be read or written, 2 when the
+old keys cannot be converted without guessing (an os_user_confinement value
+the old server refused), leaving the file untouched.
+
+Each old key is read the way the pre-#3446 server read it, so the converted
+block keeps what was running: a tier with a ``webui_image`` in
+sandbox-backends.json ran pods (whatever ``multi_user_mode`` said), a declared
+floor above the old mode is kept by raising the backend.
 
 It is stdlib-only on purpose: the installer runs it before the application's
 dependencies are installed. ``tests/unit/test_convert_workspace_isolation_3446.py``
@@ -23,6 +30,7 @@ checks that every result passes ``parse_isolation``.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -60,10 +68,8 @@ SANDBOX_BACKENDS_ENV = "OPENACE_SANDBOX_BACKENDS"
 SYSTEM_SANDBOX_BACKENDS = "/etc/openace/sandbox-backends.json"
 
 
-def _truthy(value: Any) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
+class ConversionError(ValueError):
+    """The old keys cannot be converted safely; the admin must decide."""
 
 
 def _sandbox_backends_file(config_path: str) -> str | None:
@@ -73,7 +79,10 @@ def _sandbox_backends_file(config_path: str) -> str | None:
     is the service account's ``~/.open-ace`` even when root runs the installer.
     """
     explicit = os.environ.get(SANDBOX_BACKENDS_ENV, "").strip()
-    candidates = [explicit] if explicit else []
+    if explicit:
+        # The server raises on a missing explicit path; no fallback here either.
+        return explicit if os.path.isfile(explicit) else None
+    candidates: list[str] = []
     candidates += [
         SYSTEM_SANDBOX_BACKENDS,
         os.path.join(os.path.dirname(os.path.abspath(config_path)), "sandbox-backends.json"),
@@ -135,32 +144,49 @@ def convert_workspace(
     present = [key for key in REMOVED_KEYS if key in ws]
 
     if isinstance(ws.get("isolation"), dict):
-        # Already converted; stale keys beside the block lose to it.
+        # Already converted; stale keys beside the block lose to it (the
+        # server refused such a config, so they never took effect).
         for key in present:
-            del ws[key]
-        if present:
-            notes.append(f"workspace.isolation already set; removed {', '.join(present)}")
+            notes.append(
+                f"workspace.isolation already set; removed {key}={json.dumps(ws.pop(key))}"
+            )
         return bool(present), notes
 
-    if not present and default_multi_user is None:
+    if not present and default_multi_user is None and not _has_webui_image(config_path, ""):
         return False, notes  # nothing to convert; the server default (shared) applies
 
+    # Each key is read exactly as the pre-#3446 server read it.
     required = str(ws.get("required_isolation_level") or "").strip().lower()
     tier = str(ws.get("sandbox_tier") or "").strip()
     confinement = str(ws.get("os_user_confinement") or "").strip().lower()
     if "multi_user_mode" in ws:
-        multi_user = _truthy(ws["multi_user_mode"])
+        multi_user = bool(ws["multi_user_mode"])  # truthiness, as before ("false" is true)
     else:
         multi_user = bool(default_multi_user)
 
-    backend = _CONFINEMENT_BACKEND.get(confinement)
-    if confinement not in ("", "off") and backend is None:
-        notes.append(f"unknown os_user_confinement {confinement!r} ignored")
-    if backend is None:
-        if required == "sandboxed" or tier or (multi_user and _has_webui_image(config_path, tier)):
-            backend = "opensandbox"
-        else:
-            backend = "plain" if multi_user else "shared"
+    # The old server refused every launch for an unknown confinement value
+    # (confinement_mode_invalid) and the installer left the unconfined launch
+    # rule out of sudoers. Guessing a backend would fail open: stop instead.
+    if confinement not in ("", "off") and confinement not in _CONFINEMENT_BACKEND:
+        raise ConversionError(
+            f"os_user_confinement {ws.get('os_user_confinement')!r} is not bwrap, runsc, kata "
+            'or off; set workspace.isolation yourself, e.g. {"level": "os_user", '
+            '"backend": "bwrap"} (see docs/en/WORKSPACE_ISOLATION.md)'
+        )
+    # The old capability snapshot checked OpenSandbox first, whatever
+    # multi_user_mode or os_user_confinement said: a (default) tier with a
+    # webui_image ran the WebUI in pods. A tier without one fell back to local.
+    if _has_webui_image(config_path, tier):
+        backend = "opensandbox"
+        if confinement not in ("", "off"):
+            notes.append(
+                f'os_user_confinement "{confinement}" dropped: OpenSandbox pods took precedence'
+            )
+    else:
+        backend = _CONFINEMENT_BACKEND.get(confinement) or ("plain" if multi_user else "shared")
+        if tier and required != "sandboxed":
+            notes.append(f'sandbox_tier "{tier}" dropped: it has no webui_image')
+            tier = ""
     # The old floor could exceed what the old mode provided (every launch was
     # then refused). Keep the floor: raise the backend to meet it.
     if required in _LEVEL_RANK and _LEVEL_RANK[required] > _LEVEL_RANK[_BACKEND_LEVEL[backend]]:
@@ -200,22 +226,38 @@ def convert_workspace(
 
 
 def _write_atomic(path: str, config: dict[str, Any]) -> None:
+    """Replace ``path`` (resolved through symlinks) keeping its owner and mode.
+
+    The installer runs this as root in a directory the service account can
+    write, so mode and owner are set on the open descriptor, never by path (a
+    swapped-in symlink must not receive them). A single-file bind mount cannot
+    be replaced (EBUSY); it is rewritten in place instead.
+    """
+    path = os.path.realpath(path)
+    text = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
     st = os.stat(path)
-    directory = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(prefix=".config.json.", dir=directory)
+    fd, tmp = tempfile.mkstemp(prefix=".config.json.", dir=os.path.dirname(path))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(config, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
-        os.chmod(tmp, st.st_mode & 0o7777)
-        if hasattr(os, "chown"):
+            os.fchmod(fh.fileno(), st.st_mode & 0o7777)
             try:
-                os.chown(tmp, st.st_uid, st.st_gid)
+                os.fchown(fh.fileno(), st.st_uid, st.st_gid)
             except PermissionError:
                 pass  # not root: the file stays ours, as it already was
-        os.replace(tmp, path)
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.replace(tmp, path)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            os.unlink(tmp)
+            with open(path, "r+", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.truncate()
     except BaseException:
-        if os.path.exists(tmp):
+        if os.path.lexists(tmp):
             os.unlink(tmp)
         raise
 
@@ -246,7 +288,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ws = config["workspace"] = {}
 
-    changed, notes = convert_workspace(ws, args.config, default)
+    try:
+        changed, notes = convert_workspace(ws, args.config, default)
+    except ConversionError as exc:
+        print(f"convert_workspace_isolation: {args.config}: {exc}", file=sys.stderr)
+        return 2
     for note in notes:
         print(f"convert_workspace_isolation: {note}")
     if changed:

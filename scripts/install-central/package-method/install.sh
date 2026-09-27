@@ -1331,9 +1331,27 @@ convert_workspace_isolation_config() {
     local config_file="$1"
     shift
     [ -f "$config_file" ] || return 0
-    if ! python3 "$SOURCE_DIR/scripts/convert_workspace_isolation.py" "$config_file" "$@"; then
-        print_error "Could not convert $config_file to workspace.isolation (Issue #3446)"
+    # The server finds sandbox-backends.json through OPENACE_SANDBOX_BACKENDS
+    # in its unit; the converter must look at the same file.
+    local sandbox_backends="${OPENACE_SANDBOX_BACKENDS:-}"
+    if [ -z "$sandbox_backends" ] && [ -f /etc/systemd/system/open-ace.service ]; then
+        sandbox_backends=$(sed -n 's/^Environment=OPENACE_SANDBOX_BACKENDS=//p' /etc/systemd/system/open-ace.service | tail -1)
+    fi
+    if ! OPENACE_SANDBOX_BACKENDS="$sandbox_backends" \
+        python3 "$SOURCE_DIR/scripts/convert_workspace_isolation.py" "$config_file" "$@"; then
+        print_error "Could not convert $config_file to workspace.isolation (Issue #3446); fix it by hand, see docs/en/WORKSPACE_ISOLATION.md"
         return 1
+    fi
+}
+
+# Same, for the remote install's ~/.open-ace/config.json (runs the copy just
+# scp'd to the remote target, before the remote server starts).
+convert_workspace_isolation_config_remote() {
+    local remote="$1"
+    local target_path="$2"
+    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then sb=\$(sed -n 's/^Environment=OPENACE_SANDBOX_BACKENDS=//p' /etc/systemd/system/open-ace.service 2>/dev/null | tail -1); OPENACE_SANDBOX_BACKENDS=\"\$sb\" python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
+        print_error "Could not convert the remote config.json to workspace.isolation (Issue #3446); fix it by hand, see docs/en/WORKSPACE_ISOLATION.md"
+        exit 1
     fi
 }
 
@@ -6093,6 +6111,9 @@ do_fresh_install_remote() {
 
     # Create config directory
     ssh "$remote" "mkdir -p '~/.open-ace'"
+    # Issue #3446: a config.json left by an earlier install (e.g. another
+    # target path) still carries the replaced keys.
+    convert_workspace_isolation_config_remote "$remote" "$target_path"
 
     # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
     check_build_dependencies_remote "$remote" || exit 1
@@ -6352,10 +6373,7 @@ do_upgrade_remote() {
 
     # Issue #3446: convert the remote config.json to workspace.isolation
     # before the upgraded server (which refuses the replaced keys) restarts.
-    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
-        print_error "Could not convert the remote config.json to workspace.isolation (Issue #3446)"
-        exit 1
-    fi
+    convert_workspace_isolation_config_remote "$remote" "$target_path"
 
     # Upgrade did not historically run the remote dependency probe. The
     # credentialless launcher requires these runtime tools as well as the

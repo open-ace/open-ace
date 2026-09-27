@@ -9,6 +9,7 @@ backend (configure_sudoers keys its confined-launch rules off it).
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
@@ -58,6 +59,8 @@ def _run(tmp_path: Path, workspace, *args: str) -> dict:
         ({"multi_user_mode": True}, {"level": "os_user", "backend": "plain"}),
         ({"multi_user_mode": False}, {"level": "none", "backend": "shared"}),
         ({"multi_user_mode": "true"}, {"level": "os_user", "backend": "plain"}),
+        # The old server used truthiness: the string "false" meant per-user.
+        ({"multi_user_mode": "false"}, {"level": "os_user", "backend": "plain"}),
         (
             {"multi_user_mode": True, "os_user_confinement": "bwrap"},
             {"level": "os_user", "backend": "bwrap"},
@@ -80,8 +83,17 @@ def _run(tmp_path: Path, workspace, *args: str) -> dict:
             {"level": "sandboxed", "backend": "opensandbox"},
         ),
         (
-            {"multi_user_mode": True, "sandbox_tier": "gold"},
+            {
+                "multi_user_mode": True,
+                "sandbox_tier": "gold",
+                "required_isolation_level": "sandboxed",
+            },
             {"level": "sandboxed", "backend": "opensandbox", "tier": "gold"},
+        ),
+        # A tier without a webui_image fell back to the local form.
+        (
+            {"multi_user_mode": True, "sandbox_tier": "gold"},
+            {"level": "os_user", "backend": "plain"},
         ),
         (
             {"multi_user_mode": False, "required_isolation_level": "sandboxed"},
@@ -109,16 +121,32 @@ def test_legacy_keys_map_to_one_block(tmp_path, legacy, expected):
     assert result["enabled"] is True
 
 
-def test_webui_image_beside_config_means_opensandbox(tmp_path):
-    (tmp_path / "sandbox-backends.json").write_text(
-        json.dumps({"default_tier": "std", "endpoints": {"std": {"webui_image": "img@sha256:x"}}})
-    )
-    result = _run(tmp_path, {"multi_user_mode": True})
+def _backends(path: Path, tier: str = "std", **extra) -> Path:
+    endpoints = {tier: {"webui_image": "img@sha256:x"}, **extra}
+    path.write_text(json.dumps({"default_tier": tier, "endpoints": endpoints}))
+    return path
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"multi_user_mode": True},
+        # Single-user deployments ran the WebUI in a pod too (B2, round 2).
+        {"multi_user_mode": False},
+        {},
+        # The OpenSandbox check came first: pods beat local confinement.
+        {"multi_user_mode": True, "os_user_confinement": "bwrap"},
+        {"multi_user_mode": True, "os_user_confinement": "kata"},
+    ],
+)
+def test_a_tier_with_a_webui_image_means_opensandbox(tmp_path, legacy):
+    _backends(tmp_path / "sandbox-backends.json")
+    result = _run(tmp_path, {"enabled": True, **legacy})
     assert result["isolation"] == {"level": "sandboxed", "backend": "opensandbox"}
 
 
-def test_webui_image_from_env_path_and_named_tier(tmp_path, monkeypatch):
-    backends = tmp_path / "elsewhere.json"
+def test_named_tier_and_env_path_are_honoured(tmp_path, monkeypatch):
+    backends = _backends(tmp_path / "elsewhere.json", tier="std")
     backends.write_text(
         json.dumps(
             {
@@ -129,13 +157,28 @@ def test_webui_image_from_env_path_and_named_tier(tmp_path, monkeypatch):
     )
     monkeypatch.setenv(conv.SANDBOX_BACKENDS_ENV, str(backends))
     assert _run(tmp_path, {"multi_user_mode": True})["isolation"]["backend"] == "plain"
+    assert _run(tmp_path, {"multi_user_mode": True, "sandbox_tier": "gold"})["isolation"] == {
+        "level": "sandboxed",
+        "backend": "opensandbox",
+        "tier": "gold",
+    }
 
 
-def test_webui_image_without_multi_user_stays_shared(tmp_path):
-    (tmp_path / "sandbox-backends.json").write_text(
-        json.dumps({"default_tier": "std", "endpoints": {"std": {"webui_image": "img"}}})
-    )
-    assert _run(tmp_path, {"multi_user_mode": False})["isolation"]["backend"] == "shared"
+def test_a_missing_explicit_env_path_does_not_fall_back(tmp_path, monkeypatch):
+    _backends(tmp_path / "sandbox-backends.json")
+    monkeypatch.setenv(conv.SANDBOX_BACKENDS_ENV, str(tmp_path / "missing.json"))
+    assert _run(tmp_path, {"multi_user_mode": True})["isolation"]["backend"] == "plain"
+
+
+@pytest.mark.parametrize("value", ["true", "gvisor", True, ["bwrap"], "container"])
+def test_unknown_confinement_refuses_to_guess(tmp_path, value, capsys):
+    """The old server refused these (confinement_mode_invalid); plain would fail open."""
+    path = tmp_path / "config.json"
+    text = json.dumps({"workspace": {"multi_user_mode": True, "os_user_confinement": value}})
+    path.write_text(text)
+    assert conv.main([str(path)]) == 2
+    assert path.read_text() == text
+    assert "os_user_confinement" in capsys.readouterr().err
 
 
 def test_limits_are_coerced_and_invalid_ones_dropped(tmp_path, capsys):
@@ -178,12 +221,13 @@ def test_already_converted_config_is_left_byte_for_byte(tmp_path):
     assert path.read_text() == text
 
 
-def test_stale_keys_beside_a_block_are_removed_and_the_block_wins(tmp_path):
+def test_stale_keys_beside_a_block_are_removed_and_the_block_wins(tmp_path, capsys):
     result = _run(
         tmp_path,
-        {"isolation": {"level": "none", "backend": "shared"}, "multi_user_mode": True},
+        {"isolation": {"level": "os_user", "backend": "plain"}, "os_user_confinement": "bwrap"},
     )
-    assert result == {"isolation": {"level": "none", "backend": "shared"}}
+    assert result == {"isolation": {"level": "os_user", "backend": "plain"}}
+    assert 'removed os_user_confinement="bwrap"' in capsys.readouterr().out
 
 
 def test_default_applies_only_when_the_config_states_nothing(tmp_path):
@@ -213,6 +257,49 @@ def test_rewrite_keeps_the_file_mode(tmp_path):
     path.chmod(0o600)
     assert conv.main([str(path)]) == 0
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
+
+
+def test_symlinked_config_converts_the_target(tmp_path):
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"workspace": {"multi_user_mode": True}}))
+    link = tmp_path / "config.json"
+    link.symlink_to(real)
+    assert conv.main([str(link)]) == 0
+    assert link.is_symlink()
+    assert json.loads(real.read_text())["workspace"]["isolation"]["backend"] == "plain"
+
+
+def test_owner_and_mode_are_set_on_the_descriptor_not_the_path(tmp_path, monkeypatch):
+    """Root rewrites a file in a directory the service account can write: a
+    temp file swapped for a symlink must not receive chmod/chown (B3, round 2)."""
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"workspace": {"multi_user_mode": True}}))
+
+    def refuse(*_a, **_k):
+        raise AssertionError("path-based chmod/chown")
+
+    monkeypatch.setattr(conv.os, "chmod", refuse)
+    monkeypatch.setattr(conv.os, "chown", refuse)
+    fchown = []
+    monkeypatch.setattr(conv.os, "fchown", lambda fd, uid, gid: fchown.append((uid, gid)))
+    assert conv.main([str(path)]) == 0
+    st = path.stat()
+    assert fchown == [(st.st_uid, st.st_gid)]
+
+
+def test_single_file_bind_mount_is_rewritten_in_place(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"workspace": {"multi_user_mode": True}}))
+    inode = path.stat().st_ino
+
+    def busy(*_a):
+        raise OSError(errno.EBUSY, "Device or resource busy")
+
+    monkeypatch.setattr(conv.os, "replace", busy)
+    assert conv.main([str(path)]) == 0
+    assert path.stat().st_ino == inode
+    assert json.loads(path.read_text())["workspace"]["isolation"]["backend"] == "plain"
     assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
 
 
@@ -260,10 +347,16 @@ def test_package_installer_converts_on_every_local_path_before_sudoers():
     assert "os_user_confinement" not in _function_body(text, "update_config_workspace")
 
 
-def test_package_installer_converts_the_remote_config_on_upgrade():
-    body = _function_body(PACKAGE_INSTALLER.read_text(), "do_upgrade_remote")
-    assert "scripts/convert_workspace_isolation.py' ~/.open-ace/config.json" in body
-    assert body.index("convert_workspace_isolation.py") < body.index("systemctl restart open-ace")
+def test_package_installer_converts_the_remote_config_on_upgrade_and_fresh_install():
+    text = PACKAGE_INSTALLER.read_text()
+    helper = _function_body(text, "convert_workspace_isolation_config_remote")
+    assert "scripts/convert_workspace_isolation.py' ~/.open-ace/config.json" in helper
+    upgrade = _function_body(text, "do_upgrade_remote")
+    call = upgrade.index('convert_workspace_isolation_config_remote "$remote"')
+    assert upgrade.index('scp -r "$SOURCE_DIR"') < call < upgrade.index("systemctl restart")
+    fresh = _function_body(text, "do_fresh_install_remote")
+    call = fresh.index('convert_workspace_isolation_config_remote "$remote"')
+    assert fresh.index('scp -r "$SOURCE_DIR"') < call
 
 
 def _sudoers_confined_check() -> str:
@@ -301,26 +394,70 @@ def test_docker_entrypoint_converts_an_existing_config():
     assert 'python3 /app/scripts/convert_workspace_isolation.py "$CONFIG_FILE"' in body[exists:]
 
 
+def _docker_installer_backend(config: Path) -> tuple[int, str]:
+    """Run the Docker installer's backend-reading block on ``config``."""
+    text = DOCKER_INSTALLER.read_text()
+    start = text.index("        # Issue #3446: workspace.isolation.backend. A pre-#3446")
+    end = text.index("        # Multi-user mode here means per-user OS accounts")
+    script = (
+        'print_error() { echo "$*" >&2; }\n'
+        f"read_backend() {{\n local config_file={str(config)!r}\n{text[start:end]}\n"
+        ' echo "$WORKSPACE_ISOLATION_BACKEND"\n}\nread_backend\n'
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
+    return out.returncode, out.stdout.strip()
+
+
+_DOCKER_CASES = [
+    {"isolation": {"level": "sandboxed", "backend": "opensandbox"}},
+    {"isolation": {"level": "os_user", "backend": "plain"}},
+    {"isolation": {"level": "none", "backend": "shared"}},
+    {"multi_user_mode": True},
+    {"multi_user_mode": "false"},
+    {"multi_user_mode": False, "required_isolation_level": "os_user"},
+    {"multi_user_mode": True, "required_isolation_level": "sandboxed"},
+    {"multi_user_mode": True, "sandbox_tier": "std"},
+    {},
+]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
+@pytest.mark.parametrize("with_image", [False, True])
+@pytest.mark.parametrize("workspace", _DOCKER_CASES)
+def test_docker_installer_agrees_with_the_converter(tmp_path, workspace, with_image):
+    """compose (root or not) and the converted config must name one backend (N3)."""
+    if with_image:
+        _backends(tmp_path / "sandbox-backends.json")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"workspace": workspace}))
+    rc, backend = _docker_installer_backend(config)
+    assert rc == 0
+    expected = _run(tmp_path, dict(workspace)).get("isolation", {}).get("backend", "shared")
+    assert backend == expected
+
+
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
 @pytest.mark.parametrize(
-    ("workspace", "backend"),
+    "workspace",
     [
-        ({"isolation": {"level": "sandboxed", "backend": "opensandbox"}}, "opensandbox"),
-        ({"isolation": {"level": "os_user", "backend": "plain"}}, "plain"),
-        ({"isolation": {"level": "none", "backend": "shared"}}, "shared"),
-        ({"multi_user_mode": True}, "plain"),
-        ({"multi_user_mode": True, "sandbox_tier": "std"}, "opensandbox"),
-        ({}, "shared"),
+        {"multi_user_mode": True, "os_user_confinement": "bwrap"},
+        {"isolation": {"level": "sandboxed", "backend": "local-kata"}},
     ],
 )
-def test_docker_installer_reads_the_real_backend(tmp_path, workspace, backend):
-    text = DOCKER_INSTALLER.read_text()
-    expr = re.search(r"WORKSPACE_ISOLATION_BACKEND=\$\(jq -r '([^']+)'", text)
-    assert expr
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"workspace": workspace}))
-    out = subprocess.run(["jq", "-r", expr.group(1), str(path)], capture_output=True, text=True)
-    assert out.stdout.strip() == backend
+def test_docker_installer_refuses_backends_docker_cannot_run(tmp_path, workspace):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"workspace": workspace}))
+    assert _docker_installer_backend(config)[0] != 0
+
+
+@pytest.mark.parametrize("value", ["bwrap", "local-kata", "nonsense"])
+def test_docker_installer_validates_the_backend_env(value):
+    env = {**os.environ, "WORKSPACE_ISOLATION_BACKEND": value}
+    out = subprocess.run(
+        ["bash", str(DOCKER_INSTALLER), "--help"], capture_output=True, text=True, env=env
+    )
+    assert out.returncode != 0
+    assert "WORKSPACE_ISOLATION_BACKEND must be shared, plain or opensandbox" in out.stderr
 
 
 def test_docker_installer_writes_the_backend_not_a_multi_user_guess():

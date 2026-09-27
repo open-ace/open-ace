@@ -37,8 +37,9 @@
 `confinement_*`)同样会让启动停止,错误信息会给出替代的写法。
 
 升级会自动转换它们:package 安装器(全新安装、本地升级、远程升级)和 Docker entrypoint(每次启动)都会对
-`config.json` 运行 `scripts/convert_workspace_isolation.py`。它让 OpenSandbox 部署保持 `opensandbox`(连同 tier),
-保留声明的下限,并打印写入的配置块。只读挂载的 config.json 不会被转换,请自行运行
+`config.json` 运行 `scripts/convert_workspace_isolation.py`。它按旧服务器的方式读取每个旧键:原本运行 OpenSandbox pod 的部署保持
+`opensandbox`(连同 tier),保留声明的下限;旧服务器拒绝的 `os_user_confinement` 值会让安装停止,由你自己选择
+backend。它会打印写入的配置块。只读挂载的 config.json 不会被转换,请自行运行
 `python3 scripts/convert_workspace_isolation.py /path/to/config.json`。
 
 经验法则:

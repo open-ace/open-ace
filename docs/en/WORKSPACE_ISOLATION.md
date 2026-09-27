@@ -42,8 +42,9 @@ at startup with the list of allowed backends. So does any of the keys this block
 
 Upgrading converts them for you: the package installer (fresh install, local and remote upgrade) and
 the Docker entrypoint (every start) run `scripts/convert_workspace_isolation.py` on `config.json`.
-It keeps an OpenSandbox deployment on `opensandbox` (with its tier) and keeps a declared floor, and
-prints the block it wrote. A config.json mounted read-only is not converted; convert it yourself with
+It reads each old key the way the old server did: a deployment that ran OpenSandbox pods stays on
+`opensandbox` (with its tier), a declared floor is kept, and an `os_user_confinement` value the old
+server refused stops the install so you choose the backend yourself. It prints the block it wrote. A config.json mounted read-only is not converted; convert it yourself with
 `python3 scripts/convert_workspace_isolation.py /path/to/config.json`.
 
 Rules of thumb:
