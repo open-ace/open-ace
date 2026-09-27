@@ -703,7 +703,7 @@ wrapper、`webui_path` 改指 dev checkout、sudo 被移除)时,启动会以 `is
 **probe-only** 方式解析 WebUI 可执行文件(绝不触发 npm build);就绪结果
 (含降级态)在进程内按 30 秒 TTL 双向记忆化(以检查**结束**时刻计时),成功解析额外永久缓存。sudo
 路径的真实前置是 `openace-webui-launch` 包装器已安装且可执行(sudoers 规则
-本身无法廉价验证);目标系统账户拒绝 uid 0 与保留段(uid<1000)。
+本身无法廉价验证);目标系统账户拒绝 uid 0 与保留段(`uid < 1000`)。
 
 ## 8. 已知缺口与后续路线
 
