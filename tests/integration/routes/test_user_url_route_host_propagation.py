@@ -197,15 +197,25 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
     manager._instances = {MOCK_USER["id"]: instance}
 
     mock_get_manager.return_value = manager
-    mock_get_user.return_value = MOCK_USER
+    # The os_user floor also requires the user's OS-account mapping.
+    mock_get_user.return_value = {**MOCK_USER, "system_account": MOCK_USER["username"]}
 
-    resp = _authed_get(
-        workspace_app.test_client(),
-        "/api/workspace/user-url",
-        host="my-host.example:19888",
-    )
+    # Issue #3446: backend "plain" declares level os_user, and the declared
+    # level is the floor — the gate refuses unless the per-user launch path
+    # verifies. This test is about host propagation, so the host verifies
+    # (Linux, per-user launch possible for the mapped account).
+    with (
+        patch("app.services.workspace_isolation_contract._current_platform", return_value="linux"),
+        patch.object(WebUIManager, "per_user_launch_readiness", return_value=None),
+        patch.object(WebUIManager, "supports_per_user_launch", return_value=(True, None)),
+    ):
+        resp = _authed_get(
+            workspace_app.test_client(),
+            "/api/workspace/user-url",
+            host="my-host.example:19888",
+        )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()
     # host replaced from request, port taken from the instance (3123, not 3100)
     assert data["url"] == "http://my-host.example:3123", data["url"]
