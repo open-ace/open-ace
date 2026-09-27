@@ -2898,9 +2898,11 @@ configure_sudoers() {
     local isolation_class=""
     if [ -f "${config_dir:-}/config.json" ]; then
         isolation_class=$(python3 -c 'import json,sys; w=json.load(open(sys.argv[1])).get("workspace") or {}; b=(w.get("isolation") or {}).get("backend",""); c=w.get("os_user_confinement"); print("confined" if b in ("bwrap","local-gvisor","local-kata") or (c is not None and str(c).strip().lower() not in ("","off")) else "remote" if b == "opensandbox" else "local")' \
-            "${config_dir}/config.json" 2>/dev/null || echo "")
+            "${config_dir}/config.json" 2>/dev/null || echo "unreadable")
     fi
-    if { [ -n "$confine_rule" ] && [ "$isolation_class" = confined ]; } || [ "$isolation_class" = remote ]; then
+    # An unreadable config (the server refuses it too) fails closed.
+    if { [ -n "$confine_rule" ] && [ "$isolation_class" = confined ]; } || \
+       [ "$isolation_class" = remote ] || [ "$isolation_class" = unreadable ]; then
         confine_configured=true
     fi
 

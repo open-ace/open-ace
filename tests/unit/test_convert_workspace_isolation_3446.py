@@ -246,6 +246,8 @@ def test_stale_keys_beside_a_block_are_removed_and_the_block_wins(tmp_path, caps
         ({"isolation": {"level": "os_user", "backend": "bwrap"}}, "false", "bwrap"),
         ({"isolation": {"level": "sandboxed", "backend": "opensandbox"}}, "true", "opensandbox"),
         ({"multi_user_mode": True, "os_user_confinement": "kata"}, "false", "local-kata"),
+        # The answer never lowers a declared legacy floor.
+        ({"multi_user_mode": False, "required_isolation_level": "os_user"}, "false", "plain"),
     ],
 )
 def test_installer_answer_sets_plain_or_shared(tmp_path, workspace, answer, backend):
@@ -461,6 +463,11 @@ def test_sudoers_launch_rule_decision(tmp_path, workspace, omitted):
     assert _sudoers_omits_launch_rule(tmp_path) is omitted
 
 
+def test_sudoers_unreadable_config_fails_closed(tmp_path):
+    (tmp_path / "config.json").write_text("{not json")
+    assert _sudoers_omits_launch_rule(tmp_path) is True
+
+
 def test_sudoers_keeps_opensandbox_hosts_without_the_wrapper_closed(tmp_path):
     (tmp_path / "config.json").write_text(
         json.dumps({"workspace": {"isolation": {"level": "sandboxed", "backend": "opensandbox"}}})
@@ -531,9 +538,11 @@ def test_docker_installer_agrees_with_the_converter(tmp_path, workspace, with_im
     [
         {"multi_user_mode": True, "os_user_confinement": "bwrap"},
         {"isolation": {"level": "sandboxed", "backend": "local-kata"}},
+        {"multi_user_mode": True, "os_user_confinement": "gvisor"},
     ],
 )
 def test_docker_installer_refuses_backends_docker_cannot_run(tmp_path, workspace):
+    _backends(tmp_path / "sandbox-backends.json")  # a usable image must not mask it
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"workspace": workspace}))
     assert _docker_installer_backend(config)[0] != 0

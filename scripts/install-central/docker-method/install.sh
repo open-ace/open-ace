@@ -2006,7 +2006,7 @@ read_existing_config() {
         local sandbox_backends_file legacy_keys
         sandbox_backends_file="$(dirname "$config_file")/sandbox-backends.json"
         legacy_keys=$(jq -r '(.workspace // {}) | ((.isolation | type) != "object") and (has("multi_user_mode") or has("required_isolation_level") or has("os_user_confinement") or has("sandbox_tier") or (keys | any(startswith("confinement_"))))' "$config_file" 2>/dev/null || echo false)
-        if [ "$legacy_keys" = "true" ] && [ -f "$sandbox_backends_file" ] && \
+        if [ "$WORKSPACE_ISOLATION_BACKEND" != "unsupported" ] && [ "$legacy_keys" = "true" ] && [ -f "$sandbox_backends_file" ] && \
            [ "$(jq -r --arg t "$(jq -r '.workspace.sandbox_tier // "" | tostring' "$config_file" 2>/dev/null)" '(if $t != "" then $t else .default_tier end) as $tier | (.endpoints[$tier].webui_image // "" | tostring) as $img | (.image_allowlist // []) as $allow | ($img | test("@sha256:[0-9a-f]{64}$")) and (($allow | length) == 0 or ($allow | index($img)) != null)' "$sandbox_backends_file" 2>/dev/null)" = "true" ]; then
             WORKSPACE_ISOLATION_BACKEND="opensandbox"
         fi

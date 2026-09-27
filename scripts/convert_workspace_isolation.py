@@ -161,11 +161,16 @@ def convert_workspace(
     answer on a fresh install: it picks ``plain`` or ``shared`` unless the
     config already names another backend (a deliberate choice it keeps).
     """
+    floor = str(ws.get("required_isolation_level") or "").strip().lower()
     changed, notes = _convert_legacy(ws, config_path, multi_user_answer)
     if multi_user_answer is None:
         return changed, notes
     block = ws.get("isolation")
     wanted = "plain" if multi_user_answer else "shared"
+    if _LEVEL_RANK.get(floor, 0) > _LEVEL_RANK[_BACKEND_LEVEL[wanted]]:
+        # The answer never lowers a floor the old config declared.
+        notes.append(f'kept the declared floor "{floor}" over the installer answer "{wanted}"')
+        return changed, notes
     if block is None or (
         isinstance(block, dict)
         and block.get("backend") in ("shared", "plain")
