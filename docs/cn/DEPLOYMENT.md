@@ -53,8 +53,8 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 是稳定的，并与镜像中内置的文件属主、K8s 的 `runAsUser`/`runAsGroup: 1000`
 保持一致。
 
-多用户工作区模式（`WORKSPACE_MULTI_USER_MODE=true` 或配置中的
-`workspace.multi_user_mode: true`）确实需要 root——它会创建系统用户
+使用每用户 OS 账户的多用户工作区模式（`WORKSPACE_ISOLATION_BACKEND=plain` 或配置中的
+`workspace.isolation.backend: "plain"`）确实需要 root——它会创建系统用户
 （`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
 （`sudo -u <user>`）。
 
@@ -95,7 +95,7 @@ docker-compose.multi-user.yml 会自动配置：
 #### 方式三：手动配置
 
 ```bash
-docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+docker run --user 0 -e WORKSPACE_ISOLATION_BACKEND=plain \
   -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
   -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
@@ -158,10 +158,10 @@ docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
 
 #### 从 config.json 迁移
 
-如果您之前在 config.json 中设置了 `"multi_user_mode": true`：
-
-1. 推荐使用 docker-compose.multi-user.yml（见上方）
-2. 或在 config.json 中将 `"multi_user_mode"` 设置为 `false`，改用环境变量控制
+`multi_user_mode`、`required_isolation_level` 以及 #3446 之前的其他隔离配置键已不再被接受:服务器会拒绝启动并
+给出替代写法。请改用 `workspace.isolation`(见 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)),例如每用户 OS
+账户为 `"isolation": {"level": "os_user", "backend": "plain"}`,并用 `WORKSPACE_ISOLATION_BACKEND=plain`(多用户
+叠加配置已设置)代替 `WORKSPACE_MULTI_USER_MODE`。
 
 **注意**：多用户模式需要容器以 root 运行，仅适用于受控环境。生产环境请确保
 设置强密码和安全密钥。
@@ -744,7 +744,7 @@ Docker Compose 现在要求显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY` 
 
 ## 多用户工作区部署
 
-启用 `workspace.multi_user_mode` 时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
+使用 OS 账户类隔离 backend(`workspace.isolation.backend` 为 `plain`、`bwrap`、`local-gvisor` 或 `local-kata`)时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
 
 > 如何在几种隔离方式(每用户 OS 账户、受约束、本机 gVisor/Kata 容器、OpenSandbox pod)之间选择、如何配置并验证
 > 实际生效的隔离,见管理员指南 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)。包安装脚本会为你配置 sudoers

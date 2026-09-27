@@ -32,6 +32,7 @@ import app.services.webui_manager as wmgr
 from app.services import workspace_isolation_contract as wic
 from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
 from app.services.webui_sandbox import mint_instance_token
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -139,12 +140,13 @@ class _FakeLauncher:
 
 
 def _manager(*, multi_user=True, launcher=None, **config_kwargs):
+    """multi_user=True: backend opensandbox (one pod per user); False: shared."""
     config_kwargs.setdefault("port_range_start", 3100)
     config_kwargs.setdefault("port_range_end", 3200)
     config = WorkspaceConfig(
         enabled=True,
         url="http://127.0.0.1",
-        multi_user_mode=multi_user,
+        isolation=iso("opensandbox" if multi_user else "shared"),
         webui_callback_url="http://openace.open-ace.svc.cluster.local:8080",
         **config_kwargs,
     )
@@ -252,27 +254,6 @@ def test_dead_sandboxed_instance_token_rejected_and_reaped(monkeypatch):
     assert manager.get_user_instance(7) is None
     assert len(launcher.destroy_calls) == 1
     reaped[1]()  # the second finds the registry entry already replaced — no-op
-    assert len(launcher.destroy_calls) == 1
-
-
-def test_dead_single_user_sandboxed_token_rejected_and_reaped(monkeypatch):
-    """T-H, single-user registry: same fail-closed + async reap through the
-    _single_user_lock branch (lock order _single_user_lock → _lock)."""
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
-    _url, token = manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
-    assert manager.validate_token(token)[0] is True
-
-    launcher.healthy = False
-    instance = manager._single_user_instance
-    instance._consecutive_health_failures = instance._max_consecutive_failures
-    instance._health_check_ttl = 0.0
-
-    reaped = []
-    monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: reaped.append(fn))
-    assert manager.validate_token(token)[0] is False
-    reaped[0]()
-    assert manager._single_user_instance is None
     assert len(launcher.destroy_calls) == 1
 
 
@@ -527,236 +508,6 @@ def test_shutdown_exports_and_destroys_sandboxed_instances():
 # ── single-user sandboxed ─────────────────────────────────────────────
 
 
-def test_single_user_sandboxed_url_uses_proxy_port_not_3100():
-    launcher = _FakeLauncher()
-    # Range starts at 3200 so the allocator's answer is provably NOT the
-    # hardcoded single-user 3100.
-    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
-    url, token = manager.get_user_webui_url(
-        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
-    )
-    instance = manager._single_user_instance
-    assert instance.form == "sandboxed"
-    assert instance.port == 3200  # §7.2: allocator port, not the hardcoded 3100
-    assert url == f"http://192.168.1.5:{instance.port}"
-    assert token.startswith("v2:3:")
-
-    # Hit: same pod, fresh token.
-    url2, token2 = manager.get_user_webui_url(
-        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
-    )
-    assert len(launcher.launch_calls) == 1
-    assert token2 != token
-
-    # Shutdown path (server.py SIGTERM → shutdown_webui_manager).
-    manager.stop_all_instances()
-    assert len(launcher.destroy_calls) == 1
-    assert instance.proxy.stopped
-
-
-def test_single_user_sandboxed_token_mints_for_the_requester():
-    """T-C: the shared single-user sandboxed instance must mint each token
-    for the REQUESTING user. The reuse branch minted with the pod creator's
-    user_id, so a second user's token validated as the creator — including
-    against the admin paths URL_TOKEN_ALLOWED_PATHS admits."""
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
-    _url, token_creator = manager.get_user_webui_url(
-        3, "u3", "http://192.168.1.5:19888", required_isolation="sandboxed"
-    )
-    instance = manager._single_user_instance
-    assert len(launcher.launch_calls) == 1  # pod reused below, never recreated
-
-    _url2, token_other = manager.get_user_webui_url(
-        9, "u9", "http://192.168.1.5:19888", required_isolation="sandboxed"
-    )
-    assert len(launcher.launch_calls) == 1  # same shared pod
-    assert token_other.startswith("v2:9:")
-
-    # Each token validates (against the instance secret) to ITS OWN user.
-    assert manager.validate_token(token_creator)[:2] == (True, 3)
-    assert manager.validate_token(token_other)[:2] == (True, 9)
-    # And the pod-creator subject never leaks into the second user's token.
-    assert not token_other.startswith("v2:3:")
-    assert instance.user_id == 3  # the pod still belongs to its creator
-
-
-def test_single_user_sandboxed_launch_token_never_leaks_across_users_under_contention():
-    """F-1 (review round 2): the single-user LAUNCH branch must capture its
-    url/token INSIDE _single_user_lock. The reuse branch's
-    _mint_sandboxed_token rewrites instance.token under the same lock; the old
-    code read ``instance.token`` AFTER releasing the lock, so a user who had
-    been waiting on the lock could receive the token the NEXT requester minted
-    (a cross-user credential handoff that validates against the admin-allowed
-    URL-token paths).
-
-    Deterministic interleaving (pure threading — a gevent hub inside an xdist
-    worker is the #2457 worker-crash class): thread A walks the launch branch
-    with a launcher that parks until signaled (A holds the lock the whole
-    time), thread B queues on the lock and then walks the REUSE branch. The
-    instance's token reads are instrumented: a read made OUTSIDE the lock (the
-    old buggy window) parks until B's mint has certainly landed, so a
-    regression to the lock-external read fails deterministically instead of
-    relying on a scheduler race.
-    """
-    import threading
-
-    launch_entered = threading.Event()
-    release_launch = threading.Event()
-    b_minted = threading.Event()
-
-    class _ParkingLauncher(_FakeLauncher):
-        def launch(self, *, user_id, callback_url, snapshot=None, **kwargs):
-            launch_entered.set()
-            assert release_launch.wait(timeout=15), "launch was never released"
-            return super().launch(
-                user_id=user_id, callback_url=callback_url, snapshot=snapshot, **kwargs
-            )
-
-    launcher = _ParkingLauncher()
-    manager = _manager(multi_user=False, launcher=launcher, port_range_start=3200)
-    # Plain threading lock: the code under test only needs mutual exclusion,
-    # and this keeps the test off any real gevent hub.
-    manager._single_user_lock = threading.RLock()
-    lock = manager._single_user_lock
-
-    original_mint = manager._mint_sandboxed_token
-
-    def _mint(instance, *, requester_id=None):
-        token = original_mint(instance, requester_id=requester_id)
-        if requester_id == 9:
-            b_minted.set()
-        return token
-
-    manager._mint_sandboxed_token = _mint
-
-    def _gate_instance(instance):
-        """Route instance.token reads outside the lock through the interlock."""
-        base_cls = type(instance)
-
-        class _GatedInstance(base_cls):
-            def __getattribute__(self, name):
-                value = super().__getattribute__(name)
-                if name == "token" and not lock._is_owned():
-                    # The OLD code's window: the read happens after the lock
-                    # was released, so the queued reuse-branch mint (user 9)
-                    # is allowed to land first — deterministically exposing
-                    # the cross-user leak the fix removes.
-                    assert b_minted.wait(timeout=15), "queued mint never happened"
-                    return super().__getattribute__(name)
-                return value
-
-        instance.__class__ = _GatedInstance
-
-    original_launch = manager._launch_sandboxed
-
-    def _launch_and_gate(user_id, system_account, base_url):
-        instance = original_launch(user_id, system_account, base_url)
-        _gate_instance(instance)
-        return instance
-
-    manager._launch_sandboxed = _launch_and_gate
-
-    results: dict[str, tuple[str, str]] = {}
-    errors: dict[str, BaseException] = {}
-
-    def _launch_caller():
-        try:
-            results["a"] = manager.get_user_webui_url(7, "u7", None, required_isolation="sandboxed")
-        except BaseException as exc:  # noqa: BLE001 - recorded then re-raised (scanner gate)
-            errors["a"] = exc
-            raise
-
-    def _reuse_caller():
-        try:
-            results["b"] = manager.get_user_webui_url(9, "u9", None, required_isolation="sandboxed")
-        except BaseException as exc:  # noqa: BLE001 - recorded then re-raised (scanner gate)
-            errors["b"] = exc
-            raise
-
-    thread_a = threading.Thread(target=_launch_caller, daemon=True)
-    thread_b = threading.Thread(target=_reuse_caller, daemon=True)
-    thread_a.start()
-    assert launch_entered.wait(timeout=15), "launch branch never entered"
-    # A holds the lock (parked inside the launcher); B is now queued on it.
-    thread_b.start()
-    thread_b.join(timeout=0.05)
-    assert thread_b.is_alive(), "B should be parked on _single_user_lock"
-
-    release_launch.set()
-    thread_a.join(timeout=15)
-    thread_b.join(timeout=15)
-    assert not thread_a.is_alive() and not thread_b.is_alive()
-    for key, exc in errors.items():
-        raise AssertionError(f"thread {key} raised: {exc!r}")
-
-    url_a, token_a = results["a"]
-    url_b, token_b = results["b"]
-    # One shared pod: A launched it, B reused it.
-    assert len(launcher.launch_calls) == 1
-    assert url_a == url_b
-    # F-1: each caller's token validates as THEIR OWN user — A never sees the
-    # token B minted while A was between the lock release and its return.
-    assert manager.validate_token(token_a)[:2] == (True, 7)
-    assert manager.validate_token(token_b)[:2] == (True, 9)
-    assert token_a.startswith("v2:7:") and token_b.startswith("v2:9:")
-
-
-def test_single_user_sandboxed_instance_resolves_for_proxy_token_lifecycle(monkeypatch, tmp_path):
-    """M1: the pod's baked-in LLM proxy token only validates while its
-    instance resolves as alive — api_key_proxy._webui_instance_alive goes
-    through WebUIManager.get_user_instance, which must recognize the
-    single-user SANDBOXED registry (a plain _instances lookup returns None in
-    single-user mode, so every pod-side LLM call would 401)."""
-    import os
-
-    from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher)
-    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
-    instance = manager._single_user_instance
-
-    # Resolution: the shared instance answers only for the user whose pod
-    # token it carries; other users (multi-user registry empty here) do not.
-    assert manager.get_user_instance(3) is instance
-    assert manager.get_user_instance(4) is None
-
-    with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "unit-3378-encryption-key"}):
-        service = APIKeyProxyService(db_path=str(tmp_path / "proxy_tokens.db"))
-    revoked: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        service,
-        "revoke_proxy_tokens_for_session",
-        lambda session_id, reason="session_revoked": revoked.append((session_id, reason)) or 1,
-    )
-    monkeypatch.setattr(
-        "app.modules.workspace.api_key_proxy.get_api_key_proxy_service", lambda: service
-    )
-    monkeypatch.setattr("app.services.webui_manager.get_webui_manager", lambda: manager)
-
-    # The REAL _webui_instance_alive path resolves the instance and keeps the
-    # pod's proxy token alive while the instance lives...
-    assert service._webui_instance_alive(f"webui:{instance.user_id}", instance.user_id) is True
-    # ...and stopping revokes the session (Q1) and kills the resolution.
-    manager.stop_all_instances()
-    assert revoked == [("webui:3", "webui_stopped")]
-    assert service._webui_instance_alive("webui:3", 3) is False
-
-
-def test_single_user_sandboxed_proxy_activity_updates_last_activity():
-    """m1: the proxy's on_activity heartbeat reaches the instance."""
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher)
-    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
-    instance = manager._single_user_instance
-    assert instance.proxy.on_activity is not None
-    instance.last_activity = datetime.now() - timedelta(hours=3)
-    stale = instance.last_activity
-    instance.proxy.on_activity()
-    assert instance.last_activity > stale
-
-
 def test_multi_user_sandboxed_proxy_activity_updates_last_activity():
     """m1: same wiring on the multi-user branch (shared _launch_sandboxed)."""
     launcher = _FakeLauncher()
@@ -768,26 +519,6 @@ def test_multi_user_sandboxed_proxy_activity_updates_last_activity():
     stale = instance.last_activity
     instance.proxy.on_activity()
     assert instance.last_activity > stale
-
-
-def test_idle_single_user_sandboxed_instance_is_reaped():
-    """m1: the single-user sandboxed instance holds a pod + a proxy port —
-    the idle reaper must cover it, not just the _instances registry."""
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher)
-    manager.get_user_webui_url(3, "u3", None, required_isolation="sandboxed")
-    instance = manager._single_user_instance
-    proxy = instance.proxy
-
-    manager.cleanup_idle_instances()  # fresh start → not idle yet
-    assert launcher.destroy_calls == []
-
-    instance.last_activity = datetime.now() - timedelta(hours=2)
-    manager.cleanup_idle_instances()
-    assert len(launcher.destroy_calls) == 1
-    assert proxy.stopped
-    assert manager._single_user_instance is None
-    assert instance.port not in manager._port_allocations
 
 
 def test_idle_local_single_user_instance_is_never_reaped():
@@ -802,72 +533,6 @@ def test_idle_local_single_user_instance_is_never_reaped():
 
     manager.cleanup_idle_instances()
     assert manager._single_user_instance is local
-
-
-def test_single_user_local_request_restarts_live_sandboxed_instance(monkeypatch):
-    """MINOR-2: a single-user SANDBOXED instance is alive while the request
-    resolves to the LOCAL form (e.g. the backend was unconfigured between
-    launches). The old branch answered "already running" with the hardcoded
-    3100 plus a global-secret token the remote pod cannot validate; the fix
-    mirrors the multi-user form-mismatch stop-and-restart."""
-    launcher = _FakeLauncher()
-    manager = _manager(multi_user=False, launcher=launcher)
-    sandboxed = WebUIInstance(
-        user_id=3,
-        system_account="u3",
-        port=45678,
-        form="sandboxed",
-        sandbox_id="sb-live",
-        token_secret="s" * 64,
-        launcher=launcher,
-        proxy=_FakeProxy(sandbox_id="sb-live", upstream_resolver=lambda: ("http://up", {})),
-        isolation_level="sandboxed",
-        user_home_path="/workspace/u3",
-    )
-    sandboxed.is_alive = lambda: True
-    manager._single_user_instance = sandboxed
-    manager._port_allocations[45678] = (3, "sandboxed")
-
-    # The local start path must not spawn a real webui process.
-    def fake_launch(user_id, system_account, port, base_url):
-        process = MagicMock()
-        process.pid = 4242
-        return process, MagicMock()
-
-    manager._launch_webui_process = MagicMock(side_effect=fake_launch)
-    manager._wait_for_service_ready = MagicMock(return_value=True)
-
-    # The snapshot verifies only os_user (sandbox probe no longer passes), so
-    # the strongest verified form satisfying the request is the LOCAL form.
-    os_user_snapshot = wic.IsolationCapabilitySnapshot(
-        supported=True,
-        backend=wic.BACKEND_PER_USER,
-        isolation_level=wic.ISOLATION_LEVEL_OS_USER,
-        enforced=wic._OS_USER_ENFORCED,
-        unsupported=wic._OS_USER_UNSUPPORTED,
-        reasons=(),
-    )
-    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: os_user_snapshot)
-    monkeypatch.setattr(wic, "resolve_required_floor", lambda config, snap: "os_user")
-
-    url, token = manager.get_user_webui_url(3, "u3", "http://192.168.1.5:19888")
-
-    # The sandboxed instance was stopped-and-restarted, not "already running":
-    assert len(launcher.destroy_calls) == 1
-    assert launcher.destroy_calls[0]["sandbox_id"] == "sb-live"
-    assert launcher.destroy_calls[0]["final_export"] is True
-    assert sandboxed.proxy.stopped
-    assert 45678 not in manager._port_allocations
-    # ...and the replacement is a LOCAL single-user instance on the fixed port.
-    replacement = manager._single_user_instance
-    assert replacement is not sandboxed
-    assert replacement.form == "local"
-    assert replacement.port == 3100
-    assert url == "http://192.168.1.5:3100"
-    # The token is the local-form (global-secret) token for 3100 — minted for
-    # the NEW instance, not a stale sandboxed-form artifact.
-    assert token.startswith("v2:3:3100:")
-    assert manager._launch_webui_process.call_count == 1
 
 
 # ── prestart reorder (§7.7) ───────────────────────────────────────────
@@ -895,59 +560,26 @@ def _snapshot_at_level(level: str) -> wic.IsolationCapabilitySnapshot:
 
 
 @pytest.mark.parametrize(
-    ("pin", "snapshot_level", "request_param", "expected_form"),
-    [
-        # The invariant: the default launch form is the strongest VERIFIED
-        # form satisfying max(pin floor, request) — same source as the
-        # contract snapshot. The second row is the T-B regression: the
-        # entrypoint pins `os_user` on multi-user deployments, and the old
-        # code silently launched local processes on a sandboxed-capable one.
-        ("", wic.ISOLATION_LEVEL_SANDBOXED, "", "sandboxed"),
-        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "", "sandboxed"),
-        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "os_user", "sandboxed"),
-        ("os_user", wic.ISOLATION_LEVEL_OS_USER, "", "local"),
-        ("", wic.ISOLATION_LEVEL_OS_USER, "", "local"),
-        ("", wic.ISOLATION_LEVEL_NONE, "", "local"),
-        # An explicit sandboxed request keeps its fail-closed shape.
-        ("os_user", wic.ISOLATION_LEVEL_SANDBOXED, "sandboxed", "sandboxed"),
-    ],
-)
-def test_resolve_form_invariant_strongest_verified_form(
-    monkeypatch, pin, snapshot_level, request_param, expected_form
-):
-    launcher = _FakeLauncher()
-    manager = _manager(launcher=launcher, required_isolation_level=pin)
-    snap = _snapshot_at_level(snapshot_level)
-    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", lambda mgr: snap)
+    ("backend", "expected_form"),
+    [("opensandbox", "sandboxed"), ("plain", "local"), ("bwrap", "local"),
+     ("local-gvisor", "local"), ("local-kata", "local"), ("shared", "local")],
+)  # fmt: skip
+def test_resolve_form_follows_the_isolation_backend(monkeypatch, backend, expected_form):
+    """Issue #3446: the form is the configured backend's, never inferred from
+    a snapshot (a pod form without backend "opensandbox" cannot happen, and
+    an "opensandbox" deployment never quietly launches local processes)."""
+    manager = _manager(launcher=_FakeLauncher())
+    manager.config.isolation = iso(backend)
 
-    # What the /user-url gate hands the manager: max(pin floor, request).
-    effective = pin or snapshot_level
-    if request_param and wic.isolation_level_at_least(request_param, effective):
-        effective = request_param
-    assert manager._resolve_form(effective) == expected_form
+    def _boom(mgr):
+        raise AssertionError("the form must not depend on a snapshot build")
 
-    # And a real DEFAULT request (no parameter) through get_user_webui_url
-    # lands on the form the snapshot's isolation level dictates: sandboxed
-    # capability → the pod form, regardless of the pin. (Local rows stub the
-    # OS-process start — launching a real webui is not this test's business.)
-    form = "sandboxed" if snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED else "local"
-    if form == "local":
-        stub = WebUIInstance(user_id=7, system_account="u7", port=3110, form="local")
-        manager._start_instance_internal = lambda *a, **kw: stub
-    url, token = manager.get_user_webui_url(
-        7,
-        "u7",
-        "http://192.168.1.5:19888",
-        required_isolation=effective if request_param else "",
-    )
-    instance = manager._instances.get(7)
-    chosen = getattr(instance, "form", "local") if instance else "local"
-    assert chosen == form
-    if form == "sandboxed":
-        assert token.startswith("v2:7:")
-        # The URL carries the LOCAL proxy port of the pod instance (never a
-        # global-secret 3100 token path).
-        assert url == f"http://192.168.1.5:{instance.port}"
+    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", _boom)
+    for requested in ("", "none", "os_user", "sandboxed"):
+        assert manager._resolve_form(requested) == expected_form
+        assert manager._resolve_form(requested, snapshot=_snapshot_at_level("os_user")) == (
+            expected_form
+        )
 
 
 def test_prestart_proceeds_without_mapping_when_floor_is_sandboxed(monkeypatch):
@@ -1061,7 +693,7 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
         def __init__(self):
             import app.services.webui_manager as wm
 
-            self.config = wm.WorkspaceConfig(enabled=True, multi_user_mode=True)
+            self.config = wm.WorkspaceConfig(enabled=True, isolation=iso("plain"))
             self.received_isolation = None
             self.received_snapshot = None
 
@@ -1111,38 +743,6 @@ def test_user_url_route_forwards_effective_level(app, client, monkeypatch):
     assert stub.received_snapshot is sandbox_snapshot
 
 
-def test_resolve_form_reuses_the_callers_snapshot():
-    """F-6.1: with a snapshot handed in, _resolve_form must not build a second
-    one — two builds could disagree (a peer heartbeat flipping the cached
-    level between them), making the launch form contradict the gate."""
-    launcher = _FakeLauncher()
-    manager = _manager(launcher=launcher)
-
-    def _boom(mgr):
-        raise AssertionError("a second snapshot build must never happen")
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(wic, "build_workspace_isolation_snapshot", _boom)
-    try:
-        # The caller's sandboxed snapshot decides — no rebuild.
-        assert manager._resolve_form("", snapshot=_snapshot_at_level("sandboxed")) == "sandboxed"
-        assert manager._resolve_form("", snapshot=_snapshot_at_level("os_user")) == "local"
-        # An explicit sandboxed request never needs the snapshot at all.
-        assert manager._resolve_form("sandboxed", snapshot=None) == "sandboxed"
-    finally:
-        monkeypatch.undo()
-
-    # Default (None) keeps the historical build-it-yourself behavior.
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        wic, "build_workspace_isolation_snapshot", lambda mgr: _snapshot_at_level("os_user")
-    )
-    try:
-        assert manager._resolve_form("") == "local"
-    finally:
-        monkeypatch.undo()
-
-
 def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
     """MINOR-5: a launcher SandboxWebuiError must cross the API boundary with
     its machine-readable reason code (gate-rejection body shape), not collapse
@@ -1153,7 +753,7 @@ def test_user_url_route_surfaces_sandbox_error_code(app, client, monkeypatch):
         def __init__(self):
             import app.services.webui_manager as wm
 
-            self.config = wm.WorkspaceConfig(enabled=True, multi_user_mode=True)
+            self.config = wm.WorkspaceConfig(enabled=True, isolation=iso("plain"))
 
         def per_user_launch_readiness(self):
             return None

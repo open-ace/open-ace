@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 
 class TestWorkspaceConfig:
@@ -45,7 +46,7 @@ class TestLoadConfig:
         """Test loading basic workspace config."""
         config = WorkspaceConfig(
             enabled=True,
-            multi_user_mode=True,
+            isolation=iso("plain"),
         )
         mock_load.return_value = config
 
@@ -62,7 +63,7 @@ class TestLoadConfig:
             config_data = {
                 "workspace": {
                     "enabled": True,
-                    "multi_user_mode": True,
+                    "isolation": {"level": "os_user", "backend": "plain"},
                     "port_range_start": 3100,
                     "port_range_end": 3200,
                     "token_secret": "test-secret",
@@ -187,7 +188,7 @@ class TestConfigureLocalOpenAIProxy:
         """Test that _launch_webui_process configures local proxy env."""
         config = WorkspaceConfig(
             enabled=True,
-            multi_user_mode=False,
+            isolation=iso("shared"),
             webui_path="/tmp/webui",
             token_secret="secret",
         )

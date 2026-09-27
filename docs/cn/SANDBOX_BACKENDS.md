@@ -470,13 +470,14 @@ pod 运行,而不是作为某个 OS 账户下的本地进程。
 
 **配置。** 本文件中一个键,加上 config.json 中两个:
 
-- `endpoints.<tier>.webui_image`:pod 镜像,见 §3 的说明。设置它才使 `sandboxed` 等级可被探测,探针通过
-  会把部署的默认启动形态切换为 sandboxed。
+- `endpoints.<tier>.webui_image`:pod 镜像,见 §3 的说明。只有 config.json 选择了这个 backend(见下)时才会
+  启动 pod;仅配置镜像不会切换任何东西(#3446)。
 - config.json `workspace.webui_callback_url`:**必填**。静态探针把它当作 pod 访问控制面 LLM 代理的 URL。
   sidecar tier 上,控制面主机名必须在该 tier 的 `egress_allow_hosts` 中;CNI tier 上它必须公网可达
   (loopback、私网与集群内地址在探测时被拒)。
-- config.json `workspace.sandbox_tier`:可选。交互 pod 在哪个 endpoint tier 上启动,默认为后端的
-  `default_tier`。
+- config.json `workspace.isolation`:`{"level": "sandboxed", "backend": "opensandbox"}`,另可加 `"tier"`:交互
+  pod 在哪个 endpoint tier 上启动,默认为后端的 `default_tier`。见管理员指南
+  [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md) §3.6。
 
 **web 进程的环境变量:**
 

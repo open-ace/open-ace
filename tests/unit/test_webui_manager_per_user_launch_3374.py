@@ -3,6 +3,7 @@
 import pytest
 
 from app.services.webui_manager import WebUIManager
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3374)]
 
@@ -200,7 +201,12 @@ def test_cached_instance_with_stale_account_is_restarted(monkeypatch):
     manager.config = type(
         "C",
         (),
-        {"max_instances": 30, "url": "http://127.0.0.1", "multi_user_mode": True},
+        {
+            "max_instances": 30,
+            "url": "http://127.0.0.1",
+            "multi_user_mode": True,
+            "isolation": iso("plain"),
+        },
     )()
 
     class _FakeInstance:
@@ -241,7 +247,12 @@ def test_cached_instance_with_same_account_is_reused(monkeypatch):
     manager.config = type(
         "C",
         (),
-        {"max_instances": 30, "url": "http://127.0.0.1", "multi_user_mode": True},
+        {
+            "max_instances": 30,
+            "url": "http://127.0.0.1",
+            "multi_user_mode": True,
+            "isolation": iso("plain"),
+        },
     )()
 
     class _FakeInstance:
@@ -270,7 +281,7 @@ def test_cached_instance_with_same_account_is_reused(monkeypatch):
 def test_prestart_skips_when_gate_rejects(monkeypatch):
     # 评审 #6:prestart 与 /user-url 同闸——拒绝则不 spawn
     manager = _make()
-    manager.config = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
+    manager.config = type("C", (), {"multi_user_mode": True, "isolation": iso("plain")})()
     spawned = []
     monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
 
@@ -299,7 +310,7 @@ def test_prestart_skips_when_gate_rejects(monkeypatch):
 
 def test_prestart_skips_without_explicit_mapping(monkeypatch):
     manager = _make()
-    manager.config = type("C", (), {"multi_user_mode": True, "required_isolation_level": ""})()
+    manager.config = type("C", (), {"multi_user_mode": True, "isolation": iso("plain")})()
     spawned = []
     monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
     manager.prestart_user_instance_async(7, "", "http://h")
@@ -311,7 +322,7 @@ def wic_snap():
 
     return IsolationCapabilitySnapshot(
         supported=True,
-        backend="qwen-code-webui-per-user",
+        backend="plain",
         isolation_level="os_user",
         enforced=("identity",),
         unsupported=(),
@@ -325,13 +336,12 @@ def wic_reason(code, message):
     return IsolationReason(code, message)
 
 
-def test_prestart_invalid_config_floor_still_gates(monkeypatch):
-    # PR review round 2:无效 config 下限在 prestart 也 fail-closed(归一化回退
-    # 快照等级),不再跳过整个门闸
+def test_prestart_gates_at_the_declared_level(monkeypatch):
+    # Issue #3446: the declared workspace.isolation.level is the floor the
+    # prestart gate evaluates (an invalid level can no longer reach here —
+    # the config parser refuses it).
     manager = _make()
-    manager.config = type(
-        "C", (), {"multi_user_mode": True, "required_isolation_level": "strong"}
-    )()
+    manager.config = type("C", (), {"multi_user_mode": True, "isolation": iso("plain")})()
     spawned = []
     monkeypatch.setattr("app.services.webui_manager.gevent.spawn", lambda fn: spawned.append(fn))
 
@@ -358,7 +368,7 @@ def test_prestart_invalid_config_floor_still_gates(monkeypatch):
     )
     manager.prestart_user_instance_async(7, "alice_acct", "http://h")
     assert spawned == []
-    assert rejected_with == ["os_user"]  # 归一化后按快照等级过闸
+    assert rejected_with == ["os_user"]
 
 
 def test_launch_path_shares_resolution_memo_with_probe(monkeypatch):
@@ -375,6 +385,7 @@ def test_launch_path_shares_resolution_memo_with_probe(monkeypatch):
             "max_instances": 30,
             "url": "http://127.0.0.1",
             "multi_user_mode": True,
+            "isolation": iso("plain"),
         },
     )()
     calls = []

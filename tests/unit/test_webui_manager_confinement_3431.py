@@ -18,21 +18,17 @@ import pytest
 
 from app.services import workspace_isolation_contract as wic
 from app.services.webui_manager import _WEBUI_CONFINE_WRAPPER, WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3431)]
 
 
-def _manager(**overrides) -> WebUIManager:
+def _manager(egress_allow=("registry.npmjs.org:443",), **overrides) -> WebUIManager:
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("bwrap", memory="2G", cpu_percent=150, tasks=256, egress_allow=egress_allow),
         token_secret="secret-3431",
         webui_callback_url="http://10.0.0.5:19888",
-        os_user_confinement="bwrap",
-        confinement_memory_max="2G",
-        confinement_cpu_quota=150,
-        confinement_tasks_max=256,
-        confinement_egress_allow=("registry.npmjs.org:443",),
     )
     for key, value in overrides.items():
         setattr(config, key, value)
@@ -45,18 +41,14 @@ def _manager(**overrides) -> WebUIManager:
 
 
 @pytest.mark.parametrize(
-    ("value", "enabled"),
-    [("", False), ("off", False), ("OFF", False), ("bwrap", True), (" Bwrap ", True),
-     ("docker", True), (None, False), (MagicMock(), False)],
+    ("backend", "enabled"),
+    [("shared", False), ("plain", False), ("opensandbox", False),
+     ("bwrap", True), ("local-gvisor", True), ("local-kata", True)],
 )  # fmt: skip
-def test_confinement_enabled_is_string_only(value, enabled):
-    manager = _manager(os_user_confinement=value)
+def test_confinement_follows_the_isolation_backend(backend, enabled):
+    manager = _manager(isolation=iso(backend))
     assert manager._confinement_enabled() is enabled
-
-
-def test_unknown_mode_is_a_readiness_error_not_a_silent_off():
-    manager = _manager(os_user_confinement="docker")
-    assert manager._confinement_readiness("/usr/bin/qwen-code-webui") == "confinement_mode_invalid"
+    assert manager.confinement_mode() == (backend if enabled else "")
 
 
 def test_non_linux_platform_cannot_confine():
@@ -145,7 +137,7 @@ def test_launch_readiness_includes_confinement_after_base_checks():
 
 
 def test_launch_readiness_unchanged_when_confinement_off():
-    manager = _manager(os_user_confinement="")
+    manager = _manager(isolation=iso("plain"))
     manager._resolved_webui = ("/usr/bin/qwen-code-webui", None)
     with (
         patch("app.utils.workspace._is_wrapper_available", return_value=True),
@@ -183,13 +175,13 @@ def test_confined_env_drops_reserved_loader_and_empty_keys():
 def test_allowlist_comes_from_server_config_only():
     manager = _manager(
         webui_callback_url="https://openace.example.com/",
-        confinement_egress_allow=("registry.npmjs.org:443", "openace.example.com:443"),
+        egress_allow=("registry.npmjs.org:443", "openace.example.com:443"),
     )
     assert manager._confinement_allowlist() == [
         "openace.example.com:443",
         "registry.npmjs.org:443",
     ]
-    ipv6 = _manager(webui_callback_url="http://[fd00::1]:8080", confinement_egress_allow=())
+    ipv6 = _manager(webui_callback_url="http://[fd00::1]:8080", egress_allow=())
     assert ipv6._confinement_allowlist() == ["[fd00::1]:8080"]
 
 
@@ -270,7 +262,7 @@ def test_launch_hands_environment_over_stdin(mock_chown, mock_popen, mock_pwd):
 
 class _ConfinedStub:
     def __init__(self, *, readiness=None, active=True):
-        self.config = SimpleNamespace(enabled=True, multi_user_mode=True, sandbox_tier="")
+        self.config = SimpleNamespace(enabled=True, isolation=iso("bwrap" if active else "plain"))
         self._readiness = readiness
         self._active = active
 
@@ -300,7 +292,7 @@ def test_confined_snapshot_adds_resources_and_egress(linux_no_sandbox):
         "identity", "filesystem", "environment", "process", "resources", "network_egress",
     }  # fmt: skip
     assert snap.unsupported == ("kernel",)
-    assert snap.policy_revision == "2026-09-26.2"
+    assert snap.policy_revision == "2026-09-26.3"
 
 
 def test_unconfined_os_user_snapshot_is_unchanged(linux_no_sandbox):
@@ -322,24 +314,26 @@ def test_cold_worker_does_not_claim_confinement(linux_no_sandbox, monkeypatch):
     monkeypatch.setattr("app.services.webui_manager.peek_webui_manager", lambda: None)
     monkeypatch.setattr(
         "app.services.webui_manager.read_workspace_config",
-        lambda: WorkspaceConfig(enabled=True, multi_user_mode=True, os_user_confinement="bwrap"),
+        lambda: WorkspaceConfig(enabled=True, isolation=iso("bwrap")),
     )
     snap = wic.build_workspace_isolation_snapshot()
-    assert snap.backend == wic.BACKEND_PER_USER
+    # the configured backend is named, but only the os_user guarantees are claimed
+    assert snap.backend == "bwrap"
     assert "launch_path_unverified" in [r.code for r in snap.reasons]
     assert "resources" in snap.unsupported
 
 
-def test_read_workspace_config_parses_confinement(tmp_path, monkeypatch):
+def test_read_workspace_config_parses_the_isolation_block(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(
         json.dumps(
             {
                 "workspace": {
-                    "os_user_confinement": " BWRAP ",
-                    "confinement_memory_max": "8G",
-                    "confinement_cpu_quota": 400,
-                    "confinement_tasks_max": 1024,
-                    "confinement_egress_allow": ["pypi.org:443", " ", "files.pythonhosted.org:443"],
+                    "isolation": {
+                        "level": "os_user",
+                        "backend": "bwrap",
+                        "limits": {"memory": "8G", "cpu_percent": 400, "tasks": 1024},
+                        "egress_allow": ["pypi.org:443", " ", "files.pythonhosted.org:443"],
+                    }
                 }
             }
         )
@@ -347,12 +341,10 @@ def test_read_workspace_config_parses_confinement(tmp_path, monkeypatch):
     monkeypatch.setattr("app.repositories.database.CONFIG_DIR", str(tmp_path))
     from app.services.webui_manager import read_workspace_config
 
-    config = read_workspace_config()
-    assert config.os_user_confinement == "bwrap"
-    assert config.confinement_memory_max == "8G"
-    assert config.confinement_cpu_quota == 400
-    assert config.confinement_tasks_max == 1024
-    assert config.confinement_egress_allow == ("pypi.org:443", "files.pythonhosted.org:443")
+    isolation = read_workspace_config().isolation
+    assert (isolation.level, isolation.backend) == ("os_user", "bwrap")
+    assert (isolation.memory, isolation.cpu_percent, isolation.tasks) == ("8G", 400, 1024)
+    assert isolation.egress_allow == ("pypi.org:443", "files.pythonhosted.org:443")
 
 
 @pytest.mark.parametrize("form", ["dev_directory", "same_account"])

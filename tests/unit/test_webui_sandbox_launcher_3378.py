@@ -25,6 +25,7 @@ from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import Fak
 from app.services import webui_sandbox as ws
 from app.services import webui_sandbox_opensandbox as wso
 from app.services import workspace_isolation_contract as wic
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -142,9 +143,8 @@ class _StubConfig:
 
     enabled = True
     multi_user_mode = True
-    sandbox_tier = "kata"
+    isolation = iso("opensandbox", tier="kata")
     webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-    required_isolation_level = ""
 
 
 def _launcher(
@@ -574,9 +574,8 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
     class _Cfg:
         enabled = True
         multi_user_mode = True
-        sandbox_tier = ""
+        isolation = iso("opensandbox")
         webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-        required_isolation_level = ""
 
     class _StubManager:
         config = _Cfg()
@@ -724,10 +723,9 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
         enabled = True
         multi_user_mode = True
         webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-        required_isolation_level = ""
 
         def __init__(self, sandbox_tier: str):
-            self.sandbox_tier = sandbox_tier
+            self.isolation = iso("opensandbox", tier=sandbox_tier)
 
     class _StubManager:
         def __init__(self, sandbox_tier: str):

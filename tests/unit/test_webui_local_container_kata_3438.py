@@ -1,10 +1,10 @@
-"""Issue #3438: ``os_user_confinement = "kata"`` in the manager + contract.
+"""Issue #3438: backend ``local-kata`` in the manager + contract (#3446 names).
 
-The Kata mode is the local-container form of #3431 Option 2 on a Kata
-Containers runtime: SANDBOXED with backend ``local-container:kata``, identity
+The Kata backend is the local-container form of #3431 Option 2 on a Kata
+Containers runtime: SANDBOXED with backend ``local-kata``, identity
 still the OS account, home still the host directory. Pinned here: the root
-probe command (``--backend kata``, the longer boot budget) and its reason
-tokens, the ``--backend kata`` launch, the snapshot and the local launch form.
+probe command (``--backend local-kata``, the longer boot budget) and its reason
+tokens, the ``--backend local-kata`` launch, the snapshot and the local launch form.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from app.services.webui_manager import (
     WebUIManager,
     WorkspaceConfig,
 )
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3438)]
 
@@ -29,13 +30,12 @@ pytestmark = [pytest.mark.issue(3438)]
 def _manager(**overrides) -> WebUIManager:
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("local-kata"),
         token_secret="secret-3438",
         webui_callback_url="http://10.0.0.5:19888",
-        os_user_confinement="kata",
     )
     for key, value in overrides.items():
-        setattr(config, key, value)
+        setattr(config, key, value)  # isolation=iso(...) switches the backend
     manager = WebUIManager(config)
     manager._platform = "linux"
     return manager
@@ -58,11 +58,11 @@ def test_kata_readiness_runs_the_kata_probe():
         assert manager._compute_launch_readiness() is None
     find_webui.assert_not_called()  # the WebUI lives in the image
     assert run.call_args.args[0] == [
-        "sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe", "--backend", "kata",
+        "sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe", "--backend", "local-kata",
     ]  # fmt: skip
     # a nested-virtualization guest can take minutes to boot
     assert run.call_args.kwargs["timeout"] >= 300
-    assert manager.confinement_mode() == "kata"
+    assert manager.confinement_mode() == "local-kata"
 
 
 @pytest.mark.parametrize(
@@ -84,8 +84,8 @@ def test_kata_probe_tokens_map_to_reasons(token, reason):
         assert manager._container_readiness() == reason
 
 
-def test_runsc_probe_command_is_unchanged():
-    manager = _manager(os_user_confinement="runsc")
+def test_gvisor_probe_command_names_its_backend():
+    manager = _manager(isolation=iso("local-gvisor"))
     with (
         patch("app.utils.workspace._is_wrapper_available", return_value=True),
         patch(
@@ -93,7 +93,9 @@ def test_runsc_probe_command_is_unchanged():
         ) as run,
     ):
         manager._container_readiness()
-    assert run.call_args.args[0] == ["sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe"]
+    assert run.call_args.args[0] == [
+        "sudo", "-n", _WEBUI_CONFINE_WRAPPER, "launch", "--probe", "--backend", "local-gvisor",
+    ]  # fmt: skip
 
 
 @patch("app.services.webui_manager.pwd")
@@ -111,13 +113,13 @@ def test_kata_launch_uses_the_kata_backend(mock_chown, mock_popen, mock_pwd):
         manager._launch_webui_process(7, "alice", 3150, "http://10.0.0.5")
     find_webui.assert_not_called()
     cmd = mock_popen.call_args.args[0]
-    assert cmd[cmd.index("--backend") + 1] == "kata"
+    assert cmd[cmd.index("--backend") + 1] == "local-kata"
     assert cmd[cmd.index("--webui") + 1] == "/usr/bin/qwen-code-webui"
 
 
 class _Stub:
-    def __init__(self, *, readiness=None, mode="kata"):
-        self.config = SimpleNamespace(enabled=True, multi_user_mode=True, sandbox_tier="")
+    def __init__(self, *, readiness=None, mode="local-kata"):
+        self.config = SimpleNamespace(enabled=True, isolation=iso(mode or "plain"))
         self._readiness = readiness
         self._mode = mode
 
@@ -148,9 +150,9 @@ def test_kata_snapshot_is_sandboxed_with_every_dimension(linux_no_opensandbox):
     snap = wic.build_workspace_isolation_snapshot(_Stub())
     assert snap.supported is True
     assert snap.isolation_level == wic.ISOLATION_LEVEL_SANDBOXED
-    assert snap.backend == "local-container:kata"
+    assert snap.backend == "local-kata"
     assert set(snap.enforced) == set(wic.ALL_DIMENSIONS)
-    assert snap.policy_revision == "2026-09-26.2"
+    assert snap.policy_revision == "2026-09-26.3"
 
 
 def test_a_host_without_kvm_degrades(linux_no_opensandbox):
@@ -159,8 +161,8 @@ def test_a_host_without_kvm_degrades(linux_no_opensandbox):
     assert "confinement_kvm_unavailable" in snap.reasons[0].message
 
 
-def test_an_unknown_mode_is_not_reported_as_sandboxed(linux_no_opensandbox):
-    snap = wic.build_workspace_isolation_snapshot(_Stub(mode="firecracker"))
+def test_a_non_container_backend_is_not_reported_as_sandboxed(linux_no_opensandbox):
+    snap = wic.build_workspace_isolation_snapshot(_Stub(mode="plain"))
     assert snap.isolation_level != wic.ISOLATION_LEVEL_SANDBOXED
 
 
@@ -218,10 +220,10 @@ def test_a_mode_switch_reprobes():
         ) as run,
     ):
         manager._container_readiness()
-        manager.config.os_user_confinement = "runsc"
+        manager.config.isolation = iso("local-gvisor")
         manager._container_readiness()
     assert run.call_count == 2
-    assert "--backend" not in run.call_args.args[0]
+    assert run.call_args.args[0][-2:] == ["--backend", "local-gvisor"]
 
 
 def test_a_slow_failing_probe_is_shared_and_cached():

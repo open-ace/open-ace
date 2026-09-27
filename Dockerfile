@@ -300,7 +300,8 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_APP=server.py \
     FLASK_ENV=production \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    OPENACE_INSTALL_METHOD=docker
 
 # Expose port
 EXPOSE 19888

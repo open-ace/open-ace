@@ -230,7 +230,7 @@ def check_root_user(
 
     Args:
         is_root: Whether running as root user.
-        multi_user_mode: Whether WORKSPACE_MULTI_USER_MODE is enabled.
+        multi_user_mode: Whether WORKSPACE_ISOLATION_BACKEND is "plain" (per-user OS accounts).
         allow_root_multi_user: Whether OPENACE_ALLOW_ROOT_MULTI_USER is set.
 
     Returns:
@@ -244,7 +244,7 @@ def check_root_user(
         return CheckResult(
             status="fail",
             message="Container running as root without proper authorization.",
-            recommendation="If you need multi-user workspace mode, set WORKSPACE_MULTI_USER_MODE=true and OPENACE_ALLOW_ROOT_MULTI_USER=1. For single-user mode, remove any --user 0 setting.",
+            recommendation="If you need multi-user workspace mode, set WORKSPACE_ISOLATION_BACKEND=plain and OPENACE_ALLOW_ROOT_MULTI_USER=1. For single-user mode, remove any --user 0 setting.",
         )
 
     return CheckResult(
@@ -269,7 +269,8 @@ def check_all() -> dict:
     # Get environment values
     secret_key = os.environ.get("SECRET_KEY")
     encryption_key = os.environ.get("OPENACE_ENCRYPTION_KEY")
-    multi_user_mode = os.environ.get("WORKSPACE_MULTI_USER_MODE", "").lower() == "true"
+    # Issue #3446: root is only authorized for per-user OS accounts (backend "plain").
+    multi_user_mode = os.environ.get("WORKSPACE_ISOLATION_BACKEND", "").strip().lower() == "plain"
     allow_root_multi_user = os.environ.get("OPENACE_ALLOW_ROOT_MULTI_USER", "").lower() == "1"
 
     # Issue #2810: Detect database backend to determine if password check applies.

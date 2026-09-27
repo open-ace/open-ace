@@ -142,8 +142,8 @@ class TestMultiUserConfiguration:
         """Test that overlay file enables multi-user mode."""
         overlay_content = OVERLAY_COMPOSE.read_text()
         assert (
-            "WORKSPACE_MULTI_USER_MODE=true" in overlay_content
-        ), "Overlay should set WORKSPACE_MULTI_USER_MODE=true"
+            "WORKSPACE_ISOLATION_BACKEND=plain" in overlay_content
+        ), "Overlay should set WORKSPACE_ISOLATION_BACKEND=plain (#3446)"
 
     def test_overlay_file_sets_allow_root(self):
         """Test that overlay file sets explicit root authorization."""
@@ -174,8 +174,8 @@ class TestEntrypointValidation:
 
         # Check for configuration validation
         assert (
-            "WORKSPACE_MULTI_USER_MODE" in entrypoint_content
-        ), "Entrypoint should validate WORKSPACE_MULTI_USER_MODE"
+            "WORKSPACE_ISOLATION_BACKEND" in entrypoint_content
+        ), "Entrypoint should validate WORKSPACE_ISOLATION_BACKEND"
         assert (
             "OPENACE_ALLOW_ROOT_MULTI_USER" in entrypoint_content
         ), "Entrypoint should validate OPENACE_ALLOW_ROOT_MULTI_USER"

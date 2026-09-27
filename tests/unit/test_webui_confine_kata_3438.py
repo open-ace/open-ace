@@ -408,45 +408,51 @@ def _load(confine, tmp_path, monkeypatch, data):
     return confine.load_policy(str(path))
 
 
-def test_policy_runtimes_map_and_legacy_runtime(confine, tmp_path, monkeypatch):
+def test_policy_has_one_section_per_container_backend(confine, tmp_path, monkeypatch):
     policy = _load(
         confine, tmp_path, monkeypatch,
-        {"webui": ["/w"], "container": {"image": IMAGE,
-                                        "runtimes": {"runsc": "runsc-openace",
-                                                     "kata": "io.containerd.kata.v2"}}},
+        {"webui": ["/w"], "docker": "/usr/local/bin/docker",
+         "local-gvisor": {"image": IMAGE, "runtime": "runsc-openace"},
+         "local-kata": {"image": IMAGE, "runtime": "io.containerd.kata.v2"}},
     )  # fmt: skip
-    assert policy.container.runtime == "runsc-openace"
-    assert policy.container.kata_runtime == "io.containerd.kata.v2"
-    legacy = _load(
-        confine,
-        tmp_path,
-        monkeypatch,
-        {"webui": ["/w"], "container": {"image": IMAGE, "runtime": "runsc-openace"}},
+    assert policy.container("local-gvisor") == confine.ContainerPolicy(
+        IMAGE, "runsc-openace", "/usr/local/bin/docker"
     )
-    assert (legacy.container.runtime, legacy.container.kata_runtime) == ("runsc-openace", "")
+    assert policy.container("local-kata").runtime == "io.containerd.kata.v2"
     kata_only = _load(
-        confine,
-        tmp_path,
-        monkeypatch,
-        {"webui": ["/w"], "container": {"image": IMAGE, "runtimes": {"kata": "kata"}}},
-    )
-    assert (kata_only.container.runtime, kata_only.container.kata_runtime) == ("", "kata")
+        confine, tmp_path, monkeypatch,
+        {"webui": ["/w"], "local-kata": {"image": IMAGE, "runtime": "kata"}},
+    )  # fmt: skip
+    assert kata_only.container("local-gvisor") is None
+    assert kata_only.container("local-kata").docker == "/usr/bin/docker"
+
+
+def test_the_old_container_section_is_refused_with_the_conversion(confine, tmp_path, monkeypatch):
+    with pytest.raises(confine.ConfineError, match="local-gvisor"):
+        _load(
+            confine, tmp_path, monkeypatch,
+            {"webui": ["/w"], "container": {"image": IMAGE, "runtime": "runsc-openace"}},
+        )  # fmt: skip
 
 
 @pytest.mark.parametrize(
-    "container",
-    [{"image": IMAGE},  # no runtime at all
-     {"image": IMAGE, "runtimes": {"runc": "runc"}},  # an unknown mode
-     {"image": IMAGE, "runtimes": {"kata": "kata --debug"}},
-     {"image": IMAGE, "runtimes": ["kata"]}],
+    "section",
+    [{"image": IMAGE},  # no runtime
+     {"image": IMAGE, "runtime": "kata --debug"},
+     {"image": IMAGE, "runtime": "kata", "docker": "/usr/bin/docker"},  # docker is top-level
+     ["kata"]],
 )  # fmt: skip
-def test_policy_rejects_bad_runtimes(confine, tmp_path, monkeypatch, container):
+def test_policy_rejects_bad_sections(confine, tmp_path, monkeypatch, section):
     with pytest.raises(confine.ConfineError):
-        _load(confine, tmp_path, monkeypatch, {"webui": ["/w"], "container": container})
+        _load(confine, tmp_path, monkeypatch, {"webui": ["/w"], "local-kata": section})
 
 
 def _kata_policy(confine):
-    return confine.ContainerPolicy(IMAGE, "runsc-openace", "/usr/bin/docker", "kata")
+    return confine.ContainerPolicy(IMAGE, "kata", "/usr/bin/docker")
+
+
+def _gvisor_policy(confine):
+    return confine.ContainerPolicy(IMAGE, "runsc-openace", "/usr/bin/docker")
 
 
 def _docker_argv(confine, container, kata):
@@ -467,15 +473,9 @@ def test_kata_docker_argv_uses_the_stdio_channel(confine):
     assert argv[argv.index("--pids-limit") + 1] == "512"  # no gVisor host-thread floor
     inner = argv[argv.index("inner") :]
     assert inner[inner.index("--transport") + 1] == "stdio"
-    runsc = _docker_argv(confine, _kata_policy(confine), kata=False)
+    runsc = _docker_argv(confine, _gvisor_policy(confine), kata=False)
     assert runsc[runsc.index("--runtime") + 1] == "runsc-openace"
     assert "--transport" not in runsc
-
-
-def test_a_backend_without_its_runtime_is_refused(confine):
-    policy = confine.ContainerPolicy(IMAGE, "runsc-openace", "/usr/bin/docker")
-    with pytest.raises(confine.ConfineError, match="no kata runtime"):
-        _docker_argv(confine, policy, kata=True)
 
 
 @pytest.fixture
@@ -483,7 +483,7 @@ def planned_kata(confine, monkeypatch, tmp_path):
     entry = pwd.struct_passwd(("alice", "x", 3001, 3001, "", "/wsbase/alice", "/bin/bash"))
     policy = confine.Policy(
         frozenset({"/usr/bin/qwen-code-webui"}), "/usr/bin:/bin", frozenset(),
-        confine.PRIVILEGED_GROUPS, _kata_policy(confine),
+        confine.PRIVILEGED_GROUPS, (("local-kata", _kata_policy(confine)),),
     )  # fmt: skip
     kvm = tmp_path / "kvm"
     kvm.write_text("")
@@ -504,7 +504,7 @@ def planned_kata(confine, monkeypatch, tmp_path):
             "--account", "alice", "--port", "3150", "--memory-max", "4G", "--cpu-quota", "150",
             "--tasks-max", "512", "--allow", "10.0.0.5:19888",
             "--log-dir", "/tmp/qwen-code-webui-7", "--webui", "/usr/bin/qwen-code-webui",
-            "--backend", "kata", "--", "--port", "3150",
+            "--backend", "local-kata", "--", "--port", "3150",
         ]  # fmt: skip
         return confine.plan_launch(argv, json.dumps({"OPENAI_API_KEY": "tok"}))
 
@@ -529,14 +529,13 @@ def test_plan_kata_requires_kvm(confine, planned_kata):
 def test_probe_usage_is_strict(confine, monkeypatch):
     monkeypatch.setattr(confine.os, "geteuid", lambda: 0)
     seen = []
-    monkeypatch.setattr(
-        confine, "run_container_probe", lambda backend="container": seen.append(backend) or 0
-    )
-    assert confine.run_launch(["--probe"]) == 0
-    assert confine.run_launch(["--probe", "--backend", "kata"]) == 0
-    assert seen == ["container", "kata"]
-    with pytest.raises(confine.ConfineError):
-        confine.run_launch(["--probe", "--backend", "bwrap"])
+    monkeypatch.setattr(confine, "run_container_probe", lambda backend: seen.append(backend) or 0)
+    assert confine.run_launch(["--probe", "--backend", "local-gvisor"]) == 0
+    assert confine.run_launch(["--probe", "--backend", "local-kata"]) == 0
+    assert seen == ["local-gvisor", "local-kata"]
+    for argv in (["--probe"], ["--probe", "--backend", "bwrap"], ["--probe", "--backend", "kata"]):
+        with pytest.raises(confine.ConfineError):
+            confine.run_launch(argv)
 
 
 # ── review round 1: bounded handlers, closed channel, probe ────────────────
@@ -602,8 +601,8 @@ def test_supervisor_exits_when_the_channel_closes(confine, tmp_path):
     assert rc == 1
 
 
-def _probe_policy(confine, monkeypatch, tmp_path, container, kvm=True):
-    policy = confine.Policy(frozenset({"/w"}), "/usr/bin", frozenset(), frozenset(), container)
+def _probe_policy(confine, monkeypatch, tmp_path, containers, kvm=True):
+    policy = confine.Policy(frozenset({"/w"}), "/usr/bin", frozenset(), frozenset(), containers)
     monkeypatch.setattr(confine, "load_policy", lambda path=None: policy)
     monkeypatch.setattr(confine, "require_root_controlled_executable", lambda p: None)
     monkeypatch.setattr(confine, "symlinks_protected", lambda path=None: True)
@@ -613,16 +612,17 @@ def _probe_policy(confine, monkeypatch, tmp_path, container, kvm=True):
     monkeypatch.setattr(confine, "KVM_DEVICE", str(kvm_path))
 
 
-def test_probe_without_a_kata_runtime_is_a_policy_error(confine, monkeypatch, tmp_path, capsys):
-    container = confine.ContainerPolicy(IMAGE, "runsc-openace", "/usr/bin/docker")
-    _probe_policy(confine, monkeypatch, tmp_path, container)
-    assert confine.run_container_probe(backend="kata") == 1
+def test_probe_without_a_kata_section_is_a_policy_error(confine, monkeypatch, tmp_path, capsys):
+    _probe_policy(confine, monkeypatch, tmp_path, (("local-gvisor", _gvisor_policy(confine)),))
+    assert confine.run_container_probe("local-kata") == 1
     assert capsys.readouterr().out.strip().splitlines()[-1] == "policy:invalid"
 
 
 def test_probe_without_kvm(confine, monkeypatch, tmp_path, capsys):
-    _probe_policy(confine, monkeypatch, tmp_path, _kata_policy(confine), kvm=False)
-    assert confine.run_container_probe(backend="kata") == 1
+    _probe_policy(
+        confine, monkeypatch, tmp_path, (("local-kata", _kata_policy(confine)),), kvm=False
+    )
+    assert confine.run_container_probe("local-kata") == 1
     assert capsys.readouterr().out.strip().splitlines()[-1] == "kvm:unavailable"
 
 

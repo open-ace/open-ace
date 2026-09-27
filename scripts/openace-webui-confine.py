@@ -25,14 +25,17 @@ Installed as ``/usr/local/bin/openace-webui-confine``. One file, four modes:
                loopback proxy port to the egress socket, and runs the WebUI.
 ``check``      unprivileged readiness probe for the manager.
 
-Issue #3431 Option 2 adds a second backend, ``--backend container``: the
-sandbox is a Docker container on a gVisor (runsc) runtime instead of
-bubblewrap. ``launch`` then prepares a root-owned run directory, forks the
-same ``supervise`` endpoints (as the account, via setpriv) and execs a fixed
-``docker run`` whose image is digest-pinned in the policy; the WebUI
-environment reaches ``inner`` on the container's stdin. ``launch --probe``
-(root) verifies the runtime, the image, a gVisor kernel and host UNIX-socket
-access (runsc needs ``--host-uds=open``) for the manager's readiness check.
+``--backend`` takes the names of ``workspace.isolation.backend`` (#3446):
+``bwrap`` (above), ``local-gvisor`` (#3431 Option 2) and ``local-kata``
+(#3438). For the two container backends the sandbox is a Docker container on
+the gVisor or Kata runtime instead of bubblewrap: ``launch`` prepares a
+root-owned run directory, forks the same ``supervise`` endpoints (as the
+account, via setpriv) and runs a fixed ``docker run`` whose image is
+digest-pinned in the policy's section for that backend; the WebUI environment
+reaches ``inner`` on the container's stdin (under Kata the ingress/egress
+streams share that stdio channel). ``launch --probe --backend <name>`` (root)
+verifies the runtime, the image and the kernel for the manager's readiness
+check.
 
 Nothing on the host side ever follows a path the sandbox can write: the
 socket directory is bound READ-ONLY into the sandbox, the sandbox only
@@ -187,13 +190,21 @@ class ConfineError(Exception):
     """A refused launch (exit status 64, message on stderr)."""
 
 
+# The container backends; the names are workspace.isolation.backend's (#3446).
+BACKEND_BWRAP = "bwrap"
+BACKEND_LOCAL_GVISOR = "local-gvisor"
+BACKEND_LOCAL_KATA = "local-kata"
+CONTAINER_BACKENDS = (BACKEND_LOCAL_GVISOR, BACKEND_LOCAL_KATA)
+
+
 class ContainerPolicy(NamedTuple):
-    """The policy's ``container`` section (Option 2 backend)."""
+    """One container backend's section of the policy (``local-gvisor`` / ``local-kata``)."""
 
     image: str  # name@sha256:<64 hex> or a local image id sha256:<64 hex>
-    runtime: str  # gVisor: a Docker runtime registered for runsc --host-uds=open ("" = none)
-    docker: str  # absolute path of the docker CLI
-    kata_runtime: str = ""  # Kata (#3438): a registered name or io.containerd.kata.v2
+    # local-gvisor: a Docker runtime registered for runsc --host-uds=open;
+    # local-kata: a registered name or a shim name such as io.containerd.kata.v2
+    runtime: str
+    docker: str  # absolute path of the docker CLI (the policy's top-level "docker")
 
 
 class Policy(NamedTuple):
@@ -203,7 +214,11 @@ class Policy(NamedTuple):
     path: str
     bases: frozenset[str]  # empty = any workspace base
     denied_groups: frozenset[str]
-    container: ContainerPolicy | None = None
+    # backend name -> its section; only the backends the policy configures
+    containers: tuple[tuple[str, ContainerPolicy], ...] = ()
+
+    def container(self, backend: str) -> ContainerPolicy | None:
+        return dict(self.containers).get(backend)
 
 
 # ── Validation helpers (pure; unit-tested) ──────────────────────────────────
@@ -531,36 +546,39 @@ def load_policy(path: str = CONFIG_PATH) -> Policy:
         os.path.isabs(part) for part in sandbox_path.split(":")
     ):
         raise ConfineError(f"policy file {path}: 'path' must be absolute directories joined by ':'")
-    container = None
-    raw_container = data.get("container")
-    if raw_container is not None:
-        if not isinstance(raw_container, dict):
-            raise ConfineError(f"policy file {path}: 'container' must be an object")
-        image = raw_container.get("image", "")
-        # ``runtimes`` maps a confinement mode to its Docker runtime; the
-        # older single ``runtime`` key is the gVisor one.
-        runtimes = raw_container.get("runtimes", {})
-        if not isinstance(runtimes, dict) or set(runtimes) - {"runsc", "kata"}:
+    if "container" in data:
+        raise ConfineError(
+            f"policy file {path}: the 'container' section was replaced by one section "
+            "per backend (#3446): move its image and runtime to "
+            '"local-gvisor": {"image": ..., "runtime": ...} and/or '
+            '"local-kata": {"image": ..., "runtime": ...}, and docker to the top-level '
+            '"docker" key'
+        )
+    docker = data.get("docker", "/usr/bin/docker")
+    if not isinstance(docker, str) or not os.path.isabs(docker):
+        raise ConfineError(f"policy file {path}: 'docker' must be an absolute path")
+    containers: list[tuple[str, ContainerPolicy]] = []
+    for backend in CONTAINER_BACKENDS:
+        raw = data.get(backend)
+        if raw is None:
+            continue
+        if not isinstance(raw, dict) or set(raw) - {"image", "runtime"}:
             raise ConfineError(
-                f"policy file {path}: container.runtimes may only map 'runsc' and 'kata'"
+                f"policy file {path}: {backend!r} must be an object with 'image' and 'runtime'"
             )
-        runtime = runtimes.get("runsc", raw_container.get("runtime", ""))
-        kata_runtime = runtimes.get("kata", "")
-        docker = raw_container.get("docker", "/usr/bin/docker")
+        image = raw.get("image", "")
+        runtime = raw.get("runtime", "")
         if not isinstance(image, str) or not IMAGE_RE.fullmatch(image):
             raise ConfineError(
-                f"policy file {path}: container.image must be pinned by digest "
+                f"policy file {path}: {backend}.image must be pinned by digest "
                 "(name@sha256:<64 hex>) or be a local image id (sha256:<64 hex>)"
             )
-        for what, value in (("runsc", runtime), ("kata", kata_runtime)):
-            if not isinstance(value, str) or (value and not RUNTIME_RE.fullmatch(value)):
-                raise ConfineError(f"policy file {path}: the {what} runtime is not a runtime name")
-        if not runtime and not kata_runtime:
-            raise ConfineError(f"policy file {path}: container names no runtime")
-        if not isinstance(docker, str) or not os.path.isabs(docker):
-            raise ConfineError(f"policy file {path}: container.docker must be an absolute path")
-        container = ContainerPolicy(image, runtime, docker, kata_runtime)
-    return Policy(webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied), container)
+        if not isinstance(runtime, str) or not RUNTIME_RE.fullmatch(runtime):
+            raise ConfineError(f"policy file {path}: {backend}.runtime is not a runtime name")
+        containers.append((backend, ContainerPolicy(image, runtime, docker)))
+    return Policy(
+        webuis, sandbox_path, bases, PRIVILEGED_GROUPS | frozenset(denied), tuple(containers)
+    )
 
 
 def validate_log_dir(path: str, entry: pwd.struct_passwd) -> str:
@@ -680,9 +698,7 @@ def build_docker_argv(
     sockets. No socket directory is mounted; ``inner`` speaks the stdio
     channel instead (see :class:`Mux`), and the task bound is the guest's own.
     """
-    runtime = container.kata_runtime if kata else container.runtime
-    if not runtime:
-        raise ConfineError(f"the policy names no {'kata' if kata else 'runsc'} runtime")
+    runtime = container.runtime
     argv = [
         container.docker, "run", "--rm", "-i", "--init",
         "--name", f"openace-webui-{uid}-{port}",
@@ -1571,7 +1587,9 @@ def _launch_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-dir", required=True)
     parser.add_argument("--webui", required=True)
     # container = Docker on gVisor (#3431 Option 2); kata = Docker on Kata (#3438)
-    parser.add_argument("--backend", choices=("bwrap", "container", "kata"), default="bwrap")
+    parser.add_argument(
+        "--backend", choices=(BACKEND_BWRAP, *CONTAINER_BACKENDS), default=BACKEND_BWRAP
+    )
     parser.add_argument("webui_args", nargs=argparse.REMAINDER)
     return parser
 
@@ -1614,7 +1632,7 @@ def plan_launch(
         env = validate_env(json.loads(env_text or "{}"))
     except json.JSONDecodeError as exc:
         raise ConfineError(f"environment on stdin is not JSON: {exc}") from None
-    if args.backend in ("container", "kata"):
+    if args.backend in CONTAINER_BACKENDS:
         return _plan_container(
             args, policy, entry, port, cpu, tasks, allow, webui, webui_args,
             log_dir, base, home, shared, env,
@@ -1697,10 +1715,11 @@ def _plan_container(
     anchor. Supplementary groups are passed as ``--group-add`` (privileged
     ones were already refused) so shared-project ACLs keep working.
     """
-    if policy.container is None:
-        raise ConfineError("the policy file has no 'container' section")
-    kata = args.backend == "kata"
-    require_root_controlled_executable(policy.container.docker)
+    container = policy.container(args.backend)
+    if container is None:
+        raise ConfineError(f"the policy file has no {args.backend!r} section")
+    kata = args.backend == BACKEND_LOCAL_KATA
+    require_root_controlled_executable(container.docker)
     if kata and not os.path.exists(KVM_DEVICE):
         raise ConfineError(f"the kata backend needs {KVM_DEVICE}")
     if not symlinks_protected():
@@ -1716,7 +1735,7 @@ def _plan_container(
     cidfile = os.path.join(RUN_ROOT, f"{launch_id}.cid")  # root-owned directory
     extra_gids = sorted(gid for gid in account_groups(entry) if gid != entry.pw_gid)
     docker_argv = build_docker_argv(
-        container=policy.container,
+        container=container,
         uid=entry.pw_uid,
         gid=entry.pw_gid,
         extra_gids=extra_gids,
@@ -2076,9 +2095,9 @@ def run_launch(argv: Sequence[str]) -> int:
         raise ConfineError("launch must run as root (via sudo)")
     if list(argv[:1]) == ["--probe"]:
         rest = list(argv[1:])
-        if rest not in ([], ["--backend", "container"], ["--backend", "kata"]):
-            raise ConfineError("usage: launch --probe [--backend container|kata]")
-        return run_container_probe(backend=rest[1] if rest else "container")
+        if len(rest) != 2 or rest[0] != "--backend" or rest[1] not in CONTAINER_BACKENDS:
+            raise ConfineError("usage: launch --probe --backend local-gvisor|local-kata")
+        return run_container_probe(backend=rest[1])
     systemd_argv, payload = plan_launch(argv, sys.stdin.read())
     if payload.get("backend") == "container":
         return _run_launch_container(systemd_argv, payload)
@@ -2475,7 +2494,7 @@ def _run_kata_probe(
         prepare_run_dir(probe_dir, 0, 0)  # root only: docker writes the cid file
         proc = subprocess.Popen(  # noqa: S603 - fixed argv
             [container.docker, "run", "--rm", "-i", "--cidfile", cidfile,
-             "--runtime", container.kata_runtime, "--network", "none",
+             "--runtime", container.runtime, "--network", "none",
              "--user", "65534:65534", "--read-only", "--cap-drop", "ALL",
              "--security-opt", "no-new-privileges",
              "--entrypoint", "python3", container.image, "-I", "-c", KATA_PROBE_PROGRAM],
@@ -2535,7 +2554,7 @@ def _run_kata_probe(
         shutil.rmtree(probe_dir, ignore_errors=True)
 
 
-def run_container_probe(policy_path: str = CONFIG_PATH, backend: str = "container") -> int:
+def run_container_probe(backend: str, policy_path: str = CONFIG_PATH) -> int:
     """Print ``ok`` or one reason token; used by the manager's readiness check.
 
     Verifies what the container backend's guarantees rest on: the docker CLI
@@ -2546,19 +2565,15 @@ def run_container_probe(policy_path: str = CONFIG_PATH, backend: str = "containe
     """
     try:
         policy = load_policy(policy_path)
-        if policy.container is None:
-            raise ConfineError("the policy file has no 'container' section")
-        require_root_controlled_executable(policy.container.docker)
+        container = policy.container(backend)
+        if container is None:
+            raise ConfineError(f"the policy file has no {backend!r} section")
+        require_root_controlled_executable(container.docker)
     except ConfineError as exc:
         print(f"# {exc}", file=sys.stderr)
         print("policy:invalid")
         return 1
-    container = policy.container
-    kata = backend == "kata"
-    if not (container.kata_runtime if kata else container.runtime):
-        print("# the policy names no runtime for this backend", file=sys.stderr)
-        print("policy:invalid")
-        return 1
+    kata = backend == BACKEND_LOCAL_KATA
     if not symlinks_protected():
         print("symlinks:unprotected")
         return 1
@@ -2586,7 +2601,7 @@ def run_container_probe(policy_path: str = CONFIG_PATH, backend: str = "containe
     except json.JSONDecodeError:
         runtimes = {}
     if not (
-        _kata_runtime_available(container.kata_runtime, runtimes)
+        _kata_runtime_available(container.runtime, runtimes)
         if kata
         else container.runtime in runtimes
     ):

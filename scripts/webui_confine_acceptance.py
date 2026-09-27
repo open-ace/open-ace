@@ -12,17 +12,17 @@ bubblewrap, and it creates OS accounts. Run it ONLY on a disposable host:
 
     CONFINE_ACCEPTANCE_DISPOSABLE=1 python3 scripts/webui_confine_acceptance.py
 
-Option 2 (``--backend container``, a Docker + gVisor host with a registered
+``local-gvisor`` (#3431 Option 2; a Docker + gVisor host with a registered
 ``runsc --host-uds=open`` runtime and the webui-sandbox image built locally):
 
-    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=container \
+    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=local-gvisor \
     CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
     CONFINE_ACCEPTANCE_RUNTIME=runsc-openace python3 scripts/webui_confine_acceptance.py
 
-Kata (#3438, ``--backend kata``, a Docker host with /dev/kvm and Kata >= 3.32
-whose containerd-shim-kata-v2 is on dockerd's PATH):
+``local-kata`` (#3438; a Docker host with /dev/kvm and Kata >= 3.32 whose
+containerd-shim-kata-v2 is root-owned in /usr/local/bin):
 
-    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=kata \
+    CONFINE_ACCEPTANCE_DISPOSABLE=1 CONFINE_ACCEPTANCE_BACKEND=local-kata \
     CONFINE_ACCEPTANCE_IMAGE=<image id or name@sha256:...> \
     CONFINE_ACCEPTANCE_RUNTIME=io.containerd.kata.v2 python3 scripts/webui_confine_acceptance.py
 
@@ -175,24 +175,23 @@ def host_ip() -> str:
 
 
 def container_backend() -> str:
-    """ "container" (gVisor), "kata", or "" for the bwrap backend."""
+    """ "local-gvisor", "local-kata", or "" for the bwrap backend (#3446 names)."""
     backend = os.environ.get("CONFINE_ACCEPTANCE_BACKEND", "")
-    return backend if backend in ("container", "kata") else ""
+    return backend if backend in ("local-gvisor", "local-kata") else ""
 
 
 def container_policy() -> dict | None:
+    """The policy entries for the container backend under test."""
     backend = container_backend()
     if not backend:
         return None
-    if backend == "kata":
-        runtime = os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "io.containerd.kata.v2")
-        runtimes = {"kata": runtime}
-    else:
-        runtimes = {"runsc": os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", "runsc-openace")}
+    default_runtime = "io.containerd.kata.v2" if backend == "local-kata" else "runsc-openace"
     return {
-        "image": os.environ["CONFINE_ACCEPTANCE_IMAGE"],
-        "runtimes": runtimes,
         "docker": shutil.which("docker") or "/usr/bin/docker",
+        backend: {
+            "image": os.environ["CONFINE_ACCEPTANCE_IMAGE"],
+            "runtime": os.environ.get("CONFINE_ACCEPTANCE_RUNTIME", default_runtime),
+        },
     }
 
 
@@ -205,9 +204,7 @@ def setup(real_webui: bool) -> None:
     webuis = [PROBE] + ([REAL_WEBUI] if real_webui else [])
     sudo("install", "-d", "-o", "root", "-g", "root", "-m", "0755", "/etc/openace")
     policy = {"webui": webuis, "path": "/usr/local/bin:/usr/bin:/bin"}
-    container = container_policy()
-    if container is not None:
-        policy["container"] = container
+    policy.update(container_policy() or {})
     sudo("tee", POLICY, input=json.dumps(policy))
     sudo("chmod", "0644", POLICY)
     sudo("install", "-d", "-o", "root", "-g", "root", "-m", "0755", BASE)
@@ -504,13 +501,13 @@ def _run_real_webui(record: Record, target: str) -> None:
         process.wait(timeout=15)
 
 
-def run_container(record: Record, backend: str = "container") -> None:
+def run_container(record: Record, backend: str = "local-gvisor") -> None:
     """The real WebUI from the pinned image: Option 2 on gVisor (``container``)
     or #3438 on Kata (``kata``, ingress/egress over the stdio channel)."""
-    kata = backend == "kata"
+    kata = backend == "local-kata"
     runtime_label = "Kata" if kata else "gVisor"
     boot = 300.0 if kata else 90.0  # a nested-virtualization Kata guest boots slowly
-    probe_argv = [WRAPPER, "launch", "--probe", *(["--backend", "kata"] if kata else [])]
+    probe_argv = [WRAPPER, "launch", "--probe", "--backend", backend]
     target = host_ip()
     server = subprocess.Popen(
         [sys.executable, "-m", "http.server", str(ALLOWED_PORT), "--bind", "0.0.0.0"],  # noqa: S104
@@ -705,10 +702,10 @@ def run_container(record: Record, backend: str = "container") -> None:
         broken = json.loads(policy_text)
         if kata:
             # runc claimed as Kata: the host-side evidence must refuse it
-            broken["container"]["runtimes"]["kata"] = "runc"
+            broken["local-kata"]["runtime"] = "runc"
             expected, label = "kernel:unverified", "probe refuses runc claimed as Kata"
         else:
-            broken["container"]["runtimes"]["runsc"] = "runsc"  # plain runsc: no host UDS
+            broken["local-gvisor"]["runtime"] = "runsc"  # plain runsc: no host UDS
             expected, label = "runtime:no-host-uds", "probe refuses a runtime without host UDS"
         sudo("tee", POLICY, input=json.dumps(broken))
         probe = sudo(*probe_argv, check=False, timeout=400)

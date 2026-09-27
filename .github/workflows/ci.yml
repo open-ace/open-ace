@@ -490,7 +490,7 @@ jobs:
         run: |
           docker run --rm --user 0 \
             -e OPENACE_SECURITY_MODE=development \
-            -e WORKSPACE_MULTI_USER_MODE=true \
+            -e WORKSPACE_ISOLATION_BACKEND=plain \
             -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
             -e WORKSPACE_BASE_DIR=/workspace \
             open-ace:${{ github.sha }} python /app/scripts/multiuser_smoke.py
