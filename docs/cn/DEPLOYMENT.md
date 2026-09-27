@@ -306,7 +306,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. 指定版本（在 .env 中设置）
-echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.0.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.1.0" >> .env
 
 # 2. 拉取并重建容器
 docker compose pull
@@ -617,6 +617,8 @@ python3 scripts/manage.py remote sync     # 同步文件到远程
 ```
 
 ## 升级
+
+> **升级到 v2.1**：工作区隔离改为单一的 `workspace.isolation {"level", "backend"}` 配置块（Issue #3446），旧配置键（`multi_user_mode`、`required_isolation_level`、`os_user_confinement` 等）会使服务器拒绝启动。包安装与 Docker 安装会自动转换配置；源码安装和只读挂载的配置须先运行 `python3 scripts/convert_workspace_isolation.py <config.json 路径>`。Docker 请用 `WORKSPACE_ISOLATION_BACKEND` 代替 `WORKSPACE_MULTI_USER_MODE`。详见[工作区隔离](./WORKSPACE_ISOLATION.md)。执行 `alembic upgrade head`（v2.1 新增两个索引，在 PostgreSQL 上构建时不阻塞写入）。
 
 > **从 v1.x 升级到 v2.0**：以 v2.0 重启前请先确认：
 > 1. 源码 / 离线包安装需要 Python 3.10+。
