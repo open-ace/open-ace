@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/React-18.3-61DAFB.svg" alt="React">
-  <img src="https://img.shields.io/badge/Flask-2.x-orange.svg" alt="Flask">
+  <img src="https://img.shields.io/badge/Flask-3.x-orange.svg" alt="Flask">
 </p>
 
 <p align="center">
@@ -131,10 +131,13 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# Build and start
-docker compose up -d --build
+# Start (pulls the prebuilt image from ghcr.io by default)
+docker compose up -d
+# Or build locally: docker compose up -d --build
 
 # Visit http://localhost:19888 (AI + ace mnemonic port)
+
+> 📦 The default image is `ghcr.io/open-ace/open-ace:latest` (linux/amd64 tags `:vX.Y.Z`/`:X.Y`/`:X`). If ghcr.io is unreachable, build locally with `--build` (see [Deployment Guide](docs/guide/DEPLOYMENT.md)).
 ```
 
 > 💡 For production deployment, see [Deployment Guide](docs/guide/DEPLOYMENT.md)
@@ -174,6 +177,77 @@ python3 server.py
 > ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/guide/DEPLOYMENT.md).
 
 ---
+
+
+---
+
+### 👥 Multi-User Mode
+
+**Best for**: team collaboration, production, per-user isolation.
+
+**⚠️ Important**:
+- Multi-user mode runs the container as root (it creates system users)
+- Do not edit `docker-compose.yml` directly — use the dedicated overlay file
+
+#### Method 1: One-click script (recommended)
+
+```bash
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+./scripts/start-multi-user.sh
+
+# Visit http://localhost:19888
+```
+
+#### Method 2: Docker Compose overlay
+
+```bash
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
+
+# Visit http://localhost:19888
+```
+
+#### What the overlay configures
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `user: "0"` | run as root | required to create system users |
+| `WORKSPACE_ISOLATION_BACKEND` | `plain` | Isolation backend: `shared` (single instance) / `plain` (per-user OS account) / `opensandbox` (per-user pod) — see [WORKSPACE_ISOLATION](docs/guide/WORKSPACE_ISOLATION.md) |
+| `OPENACE_ALLOW_ROOT_MULTI_USER` | `1` | explicitly authorizes root operation |
+| `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace` | config persistence path |
+
+> 📖 **Details**: [Multi-User Workspace Deployment](docs/guide/MULTI_USER_WORKSPACE.md)
+
+---
+
+#### 🇨🇳 Network acceleration (mainland China)
+
+If pulling base images (`python`, `node`, `postgres`) stalls or times out, point `BASE_REGISTRY` at a mainland mirror and rebuild:
+
+```bash
+export BASE_REGISTRY=docker.m.daocloud.io
+docker compose up -d --build
+```
+
+The variable applies to both the Dockerfile base images and the postgres image. Mirror availability changes over time — any mirror you can pull from works (e.g. `docker.m.daocloud.io`, `docker.1panel.live`); a daemon-level `registry-mirrors` config achieves the same globally.
+
+---
+
+#### 🌐 Proxy configuration
+
+If your environment reaches external APIs (OpenAI, GitHub, ...) through a proxy:
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+Open ACE uses these for all outbound HTTP/HTTPS requests (`HTTP_PROXY`/`HTTPS_PROXY`, case-insensitive). When unset, proxy lookup is disabled by default (avoids the gevent RecursionError).
 
 ## 📖 Feature Details
 
@@ -244,6 +318,10 @@ python3 server.py
 
 ---
 
+### 🧩 Governance & platform features
+
+Beyond the six modules above, Manage mode also ships: the **model gateway** (LiteLLM-compatible routing/failover), **policy rules** (feature flags and enforcement), the **security center** (baseline status and hardening), **encryption-key management** (rotation with hot reload), and **usage forecasting**. See [MODULES](docs/dev/MODULES.md) for the module map.
+
 ## 🛠️ Tech Stack
 
 <table>
@@ -295,7 +373,6 @@ open-ace/
 ├── schema/                # Database schema helpers
 ├── scripts/               # Core scripts and operational helpers
 │   ├── fetch_*.py         # Data collection
-│   ├── cron/              # Scheduled task scripts
 │   ├── systemd/           # systemd service/timer examples
 │   └── shared/            # Shared modules
 ├── static/                # Runtime static assets and frontend build output
@@ -322,6 +399,7 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | [Remote Workspace](docs/guide/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
 | [Remote Agent](docs/guide/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
 | [Permission Model](docs/dev/PERMISSION_MODEL.md) | Tenants, roles, and access control |
+| [Workspace Isolation](docs/guide/WORKSPACE_ISOLATION.md) | Admin guide: choose/configure/verify workspace-user isolation |
 | [Kubernetes](docs/guide/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
 | [Feishu Config](docs/guide/FEISHU_CONFIG.md) | Feishu integration |
 | [DingTalk Config](docs/guide/DINGTALK_CONFIG.md) | DingTalk integration |
@@ -469,10 +547,13 @@ This project is licensed under the [Apache 2.0 License](LICENSE).
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# 构建并启动
-docker compose up -d --build
+# 启动（默认拉取 ghcr.io 预构建镜像）
+docker compose up -d
+# 或本地构建：docker compose up -d --build
 
 # 访问 http://localhost:19888
+
+> 📦 默认镜像为 `ghcr.io/open-ace/open-ace:latest`（linux/amd64，tag 体系 `:vX.Y.Z`/`:X.Y`/`:X`）。ghcr.io 不可达时用 `--build` 本地构建（见 [部署指南](docs/guide/DEPLOYMENT.md)）。
 ```
 
 > 💡 **零配置**：安全密钥（`SECRET_KEY` / `OPENACE_ENCRYPTION_KEY` / `UPLOAD_AUTH_KEY`）在首次启动时自动生成，无需预先配置。
@@ -680,6 +761,10 @@ python3 server.py
 
 ---
 
+### 🧩 平台治理能力
+
+除上述六大模块外，Manage 模式还提供：**模型网关**（LiteLLM 兼容路由/故障转移）、**策略规则**（功能开关与执行）、**安全中心**（基线状态与加固）、**加密密钥管理**（热加载轮换）、**用量预测**。模块导览见 [MODULES](docs/dev/MODULES.md)。
+
 ## 🛠️ 技术栈
 
 <table>
@@ -731,7 +816,6 @@ open-ace/
 ├── schema/                # 数据库 Schema 辅助文件
 ├── scripts/               # 核心脚本与运维辅助文件
 │   ├── fetch_*.py         # 数据收集
-│   ├── cron/              # 定时任务脚本
 │   ├── systemd/           # systemd service/timer 示例
 │   └── shared/            # 共享模块
 ├── static/                # 运行时静态资源与前端构建产物
@@ -758,6 +842,7 @@ open-ace/
 | [远程工作区](docs/guide/REMOTE_WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
 | [远程 Agent](docs/guide/REMOTE_AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
 | [权限模型](docs/dev/PERMISSION_MODEL.md) | 租户、角色与访问控制 |
+| [工作区隔离](docs/guide/WORKSPACE_ISOLATION.md) | 管理员指南：选择/配置/验证工作区用户隔离 |
 | [Kubernetes](docs/guide/KUBERNETES.md) | K8s 部署参考（多副本 + 粘性会话边界） |
 | [飞书配置](docs/guide/FEISHU_CONFIG.md) | 飞书集成配置 |
 | [钉钉配置](docs/guide/DINGTALK_CONFIG.md) | 钉钉集成配置 |
