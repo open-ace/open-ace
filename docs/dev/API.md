@@ -6,7 +6,7 @@
 
 ## English
 
-This reference documents all 425 HTTP endpoints exposed by the Open ACE backend,
+This reference documents all 426 HTTP endpoints exposed by the Open ACE backend,
 grouped by path family. Paths are the full externally visible routes, with blueprint
 URL prefixes already folded in. Route parameters use Flask syntax
 (`<int:user_id>`, `<path:filename>`, ...).
@@ -104,8 +104,8 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Request statistics | `/api/request` | 6 |
 | Authentication and account | `/api/auth` | 6 |
 | Other endpoints | — | 90 |
-| Operational endpoints | — | 9 |
-| **Total** | | **425** |
+| Operational endpoints | — | 10 |
+| **Total** | | **426** |
 
 ### Remote machines and sessions (`/api/remote`)
 
@@ -125,7 +125,7 @@ Register and manage remote machines, drive remote AI sessions, web terminals and
 | POST/HEAD | `/api/remote/llm-proxy` | - | Transparent LLM API proxy for remote workspaces (empty path); forwards provider requests using stored encrypted API keys. |
 | GET/POST/PUT/DELETE/HEAD | `/api/remote/llm-proxy/<path:path>` | - | Transparent LLM API proxy — catch-all path form. |
 | GET | `/api/remote/machines` | - | List machines with tenant isolation. |
-| DELETE | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | Deregister a remote machine. Admin only. |
+| DELETE | `/api/remote/machines/<machine_id>` | admin_required | Deregister a remote machine. Admin only. |
 | GET | `/api/remote/machines/<machine_id>` | machine_access_required | Get details and status of a specific machine. |
 | POST | `/api/remote/machines/<machine_id>/assign` | machine_admin_required | Assign a user to a machine. System admin or machine admin. |
 | DELETE | `/api/remote/machines/<machine_id>/assign/<int:user_id>` | machine_admin_required | Revoke a user's access to a machine. System admin or machine admin. |
@@ -230,7 +230,7 @@ Create and supervise autonomous development workflows: milestones, forks, retrie
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
 | DELETE | `/api/autonomous/batches/<batch_id>` | auth_required | Delete an entire batch of workflows. |
-| POST | `/api/autonomous/internal/events/ingest` | - | Cross-process SSE ingest: scheduler process → this web process. |
+| POST | `/api/autonomous/internal/events/ingest` | public_endpoint | Cross-process SSE ingest: scheduler process → this web process. |
 | GET | `/api/autonomous/models` | auth_required | Get available models for a given tool and workspace type. |
 | GET | `/api/autonomous/tools` | auth_required | Get the list of available agent tools. |
 | GET | `/api/autonomous/workflows` | auth_required | List autonomous development workflows. |
@@ -261,7 +261,7 @@ SSO provider registry (OAuth2/OIDC/SAML), login flows, SAML metadata/ACS/SLO end
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
-| POST | `/api/sso/acs/<provider_name>` | - | Handle SAML HTTP-POST Assertion Consumer Service callbacks. |
+| POST | `/api/sso/acs/<provider_name>` | public_endpoint | Handle SAML HTTP-POST Assertion Consumer Service callbacks. |
 | GET | `/api/sso/callback/<provider_name>` | public_endpoint | Handle SSO callback. |
 | GET | `/api/sso/identities/<int:user_id>` | auth_required | Get SSO identities for a user. |
 | DELETE | `/api/sso/identities/<int:user_id>/<provider_name>` | auth_required | Unlink an SSO identity from a user. |
@@ -277,10 +277,10 @@ SSO provider registry (OAuth2/OIDC/SAML), login flows, SAML metadata/ACS/SLO end
 | POST | `/api/sso/providers/<provider_name>/reset` | admin_required | Reset a predefined provider to its default configuration. |
 | POST | `/api/sso/providers/<provider_name>/test` | admin_required | Test SSO provider connection (basic validation). |
 | GET | `/api/sso/providers/export` | admin_required | Export SSO provider configurations. |
-| DELETE | `/api/sso/session` | - | Logout from SSO session. |
+| DELETE | `/api/sso/session` | public_endpoint | Logout from SSO session. |
 | GET | `/api/sso/session` | - | Get current SSO session info. |
 | GET | `/api/sso/slo-redirect/<provider_name>` | public_endpoint | Handle SAML HTTP-Redirect Single Logout Service. |
-| POST | `/api/sso/slo/<provider_name>` | - | Handle SAML HTTP-POST Single Logout Service. |
+| POST | `/api/sso/slo/<provider_name>` | public_endpoint | Handle SAML HTTP-POST Single Logout Service. |
 
 ### Integration and notification management (`/api/management`)
 
@@ -562,7 +562,7 @@ Session login/logout, password change and current-user profile.
 | POST | `/api/auth/change-password` | auth_required | Change password endpoint. |
 | GET | `/api/auth/check` | - | Check if user is authenticated and extend session if needed. |
 | POST | `/api/auth/login` | - | Login endpoint. |
-| POST | `/api/auth/logout` | - | Logout endpoint. |
+| POST | `/api/auth/logout` | public_endpoint | Logout endpoint. |
 | GET | `/api/auth/me` | auth_required | Get current user info (alias for /auth/profile). |
 | GET | `/api/auth/profile` | auth_required | Get current user profile. |
 
@@ -602,11 +602,11 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/fetch/remote` | admin_required | Fetch data from remote sources. |
 | GET | `/api/fetch/status` | auth_required | Get data fetch status. |
 | GET | `/api/filter-rules` | admin_required | Get content filter rules with pagination and filtering. |
-| POST | `/api/filter-rules` | admin_required,platform_admin_required | Create a new content filter rule (idempotent). |
-| DELETE | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | Delete a content filter rule. |
+| POST | `/api/filter-rules` | platform_admin_required | Create a new content filter rule (idempotent). |
+| DELETE | `/api/filter-rules/<int:rule_id>` | platform_admin_required | Delete a content filter rule. |
 | GET | `/api/filter-rules/<int:rule_id>` | admin_required | Get a specific filter rule. |
-| PUT | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | Update a content filter rule. |
-| POST | `/api/frontend-errors` | - | Receive frontend error reports (public endpoint, no auth required). |
+| PUT | `/api/filter-rules/<int:rule_id>` | platform_admin_required | Update a content filter rule. |
+| POST | `/api/frontend-errors` | public_endpoint | Receive frontend error reports (public endpoint, no auth required). |
 | GET | `/api/governance/audit-logs` | admin_required | Get audit logs with filters (full path alias for /audit/logs). |
 | GET | `/api/hosts` | - | Get list of all hosts from pre-aggregated summary table and remote machines. |
 | DELETE | `/api/insights/<int:report_id>` | auth_required | Delete an insights report. |
@@ -639,7 +639,7 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/schedulers/data-fetch` | - | Get data fetch scheduler status. |
 | GET | `/api/schedulers/quota-enforcement` | - | Get quota enforcement scheduler status. |
 | GET | `/api/security-settings` | admin_required | Get security settings. |
-| PUT | `/api/security-settings` | admin_required,platform_admin_required | Update security settings. |
+| PUT | `/api/security-settings` | platform_admin_required | Update security settings. |
 | GET | `/api/security-settings/ssrf-status` | admin_required | Get SSRF protection status and configuration. |
 | POST | `/api/security-settings/ssrf/reset` | platform_admin_required | Reset SSRF configuration to default. |
 | GET | `/api/security-settings/upload-auth-status` | admin_required | Get upload authentication status. |
@@ -657,9 +657,9 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/unmapped-accounts` | admin_required | Get list of unmapped tool accounts. |
 | POST | `/api/unmapped-accounts/<sender_name>/map` | admin_required | Manually map an unmapped account to a user. |
 | GET | `/api/unmapped-accounts/<sender_name>/suggest-mapping` | admin_required | Get suggested mapping for an unmapped account. |
-| POST | `/api/upload/batch` | - | Upload batch data (usage and messages). |
-| POST | `/api/upload/messages` | - | Upload message data. |
-| POST | `/api/upload/usage` | - | Upload usage data. |
+| POST | `/api/upload/batch` | require_upload_auth | Upload batch data (usage and messages). |
+| POST | `/api/upload/messages` | require_upload_auth | Upload message data. |
+| POST | `/api/upload/usage` | require_upload_auth | Upload usage data. |
 | DELETE | `/api/user/avatar` | auth_required | Delete user avatar. |
 | POST | `/api/user/avatar` | auth_required | Upload user avatar. |
 
@@ -702,7 +702,7 @@ Application-level health and readiness probes, Prometheus metrics, security base
 
 ## 中文
 
-本参考覆盖 Open ACE 后端暴露的全部 425 个 HTTP 端点，按路径族分组。
+本参考覆盖 Open ACE 后端暴露的全部 426 个 HTTP 端点，按路径族分组。
 路径为折算 blueprint URL 前缀后的完整对外路由；路由参数使用 Flask 语法
 （`<int:user_id>`、`<path:filename>` 等）。
 
@@ -792,8 +792,8 @@ SPA 路由位于应用根路径。
 | 请求统计 | `/api/request` | 6 |
 | 认证与账号 | `/api/auth` | 6 |
 | 其他端点 | — | 90 |
-| 运维端点 | — | 9 |
-| **合计** | | **425** |
+| 运维端点 | — | 10 |
+| **合计** | | **426** |
 
 ### 远程机器与会话（`/api/remote`）
 
@@ -813,7 +813,7 @@ SPA 路由位于应用根路径。
 | POST/HEAD | `/api/remote/llm-proxy` | - | 面向远程工作区的透明 LLM 代理（空路径），使用已存储的加密 API Key 转发模型请求。 |
 | GET/POST/PUT/DELETE/HEAD | `/api/remote/llm-proxy/<path:path>` | - | 远程 LLM 代理——catch-all 路径形态。 |
 | GET | `/api/remote/machines` | - | 列出远程机器（租户隔离）。 |
-| DELETE | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | 注销远程机器，仅管理员。 |
+| DELETE | `/api/remote/machines/<machine_id>` | admin_required | 注销远程机器，仅管理员。 |
 | GET | `/api/remote/machines/<machine_id>` | machine_access_required | 获取指定机器的详情与状态。 |
 | POST | `/api/remote/machines/<machine_id>/assign` | machine_admin_required | 将用户分配到机器（系统管理员或机器管理员）。 |
 | DELETE | `/api/remote/machines/<machine_id>/assign/<int:user_id>` | machine_admin_required | 撤销用户对机器的访问（系统管理员或机器管理员）。 |
@@ -918,7 +918,7 @@ SPA 路由位于应用根路径。
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
 | DELETE | `/api/autonomous/batches/<batch_id>` | auth_required | 删除整批工作流。 |
-| POST | `/api/autonomous/internal/events/ingest` | - | 跨进程 SSE 事件接入：调度器进程推送到本 Web 进程。 |
+| POST | `/api/autonomous/internal/events/ingest` | public_endpoint | 跨进程 SSE 事件接入：调度器进程推送到本 Web 进程。 |
 | GET | `/api/autonomous/models` | auth_required | 获取指定工具与工作区类型的可用模型。 |
 | GET | `/api/autonomous/tools` | auth_required | 获取可用 Agent 工具列表。 |
 | GET | `/api/autonomous/workflows` | auth_required | 列出自主开发工作流。 |
@@ -949,7 +949,7 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
-| POST | `/api/sso/acs/<provider_name>` | - | 处理 SAML HTTP-POST ACS 回调。 |
+| POST | `/api/sso/acs/<provider_name>` | public_endpoint | 处理 SAML HTTP-POST ACS 回调。 |
 | GET | `/api/sso/callback/<provider_name>` | public_endpoint | 处理 SSO 回调。 |
 | GET | `/api/sso/identities/<int:user_id>` | auth_required | 获取用户的 SSO 身份。 |
 | DELETE | `/api/sso/identities/<int:user_id>/<provider_name>` | auth_required | 解绑用户的 SSO 身份。 |
@@ -965,10 +965,10 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | POST | `/api/sso/providers/<provider_name>/reset` | admin_required | 将预定义提供商重置为默认配置。 |
 | POST | `/api/sso/providers/<provider_name>/test` | admin_required | 测试 SSO 提供商连接（基础校验）。 |
 | GET | `/api/sso/providers/export` | admin_required | 导出 SSO 提供商配置。 |
-| DELETE | `/api/sso/session` | - | 登出 SSO 会话。 |
+| DELETE | `/api/sso/session` | public_endpoint | 登出 SSO 会话。 |
 | GET | `/api/sso/session` | - | 获取当前 SSO 会话信息。 |
 | GET | `/api/sso/slo-redirect/<provider_name>` | public_endpoint | 处理 SAML HTTP-Redirect 单点登出。 |
-| POST | `/api/sso/slo/<provider_name>` | - | 处理 SAML HTTP-POST 单点登出。 |
+| POST | `/api/sso/slo/<provider_name>` | public_endpoint | 处理 SAML HTTP-POST 单点登出。 |
 
 ### 集成与通知管理（`/api/management`）
 
@@ -1250,7 +1250,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | POST | `/api/auth/change-password` | auth_required | 修改当前用户密码。 |
 | GET | `/api/auth/check` | - | 检查登录态，必要时延长会话。 |
 | POST | `/api/auth/login` | - | 用户登录。 |
-| POST | `/api/auth/logout` | - | 用户登出。 |
+| POST | `/api/auth/logout` | public_endpoint | 用户登出。 |
 | GET | `/api/auth/me` | auth_required | 获取当前用户信息（/auth/profile 的别名）。 |
 | GET | `/api/auth/profile` | auth_required | 获取当前用户资料。 |
 
@@ -1290,11 +1290,11 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/fetch/remote` | admin_required | 从远程数据源拉取数据。 |
 | GET | `/api/fetch/status` | auth_required | 获取数据拉取状态。 |
 | GET | `/api/filter-rules` | admin_required | 分页且带过滤地获取内容过滤规则。 |
-| POST | `/api/filter-rules` | admin_required,platform_admin_required | 创建内容过滤规则（幂等）。 |
-| DELETE | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | 删除内容过滤规则。 |
+| POST | `/api/filter-rules` | platform_admin_required | 创建内容过滤规则（幂等）。 |
+| DELETE | `/api/filter-rules/<int:rule_id>` | platform_admin_required | 删除内容过滤规则。 |
 | GET | `/api/filter-rules/<int:rule_id>` | admin_required | 获取单条过滤规则。 |
-| PUT | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | 更新内容过滤规则。 |
-| POST | `/api/frontend-errors` | - | 接收前端错误上报（公共端点，无需认证）。 |
+| PUT | `/api/filter-rules/<int:rule_id>` | platform_admin_required | 更新内容过滤规则。 |
+| POST | `/api/frontend-errors` | public_endpoint | 接收前端错误上报（公共端点，无需认证）。 |
 | GET | `/api/governance/audit-logs` | admin_required | 按条件筛选获取审计日志（/audit/logs 的完整路径别名）。 |
 | GET | `/api/hosts` | - | 从预聚合汇总表与远程机器获取全部主机列表。 |
 | DELETE | `/api/insights/<int:report_id>` | auth_required | 删除洞察报告。 |
@@ -1327,7 +1327,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/schedulers/data-fetch` | - | 获取数据拉取调度器状态。 |
 | GET | `/api/schedulers/quota-enforcement` | - | 获取配额执行调度器状态。 |
 | GET | `/api/security-settings` | admin_required | 获取安全设置。 |
-| PUT | `/api/security-settings` | admin_required,platform_admin_required | 更新安全设置。 |
+| PUT | `/api/security-settings` | platform_admin_required | 更新安全设置。 |
 | GET | `/api/security-settings/ssrf-status` | admin_required | 获取 SSRF 防护状态与配置。 |
 | POST | `/api/security-settings/ssrf/reset` | platform_admin_required | 将 SSRF 配置重置为默认值。 |
 | GET | `/api/security-settings/upload-auth-status` | admin_required | 获取上传认证状态。 |
@@ -1345,9 +1345,9 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/unmapped-accounts` | admin_required | 获取未映射工具账号列表。 |
 | POST | `/api/unmapped-accounts/<sender_name>/map` | admin_required | 手动将未映射账号映射到用户。 |
 | GET | `/api/unmapped-accounts/<sender_name>/suggest-mapping` | admin_required | 获取未映射账号的建议映射。 |
-| POST | `/api/upload/batch` | - | 批量上传数据（用量与消息）。 |
-| POST | `/api/upload/messages` | - | 上传消息数据。 |
-| POST | `/api/upload/usage` | - | 上传用量数据。 |
+| POST | `/api/upload/batch` | require_upload_auth | 批量上传数据（用量与消息）。 |
+| POST | `/api/upload/messages` | require_upload_auth | 上传消息数据。 |
+| POST | `/api/upload/usage` | require_upload_auth | 上传用量数据。 |
 | DELETE | `/api/user/avatar` | auth_required | 删除用户头像。 |
 | POST | `/api/user/avatar` | auth_required | 上传用户头像。 |
 

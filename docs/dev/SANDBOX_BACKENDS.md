@@ -898,7 +898,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 - **`rollout` 决定 Legacy 还是 OpenSandbox；`tenant_tiers` 决定用哪个
   endpoint。** 两个 tier 都运行 agent 工作负载；差别在出站保证（见 §7）。
   这是两个不同的问题——`tenant_tiers` 无法把租户路由回 Legacy，因为每个
-  tier 都是 OpenSandbox endpoint。
+  tier 都是 OpenSandbox 端点。
 - **`production_required_tenants` 是禁止降级名单。** 名单上的租户要么获得
   OpenSandbox 要么走例外；不存在从 "required" 回到 Legacy 的路径。
 - **显式请求的配置路径若不存在则抛异常。** 它不会回退到系统文件——回退会
@@ -963,7 +963,7 @@ provider 声明的每个能力都对应一个你可以指认的机制。*未*被
 
 | 能力 | 强制执行者 |
 | --- | --- |
-| `NAMESPACE_ISOLATION` | 所声明的 runtime class，通过每个 endpoint 首个沙箱上的 `/proc/version` 探测检查。**该检查是单向的**：gVisor 的声明会被正面验证（其内核会自我标识），而 Kata 的声明只能确认*不是* gVisor——Kata 的客户机内核与未隔离的 runc 容器内核无法区分，因此无法证明 Kata 生效。应将 Kata runtime class 视为一条运维佐证，由 `[secure_runtime] k8s_runtime_class` 与节点上存在该 RuntimeClass 支撑。 |
+| `NAMESPACE_ISOLATION` | 所声明的 runtime class，通过每个端点的首个沙箱上的 `/proc/version` 探测检查。**该检查是单向的**：gVisor 的声明会被正面验证（其内核会自我标识），而 Kata 的声明只能确认*不是* gVisor——Kata 的客户机内核与未隔离的 runc 容器内核无法区分，因此无法证明 Kata 生效。应将 Kata runtime class 视为一条运维佐证，由 `[secure_runtime] k8s_runtime_class` 与节点上存在该 RuntimeClass 支撑。 |
 | `NETWORK_EGRESS_POLICY` | 出站 sidecar 在 `dns+nft` 模式下的 `deny_all`，通过探测其 `/policy` 加以**验证**，外加集群 NetworkPolicy。**仅限 sidecar tier。** CNI tier（`egress_cni_default_deny`——gVisor 唯一能运行的机制）依然强制出站，但对每个沙箱只有一条静态 CIDR 规则且无 FQDN 白名单，因此它不声明此能力，要求此能力的 spec 在那里 fail-closed。两种机制都依赖集群 NetworkPolicy，provider 会在首个沙箱内部通过确认元数据服务与 Kubernetes API server 不可达来验证它。 |
 | `FILESYSTEM_ACL` | pod `securityContext`：非 root、只读 rootfs、丢弃 capabilities、seccomp `RuntimeDefault` |
 | `CPU_MEM_PIDS_TIME_QUOTA` | 经 kubelet 的 `resourceLimits` cpu/memory、管 pids 的 `podPidsLimit`、管墙上时钟的沙箱 TTL |
@@ -1073,7 +1073,7 @@ reason code fail-closed。agent CLI（`claude`、`qwen`……）按**名字**调
 平面目前无法使用该后端。已列为后续工作；围绕 provider 选择重构命令构建
 不在 #2023 范围内。
 
-**Gateway endpoint 是明文 HTTP，除非你自行终结 TLS。** server 返回裸
+**Gateway 端点是明文 HTTP，除非你自行终结 TLS。** server 返回裸
 主机名，客户端默认 `http://`。`direct` 模式下这些流量是集群内部的；
 `gateway` 模式下，工作区快照和按沙箱凭据会穿过通往
 `ingress.gateway.address` 的任意路径。`k8s/extras/opensandbox/` 中没有
@@ -1093,7 +1093,7 @@ server 发现的；此前每次评审都把交付的 gVisor tier 当作可用，
 集群 `NetworkPolicy`，由 CNI 在沙箱内核之外施加，缺失的 nat 表在那里
 无关紧要。这样的 tier 佐证 `egress_cni_default_deny` 而非 `egress_enforced`
 （`parse_backend_config` 在 gVisor 下拒绝 sidecar，也拒绝既不佐证任一机制
-又佐证两者的 endpoint）。
+又佐证两者的端点）。
 
 **你精确放弃了什么。** 集群策略基于 CIDR 且对所有沙箱相同。它拒绝实例
 元数据服务、集群自身的 pod 与 service 网段以及所有私有网络——provider 在
@@ -1216,7 +1216,7 @@ qwen-code-webui 运行在它自己的 OpenSandbox pod 中，而不是作为 OS �
   主机名必须在该 tier 的 `egress_allow_hosts` 中；在 CNI tier 上它必须
   公网可达（回环、私有和集群内部地址在探测时被拒绝）。
 - config.json 的 `workspace.sandbox_tier`——可选；交互式 pod 启动在哪个
-  endpoint tier 上，默认为后端的 `default_tier`。
+  端点 tier 上，默认为后端的 `default_tier`。
 
 **Web 进程环境：**
 

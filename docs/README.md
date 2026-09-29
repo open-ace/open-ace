@@ -68,7 +68,7 @@ together with index consistency and endpoint/env coverage.
 | [DEVELOPMENT](dev/DEVELOPMENT.md) | Dev environment setup and first run |
 | [ARCHITECTURE](dev/ARCHITECTURE.md) | System architecture — backend, frontend, agent layers |
 | [MODULES](dev/MODULES.md) | The six `app/modules/` packages: duties and invariants |
-| [API](dev/API.md) | REST reference — all 425 endpoints, generated inventory |
+| [API](dev/API.md) | REST reference — all 426 endpoints, generated inventory |
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | Generated elevated-permission matrix (do not hand-edit) |
 | [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | Six-role RBAC, ten auth decorators, strict mode |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token collection pipeline + Request/Message/Session concepts |
@@ -202,7 +202,7 @@ docs/
 | [DEVELOPMENT](dev/DEVELOPMENT.md) | 开发环境搭建与首次运行 |
 | [ARCHITECTURE](dev/ARCHITECTURE.md) | 系统架构——后端、前端、Agent 层 |
 | [MODULES](dev/MODULES.md) | `app/modules/` 六个模块：职责与不变量 |
-| [API](dev/API.md) | REST 参考——全部 425 个端点（清单生成） |
+| [API](dev/API.md) | REST 参考——全部 426 个端点（清单生成） |
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | 生成的提权端点矩阵（勿手改） |
 | [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | 六角色 RBAC、十个认证装饰器、严格模式 |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token 采集链路 + Request/Message/Session 概念 |
