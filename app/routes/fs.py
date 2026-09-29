@@ -1686,33 +1686,44 @@ def api_get_home():
     """Get user's home directory.
 
     Issue #3420: Return isolation-aware home path.
-    Gets isolation level from WebUIInstance (not session) to match sandbox lifecycle.
-    Falls back to _primary_home_root() if no instance exists.
+    Gets isolation level from WebUIInstance (not session) to match sandbox
+    lifecycle. Falls back to _primary_home_root() if no instance exists.
+
+    Issue #3459 follow-up (observed in PR #3460's review): in sandboxed mode
+    the home lives only inside the container — the previous get_directory_info
+    probe forked doomed host sudo calls per request, and the fallback ran
+    _primary_home_root WITHOUT the isolation level, whose legacy
+    get_home_directory() append forks another host probe (and could even
+    resolve a host base dir). Resolve the instance ONCE and never touch the
+    host filesystem on the sandboxed path; host probing stays legitimate for
+    os_user/unknown levels.
     """
-    from app.services.webui_manager import get_webui_manager
+    from app.utils.isolation_level import get_webui_instance, is_sandboxed
 
     user = g.user
-    user_id = user.get("id")
-    system_account = user.get("system_account") if user else None
+    user_id = user.get("id") if user else None
 
-    # Issue #3420: Try to get home path from WebUI instance
-    home = None
-    try:
-        manager = get_webui_manager()
-        instance = manager.get_user_instance(user_id)
-        if instance and instance.isolation_level == "sandboxed":
-            # sandboxed mode: use instance's path
-            home = instance.user_home_path
-    except Exception:
-        # Instance not available, fall back to default
-        pass
+    instance = get_webui_instance(user_id)
+    isolation_level = instance.isolation_level if instance is not None else None
 
-    # Fall back to default path calculation
-    if home is None:
-        home = _primary_home_root(user)
+    if is_sandboxed(isolation_level):
+        # Prefer the instance's authoritative path (#3420); the computed root
+        # is equivalent when the instance record predates user_home_path.
+        home = (instance.user_home_path if instance is not None else "") or None
+        if not home:
+            home_roots = _home_roots_for_user(user, isolation_level)
+            home = home_roots[0] if home_roots else None
+        if not home:
+            return jsonify({"error": "No home directory available for this user"}), 400
+        # Same honest degradation as sandboxed browse (#3459): the host cannot
+        # see the container's filesystem, so canCreate is False, not probed.
+        return jsonify({"homePath": home, "canCreate": False, "sandboxed": True})
 
+    # os_user or unknown level: host semantics — probing is legitimate.
+    home = _primary_home_root(user)
     if home is None:
         return jsonify({"error": "No home directory available for this user"}), 400
+    system_account = user.get("system_account") if user else None
     dir_info = get_directory_info(home, system_account)
 
     return jsonify(
