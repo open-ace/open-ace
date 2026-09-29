@@ -545,16 +545,36 @@ class TestDocumentedAdmissionPredicate:
     """The §7 doc example must be executable, not prose that rots on a bump.
 
     These tests RUN the fenced snippet from
-    docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §7 (#3410 review: a re-implemented
-    copy could drift from the doc unnoticed).
+    docs/contracts/WORKSPACE_ISOLATION_CAPABILITIES.md §7 (#3410 review: a
+    re-implemented copy could drift from the doc unnoticed). The doc is a
+    single bilingual file; both language sections carry the snippet.
     """
 
-    DOCS = Path(__file__).resolve().parents[2] / "docs"
+    DOC = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "contracts"
+        / "WORKSPACE_ISOLATION_CAPABILITIES.md"
+    )
 
     @pytest.fixture(autouse=True, params=["en", "cn"])
     def _doc(self, request):
-        """Both language versions carry the snippet; each must stay executable."""
-        self.doc = self.DOCS / request.param / "WORKSPACE_ISOLATION_CAPABILITIES.md"
+        """Both language sections carry the snippet; each must stay executable."""
+        text = self.DOC.read_text(encoding="utf-8")
+        section = (
+            text[: text.index("## 中文")]
+            if request.param == "en"
+            else text[text.index("## 中文") :]
+        )
+
+        class _Section:
+            def __init__(self, content):
+                self._c = content
+
+            def read_text(self, encoding="utf-8"):
+                return self._c
+
+        self.doc = _Section(section)
 
     def _snippet(self) -> str:
         match = re.search(

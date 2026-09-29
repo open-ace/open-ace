@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Docs governance restructure (2026-09-29): all curated docs under `docs/` are now single-file bilingual (English + Chinese sections). Language directories `docs/en/` and `docs/cn/` are gone; content is organized as `guide/` (usage & ops), `dev/` (contributors), `contracts/` (versioned contracts), `security/`, plus the `dev-notes/` English-only process archive. `docs/README.md` is the index.
+- `docs/dev/API.md` rewritten: all 426 endpoints covered from a generated inventory; three families of ghost endpoints that no longer existed were removed (`/api/usage/request/*` → `/api/request/*`, `/api/sessions` & `/api/prompts` → `/api/workspace` prefix).
+- Reverted while merging `main`: the deprecation of `POST /api/content/filter/patterns` in favor of `/api/filter-rules` has been withdrawn — the endpoint is a real implementation again (it adds the pattern to the content filter and audits the change) and coexists with `GET/POST /api/filter-rules` — so the `docs/contracts/FILTER_PATTERNS_V2.md` migration guide and the deprecation-notice links to it have been removed.
+- `scripts/generate_permission_matrix.py` fixed: route-decorator matching now covers all blueprint variable names (previously 92 `@admin_required` and 7 `@platform_admin_required` endpoints were silently omitted from the generated matrix); output is bilingual at `docs/dev/API_PERMISSION_MATRIX.md` with a generated date.
+- New docs: `guide/UPGRADING.md` (upgrade/rollback runbook with the `baseline_2026_06_23` minimum), `guide/ENV_REFERENCE.md`, `guide/CONFIG_REFERENCE.md` (absorbs `config/CONFIG_GUIDE.md`), `guide/SSO_CONFIG.md` (SAML + OIDC/OAuth2 + SLO, replaces SAML_CONFIG), `guide/OPERATIONS.md`, `guide/TROUBLESHOOTING.md`, `guide/MULTI_USER_WORKSPACE.md` (split from DEPLOYMENT), `dev/CLI_REFERENCE.md`, `dev/MODULES.md`, `remote-agent/README.md`.
+- `docs/dev/DATABASE_SCHEMA.md` is now a domain map covering all 103 tables (40 previously undocumented); column-level reference authority is `schema/schema-postgres.sql`.
+- Guard test `test_phase_b_acceptance.py` now also enforces the 8-field contract for the `acceptance_verification` phase.
+- `docs/marketing/` removed along with its pitch-deck generator scripts.
+
 ## [v2.1.0] - 2026-09-27
 
 ### Upgrade Notes

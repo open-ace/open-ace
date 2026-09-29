@@ -246,7 +246,7 @@ def _sanitize_filename(name: str) -> str | None:
 # dirs AS CONFIGURED, so a home that resolves outside every configured base is
 # rejected before this code runs. Point <base>/<account> only at a location
 # inside a configured base (or list the volume in WORKSPACE_BASE_DIR). See
-# docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4 "Deployment preconditions".
+# docs/contracts/WORKSPACE_ISOLATION_CAPABILITIES.md §4 "Deployment preconditions".
 
 _UPLOAD_TMP_PREFIX = ".openace-upload-"
 
@@ -1885,7 +1885,7 @@ def api_create_directory():
 # ============================================================
 # File upload / download / delete (personal files page).
 #
-# Multi-user sudo strategy (see docs/personal-files-upload.md):
+# Multi-user sudo strategy (see docs/guide/MULTI_USER_WORKSPACE.md):
 # - Docker multi-user mode: process runs as root. We write to a temp file
 #   inside the target dir, chown it to the target system_account, then
 #   atomically rename. No sudo is involved — root uses kernel capabilities
@@ -2049,7 +2049,7 @@ def api_upload_file():
             # a pre-#3410 wrapper is refused outright by the capability gate
             # below (fail closed), so the contract's `enforced` claim holds
             # either way; the re-install is documented in
-            # docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4.
+            # docs/contracts/WORKSPACE_ISOLATION_CAPABILITIES.md §4.
             if not _is_wrapper_available(OPENACE_WRITE_AS_WRAPPER):
                 return (
                     jsonify(

@@ -63,7 +63,7 @@ pushes the fixes back and re-triggers CI — but going through
   directories. Mark bug tests once with `pytest.mark.regression` and
   `pytest.mark.issue(<number>)` in their canonical layer.
 - Before claiming a test is a gate, verify the exact CI lane that executes it.
-  See `docs/TEST_LAYERS.md` for the directory/lane contract and migration rules.
+  See `docs/dev/TEST_LAYERS.md` for the directory/lane contract and migration rules.
 
 ## Schema snapshots (`schema-sync` CI)
 

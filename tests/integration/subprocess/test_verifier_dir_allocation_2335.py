@@ -4,7 +4,7 @@ Split out of the legacy ``tests/issues/2335/test_verifier_checkout.py`` when the
 mocked items moved to ``tests/unit/``: the same-user allocation path runs real
 ``mkdir -p`` / ``mkdir -m 700`` subprocesses and asserts the resulting on-disk
 permission bits, so it crosses the subprocess + filesystem boundary
-(docs/TEST_LAYERS.md) and belongs in the integration layer.
+(docs/dev/TEST_LAYERS.md) and belongs in the integration layer.
 """
 
 from __future__ import annotations

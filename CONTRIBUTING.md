@@ -52,7 +52,7 @@ What actually happened.
 - Python 3.10+
 - pip
 - Bash >= 4 on PATH for `python-core` / `python-min` (macOS's bundled Bash 3.2
-  is insufficient). See [local shell prerequisites](docs/TEST_LAYERS.md#local-shell-prerequisites)
+  is insufficient). See [local shell prerequisites](docs/dev/TEST_LAYERS.md#appendix-local-shell-prerequisites)
   for setup and the Linux/macOS validation boundary.
 
 ### Setup
@@ -151,7 +151,7 @@ duplicating the test:
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2429)]
 ```
 
-See `docs/TEST_LAYERS.md` for CI execution guarantees and legacy migration.
+See `docs/dev/TEST_LAYERS.md` for CI execution guarantees and legacy migration.
 
 ## 📋 Pull Request Process
 

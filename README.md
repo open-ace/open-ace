@@ -150,7 +150,7 @@ docker compose up -d --build
 
 > 💡 **零配置**：安全密钥（`SECRET_KEY` / `OPENACE_ENCRYPTION_KEY` / `UPLOAD_AUTH_KEY`）在首次启动时自动生成，无需预先配置。
 >
-> ⚠️ 生产环境请通过 `.env` 显式设置强密钥（参考 `.env.example`）、修改默认密码，并参阅 [部署指南](docs/cn/DEPLOYMENT.md)。自动生成的密钥仅存在于运行环境，容器/卷销毁后不保留。
+> ⚠️ 生产环境请通过 `.env` 显式设置强密钥（参考 `.env.example`）、修改默认密码，并参阅 [部署指南](docs/guide/DEPLOYMENT.md)。自动生成的密钥仅存在于运行环境，容器/卷销毁后不保留。
 
 > 🇨🇳 **国内网络**：若构建时拉取基础镜像卡住或超时，见 [国内网络加速](#-国内网络加速)。
 
@@ -198,11 +198,11 @@ docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wa
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | `user: "0"` | 以 root 运行 | 创建系统用户所需 |
-| `WORKSPACE_ISOLATION_BACKEND` | `plain` | 工作区隔离方式:`shared`(单实例)/ `plain`(每用户 OS 账户)/ `opensandbox`(每用户 pod),见 [docs/cn/WORKSPACE_ISOLATION.md](docs/cn/WORKSPACE_ISOLATION.md) |
+| `WORKSPACE_ISOLATION_BACKEND` | `plain` | 工作区隔离方式:`shared`(单实例)/ `plain`(每用户 OS 账户)/ `opensandbox`(每用户 pod),见 [docs/guide/WORKSPACE_ISOLATION.md](docs/guide/WORKSPACE_ISOLATION.md) |
 | `OPENACE_ALLOW_ROOT_MULTI_USER` | `1` | 显式授权 root 运行 |
 | `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace` | 配置持久化路径 |
 
-> 📖 **详细文档**：[多用户工作区部署](docs/cn/DEPLOYMENT.md#多用户工作区部署)
+> 📖 **详细文档**：[多用户工作区部署](docs/guide/MULTI_USER_WORKSPACE.md)
 
 ---
 
@@ -280,7 +280,7 @@ python3 server.py
 |------|--------|------|
 | 管理员 | admin | admin123 |
 
-> ⚠️ 默认账号仅用于本地首次启动。生产环境请务必显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`、`UPLOAD_AUTH_KEY`，修改默认密码，并参考 [部署指南](docs/cn/DEPLOYMENT.md) 完成安全配置。
+> ⚠️ 默认账号仅用于本地首次启动。生产环境请务必显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`、`UPLOAD_AUTH_KEY`，修改默认密码，并参考 [部署指南](docs/guide/DEPLOYMENT.md) 完成安全配置。
 
 ---
 
@@ -424,18 +424,18 @@ open-ace/
 
 | 文档 | 说明 |
 |------|------|
-| [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
-| [AI 自主开发](docs/cn/AUTONOMOUS_DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
-| [部署指南](docs/cn/DEPLOYMENT.md) | 本地与生产环境部署 |
-| [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
-| [远程工作区](docs/cn/REMOTE_WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
-| [远程 Agent](docs/cn/REMOTE_AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
-| [权限模型](docs/cn/PERMISSION_MODEL.md) | 租户、角色与访问控制 |
-| [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考（多副本 + 粘性会话边界） |
-| [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
-| [钉钉配置](docs/cn/DINGTALK_CONFIG.md) | 钉钉集成配置 |
-| [API 文档](docs/cn/API.md) | API 接口说明 |
-| [仓库设置](docs/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
+| [架构说明](docs/dev/ARCHITECTURE.md) | 系统架构与核心概念 |
+| [AI 自主开发](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
+| [部署指南](docs/guide/DEPLOYMENT.md) | 本地与生产环境部署 |
+| [开发指南](docs/dev/DEVELOPMENT.md) | 参与开发 |
+| [远程工作区](docs/guide/REMOTE_WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
+| [远程 Agent](docs/guide/REMOTE_AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
+| [权限模型](docs/dev/PERMISSION_MODEL.md) | 租户、角色与访问控制 |
+| [Kubernetes](docs/guide/KUBERNETES.md) | K8s 部署参考（多副本 + 粘性会话边界） |
+| [飞书配置](docs/guide/FEISHU_CONFIG.md) | 飞书集成配置 |
+| [钉钉配置](docs/guide/DINGTALK_CONFIG.md) | 钉钉集成配置 |
+| [API 文档](docs/dev/API.md) | API 接口说明 |
+| [仓库设置](docs/dev/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
 
 ---
 
@@ -572,7 +572,7 @@ docker compose up -d --build
 # Visit http://localhost:19888 (AI + ace mnemonic port)
 ```
 
-> 💡 For production deployment, see [Deployment Guide](docs/en/DEPLOYMENT.md)
+> 💡 For production deployment, see [Deployment Guide](docs/guide/DEPLOYMENT.md)
 
 ### Option 2: From Source
 
@@ -606,7 +606,7 @@ python3 server.py
 |------|----------|----------|
 | Admin | admin | admin123 |
 
-> ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/en/DEPLOYMENT.md).
+> ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/guide/DEPLOYMENT.md).
 
 ---
 
@@ -750,18 +750,18 @@ The `docs/` directory is the source of truth for product documentation. The publ
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](docs/en/ARCHITECTURE.md) | System architecture and concepts |
-| [AI Autonomous Development](docs/en/AUTONOMOUS_DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
-| [Deployment](docs/en/DEPLOYMENT.md) | Local and production deployment |
-| [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
-| [Remote Workspace](docs/en/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
-| [Remote Agent](docs/en/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
-| [Permission Model](docs/en/PERMISSION_MODEL.md) | Tenants, roles, and access control |
-| [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
-| [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
-| [DingTalk Config](docs/en/DINGTALK_CONFIG.md) | DingTalk integration |
-| [API Reference](docs/en/API.md) | API documentation |
-| [Repository Setup](docs/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
+| [Architecture](docs/dev/ARCHITECTURE.md) | System architecture and concepts |
+| [AI Autonomous Development](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
+| [Deployment](docs/guide/DEPLOYMENT.md) | Local and production deployment |
+| [Development](docs/dev/DEVELOPMENT.md) | Contributing guide |
+| [Remote Workspace](docs/guide/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
+| [Remote Agent](docs/guide/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
+| [Permission Model](docs/dev/PERMISSION_MODEL.md) | Tenants, roles, and access control |
+| [Kubernetes](docs/guide/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
+| [Feishu Config](docs/guide/FEISHU_CONFIG.md) | Feishu integration |
+| [DingTalk Config](docs/guide/DINGTALK_CONFIG.md) | DingTalk integration |
+| [API Reference](docs/dev/API.md) | API documentation |
+| [Repository Setup](docs/dev/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
 
 ---
 

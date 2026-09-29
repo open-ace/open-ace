@@ -1,39 +1,59 @@
-# dev-notes — 开发过程文档
+# dev-notes — process write-up archive
 
-这里放**过程性**文档：修复复盘、CI 事故分析、实现总结、进度快照、交接说明、
-按 issue 编号的方案稿。人写的和 agent 写的都放这里。
+This directory holds **process** documents: fix retrospectives, CI incident
+analyses, implementation summaries, progress snapshots, hand-off notes, and
+per-issue design drafts — written by humans and agents alike.
 
-## 为什么有这个目录
+Archive policy (2026-09-29 docs governance):
 
-2026-08-05 至 08-12 之间，自主开发流水线把 23 份这类文档（2,554 行）直接提交到了仓库根目录 ——
-`CI_FIX_ROUND2.md`、`CI_FIX_FINAL_VERIFICATION.md`、`CI_MERGE_FIX_FINAL.md`、
-`IMPLEMENTATION_SUMMARY_2327.md`、`FINAL_STATUS.md` 等等。它们互相引用，但仓库里没有任何
-其他文件引用它们。后果是：根目录的 `.md` 从 5 个涨到 29 个，**外部访客点进仓库看到的第一屏
-是 20 多份 CI 抢修记录，而不是产品说明** —— 而这恰好发生在项目第一次有外部使用者到访的窗口。
+- Process documents live here, never in the repository root.
+- The archive is **English-only going forward**; historical files keep their
+  original language.
+- Curated long-lived documentation (architecture, runbooks, API contracts)
+  belongs under `docs/` (`guide/`, `dev/`, `contracts/`, `security/`), not
+  here. See `docs/README.md` for the placement rules.
+- Short notes that are tightly coupled to code should be code comments or
+  docstrings, not standalone files.
 
-这些文档本身有价值，问题只在于位置。所以给它们一个正式的家。
+## Why this directory exists
 
-## 约定
+Between 2026-08-05 and 2026-08-12 the autonomous development pipeline
+committed 23 such documents (2,554 lines) straight to the repository root —
+`CI_FIX_ROUND2.md`, `CI_FIX_FINAL_VERIFICATION.md`, `IMPLEMENTATION_SUMMARY_2327.md`,
+`FINAL_STATUS.md`, and friends. They referenced each other, but nothing else in
+the repo referenced them. The root `.md` count went from 5 to 29, so the first
+screen an outside visitor saw was 20+ CI repair logs instead of a product
+introduction — during the project's first window of external visitors.
 
-- **过程文档一律放这里**，不要放仓库根目录
-- 建议命名：`<issue编号>-<短描述>.md`（如 `2437-flock-reclaim-plan.md`）
-  或 `<日期>-<短描述>.md`（如 `2026-08-11-ci-lint-fix.md`）
-- 同一件事不要开多份 `ROUND2` / `FINAL` / `FINAL_VERIFICATION` —— 更新同一个文件即可
-- 属于长期项目文档（架构、运维手册、API 契约）的，放 `docs/` 下对应位置，不要放这里
-- 与代码强相关的短说明，优先写成代码注释或 docstring，而不是单独开文件
+The documents had value; only their location was wrong. So they got a proper
+home.
 
-## 根目录允许保留的 Markdown
+## Conventions
 
-`README.md` / `README_EN.md` / `CHANGELOG.md` / `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` /
-`ROADMAP.md` / `SECURITY.md` / `GOVERNANCE.md` / `MAINTAINERS.md` / `AUTHORS.md` /
-`LICENSE.md`，以及 AI 工具的指令文件（`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `QWEN.md`）。
+- Name files `<issue-number>-<slug>.md` (e.g. `2179-tenant-admin-permissions.md`) or
+  `<date>-<slug>.md` (e.g. `2026-09-13-sudoers-audit.md`).
+- Do not open a new `ROUND2` / `FINAL` / `FINAL_VERIFICATION` file for the same
+  topic — update the existing one.
+- Reference docs that were demoted from `docs/` during governance keep a
+  leading blockquote explaining where the durable content now lives (e.g.
+  `2179-tenant-admin-permissions.md`, `2026-09-29-gh-cli-version-policy.md`).
 
-## 怎么强制的
+## Markdown allowed in the repository root
 
-三层，从松到紧：
+`README.md` / `README_EN.md` / `CHANGELOG.md` / `CONTRIBUTING.md` /
+`CODE_OF_CONDUCT.md` / `ROADMAP.md` / `SECURITY.md` / `GOVERNANCE.md` /
+`MAINTAINERS.md` / `AUTHORS.md` / `LICENSE.md`, plus AI tool instruction files
+(`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `QWEN.md`).
 
-1. `.gitignore` —— 根目录的 `CI_*.md`、`*_SUMMARY.md`、`FINAL_*.md` 等命名默认不会被 `git add` 带进来
-2. `scripts/lint/check_root_docs.py` —— pre-commit 钩子，兜住 `git add -f`、重命名等绕过 .gitignore 的情况
-3. `CLAUDE.md` —— 告诉 agent 该往哪写（流水线的 agent 会读它）
+## How this is enforced
 
-要新增一个根目录长期文档，把文件名加进 `scripts/lint/check_root_docs.py` 的 `ALLOWED`。
+Three layers, loosest first:
+
+1. `.gitignore` — root-level `CI_*.md`, `*_SUMMARY.md`, `FINAL_*.md` names are
+   not picked up by `git add` by default.
+2. `scripts/lint/check_root_docs.py` — a pre-commit hook that catches
+   `git add -f`, renames, and other `.gitignore` bypasses.
+3. `CLAUDE.md` — tells agents where to write (pipeline agents read it).
+
+To add a new permanent root-level document, add the filename to `ALLOWED` in
+`scripts/lint/check_root_docs.py`.

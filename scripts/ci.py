@@ -726,7 +726,7 @@ def check_bash(config: dict[str, Any]) -> None:
     raise CIError(
         f"Bash: {version} ({executable or 'missing'}; required >= {minimum}): {detail}. "
         "Install a supported Bash and put its bin directory first on PATH, then run "
-        "python scripts/ci.py doctor --strict. See docs/TEST_LAYERS.md#local-shell-prerequisites."
+        "python scripts/ci.py doctor --strict. See docs/dev/TEST_LAYERS.md#appendix-local-shell-prerequisites."
     )
 
 

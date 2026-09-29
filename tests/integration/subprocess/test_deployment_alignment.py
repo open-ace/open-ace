@@ -70,7 +70,7 @@ class TestKubernetesManifestAlignment:
         assert "ReadWriteMany" in storage
 
     def test_k8s_docs_describe_sticky_multi_replica_boundary(self):
-        docs = (ROOT / "docs" / "en" / "KUBERNETES.md").read_text(encoding="utf-8")
+        docs = (ROOT / "docs" / "guide" / "KUBERNETES.md").read_text(encoding="utf-8")
 
         assert "multi-replica reference deployment with sticky routing" in docs
         assert "Remote session commands, command responses, session output replay" in docs

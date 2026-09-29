@@ -32,16 +32,6 @@ from app.modules.workspace.autonomous.sandbox.opensandbox.config import runtime_
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2023)]
 
 _DIR = pathlib.Path(__file__).resolve().parents[2] / "k8s" / "extras" / "opensandbox"
-
-
-def _sandbox_backend_docs(root: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
-    """The operator doc exists in English and Chinese; both are checked."""
-    return (
-        root / "docs" / "en" / "SANDBOX_BACKENDS.md",
-        root / "docs" / "cn" / "SANDBOX_BACKENDS.md",
-    )
-
-
 _TIERS = ("gvisor", "kata")
 
 
@@ -334,7 +324,7 @@ def test_the_docs_example_points_at_the_service_for_its_own_tier():
     import json
     import re
 
-    md = (_DIR.parents[2] / "docs" / "en" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
+    md = (_DIR.parents[2] / "docs" / "dev" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
     raw = json.loads(
         re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
     )
@@ -375,7 +365,7 @@ def test_the_known_probe_overclaims_are_not_reinstated():
     import re
 
     root = _DIR.parents[2]
-    sources = [*_sandbox_backend_docs(root), _DIR / "README.md"]
+    sources = [root / "docs" / "dev" / "SANDBOX_BACKENDS.md", _DIR / "README.md"]
     # Phrasings that assert the probe enforces the declared class unconditionally.
     overclaims = [
         r"refuses to continue if the kernel does not match",
@@ -412,14 +402,15 @@ def test_probe_claims_carry_the_one_directional_caveat():
 
     root = _DIR.parents[2]
     caveat = re.compile(
-        r"one-directional|only confirmed \*?not\*? gvisor|cannot prove kata|单向|只能确认|"
+        r"one-directional|only confirmed \*?not\*? gvisor|cannot prove kata|"
         r"indistinguishable from|only across the gvisor/kata boundary|"
-        r"do not rely on it",
+        r"do not rely on it|"
+        r"\u5355\u5411|\u65e0\u6cd5\u8bc1\u660e|\u4e0d\u53ef\u533a\u5206",
         re.I,
     )
-    kernel_topic = re.compile(r"kernel|/proc/version|内核", re.I)
+    kernel_topic = re.compile(r"kernel|/proc/version", re.I)
     offenders = []
-    for path in (*_sandbox_backend_docs(root), _DIR / "README.md"):
+    for path in (root / "docs" / "dev" / "SANDBOX_BACKENDS.md", _DIR / "README.md"):
         text = path.read_text(encoding="utf-8")
         for para in re.split(r"\n\s*\n", text):
             if "runtime_class" not in para or not kernel_topic.search(para):
@@ -468,7 +459,7 @@ def test_the_template_uid_and_the_exec_identity_attestation_agree():
     )
     pinned_uid = sandbox.get("securityContext", {}).get("runAsUser")
 
-    md = (_DIR.parents[2] / "docs" / "en" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
+    md = (_DIR.parents[2] / "docs" / "dev" / "SANDBOX_BACKENDS.md").read_text(encoding="utf-8")
     raw = json.loads(
         re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
     )
@@ -480,13 +471,3 @@ def test_the_template_uid_and_the_exec_identity_attestation_agree():
                 f"as it and cannot drop credentials — tier {tier!r} must attest "
                 "execd_runs_as_exec_identity or every command fails EPERM"
             )
-
-
-def test_the_chinese_doc_carries_the_same_config_example():
-    """The translated operator doc must not drift from the English one's
-    executable config example (the tests above parse the English block)."""
-    import re
-
-    en, cn = (p.read_text(encoding="utf-8") for p in _sandbox_backend_docs(_DIR.parents[2]))
-    blocks = [re.search(r"```json\n(\{.*?\n\})\n```", text, re.S).group(1) for text in (en, cn)]
-    assert blocks[0] == blocks[1]

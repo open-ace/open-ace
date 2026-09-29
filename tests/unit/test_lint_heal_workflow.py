@@ -75,6 +75,7 @@ class TestHealSkipDerivation:
             "table-boundary-check",
             "bandit-check",
             "check-root-docs",
+            "check-docs-bilingual",
             "no-commit-to-branch",
         ], (
             "a new repo:local hook must be added to this list — the heal must "

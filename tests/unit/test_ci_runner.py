@@ -48,7 +48,7 @@ def _test_matrix() -> dict[str, dict]:
 
 
 def test_docs_only_change_selects_no_runtime_suite():
-    assert ci.select_pr_suites(["docs/TEST_LAYERS.md", "README.md"]) == []
+    assert ci.select_pr_suites(["docs/dev/TEST_LAYERS.md", "README.md"]) == []
 
 
 def test_backend_change_selects_production_python_suite():

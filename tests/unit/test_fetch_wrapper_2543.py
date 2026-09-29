@@ -512,11 +512,29 @@ class TestValidParametersAccepted:
         if not os.path.exists(wrapper_path):
             pytest.skip("Wrapper not installed")
 
-        result = subprocess.run(
-            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--multi-user"],
-            capture_output=True,
-            text=True,
-        )
+        # On a dev machine with real user data the multi-user scan processes
+        # the real dataset and can far exceed a test budget; validation happens
+        # before any fetch work, so a timeout with no validation error in the
+        # captured stderr still proves the contract under test.
+        try:
+            result = subprocess.run(
+                ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--multi-user"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stderr = exc.stderr or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", "replace")
+            assert "Invalid tool" not in stderr
+            assert "Invalid characters" not in stderr
+            assert "Unknown argument" not in stderr
+            pytest.skip(
+                "argument validation passed; the real multi-user fetch exceeds "
+                "the timeout on machines with user data"
+            )
+            return
         # Should NOT be rejected by validation
         assert "Invalid tool" not in result.stderr
         assert "Invalid characters" not in result.stderr

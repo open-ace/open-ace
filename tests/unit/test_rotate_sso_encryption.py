@@ -324,8 +324,14 @@ def test_key_management_docs_route_rotation_through_atomic_script_only():
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
+    text = (repo_root / "docs" / "guide" / "KEY_MANAGEMENT.md").read_text(encoding="utf-8")
+    sections = {}
+    for anchor in ("English", "中文"):
+        start = text.index(f"## {anchor}")
+        end = text.index("## 中文") if anchor == "English" else len(text)
+        sections[anchor] = text[start:end]
     for lang in ("cn", "en"):
-        doc = (repo_root / "docs" / lang / "KEY_MANAGEMENT.md").read_text(encoding="utf-8")
+        doc = sections["中文" if lang == "cn" else "English"]
         assert "export_encrypted_data.py" not in doc, (
             f"docs/{lang}/KEY_MANAGEMENT.md still recommends the 3-store "
             "export/import flow — 5 more stores would brick on the key switch"

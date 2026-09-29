@@ -338,8 +338,8 @@ def test_installers_persist_and_use_tls_options():
 
 
 def test_remote_agent_docs_describe_secure_default_and_migration():
-    """English and Chinese guides must not retain the legacy insecure default."""
-    for relative_path in ("docs/en/REMOTE_AGENT.md", "docs/cn/REMOTE_AGENT.md"):
+    """The bilingual guide must not retain the legacy insecure default."""
+    for relative_path in ("docs/guide/REMOTE_AGENT.md",):
         content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "| skip_ssl_verify | false |" in content
         assert "ca_bundle_path" in content
