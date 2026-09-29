@@ -112,6 +112,17 @@ jobs:
             done
           fi
 
+          # install.sh pins the pair in shell variables (the canonical
+          # source for package-method installs) — update those too, or the
+          # inline literals above would disagree with what gets installed.
+          INSTALL_SH=scripts/install-central/package-method/install.sh
+          if [ -f "$INSTALL_SH" ]; then
+            sed -i "s/^QWEBUI_VERSION=\"[^\"]*\"/QWEBUI_VERSION=\"$TARGET\"/" "$INSTALL_SH"
+            if [ -n "$TARGET_CLI" ]; then
+              sed -i "s/^QWEN_CLI_VERSION=\"[^\"]*\"/QWEN_CLI_VERSION=\"$TARGET_CLI\"/" "$INSTALL_SH"
+            fi
+          fi
+
           git diff --stat
 
       - name: Open or refresh the PR
