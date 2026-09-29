@@ -102,7 +102,7 @@ Declared by the Kubernetes manifests (see [KUBERNETES.md](KUBERNETES.md)); sever
 | Variable | Default | Purpose | Rotation impact | Source |
 |----------|---------|---------|-----------------|--------|
 | `OPENACE_PLATFORM_ADMIN_STRICT_MODE` | `false` | When `true`, only explicit `platform_admin` role passes platform-admin checks; legacy `admin` no longer does (Issue #2332). Migrate existing `role='admin'` accounts to `platform_admin` FIRST, then enable and restart every process; each logs `Platform admin strict mode: ENABLED` at startup | Enabling without migrating accounts locks legacy admins out | `app/auth/permissions.py` |
-| `OPENACE_ENCRYPTION_KEYS` | unset | JSON data-key registry: `{"keys": [{"id": 1-255, "value": "...", "status": "active|deprecated|revoked"}, ...], "primary_key_id": N}`; max 5 keys, exactly 1 active; takes precedence over `OPENACE_ENCRYPTION_KEY`; hot-reloaded roughly every 5 seconds | Key changes re-bind new ciphertexts (`v1k<id>:` prefix); see [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) | `app/utils/encryption_key_registry.py` |
+| `OPENACE_ENCRYPTION_KEYS` | unset | JSON data-key registry: `{"keys": [{"id": 1-255, "value": "...", "status": "active\|deprecated\|revoked"}, ...], "primary_key_id": N}`; max 5 keys, exactly 1 active; takes precedence over `OPENACE_ENCRYPTION_KEY`; hot-reloaded roughly every 5 seconds | Key changes re-bind new ciphertexts (`v1k<id>:` prefix); see [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) | `app/utils/encryption_key_registry.py` |
 | `OPENACE_CORS_ALLOWED_ORIGINS` | unset | Comma-separated explicit API CORS allowlist for non-loopback WebUI origins | Tightening blocks requests from removed origins | `app/__init__.py` |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | `8388608` | Maximum inbound browser WebSocket message size for the terminal / VSCode raw bridges | Lower values reject large paste payloads | `app/ws_frame.py` |
 | `OPENACE_TEST_MODE` | unset | `1` marks a CI/test context: skips production-level security checks | Never enable in production | `app/utils/security_mode.py` |
@@ -214,7 +214,7 @@ For the single-user development path, missing secrets are not an error: `docker-
 | 变量 | 默认值 | 作用 | 轮转影响 | 出处 |
 |------|--------|------|----------|------|
 | `OPENACE_PLATFORM_ADMIN_STRICT_MODE` | `false` | 为 `true` 时只有显式 `platform_admin` 角色能通过平台管理员检查，legacy `admin` 不再算数（Issue #2332）。必须先把存量 `role='admin'` 账户迁移为 `platform_admin`，再开启并重启所有进程；每个进程启动时会记录 `Platform admin strict mode: ENABLED` | 未迁移账户就开启会把 legacy 管理员锁在门外 | `app/auth/permissions.py` |
-| `OPENACE_ENCRYPTION_KEYS` | 未设置 | JSON 数据密钥注册表：`{"keys": [{"id": 1-255, "value": "...", "status": "active|deprecated|revoked"}, ...], "primary_key_id": N}`；最多 5 把、恰好 1 把 active；优先于 `OPENACE_ENCRYPTION_KEY`；约每 5 秒热加载 | 密钥变更会重新绑定新密文（`v1k<id>:` 前缀）；见 [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) | `app/utils/encryption_key_registry.py` |
+| `OPENACE_ENCRYPTION_KEYS` | 未设置 | JSON 数据密钥注册表：`{"keys": [{"id": 1-255, "value": "...", "status": "active\|deprecated\|revoked"}, ...], "primary_key_id": N}`；最多 5 把、恰好 1 把 active；优先于 `OPENACE_ENCRYPTION_KEY`；约每 5 秒热加载 | 密钥变更会重新绑定新密文（`v1k<id>:` 前缀）；见 [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) | `app/utils/encryption_key_registry.py` |
 | `OPENACE_CORS_ALLOWED_ORIGINS` | 未设置 | 非 loopback WebUI 源的显式 API CORS 白名单，逗号分隔 | 收紧会拒绝被移除源的请求 | `app/__init__.py` |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | `8388608` | 浏览器侧终端 / VSCode 原始桥接入站 WebSocket 最大消息字节数 | 调小会拒绝大的粘贴内容 | `app/ws_frame.py` |
 | `OPENACE_TEST_MODE` | 未设置 | `1` 标记 CI/测试上下文：跳过生产级安全检查 | 生产环境绝不可开启 | `app/utils/security_mode.py` |

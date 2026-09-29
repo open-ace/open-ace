@@ -512,7 +512,7 @@ docker compose ps
 docker compose logs -f open-ace
 ```
 
-然后访问 http://localhost:19888，使用默认凭证登录：
+然后访问 `http://localhost:19888`，使用默认凭证登录：
 
 ```
 用户名: admin

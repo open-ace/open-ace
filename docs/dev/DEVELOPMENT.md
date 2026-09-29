@@ -464,7 +464,7 @@ python3 cli.py config init
 python3 server.py
 ```
 
-打开 http://localhost:19888，使用默认账号 `admin` / `admin123` 登录。首次登录后请立即修改该密码 —— 凭据处理与生产加固见 [DEPLOYMENT.md](../guide/DEPLOYMENT.md)。
+打开 `http://localhost:19888`，使用默认账号 `admin` / `admin123` 登录。首次登录后请立即修改该密码 —— 凭据处理与生产加固见 [DEPLOYMENT.md](../guide/DEPLOYMENT.md)。
 
 ## 项目结构
 
