@@ -6,11 +6,12 @@
 
 <p align="center">
   <strong>AI Computing Explorer</strong><br>
+  <em>Self-hosted workspace and governance control plane for AI coding agents</em><br>
   <em>自托管 AI Coding Agent 工作台与治理控制面</em>
 </p>
 
 <p align="center">
-  <a href="#中文">中文</a> | <a href="#english">English</a>
+  <a href="#english">English</a> | <a href="#中文">中文</a>
 </p>
 
 <p align="center">
@@ -26,6 +27,332 @@
   <a href="https://github.com/open-ace/open-ace-docs">Docs Repo</a> ·
   <a href="ROADMAP.md">Roadmap</a> ·
   <a href="https://github.com/open-ace/open-ace/discussions">Discussions</a>
+</p>
+
+---
+
+<a name="english"></a>
+
+## 🎯 What is This?
+
+**Open ACE** is an open-source **self-hosted workspace, remote execution layer, and control plane for AI coding agents**: developers can use Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar tools from one browser workspace while running them on the team's own remote machines; administrators can centralize API keys, access control, quotas, cost visibility, audit trails, and compliance; teams can also bring GitHub issue-driven autonomous development workflows onto the same platform.
+
+It is built for teams moving AI coding agents into real engineering workflows, especially organizations that need self-hosted deployment, private-network machines, centralized key proxying, team quotas, and traceable audit records.
+
+| Challenge | Solution |
+|-----------|----------|
+| 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and more |
+| 🖥️ **Agents need to run on internal, staging, or GPU machines** | Remote Agent runs AI CLIs directly on target machines |
+| 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived, revocable proxy tokens |
+| 🔄 **Teams want issue-driven execution, not just chat sessions** | Autonomous workflows can parse issues, plan, implement, open PRs, comment, and resume after human interruption |
+| 📊 **Cost, quotas, risk, and audit need visibility** | Manage Mode tracks usage, cost, quotas, anomalies, audit trails, and compliance |
+
+**What you can do with Open ACE:**
+
+- Give teams one place for local/remote AI coding sessions, prompts, history, and project context
+- Run Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
+- Create autonomous development tasks from GitHub issues and let workflows plan, implement, comment, open PRs, and continue with human guidance
+- Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
+- Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
+- Deploy inside your own network while integrating OIDC/OAuth2/SAML SSO, Feishu/DingTalk sync, and Kubernetes
+
+## 🔥 Recent Highlights
+
+| Capability | Why it matters |
+|------------|----------------|
+| AI coding agent control plane | Bring the team's existing AI CLIs under one access, key, quota, cost, and audit model |
+| Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
+| Multi-CLI adapters | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
+| Autonomous development workflows | Queue GitHub issue-driven workflows that move through planning, implementation, PR creation, commenting, pause/resume, and forks |
+| API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived, revocable proxy tokens with unified quota and usage tracking |
+| Terminal and VSCode/code-server proxy | Browser terminal, remote directory browsing, and code-server/VSCode access make the workspace useful for real development loops |
+| Compliance and reporting | Audit trails, quota checks, compliance reports, and CSV downloads are available for governance workflows |
+| Open-source readiness | Roadmap, Security Policy, issue templates, Dependabot, CODEOWNERS, and beginner-friendly labels are in place |
+
+## ✨ Two Modes, Double Value
+
+### 🚀 Work Mode — Make AI Your Super Assistant
+
+> For every employee, providing a seamless AI interaction experience
+
+<p align="center">
+  <img src="docs/images/work-mode-en.png" alt="Work Mode Screenshot" width="80%">
+</p>
+
+**Key Capabilities:**
+- 🤖 **Multi-AI Integration** — Claude Code, Qwen Code, Codex, ZCode, and OpenClaw behind one workspace
+- 🖥️ **Remote Workspace** — Choose a remote machine in the browser, then start AI coding sessions, terminals, and directory browsing
+- 🔄 **Autonomous Development** — Run issue-driven workflows with queueing, pause/resume, branching, and guided handoff points
+- 💬 **Smart Session Management** — History, session recovery, context memory, and cross-tool history sync
+- 📝 **Prompt Library** — Share best practices across your team with reusable prompts
+- 🔍 **Quick Search** — Search across all conversations, knowledge preserved
+
+---
+
+### 📊 Manage Mode — Data-Driven AI Governance
+
+> For administrators, providing comprehensive AI usage insights and control
+
+<p align="center">
+  <img src="docs/images/manage-mode-en.png" alt="Manage Mode Screenshot" width="80%">
+</p>
+
+**Key Capabilities:**
+- 📈 **Usage Visualization** — Token consumption trends, cost analysis, heatmaps at a glance
+- 🔑 **API Key Governance** — Encrypt API keys on the server and call models through scoped proxy tokens
+- 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
+- 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
+- 👥 **Multi-tenant Management** — Tenant-scoped session and project isolation, permission control, and resource quotas
+- 💰 **ROI Analysis** — Configurable ROI planning estimates with transparent assumptions and efficiency metrics
+
+---
+
+## 🏢 Why Open ACE?
+
+| Feature | Description |
+|---------|-------------|
+| 🔒 **Self-hosted by default** | Keep data and API keys inside your own network and database |
+| 🎛️ **Agent control plane** | Manage tools, users, machines, keys, quotas, cost, and audit trails without replacing every AI CLI |
+| 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw with unified access, history, and governance |
+| 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
+| 🔄 **Autonomous dev loop** | Move from GitHub issues to plans, implementation, PRs, comments, and human intervention in one traceable workflow |
+| 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
+| 🔌 **Enterprise integration** | OIDC/OAuth2/SAML 2.0 SSO, Feishu org import, DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions |
+| 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
+
+---
+
+## 🚀 Quick Start in 5 Minutes
+
+### Option 1: One-click Deploy (Recommended)
+
+```bash
+# Clone the project
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+# Build and start
+docker compose up -d --build
+
+# Visit http://localhost:19888 (AI + ace mnemonic port)
+```
+
+> 💡 For production deployment, see [Deployment Guide](docs/guide/DEPLOYMENT.md)
+
+### Option 2: From Source
+
+```bash
+# 1. Clone the project
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+# 2. Install backend dependencies
+pip install -r requirements.txt
+
+# 3. Install frontend dependencies and build
+cd frontend && npm install && npm run build && cd ..
+
+# 4. Initialize configuration and database
+python3 cli.py config init
+alembic upgrade head
+python3 scripts/init_db.py
+
+# 5. Start the server
+python3 server.py
+
+# Visit http://localhost:19888 (AI + ace mnemonic port)
+```
+
+> 💡 When starting directly via `python3 server.py` without an explicit `OPENACE_ENCRYPTION_KEY`, development/pilot mode auto-generates and persists it to `~/.open-ace/generated-secrets.env` on first startup (reused across restarts, never rotated; production still requires explicit values) — matching the Docker path's zero-config behavior (Issue #2667).
+
+### Default Credentials
+
+| Role | Username | Password |
+|------|----------|----------|
+| Admin | admin | admin123 |
+
+> ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/guide/DEPLOYMENT.md).
+
+---
+
+## 📖 Feature Details
+
+### 📊 Analytics
+
+| Feature | Description |
+|---------|-------------|
+| Trend Analysis | View token usage trends by day/week/month |
+| Comparison | Compare usage across time periods and tools |
+| Heatmap | Visualize peak usage hours |
+| Cost Analysis | Convert token consumption to costs |
+
+### 💬 Message Tracking
+
+| Feature | Description |
+|---------|-------------|
+| Conversation History | View complete conversation records |
+| Message Search | Filter by keyword, user, time |
+| Session Export | Export conversations for audit |
+| Timeline View | Visualize conversation flow |
+
+### 🖥️ Remote Workspace
+
+| Feature | Description |
+|---------|-------------|
+| Remote Agent | Run AI CLI daemons on Linux/macOS/Windows remote machines |
+| CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, ZCode, and OpenClaw |
+| Browser Terminal | Access remote shells through WebSocket with PTY on Linux/macOS, a piped subprocess on Windows, and screen recovery after disconnects |
+| VSCode/code-server | Proxy remote code-server/VSCode paths so users can continue development in the browser |
+| API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived, revocable proxy tokens |
+
+### 🔄 Autonomous Development
+
+| Feature | Description |
+|---------|-------------|
+| GitHub Issue Parsing | Accept issue numbers, ranges, and URLs to create one or many autonomous tasks |
+| Workflow Orchestration | Visualize queued, planning, implementation, PR, comment, and merge stages |
+| Human-in-the-loop Control | Pause, resume, inject feedback, or fork a workflow from intermediate milestones |
+| GitHub Operations | Use bot-account tokens for issue, PR, and comment automation |
+
+### 🔔 Alert Center
+
+| Feature | Description |
+|---------|-------------|
+| Quota Alerts | Automatic notifications when thresholds reached |
+| Anomaly Detection | Identify unusual usage patterns |
+| Email Reports | Periodic usage reports via email |
+| Webhook / Bot Push | Real-time alerts to webhooks, including Feishu / Lark and DingTalk group bots |
+
+### 👥 User Management
+
+| Feature | Description |
+|---------|-------------|
+| Multi-tenant | Department/team isolation |
+| Role Permissions | Admin/user role distinction |
+| SSO Integration | Enterprise single sign-on via OIDC/OAuth2 and SAML 2.0 |
+| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
+| DingTalk Sync | Manual and optionally scheduled DingTalk organization sync, plus DingTalk user/group name resolution during OpenClaw import |
+
+### 📋 Compliance and Reporting
+
+| Feature | Description |
+|---------|-------------|
+| Audit Logs | Track users, sessions, tools, and key administration actions |
+| Compliance Checks | Cover data retention, quota usage, sensitive content, and access control |
+| Report Generation | Generate governance reports with JSON/CSV export paths |
+| Risk Recommendations | Turn report results into practical follow-up actions |
+
+---
+
+## 🛠️ Tech Stack
+
+<table>
+<tr>
+<td width="50%">
+
+### Backend
+- **Python 3.10+**
+- **Flask** — Web Framework
+- **SQLAlchemy** — ORM
+- **PostgreSQL / SQLite** — Database
+- **Alembic** — Migrations
+
+</td>
+<td width="50%">
+
+### Frontend
+- **React 18** — UI Framework
+- **TypeScript** — Type Safety
+- **Vite** — Build Tool
+- **Bootstrap 5** — UI Components
+- **Chart.js** — Visualization
+
+</td>
+</tr>
+</table>
+
+---
+
+## 📁 Project Structure
+
+```
+open-ace/
+├── server.py                 # Web server entry
+├── cli.py                 # CLI tool entry
+├── app/                   # Backend application
+│   ├── routes/            # API routes
+│   ├── services/          # Business logic
+│   ├── modules/           # Domain modules: workspace, compliance, and more
+│   ├── models/            # Data models
+│   └── repositories/      # Data access
+├── frontend/              # Frontend application
+│   ├── src/               # Source code
+│   ├── e2e/               # Playwright end-to-end tests
+│   └── package.json       # Dependencies
+├── remote-agent/          # Remote Workspace agent and CLI adapters
+├── k8s/                   # Kubernetes manifests
+├── migrations/            # Alembic database migrations
+├── schema/                # Database schema helpers
+├── scripts/               # Core scripts and operational helpers
+│   ├── fetch_*.py         # Data collection
+│   ├── cron/              # Scheduled task scripts
+│   ├── systemd/           # systemd service/timer examples
+│   └── shared/            # Shared modules
+├── static/                # Runtime static assets and frontend build output
+├── docs/                  # Documentation
+└── tests/                 # Tests
+```
+
+---
+
+## 📚 Documentation
+
+The `docs/` directory is the source of truth for product documentation. The published Docusaurus docs site is built and deployed from the separate `open-ace/open-ace-docs` repository.
+
+- Docs site: <https://open-ace.github.io/open-ace-docs/docs/intro>
+- Docs source repository: <https://github.com/open-ace/open-ace-docs>
+- The legacy `https://open-ace.github.io/open-ace/` entry redirects to the current docs site to avoid stale content
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/dev/ARCHITECTURE.md) | System architecture and concepts |
+| [AI Autonomous Development](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | Workflow, four-session design (main/review/test/verification), CI repair, isolation, and maintenance |
+| [Deployment](docs/guide/DEPLOYMENT.md) | Local and production deployment |
+| [Development](docs/dev/DEVELOPMENT.md) | Contributing guide |
+| [Remote Workspace](docs/guide/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
+| [Remote Agent](docs/guide/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
+| [Permission Model](docs/dev/PERMISSION_MODEL.md) | Tenants, roles, and access control |
+| [Kubernetes](docs/guide/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
+| [Feishu Config](docs/guide/FEISHU_CONFIG.md) | Feishu integration |
+| [DingTalk Config](docs/guide/DINGTALK_CONFIG.md) | DingTalk integration |
+| [API Reference](docs/dev/API.md) | API documentation |
+| [Repository Setup](docs/dev/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
+
+---
+
+## 🤝 Contributing
+
+We welcome all forms of contribution!
+
+- 🐛 Found a bug? [Submit an Issue](https://github.com/open-ace/open-ace/issues)
+- 💡 Have an idea? [Join the discussion](https://github.com/open-ace/open-ace/discussions)
+- 🗺️ Want to see what's next? Read the [Roadmap](ROADMAP.md)
+- 🔧 Want to contribute code? Read the [Contributing Guide](CONTRIBUTING.md)
+- 🌱 First contribution? Start with [`good first issue`](https://github.com/open-ace/open-ace/labels/good%20first%20issue) or [`help wanted`](https://github.com/open-ace/open-ace/labels/help%20wanted)
+
+Good places to help include Remote Workspace UX, CLI adapters, deployment scripts, documentation translation, frontend usability, test coverage, and enterprise integrations.
+
+---
+
+## 📄 License
+
+This project is licensed under the [Apache 2.0 License](LICENSE).
+
+---
+
+<p align="center">
+  <strong>Bring AI coding agents in. Keep keys, cost, and risk under control.</strong><br>
+  <em>Open ACE — self-hosted workspace and control plane for AI coding agents</em>
 </p>
 
 ---
@@ -425,7 +752,7 @@ open-ace/
 | 文档 | 说明 |
 |------|------|
 | [架构说明](docs/dev/ARCHITECTURE.md) | 系统架构与核心概念 |
-| [AI 自主开发](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
+| [AI 自主开发](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | 功能流程、四会话设计（main/review/test/verification）、CI 自愈、隔离执行与维护指南 |
 | [部署指南](docs/guide/DEPLOYMENT.md) | 本地与生产环境部署 |
 | [开发指南](docs/dev/DEVELOPMENT.md) | 参与开发 |
 | [远程工作区](docs/guide/REMOTE_WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
@@ -461,331 +788,5 @@ open-ace/
 
 <p align="center">
   <strong>把 AI Coding Agent 接进来，把密钥、成本和风险管起来</strong><br>
-  <em>Open ACE — self-hosted workspace and control plane for AI coding agents</em>
-</p>
-
----
-
-<a name="english"></a>
-
-## 🎯 What is This?
-
-**Open ACE** is an open-source **self-hosted workspace, remote execution layer, and control plane for AI coding agents**: developers can use Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar tools from one browser workspace while running them on the team's own remote machines; administrators can centralize API keys, access control, quotas, cost visibility, audit trails, and compliance; teams can also bring GitHub issue-driven autonomous development workflows onto the same platform.
-
-It is built for teams moving AI coding agents into real engineering workflows, especially organizations that need self-hosted deployment, private-network machines, centralized key proxying, team quotas, and traceable audit records.
-
-| Challenge | Solution |
-|-----------|----------|
-| 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and more |
-| 🖥️ **Agents need to run on internal, staging, or GPU machines** | Remote Agent runs AI CLIs directly on target machines |
-| 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived, revocable proxy tokens |
-| 🔄 **Teams want issue-driven execution, not just chat sessions** | Autonomous workflows can parse issues, plan, implement, open PRs, comment, and resume after human interruption |
-| 📊 **Cost, quotas, risk, and audit need visibility** | Manage Mode tracks usage, cost, quotas, anomalies, audit trails, and compliance |
-
-**What you can do with Open ACE:**
-
-- Give teams one place for local/remote AI coding sessions, prompts, history, and project context
-- Run Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
-- Create autonomous development tasks from GitHub issues and let workflows plan, implement, comment, open PRs, and continue with human guidance
-- Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
-- Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
-- Deploy inside your own network while integrating OIDC/OAuth2/SAML SSO, Feishu/DingTalk sync, and Kubernetes
-
-## 🔥 Recent Highlights
-
-| Capability | Why it matters |
-|------------|----------------|
-| AI coding agent control plane | Bring the team's existing AI CLIs under one access, key, quota, cost, and audit model |
-| Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
-| Multi-CLI adapters | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
-| Autonomous development workflows | Queue GitHub issue-driven workflows that move through planning, implementation, PR creation, commenting, pause/resume, and forks |
-| API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived, revocable proxy tokens with unified quota and usage tracking |
-| Terminal and VSCode/code-server proxy | Browser terminal, remote directory browsing, and code-server/VSCode access make the workspace useful for real development loops |
-| Compliance and reporting | Audit trails, quota checks, compliance reports, and CSV downloads are available for governance workflows |
-| Open-source readiness | Roadmap, Security Policy, issue templates, Dependabot, CODEOWNERS, and beginner-friendly labels are in place |
-
-## ✨ Two Modes, Double Value
-
-### 🚀 Work Mode — Make AI Your Super Assistant
-
-> For every employee, providing a seamless AI interaction experience
-
-<p align="center">
-  <img src="docs/images/work-mode-en.png" alt="Work Mode Screenshot" width="80%">
-</p>
-
-**Key Capabilities:**
-- 🤖 **Multi-AI Integration** — Claude Code, Qwen Code, Codex, ZCode, and OpenClaw behind one workspace
-- 🖥️ **Remote Workspace** — Choose a remote machine in the browser, then start AI coding sessions, terminals, and directory browsing
-- 🔄 **Autonomous Development** — Run issue-driven workflows with queueing, pause/resume, branching, and guided handoff points
-- 💬 **Smart Session Management** — History, session recovery, context memory, and cross-tool history sync
-- 📝 **Prompt Library** — Share best practices across your team with reusable prompts
-- 🔍 **Quick Search** — Search across all conversations, knowledge preserved
-
----
-
-### 📊 Manage Mode — Data-Driven AI Governance
-
-> For administrators, providing comprehensive AI usage insights and control
-
-<p align="center">
-  <img src="docs/images/manage-mode-en.png" alt="Manage Mode Screenshot" width="80%">
-</p>
-
-**Key Capabilities:**
-- 📈 **Usage Visualization** — Token consumption trends, cost analysis, heatmaps at a glance
-- 🔑 **API Key Governance** — Encrypt API keys on the server and call models through scoped proxy tokens
-- 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
-- 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
-- 👥 **Multi-tenant Management** — Tenant-scoped session and project isolation, permission control, and resource quotas
-- 💰 **ROI Analysis** — Configurable ROI planning estimates with transparent assumptions and efficiency metrics
-
----
-
-## 🏢 Why Open ACE?
-
-| Feature | Description |
-|---------|-------------|
-| 🔒 **Self-hosted by default** | Keep data and API keys inside your own network and database |
-| 🎛️ **Agent control plane** | Manage tools, users, machines, keys, quotas, cost, and audit trails without replacing every AI CLI |
-| 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw with unified access, history, and governance |
-| 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
-| 🔄 **Autonomous dev loop** | Move from GitHub issues to plans, implementation, PRs, comments, and human intervention in one traceable workflow |
-| 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
-| 🔌 **Enterprise integration** | OIDC/OAuth2/SAML 2.0 SSO, Feishu org import, DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions |
-| 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
-
----
-
-## 🚀 Quick Start in 5 Minutes
-
-### Option 1: One-click Deploy (Recommended)
-
-```bash
-# Clone the project
-git clone https://github.com/open-ace/open-ace.git
-cd open-ace
-
-# Build and start
-docker compose up -d --build
-
-# Visit http://localhost:19888 (AI + ace mnemonic port)
-```
-
-> 💡 For production deployment, see [Deployment Guide](docs/guide/DEPLOYMENT.md)
-
-### Option 2: From Source
-
-```bash
-# 1. Clone the project
-git clone https://github.com/open-ace/open-ace.git
-cd open-ace
-
-# 2. Install backend dependencies
-pip install -r requirements.txt
-
-# 3. Install frontend dependencies and build
-cd frontend && npm install && npm run build && cd ..
-
-# 4. Initialize configuration and database
-python3 cli.py config init
-alembic upgrade head
-python3 scripts/init_db.py
-
-# 5. Start the server
-python3 server.py
-
-# Visit http://localhost:19888 (AI + ace mnemonic port)
-```
-
-> 💡 When starting directly via `python3 server.py` without an explicit `OPENACE_ENCRYPTION_KEY`, development/pilot mode auto-generates and persists it to `~/.open-ace/generated-secrets.env` on first startup (reused across restarts, never rotated; production still requires explicit values) — matching the Docker path's zero-config behavior (Issue #2667).
-
-### Default Credentials
-
-| Role | Username | Password |
-|------|----------|----------|
-| Admin | admin | admin123 |
-
-> ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/guide/DEPLOYMENT.md).
-
----
-
-## 📖 Feature Details
-
-### 📊 Analytics
-
-| Feature | Description |
-|---------|-------------|
-| Trend Analysis | View token usage trends by day/week/month |
-| Comparison | Compare usage across time periods and tools |
-| Heatmap | Visualize peak usage hours |
-| Cost Analysis | Convert token consumption to costs |
-
-### 💬 Message Tracking
-
-| Feature | Description |
-|---------|-------------|
-| Conversation History | View complete conversation records |
-| Message Search | Filter by keyword, user, time |
-| Session Export | Export conversations for audit |
-| Timeline View | Visualize conversation flow |
-
-### 🖥️ Remote Workspace
-
-| Feature | Description |
-|---------|-------------|
-| Remote Agent | Run AI CLI daemons on Linux/macOS/Windows remote machines |
-| CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, ZCode, and OpenClaw |
-| Browser Terminal | Access remote shells through WebSocket with PTY on Linux/macOS, a piped subprocess on Windows, and screen recovery after disconnects |
-| VSCode/code-server | Proxy remote code-server/VSCode paths so users can continue development in the browser |
-| API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived, revocable proxy tokens |
-
-### 🔄 Autonomous Development
-
-| Feature | Description |
-|---------|-------------|
-| GitHub Issue Parsing | Accept issue numbers, ranges, and URLs to create one or many autonomous tasks |
-| Workflow Orchestration | Visualize queued, planning, implementation, PR, comment, and merge stages |
-| Human-in-the-loop Control | Pause, resume, inject feedback, or fork a workflow from intermediate milestones |
-| GitHub Operations | Use bot-account tokens for issue, PR, and comment automation |
-
-### 🔔 Alert Center
-
-| Feature | Description |
-|---------|-------------|
-| Quota Alerts | Automatic notifications when thresholds reached |
-| Anomaly Detection | Identify unusual usage patterns |
-| Email Reports | Periodic usage reports via email |
-| Webhook / Bot Push | Real-time alerts to webhooks, including Feishu / Lark and DingTalk group bots |
-
-### 👥 User Management
-
-| Feature | Description |
-|---------|-------------|
-| Multi-tenant | Department/team isolation |
-| Role Permissions | Admin/user role distinction |
-| SSO Integration | Enterprise single sign-on via OIDC/OAuth2 and SAML 2.0 |
-| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
-| DingTalk Sync | Manual and optionally scheduled DingTalk organization sync, plus DingTalk user/group name resolution during OpenClaw import |
-
-### 📋 Compliance and Reporting
-
-| Feature | Description |
-|---------|-------------|
-| Audit Logs | Track users, sessions, tools, and key administration actions |
-| Compliance Checks | Cover data retention, quota usage, sensitive content, and access control |
-| Report Generation | Generate governance reports with JSON/CSV export paths |
-| Risk Recommendations | Turn report results into practical follow-up actions |
-
----
-
-## 🛠️ Tech Stack
-
-<table>
-<tr>
-<td width="50%">
-
-### Backend
-- **Python 3.10+**
-- **Flask** — Web Framework
-- **SQLAlchemy** — ORM
-- **PostgreSQL / SQLite** — Database
-- **Alembic** — Migrations
-
-</td>
-<td width="50%">
-
-### Frontend
-- **React 18** — UI Framework
-- **TypeScript** — Type Safety
-- **Vite** — Build Tool
-- **Bootstrap 5** — UI Components
-- **Chart.js** — Visualization
-
-</td>
-</tr>
-</table>
-
----
-
-## 📁 Project Structure
-
-```
-open-ace/
-├── server.py                 # Web server entry
-├── cli.py                 # CLI tool entry
-├── app/                   # Backend application
-│   ├── routes/            # API routes
-│   ├── services/          # Business logic
-│   ├── modules/           # Domain modules: workspace, compliance, and more
-│   ├── models/            # Data models
-│   └── repositories/      # Data access
-├── frontend/              # Frontend application
-│   ├── src/               # Source code
-│   ├── e2e/               # Playwright end-to-end tests
-│   └── package.json       # Dependencies
-├── remote-agent/          # Remote Workspace agent and CLI adapters
-├── k8s/                   # Kubernetes manifests
-├── migrations/            # Alembic database migrations
-├── schema/                # Database schema helpers
-├── scripts/               # Core scripts and operational helpers
-│   ├── fetch_*.py         # Data collection
-│   ├── cron/              # Scheduled task scripts
-│   ├── systemd/           # systemd service/timer examples
-│   └── shared/            # Shared modules
-├── static/                # Runtime static assets and frontend build output
-├── docs/                  # Documentation
-└── tests/                 # Tests
-```
-
----
-
-## 📚 Documentation
-
-The `docs/` directory is the source of truth for product documentation. The published Docusaurus docs site is built and deployed from the separate `open-ace/open-ace-docs` repository.
-
-- Docs site: <https://open-ace.github.io/open-ace-docs/docs/intro>
-- Docs source repository: <https://github.com/open-ace/open-ace-docs>
-- The legacy `https://open-ace.github.io/open-ace/` entry redirects to the current docs site to avoid stale content
-
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/dev/ARCHITECTURE.md) | System architecture and concepts |
-| [AI Autonomous Development](docs/dev/AUTONOMOUS_DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
-| [Deployment](docs/guide/DEPLOYMENT.md) | Local and production deployment |
-| [Development](docs/dev/DEVELOPMENT.md) | Contributing guide |
-| [Remote Workspace](docs/guide/REMOTE_WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
-| [Remote Agent](docs/guide/REMOTE_AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
-| [Permission Model](docs/dev/PERMISSION_MODEL.md) | Tenants, roles, and access control |
-| [Kubernetes](docs/guide/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
-| [Feishu Config](docs/guide/FEISHU_CONFIG.md) | Feishu integration |
-| [DingTalk Config](docs/guide/DINGTALK_CONFIG.md) | DingTalk integration |
-| [API Reference](docs/dev/API.md) | API documentation |
-| [Repository Setup](docs/dev/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
-
----
-
-## 🤝 Contributing
-
-We welcome all forms of contribution!
-
-- 🐛 Found a bug? [Submit an Issue](https://github.com/open-ace/open-ace/issues)
-- 💡 Have an idea? [Join the discussion](https://github.com/open-ace/open-ace/discussions)
-- 🗺️ Want to see what's next? Read the [Roadmap](ROADMAP.md)
-- 🔧 Want to contribute code? Read the [Contributing Guide](CONTRIBUTING.md)
-- 🌱 First contribution? Start with [`good first issue`](https://github.com/open-ace/open-ace/labels/good%20first%20issue) or [`help wanted`](https://github.com/open-ace/open-ace/labels/help%20wanted)
-
-Good places to help include Remote Workspace UX, CLI adapters, deployment scripts, documentation translation, frontend usability, test coverage, and enterprise integrations.
-
----
-
-## 📄 License
-
-This project is licensed under the [Apache 2.0 License](LICENSE).
-
----
-
-<p align="center">
-  <strong>Bring AI coding agents in. Keep keys, cost, and risk under control.</strong><br>
   <em>Open ACE — self-hosted workspace and control plane for AI coding agents</em>
 </p>

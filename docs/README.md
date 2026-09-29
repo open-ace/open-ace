@@ -74,10 +74,10 @@ together with index consistency and endpoint/env coverage.
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | Generated elevated-permission matrix (do not hand-edit) |
 | [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | Six-role RBAC, ten auth decorators, strict mode |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token collection pipeline + Request/Message/Session concepts |
-| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | Autonomous development lifecycle and three-session design |
+| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | Autonomous development lifecycle and four-session design |
 | [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM-compatible model gateway |
 | [SANDBOX_BACKENDS](dev/SANDBOX_BACKENDS.md) | Where autonomous agents execute — backends and trade-offs |
-| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | Domain map of all 103 tables (column authority: schema SQL) |
+| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | Domain map of all 104 tables (column authority: schema SQL) |
 | [DATABASE_CONVENTIONS](dev/DATABASE_CONVENTIONS.md) | Field naming conventions, `adapt_boolean` helpers |
 | [SCHEMA_MIGRATION_GUIDE](dev/SCHEMA_MIGRATION_GUIDE.md) | Alembic strategy + authoring rules MIG001–MIG003 |
 | [FRONTEND_GUIDE](dev/FRONTEND_GUIDE.md) | React/TypeScript frontend guide |
@@ -209,10 +209,10 @@ docs/
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | 生成的提权端点矩阵（勿手改） |
 | [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | 六角色 RBAC、十个认证装饰器、严格模式 |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token 采集链路 + Request/Message/Session 概念 |
-| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | 自主开发生命周期与三会话设计 |
+| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | 自主开发生命周期与四会话设计 |
 | [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM 兼容模型网关 |
 | [SANDBOX_BACKENDS](dev/SANDBOX_BACKENDS.md) | 自主 Agent 的执行地——后端与权衡 |
-| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | 103 张表领域地图（逐列权威：schema SQL） |
+| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | 104 张表领域地图（逐列权威：schema SQL） |
 | [DATABASE_CONVENTIONS](dev/DATABASE_CONVENTIONS.md) | 字段命名约定、`adapt_boolean` 助手 |
 | [SCHEMA_MIGRATION_GUIDE](dev/SCHEMA_MIGRATION_GUIDE.md) | Alembic 策略 + 编写铁律 MIG001–MIG003 |
 | [FRONTEND_GUIDE](dev/FRONTEND_GUIDE.md) | React/TypeScript 前端指南 |
