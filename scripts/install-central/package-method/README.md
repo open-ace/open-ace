@@ -390,7 +390,7 @@ openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 
 Open-ACE 已配置 CORS 允许来自 workspace 端口范围 (3100-3200) 的请求，iframe 内的 webui 可以正常调用 Open-ACE API。
 
-**详细配置说明请参考 [部署文档](../../docs/DEPLOYMENT.md#multi-user-workspace-deployment)**
+**详细配置说明请参考 [部署文档](../../../docs/guide/MULTI_USER_WORKSPACE.md)**
 
 ### 卸载配置文件格式
 

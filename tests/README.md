@@ -1,7 +1,7 @@
 # Tests
 
 Open ACE 测试按运行环境存放，每个测试只有一个 canonical location。
-完整策略见 [`docs/TEST_LAYERS.md`](../docs/TEST_LAYERS.md)。
+完整策略见 [`docs/dev/TEST_LAYERS.md`](../docs/dev/TEST_LAYERS.md)。
 
 ## 目录
 
@@ -57,4 +57,4 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 - 所属 CI lane 能自动发现它，不需要把 issue 编号硬编码进 workflow。
 - 测试清理创建的进程、连接、浏览器和临时资源。
 
-Legacy 迁移细则和 CI 保证以 `docs/TEST_LAYERS.md` 为准。
+Legacy 迁移细则和 CI 保证以 `docs/dev/TEST_LAYERS.md` 为准。

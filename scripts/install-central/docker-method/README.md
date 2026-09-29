@@ -324,6 +324,6 @@ volumes:
 
 ## 更多文档
 
-- [架构说明](../../../docs/ARCHITECTURE.md)
-- [开发指南](../../../docs/DEVELOPMENT.md)
-- [API 文档](../../../docs/API.md)
+- [架构说明](../../../docs/dev/ARCHITECTURE.md)
+- [开发指南](../../../docs/dev/DEVELOPMENT.md)
+- [API 文档](../../../docs/dev/API.md)

@@ -222,8 +222,8 @@ if $COMPOSE_CMD "${COMPOSE_ARGS[@]}"; then
     echo "  Restart:      $COMPOSE_CMD -f docker-compose.yml -f docker-compose.multi-user.yml restart"
     echo ""
     echo -e "${BLUE}Documentation:${NC}"
-    echo "  Multi-user deployment: docs/cn/DEPLOYMENT.md#多用户工作区部署"
-    echo "  Troubleshooting:       docs/cn/DEPLOYMENT.md#故障排查"
+    echo "  Multi-user deployment: docs/guide/MULTI_USER_WORKSPACE.md"
+    echo "  Troubleshooting:       docs/guide/DEPLOYMENT.md"
     echo ""
 else
     echo ""
@@ -235,6 +235,6 @@ else
     echo "  1. Ensure Docker is running: docker info"
     echo "  2. Check for port conflicts: netstat -tlnp | grep 19888"
     echo "  3. View detailed logs: $COMPOSE_CMD -f docker-compose.yml -f docker-compose.multi-user.yml logs"
-    echo "  4. Read troubleshooting guide: docs/cn/DEPLOYMENT.md#故障排查"
+    echo "  4. Read troubleshooting guide: docs/guide/DEPLOYMENT.md"
     exit 1
 fi

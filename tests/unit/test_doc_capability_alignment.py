@@ -42,38 +42,33 @@ def test_readme_and_docs_advertise_implemented_saml_support() -> None:
 
 def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
     readme = read_doc("README.md")
-    en_config = read_doc("docs/en/DINGTALK_CONFIG.md")
-    cn_config = read_doc("docs/cn/DINGTALK_CONFIG.md")
+    dingtalk_doc = read_doc("docs/guide/DINGTALK_CONFIG.md")
     config_guide = read_doc("config/CONFIG_GUIDE.md")
 
     assert "#1785" not in readme
-    assert "#1785" not in en_config
+    assert "#1785" not in dingtalk_doc
     assert "DingTalk Sync" in readme
     assert "钉钉同步" in readme
 
-    assert "local org sync of DingTalk departments and users" in en_config
-    assert "alert delivery to DingTalk custom robot webhooks" in en_config
-    assert "POST /api/admin/dingtalk/sync" in en_config
+    assert "local org sync of DingTalk departments and users" in dingtalk_doc
+    assert "alert delivery to DingTalk custom robot webhooks" in dingtalk_doc
+    assert "POST /api/admin/dingtalk/sync" in dingtalk_doc
 
-    assert "将钉钉组织架构同步到 Open ACE" in cn_config
-    assert "钉钉自定义机器人 webhook" in cn_config
-    assert "POST /api/admin/dingtalk/sync" in cn_config
+    assert "将钉钉组织架构同步到 Open ACE" in dingtalk_doc
+    assert "钉钉自定义机器人 webhook" in dingtalk_doc
     assert "当前钉钉能力覆盖 OpenClaw 导入链路" in config_guide
 
 
 def test_terminal_docs_describe_windows_piped_subprocess() -> None:
     readme = read_doc("README.md")
-    remote_agent_en = read_doc("docs/en/REMOTE_AGENT.md")
-    remote_agent_cn = read_doc("docs/cn/REMOTE_AGENT.md")
-    marketing = read_doc("docs/marketing/REMOTE_AGENT_API_KEY_PROXY_ARTICLE.md")
+    remote_agent_doc = read_doc("docs/guide/REMOTE_AGENT.md")
 
     assert "WebSocket PTY" not in readme
     assert "piped subprocess on Windows" in readme
     assert "Windows 使用管道子进程" in readme
 
-    assert "persistent piped subprocess on Windows" in remote_agent_en
-    assert "Windows 使用持久的管道子进程" in remote_agent_cn
-    assert "piped subprocess on Windows" in marketing
+    assert "persistent piped subprocess on Windows" in remote_agent_doc
+    assert "Windows 使用持久的管道子进程" in remote_agent_doc
 
 
 def test_sso_module_docstring_advertises_saml_support() -> None:

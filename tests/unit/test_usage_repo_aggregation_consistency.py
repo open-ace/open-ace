@@ -837,7 +837,7 @@ class TestRequestStatsMetaField:
         """
         from app.constants.request_stats_meta import REQUEST_STATS_META
 
-        # Verify content matches documentation (docs/en/API.md and docs/cn/API.md)
+        # Verify content matches documentation (docs/dev/API.md)
         assert REQUEST_STATS_META["definition"] == "AI assistant response count (role='assistant')"
         assert REQUEST_STATS_META["source"] == "daily_messages table"
         assert REQUEST_STATS_META["note"] == "Counts completed user-to-AI interactions"

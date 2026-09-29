@@ -447,7 +447,7 @@ def api_add_pattern():
                 "error": "Deprecated",
                 "message": "This endpoint is deprecated and will be removed in a future version.",
                 "migration_guide": "Use POST /api/filter-rules instead.",
-                "documentation": "/docs/api/migrations/FILTER_PATTERNS_V2.md",
+                "documentation": "/docs/contracts/FILTER_PATTERNS_V2.md",
             }
         ),
         200,
@@ -477,7 +477,7 @@ def api_add_keyword():
                 "error": "Deprecated",
                 "message": "This endpoint is deprecated and will be removed in a future version.",
                 "migration_guide": "Use POST /api/tenants/{tenant_id}/sensitive-keywords instead.",
-                "documentation": "/docs/api/migrations/sensitive-keywords-v2.md",
+                "documentation": "/docs/contracts/sensitive-keywords-v2.md",
             }
         ),
         200,
