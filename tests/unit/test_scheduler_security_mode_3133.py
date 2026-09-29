@@ -21,8 +21,21 @@ BASE = ROOT / "docker-compose.yml"
 OVERLAY = ROOT / "docker-compose.multi-user.yml"
 
 
+class _ComposeLoader(yaml.SafeLoader):
+    """SafeLoader plus Docker Compose's custom YAML tags (Issue #3455).
+
+    The multi-user overlay uses `profiles: !override []` — `!override` is a
+    Compose-specific tag (replacement merge semantics) that plain
+    ``yaml.safe_load`` rejects with a ConstructorError. Registering the
+    constructor on this local subclass keeps the global SafeLoader untouched.
+    """
+
+
+_ComposeLoader.add_constructor("!override", lambda loader, node: loader.construct_sequence(node))
+
+
 def _env_of(path: Path, service: str) -> dict:
-    compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+    compose = yaml.load(path.read_text(encoding="utf-8"), Loader=_ComposeLoader)
     entries = compose["services"][service]["environment"]
     return dict(entry.split("=", 1) for entry in entries if "=" in str(entry))
 
