@@ -62,9 +62,15 @@ services:
     extends:
       file: docker-compose.yml
       service: scheduler
-    # Issue #3128: Override inherited profiles: [scheduler] from docker-compose.yml
-    # Empty profiles list ensures scheduler starts by default in multi-user mode
-    profiles: []
+    # Issue #3128 / #3455: scheduler must start by default in multi-user mode.
+    # Compose MERGES `profiles` across merged files, so a bare `profiles: []`
+    # here cannot remove the `profiles: [scheduler]` inherited from
+    # docker-compose.yml — the scheduler stayed opt-in (Issue #3455). The
+    # `!override` tag switches to replacement semantics: the inherited list
+    # is discarded and the empty list makes the service always start.
+    # Requires Docker Compose >= v2.24 (2024-01); CI's ubuntu-24.04 runners
+    # satisfy this.
+    profiles: !override []
     user: "0"
     environment:
       # Multi-user workspace mode (required)

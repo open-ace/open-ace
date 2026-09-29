@@ -183,6 +183,11 @@ class TestDockerComposeMultiUserSyntax:
                 "docker-compose.yml" in result.stderr
                 or "has neither an image nor a build context" in result.stderr
                 or "looking up compose provider failed" in result.stderr
+                # Issue #3455: with `profiles: !override []` the scheduler is
+                # active in the overlay-only model too, and the overlay (an
+                # extends overlay) has no top-level networks section, so the
+                # standalone-overlay syntax check can report this instead.
+                or "refers to undefined network" in result.stderr
             ):
                 pytest.skip("Base docker-compose.yml validation required")
             else:

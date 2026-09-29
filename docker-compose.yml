@@ -192,8 +192,13 @@ services:
       - workspace-data:/workspace
       # #3237: the same volume the app service mounts, at the same path.
       - agent-state:/var/lib/openace
+    # Issue #3455: under compose this service runs the same web entrypoint as
+    # the app service (SCHEDULER_MODE=scheduler starts the scheduler services
+    # in-process); only the standalone app/scheduler_worker.py used by the k8s
+    # deployment serves :9090/metrics. Probe /readyz on the port this
+    # container actually serves, like the open-ace service above.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')"]
       interval: 30s
       timeout: 10s
       retries: 3
