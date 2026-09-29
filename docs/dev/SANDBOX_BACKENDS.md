@@ -896,7 +896,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 - **租户键是 `str(tenant_id)`**，即本代码库所携带的整数——不是 slug。任何
   地方都没有 name→id 映射，所以 slug 键什么也匹配不到。
 - **`rollout` 决定 Legacy 还是 OpenSandbox；`tenant_tiers` 决定用哪个
-  endpoint。** 两个 tier 都运行 agent 工作负载；差别在出站保证（见 §7）。
+  端点。** 两个 tier 都运行 agent 工作负载；差别在出站保证（见 §7）。
   这是两个不同的问题——`tenant_tiers` 无法把租户路由回 Legacy，因为每个
   tier 都是 OpenSandbox 端点。
 - **`production_required_tenants` 是禁止降级名单。** 名单上的租户要么获得
