@@ -168,6 +168,13 @@ services:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
       - SCHEDULER_MODE=scheduler
+      # Issue #3133: the entrypoint treats SCHEDULER_MODE=scheduler as a
+      # production-capable path and requires an explicit OPENACE_SECURITY_MODE,
+      # so starting the scheduler from this base file alone crashed on boot.
+      # Default to development, matching the app service above; production
+      # deployments must set OPENACE_SECURITY_MODE explicitly in .env (the
+      # multi-user overlay already defaults it to production).
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-development}
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
