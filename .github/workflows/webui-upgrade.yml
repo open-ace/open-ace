@@ -93,14 +93,14 @@ jobs:
           fi
 
           CURRENT_WEBUI=$(grep -rhoE 'qwen-code-webui@[0-9]+\.[0-9]+\.[0-9]+' \
-            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f2)
+            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f2 || true)
           if [ -z "$CURRENT_WEBUI" ]; then
             echo "::error::no qwen-code-webui@X.Y.Z pin found under Dockerfile/, scripts/, docs/, remote-agent/"
             exit 1
           fi
 
           CURRENT_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
-            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f3)
+            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f3 || true)
 
           if [ -n "$INPUT_VERSION" ]; then
             TARGET_WEBUI="$INPUT_VERSION"
