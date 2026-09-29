@@ -299,10 +299,22 @@ jobs:
             >/dev/null 2>&1 || true
 
           PR_STATE=$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null || echo MISSING)
+          if [ "$PR_STATE" = "MERGED" ]; then
+            # Reaching here with MERGED means main does NOT carry the pins
+            # (the resolve step would have no-op'd otherwise) — e.g. the
+            # upgrade was merged and then reverted. A fresh PR is creatable
+            # (only OPEN duplicates are forbidden); routing this through
+            # the create path instead of a no-op keeps a revert from
+            # silently stalling every future upgrade for this version.
+            echo "::notice::PR for $BRANCH was merged but main lacks these pins (revert or race); creating a fresh PR"
+            PR_STATE=MISSING
+          fi
+          PR_OPEN=false
           case "$PR_STATE" in
             OPEN)
               echo "PR for $BRANCH already exists; branch force-pushed with the latest pins"
               gh pr edit "$BRANCH" --body "$BODY" || true
+              PR_OPEN=true
               ;;
             CLOSED)
               # A human closed the upgrade PR (e.g. to hold off); reopening
@@ -310,12 +322,10 @@ jobs:
               echo "::notice::PR for $BRANCH was closed; reopening with the refreshed pins"
               if gh pr reopen "$BRANCH"; then
                 gh pr edit "$BRANCH" --body "$BODY" || true
+                PR_OPEN=true
               else
                 echo "::warning::could not reopen the PR for $BRANCH; see the error above"
               fi
-              ;;
-            MERGED)
-              echo "::notice::PR for $BRANCH was already merged; not reopening (main should carry the pins)"
               ;;
             *)
               if gh pr create \
@@ -325,13 +335,16 @@ jobs:
                 --head "$BRANCH" \
                 --label dependencies; then
                 echo "PR created for $BRANCH"
-              elif gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qE 'OPEN|CLOSED'; then
+                PR_OPEN=true
+              elif [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
                 echo "::warning::PR was created but a post-create step (e.g. labeling) failed; see the error above"
+                PR_OPEN=true
               else
                 echo "::warning::PR creation failed — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General"
               fi
               ;;
           esac
+          echo "pr-open=$PR_OPEN" >> "$GITHUB_OUTPUT"
 
           # Supersede older upgrade PRs so unmerged ones don't pile up
           # conflicting with each other. Never closes a PR for a NEWER
@@ -349,7 +362,9 @@ jobs:
             --jq '.[] | select(.headRefName | startswith("chore/webui-")) | "\(.number)=\(.headRefName)"')
 
       - name: Trigger CI on the branch
-        if: steps.versions.outputs.up-to-date == 'false'
+        if: >-
+          steps.versions.outputs.up-to-date == 'false' &&
+          steps.pr.outputs.pr-open == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.pr.outputs.branch }}
