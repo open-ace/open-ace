@@ -214,17 +214,26 @@ def api_create_project():
     from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
     if isolation_level == ISOLATION_LEVEL_SANDBOXED:
-        # In sandboxed mode, path must be under /workspace/{username}
-        username = g.user.get("username") if g.user else None
-        if not username:
-            return jsonify({"error": "Username is required for sandboxed projects"}), 400
+        # Validate against the SAME isolation-aware home roots fs browsing
+        # uses (#3420: /workspace/<account>, account = system_account or
+        # username). A literal startswith("/workspace/<username>") both
+        # mis-identifies the account and admits sibling-prefix paths like
+        # /workspace/<username>evil, so match on path boundaries instead.
+        from app.routes.fs import _home_roots_for_user
 
-        expected_prefix = f"/workspace/{username}"
-        if not path.startswith(expected_prefix):
+        home_roots = _home_roots_for_user(g.user, isolation_level)
+        if not home_roots:
+            return jsonify({"error": "No sandbox home directory available for this user"}), 400
+
+        if not any(path == root or path.startswith(root.rstrip("/") + "/") for root in home_roots):
+            allowed = ", ".join(home_roots)
             return (
                 jsonify(
                     {
-                        "error": f"In sandboxed mode, your project must be created under {expected_prefix}. The path you provided ({path}) is not allowed."
+                        "error": (
+                            "In sandboxed mode, your project must be created under "
+                            f"{allowed}. The path you provided ({path}) is not allowed."
+                        )
                     }
                 ),
                 400,
