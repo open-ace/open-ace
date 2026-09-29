@@ -49,6 +49,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Decorator | Meaning |
 |-----------|---------|
 | `public_endpoint` | Explicitly public; no authentication required. |
+| `require_upload_auth` | Upload collector endpoints guarded by the `X-Auth-Key` header instead of a session. |
 | `-` | No permission decorator declared; the handler may still resolve the session or use dedicated credentials (upload key, agent token). |
 | `auth_required` | Valid session required. |
 | `admin_required` | Admin role required (legacy platform-level admin). |
@@ -76,6 +77,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 - **Realtime.** SSE and WebSocket endpoints are flagged inline in the
   Description column (e.g. the alert stream, autonomous workflow event stream,
   remote session stream, and the terminal/VS Code/agent WebSocket routes).
+- **Row granularity.** One row per registered route; a few multi-method aliases share a row, so the row count can differ from a method-level count.
 - **Paths.** Paths are written as registered. Most have no trailing slash; a few catch-all proxy routes keep a trailing-slash base form (Flask's strict-slashes behavior).
 
 ### Endpoint families
@@ -91,7 +93,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Tenants | `/api/tenants` | 18 |
 | Compliance | `/api/compliance` | 17 |
 | Tool accounts | `/api/tool-accounts` | 14 |
-| Analysis | `/api/analysis` | 15 |
+| Analysis | `/api/analysis` | 16 |
 | Alerts | `/api/alerts` | 14 |
 | Projects | `/api/projects` | 12 |
 | Quota | `/api/quota` | 9 |
@@ -101,8 +103,8 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Return on investment | `/api/roi` | 7 |
 | Request statistics | `/api/request` | 6 |
 | Authentication and account | `/api/auth` | 6 |
-| Other endpoints | — | 92 |
-| Operational endpoints | — | 8 |
+| Other endpoints | — | 90 |
+| Operational endpoints | — | 9 |
 | **Total** | | **425** |
 
 ### Remote machines and sessions (`/api/remote`)
@@ -124,7 +126,7 @@ Register and manage remote machines, drive remote AI sessions, web terminals and
 | GET/POST/PUT/DELETE/HEAD | `/api/remote/llm-proxy/<path:path>` | - | Transparent LLM API proxy — catch-all path form. |
 | GET | `/api/remote/machines` | - | List machines with tenant isolation. |
 | DELETE | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | Deregister a remote machine. Admin only. |
-| GET | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | Get details and status of a specific machine. |
+| GET | `/api/remote/machines/<machine_id>` | machine_access_required | Get details and status of a specific machine. |
 | POST | `/api/remote/machines/<machine_id>/assign` | machine_admin_required | Assign a user to a machine. System admin or machine admin. |
 | DELETE | `/api/remote/machines/<machine_id>/assign/<int:user_id>` | machine_admin_required | Revoke a user's access to a machine. System admin or machine admin. |
 | GET | `/api/remote/machines/<machine_id>/browse` | machine_access_required | Browse the file system on a remote machine. |
@@ -260,24 +262,24 @@ SSO provider registry (OAuth2/OIDC/SAML), login flows, SAML metadata/ACS/SLO end
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
 | POST | `/api/sso/acs/<provider_name>` | - | Handle SAML HTTP-POST Assertion Consumer Service callbacks. |
-| GET | `/api/sso/callback/<provider_name>` | - | Handle SSO callback. |
+| GET | `/api/sso/callback/<provider_name>` | public_endpoint | Handle SSO callback. |
 | GET | `/api/sso/identities/<int:user_id>` | auth_required | Get SSO identities for a user. |
 | DELETE | `/api/sso/identities/<int:user_id>/<provider_name>` | auth_required | Unlink an SSO identity from a user. |
-| GET | `/api/sso/login/<provider_name>` | - | Start SSO login flow. |
-| GET | `/api/sso/providers` | admin_required | List available SSO providers. |
+| GET | `/api/sso/login/<provider_name>` | public_endpoint | Start SSO login flow. |
+| GET | `/api/sso/providers` | public_endpoint | List available SSO providers. |
 | POST | `/api/sso/providers` | admin_required | Register a new SSO provider (admin only). |
 | DELETE | `/api/sso/providers/<provider_name>` | admin_required | Disable an SSO provider (DELETE method, deprecated - use PATCH /disable instead). |
 | GET | `/api/sso/providers/<provider_name>` | admin_required | Get detailed information about a specific SSO provider. |
 | PUT | `/api/sso/providers/<provider_name>` | admin_required | Update an existing SSO provider configuration. |
 | PATCH | `/api/sso/providers/<provider_name>/disable` | admin_required | Disable an SSO provider (PATCH method, recommended). |
 | PATCH | `/api/sso/providers/<provider_name>/enable` | admin_required | Enable an SSO provider. |
-| GET | `/api/sso/providers/<provider_name>/metadata` | - | Return SAML Service Provider metadata for an enabled SAML provider. |
+| GET | `/api/sso/providers/<provider_name>/metadata` | public_endpoint | Return SAML Service Provider metadata for an enabled SAML provider. |
 | POST | `/api/sso/providers/<provider_name>/reset` | admin_required | Reset a predefined provider to its default configuration. |
 | POST | `/api/sso/providers/<provider_name>/test` | admin_required | Test SSO provider connection (basic validation). |
 | GET | `/api/sso/providers/export` | admin_required | Export SSO provider configurations. |
 | DELETE | `/api/sso/session` | - | Logout from SSO session. |
 | GET | `/api/sso/session` | - | Get current SSO session info. |
-| GET | `/api/sso/slo-redirect/<provider_name>` | - | Handle SAML HTTP-Redirect Single Logout Service. |
+| GET | `/api/sso/slo-redirect/<provider_name>` | public_endpoint | Handle SAML HTTP-Redirect Single Logout Service. |
 | POST | `/api/sso/slo/<provider_name>` | - | Handle SAML HTTP-POST Single Logout Service. |
 
 ### Integration and notification management (`/api/management`)
@@ -406,6 +408,8 @@ Dashboard analytics over collected usage: key metrics, hourly/peak patterns, ran
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
+| GET | `/api/analytics/forecast` | any_admin_required | Get usage forecast. |
+| GET | `/api/analysis/forecast` | any_admin_required | Alias route for the usage forecast. |
 | GET | `/api/analysis/anomaly-detection` | - | Get anomaly detection results. |
 | GET | `/api/analysis/anomaly-trend` | - | Get anomaly trend over time. |
 | GET | `/api/analysis/batch` | - | Get all analysis data in a single request for better performance. |
@@ -475,7 +479,7 @@ Per-user and admin quota views and checks, quota alerts and the webui-token quot
 | GET | `/api/quota/status` | auth_required | Get detailed quota status for the current user. |
 | GET | `/api/quota/status/all` | admin_required | Get quota status for all users (admin only). |
 | GET | `/api/quota/usage/me` | auth_required | Get detailed usage data for the current user. |
-| GET | `/api/quota/webui-check` | - | Check quota using webui token (called by webui backend middleware). |
+| GET | `/api/quota/webui-check` | public_endpoint | Check quota using webui token (called by webui backend middleware). |
 
 ### Mapping rules (`/api/mapping-rules`)
 
@@ -573,8 +577,6 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | POST | `/api/ai-agent/settings/validate-github-token` | admin_required | Validate a GitHub PAT by calling the GitHub API. |
 | GET | `/api/analytics/efficiency` | any_admin_required | Get efficiency metrics. |
 | GET | `/api/analytics/export` | any_admin_required | Export analytics data. |
-| GET | `/api/analytics/forecast` | any_admin_required | Get usage forecast. |
-| GET | `/api/analysis/forecast` | any_admin_required | Alias route for the usage forecast. |
 | GET | `/api/analytics/report` | any_admin_required | Generate a comprehensive usage report. |
 | GET | `/api/api-keys` | api_key_admin_required | List all encrypted API keys (without revealing actual keys). Admin only. |
 | POST | `/api/api-keys` | api_key_admin_required | Store a new encrypted API key. Admin only. |
@@ -599,10 +601,10 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | POST | `/api/fetch/data` | auth_required | Trigger data collection from all sources. |
 | GET | `/api/fetch/remote` | admin_required | Fetch data from remote sources. |
 | GET | `/api/fetch/status` | auth_required | Get data fetch status. |
-| GET | `/api/filter-rules` | admin_required,platform_admin_required | Get content filter rules with pagination and filtering. |
+| GET | `/api/filter-rules` | admin_required | Get content filter rules with pagination and filtering. |
 | POST | `/api/filter-rules` | admin_required,platform_admin_required | Create a new content filter rule (idempotent). |
 | DELETE | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | Delete a content filter rule. |
-| GET | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | Get a specific filter rule. |
+| GET | `/api/filter-rules/<int:rule_id>` | admin_required | Get a specific filter rule. |
 | PUT | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | Update a content filter rule. |
 | POST | `/api/frontend-errors` | - | Receive frontend error reports (public endpoint, no auth required). |
 | GET | `/api/governance/audit-logs` | admin_required | Get audit logs with filters (full path alias for /audit/logs). |
@@ -636,7 +638,7 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/schedulers` | - | Get status of all background schedulers. |
 | GET | `/api/schedulers/data-fetch` | - | Get data fetch scheduler status. |
 | GET | `/api/schedulers/quota-enforcement` | - | Get quota enforcement scheduler status. |
-| GET | `/api/security-settings` | admin_required,platform_admin_required | Get security settings. |
+| GET | `/api/security-settings` | admin_required | Get security settings. |
 | PUT | `/api/security-settings` | admin_required,platform_admin_required | Update security settings. |
 | GET | `/api/security-settings/ssrf-status` | admin_required | Get SSRF protection status and configuration. |
 | POST | `/api/security-settings/ssrf/reset` | platform_admin_required | Reset SSRF configuration to default. |
@@ -667,16 +669,16 @@ Application-level health and readiness probes, Prometheus metrics, security base
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
-| GET | `/` | `public_endpoint` | Serve the React SPA for the main page. |
-| GET | `/<path:path>` | - | Serve React SPA for all other routes. |
+| GET | `/` | public_endpoint | Serve the React SPA for the main page. |
+| GET | `/<path:path>` | public_endpoint | Serve React SPA for all other routes. |
 | GET | `/health` | - | Health check endpoint for Docker and load balancers. |
 | GET | `/livez` | - | Liveness probe for Kubernetes. |
-| GET | `/login` | - | Serve the React SPA for the login page. |
-| GET | `/logout` | - | Logout and serve React SPA. |
+| GET | `/login` | public_endpoint | Serve the React SPA for the login page. |
+| GET | `/logout` | public_endpoint | Logout and serve React SPA. |
 | GET | `/metrics` | - | Prometheus metrics (fallback endpoint when prometheus_flask_exporter is not available). |
 | GET | `/readyz` | - | Readiness check endpoint for Kubernetes and load balancers. |
 | GET | `/security-status` | - | Security baseline status endpoint for monitoring and health checks. |
-| GET | `/static/claude-code-webui/<path:filename>` | - | Serve static files. |
+| GET | `/static/claude-code-webui/<path:filename>` | public_endpoint | Serve static files. |
 
 ### Related documentation
 
@@ -730,7 +732,7 @@ SPA 路由位于应用根路径。
 **角色。** 提权端点要求管理员级角色（`admin`、`platform_admin`、
 `tenant_admin`）。逐端点的权威清单见
 [API_PERMISSION_MATRIX.md](API_PERMISSION_MATRIX.md)；角色模型见
-[PERMISSION_MODEL.md](PERMISSION_MODEL.md) 与。
+[PERMISSION_MODEL.md](PERMISSION_MODEL.md)。
 
 **Auth 列图例。** `Auth` 列按源码原样给出路由的权限装饰器；`-` 表示未声明
 权限装饰器：
@@ -738,6 +740,7 @@ SPA 路由位于应用根路径。
 | Decorator | Meaning |
 |-----------|---------|
 | `public_endpoint` | 显式公共路由，无需认证。 |
+| `require_upload_auth` | 上传采集端点，以 `X-Auth-Key` 头而非会话防护。 |
 | `-` | 未声明权限装饰器；处理函数内部仍可能解析会话或使用专用凭据（上传密钥、Agent 令牌）。 |
 | `auth_required` | 需要有效会话。 |
 | `admin_required` | 需要 admin 角色（旧版平台级管理员）。 |
@@ -762,6 +765,7 @@ SPA 路由位于应用根路径。
   复合键 keyset 分页。
 - **实时通信。** SSE 与 WebSocket 端点在 Description 列内联标注（如告警流、
   自主工作流事件流、远程会话流，以及终端/VS Code/Agent 的 WebSocket 路由）。
+- **行粒度。** 每个注册路由一行；个别多方法别名路由共用一行，行数与方法级计数可能不同。
 - **路径。** 路径按注册原样书写。绝大多数不带尾部斜杠；个别 catch-all 代理路由保留尾部斜杠基路径（Flask strict-slashes 行为）。
 
 ### 端点族
@@ -777,7 +781,7 @@ SPA 路由位于应用根路径。
 | 租户 | `/api/tenants` | 18 |
 | 合规 | `/api/compliance` | 17 |
 | 工具账号 | `/api/tool-accounts` | 14 |
-| 分析 | `/api/analysis` | 15 |
+| 分析 | `/api/analysis` | 16 |
 | 告警 | `/api/alerts` | 14 |
 | 项目 | `/api/projects` | 12 |
 | 配额 | `/api/quota` | 9 |
@@ -787,8 +791,8 @@ SPA 路由位于应用根路径。
 | 投入产出 | `/api/roi` | 7 |
 | 请求统计 | `/api/request` | 6 |
 | 认证与账号 | `/api/auth` | 6 |
-| 其他端点 | — | 92 |
-| 运维端点 | — | 8 |
+| 其他端点 | — | 90 |
+| 运维端点 | — | 9 |
 | **合计** | | **425** |
 
 ### 远程机器与会话（`/api/remote`）
@@ -810,7 +814,7 @@ SPA 路由位于应用根路径。
 | GET/POST/PUT/DELETE/HEAD | `/api/remote/llm-proxy/<path:path>` | - | 远程 LLM 代理——catch-all 路径形态。 |
 | GET | `/api/remote/machines` | - | 列出远程机器（租户隔离）。 |
 | DELETE | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | 注销远程机器，仅管理员。 |
-| GET | `/api/remote/machines/<machine_id>` | admin_required,machine_access_required | 获取指定机器的详情与状态。 |
+| GET | `/api/remote/machines/<machine_id>` | machine_access_required | 获取指定机器的详情与状态。 |
 | POST | `/api/remote/machines/<machine_id>/assign` | machine_admin_required | 将用户分配到机器（系统管理员或机器管理员）。 |
 | DELETE | `/api/remote/machines/<machine_id>/assign/<int:user_id>` | machine_admin_required | 撤销用户对机器的访问（系统管理员或机器管理员）。 |
 | GET | `/api/remote/machines/<machine_id>/browse` | machine_access_required | 浏览远程机器文件系统。 |
@@ -946,24 +950,24 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
 | POST | `/api/sso/acs/<provider_name>` | - | 处理 SAML HTTP-POST ACS 回调。 |
-| GET | `/api/sso/callback/<provider_name>` | - | 处理 SSO 回调。 |
+| GET | `/api/sso/callback/<provider_name>` | public_endpoint | 处理 SSO 回调。 |
 | GET | `/api/sso/identities/<int:user_id>` | auth_required | 获取用户的 SSO 身份。 |
 | DELETE | `/api/sso/identities/<int:user_id>/<provider_name>` | auth_required | 解绑用户的 SSO 身份。 |
-| GET | `/api/sso/login/<provider_name>` | - | 发起 SSO 登录流程。 |
-| GET | `/api/sso/providers` | admin_required | 列出可用的 SSO 提供商。 |
+| GET | `/api/sso/login/<provider_name>` | public_endpoint | 发起 SSO 登录流程。 |
+| GET | `/api/sso/providers` | public_endpoint | 列出可用的 SSO 提供商。 |
 | POST | `/api/sso/providers` | admin_required | 注册新的 SSO 提供商（仅管理员）。 |
 | DELETE | `/api/sso/providers/<provider_name>` | admin_required | 停用 SSO 提供商（DELETE 方式已废弃，请改用 PATCH /disable）。 |
 | GET | `/api/sso/providers/<provider_name>` | admin_required | 获取指定 SSO 提供商详情。 |
 | PUT | `/api/sso/providers/<provider_name>` | admin_required | 更新已有 SSO 提供商配置。 |
 | PATCH | `/api/sso/providers/<provider_name>/disable` | admin_required | 停用 SSO 提供商（PATCH 方式，推荐）。 |
 | PATCH | `/api/sso/providers/<provider_name>/enable` | admin_required | 启用 SSO 提供商。 |
-| GET | `/api/sso/providers/<provider_name>/metadata` | - | 返回已启用 SAML 提供商的 SP 元数据。 |
+| GET | `/api/sso/providers/<provider_name>/metadata` | public_endpoint | 返回已启用 SAML 提供商的 SP 元数据。 |
 | POST | `/api/sso/providers/<provider_name>/reset` | admin_required | 将预定义提供商重置为默认配置。 |
 | POST | `/api/sso/providers/<provider_name>/test` | admin_required | 测试 SSO 提供商连接（基础校验）。 |
 | GET | `/api/sso/providers/export` | admin_required | 导出 SSO 提供商配置。 |
 | DELETE | `/api/sso/session` | - | 登出 SSO 会话。 |
 | GET | `/api/sso/session` | - | 获取当前 SSO 会话信息。 |
-| GET | `/api/sso/slo-redirect/<provider_name>` | - | 处理 SAML HTTP-Redirect 单点登出。 |
+| GET | `/api/sso/slo-redirect/<provider_name>` | public_endpoint | 处理 SAML HTTP-Redirect 单点登出。 |
 | POST | `/api/sso/slo/<provider_name>` | - | 处理 SAML HTTP-POST 单点登出。 |
 
 ### 集成与通知管理（`/api/management`）
@@ -1092,6 +1096,8 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
+| GET | `/api/analytics/forecast` | any_admin_required | 获取用量预测。 |
+| GET | `/api/analysis/forecast` | any_admin_required | 用量预测的别名路由。 |
 | GET | `/api/analysis/anomaly-detection` | - | 获取异常检测结果。 |
 | GET | `/api/analysis/anomaly-trend` | - | 获取异常随时间的变化趋势。 |
 | GET | `/api/analysis/batch` | - | 一次请求返回全部分析数据以提升性能。 |
@@ -1161,7 +1167,7 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | GET | `/api/quota/status` | auth_required | 获取当前用户的详细配额状态。 |
 | GET | `/api/quota/status/all` | admin_required | 获取全部用户的配额状态（仅管理员）。 |
 | GET | `/api/quota/usage/me` | auth_required | 获取当前用户的详细用量数据。 |
-| GET | `/api/quota/webui-check` | - | 使用 webui 令牌检查配额（由 webui 后端中间件调用）。 |
+| GET | `/api/quota/webui-check` | public_endpoint | 使用 webui 令牌检查配额（由 webui 后端中间件调用）。 |
 
 ### 映射规则（`/api/mapping-rules`）
 
@@ -1259,8 +1265,6 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | POST | `/api/ai-agent/settings/validate-github-token` | admin_required | 调用 GitHub API 校验 GitHub 个人访问令牌。 |
 | GET | `/api/analytics/efficiency` | any_admin_required | 获取效率指标。 |
 | GET | `/api/analytics/export` | any_admin_required | 导出分析数据。 |
-| GET | `/api/analytics/forecast` | any_admin_required | 获取用量预测。 |
-| GET | `/api/analysis/forecast` | any_admin_required | 用量预测的别名路由。 |
 | GET | `/api/analytics/report` | any_admin_required | 生成综合用量报告。 |
 | GET | `/api/api-keys` | api_key_admin_required | 列出全部加密存储的 API Key（不回显明文），仅管理员。 |
 | POST | `/api/api-keys` | api_key_admin_required | 新增加密存储的 API Key，仅管理员。 |
@@ -1285,10 +1289,10 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | POST | `/api/fetch/data` | auth_required | 触发从所有数据源采集数据。 |
 | GET | `/api/fetch/remote` | admin_required | 从远程数据源拉取数据。 |
 | GET | `/api/fetch/status` | auth_required | 获取数据拉取状态。 |
-| GET | `/api/filter-rules` | admin_required,platform_admin_required | 分页且带过滤地获取内容过滤规则。 |
+| GET | `/api/filter-rules` | admin_required | 分页且带过滤地获取内容过滤规则。 |
 | POST | `/api/filter-rules` | admin_required,platform_admin_required | 创建内容过滤规则（幂等）。 |
 | DELETE | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | 删除内容过滤规则。 |
-| GET | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | 获取单条过滤规则。 |
+| GET | `/api/filter-rules/<int:rule_id>` | admin_required | 获取单条过滤规则。 |
 | PUT | `/api/filter-rules/<int:rule_id>` | admin_required,platform_admin_required | 更新内容过滤规则。 |
 | POST | `/api/frontend-errors` | - | 接收前端错误上报（公共端点，无需认证）。 |
 | GET | `/api/governance/audit-logs` | admin_required | 按条件筛选获取审计日志（/audit/logs 的完整路径别名）。 |
@@ -1322,7 +1326,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/schedulers` | - | 获取所有后台调度器状态。 |
 | GET | `/api/schedulers/data-fetch` | - | 获取数据拉取调度器状态。 |
 | GET | `/api/schedulers/quota-enforcement` | - | 获取配额执行调度器状态。 |
-| GET | `/api/security-settings` | admin_required,platform_admin_required | 获取安全设置。 |
+| GET | `/api/security-settings` | admin_required | 获取安全设置。 |
 | PUT | `/api/security-settings` | admin_required,platform_admin_required | 更新安全设置。 |
 | GET | `/api/security-settings/ssrf-status` | admin_required | 获取 SSRF 防护状态与配置。 |
 | POST | `/api/security-settings/ssrf/reset` | platform_admin_required | 将 SSRF 配置重置为默认值。 |
@@ -1353,16 +1357,16 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 
 | Method | Path | Auth | Description |
 |--------|-------|------|-------------|
-| GET | `/` | `public_endpoint` | 渲染主页面 React SPA。 |
-| GET | `/<path:path>` | - | 为其余所有前端路由渲染 React SPA。 |
+| GET | `/` | public_endpoint | 渲染主页面 React SPA。 |
+| GET | `/<path:path>` | public_endpoint | 为其余所有前端路由渲染 React SPA。 |
 | GET | `/health` | - | 面向 Docker 与负载均衡器的健康检查。 |
 | GET | `/livez` | - | Kubernetes 存活探针。 |
-| GET | `/login` | - | 渲染登录页 React SPA。 |
-| GET | `/logout` | - | 登出并渲染 React SPA。 |
+| GET | `/login` | public_endpoint | 渲染登录页 React SPA。 |
+| GET | `/logout` | public_endpoint | 登出并渲染 React SPA。 |
 | GET | `/metrics` | - | Prometheus 指标（prometheus_flask_exporter 不可用时的回退端点）。 |
 | GET | `/readyz` | - | 面向 Kubernetes 与负载均衡器的就绪检查。 |
 | GET | `/security-status` | - | 用于监控与健康检查的安全基线状态。 |
-| GET | `/static/claude-code-webui/<path:filename>` | - | 提供 claude-code-webui 静态文件。 |
+| GET | `/static/claude-code-webui/<path:filename>` | public_endpoint | 提供 claude-code-webui 静态文件。 |
 
 ### 相关文档
 
@@ -1377,8 +1381,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 - [MODEL_GATEWAY.md](MODEL_GATEWAY.md)——模型网关配置与 LLM 代理链路。
 - [TOKEN_ACCOUNTING.md](TOKEN_ACCOUNTING.md)——用量/配额端点背后
   的 Token 与请求计量口径。
-- [PERMISSION_MODEL.md](PERMISSION_MODEL.md) 与
-  [PERMISSION_MODEL.md](PERMISSION_MODEL.md)——角色
+- [PERMISSION_MODEL.md](PERMISSION_MODEL.md)——角色
   模型与租户管理员范围。
 - [../security/API_EXCEPTIONS.md](../security/API_EXCEPTIONS.md)——刻意豁免
   认证的路由。

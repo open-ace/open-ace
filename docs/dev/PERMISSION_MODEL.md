@@ -56,7 +56,7 @@ The built-in RBAC permission matrix (19 permissions, from `DEFAULT_ROLES` in `ap
 
 Note that `tenant_admin` / `platform_admin` are admin-tier roles for decorator purposes (they satisfy `ADMIN_ROLES`); the `DEFAULT_ROLES` matrix above covers the non-admin tier plus the legacy `admin` entry that owns all 19 permissions.
 
-## Authentication Decorators (9)
+## Authentication Decorators (10)
 
 All definitions live in `app/auth/decorators.py` except `machine_access_required` / `machine_admin_required` (`app/routes/remote.py:1059-1088`) and `api_key_admin_required` (`app/auth/decorators.py:1984`). Usage counts are call sites under `app/` as of this writing:
 
@@ -211,7 +211,7 @@ Open ACE 将基于角色的访问控制（RBAC）与多租户边界强制结合�
 
 注意：就装饰器判定而言，`tenant_admin` / `platform_admin` 属于管理员层级（满足 `ADMIN_ROLES`）；上面的 `DEFAULT_ROLES` 矩阵覆盖非管理员层级，以及拥有全部 19 个权限的遗留 `admin` 条目。
 
-## 认证装饰器（9 个）
+## 认证装饰器（10 个）
 
 除 `machine_access_required` / `machine_admin_required`（`app/routes/remote.py:1059-1088`）和 `api_key_admin_required`（`app/auth/decorators.py:1984`）外，其余定义都在 `app/auth/decorators.py`。使用计数为撰写本文时 `app/` 下的调用点数量：
 

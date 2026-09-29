@@ -616,7 +616,7 @@ sudo firewall-cmd --reload
 | `config-data` | `/home/open-ace/.open-ace` | `config.json` 与 `generated-secrets.env` |
 | `postgres-data` | `/var/lib/postgresql/data` | PostgreSQL 数据库（用户、会话、全部应用数据） |
 | `workspace-data` | `/workspace` | 各用户的项目目录 |
-| `agent-state` | `/var/lib/openace` | CLI 转写记录，由应用与 scheduler 服务共享（Issue #3237） |
+| `agent-state` | `/var/lib/openace` | CLI 会话记录，由应用与 scheduler 服务共享（Issue #3237） |
 
 此外，宿主机 `./logs` 以绑定挂载方式映射到 `/app/logs`。多用户部署额外增加第 5 个卷 `home-data`（挂载 `/home`），存放用户家目录（Issue #2729）。
 

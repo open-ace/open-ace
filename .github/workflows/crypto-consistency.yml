@@ -7,8 +7,6 @@ on:
       - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
       - 'docs/guide/REMOTE_WORKSPACE.md'
-      - 'docs/guide/REMOTE_WORKSPACE.md'
-      - 'docs/guide/KEY_MANAGEMENT.md'
       - 'docs/guide/KEY_MANAGEMENT.md'
       - '.github/workflows/crypto-consistency.yml'
   pull_request:
@@ -17,8 +15,6 @@ on:
       - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
       - 'docs/guide/REMOTE_WORKSPACE.md'
-      - 'docs/guide/REMOTE_WORKSPACE.md'
-      - 'docs/guide/KEY_MANAGEMENT.md'
       - 'docs/guide/KEY_MANAGEMENT.md'
       - '.github/workflows/crypto-consistency.yml'
 
@@ -42,8 +38,6 @@ jobs:
             "app/modules/workspace/model_gateway/repository.py"
             "app/utils/smtp_crypto.py"
             "docs/guide/REMOTE_WORKSPACE.md"
-            "docs/guide/REMOTE_WORKSPACE.md"
-            "docs/guide/KEY_MANAGEMENT.md"
             "docs/guide/KEY_MANAGEMENT.md"
           )
 
@@ -103,8 +97,8 @@ jobs:
         run: |
           echo "Checking for key management documentation..."
 
-          if [ -f "docs/guide/KEY_MANAGEMENT.md" ] && [ -f "docs/guide/KEY_MANAGEMENT.md" ]; then
-            echo "✓ Key management documentation exists (en + cn)"
+          if [ -f "docs/guide/KEY_MANAGEMENT.md" ]; then
+            echo "✓ Key management documentation exists (bilingual single file)"
           else
             echo "::warning::KEY_MANAGEMENT.md not found. Consider adding key management documentation."
           fi

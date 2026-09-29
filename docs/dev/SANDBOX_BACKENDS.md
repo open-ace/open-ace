@@ -858,7 +858,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 
 编辑它之前值得了解的要点：
 
-- **每个 endpoint 恰好佐证（attest）一种出站机制，且两者并不等价。**
+- **每个端点恰好佐证（attest）一种出站机制，且两者并不等价。**
   `egress_enforced` 是 OpenSandbox 出站 sidecar：按沙箱、默认拒绝、FQDN
   白名单——而在 gVisor 下不可能实现，因为其 netstack 没有 iptables nat 表
   供 sidecar 做 DNS 重定向。`egress_cni_default_deny` 则是集群

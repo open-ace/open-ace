@@ -416,7 +416,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 | `messages` | 90 天 | anonymize |
 | `user_activity` | 365 天 | archive |
 
-- **管理 API**（蓝图 `/api/compliance`，仅管理员）：`GET/PUT /api/compliance/retention/rules`、`POST /api/compliance/retention/cleanup`（支持 `?dry_run=true`）、`GET /api/compliance/retention/history|storage|status`。没有内置调度器自动触发保留 —— 请通过 API 执行或排期；合规状态检查会把"上次清理超过一周"的实例标记为不合规。每次执行都会记录到 `retention_history` 表。
+- **管理 API**（blueprint `/api/compliance`，仅管理员）：`GET/PUT /api/compliance/retention/rules`、`POST /api/compliance/retention/cleanup`（支持 `?dry_run=true`）、`GET /api/compliance/retention/history|storage|status`。没有内置调度器自动触发保留 —— 请通过 API 执行或排期；合规状态检查会把"上次清理超过一周"的实例标记为不合规。每次执行都会记录到 `retention_history` 表。
 - **Schema 铺垫（Issue #2188 Phase 1）**：迁移 `20260803_002_create_retention_tables` 创建了 `retention_policies`、`retention_executions`、`legal_holds`、`retention_evidence`、`archive_files` 与 `recycle_bin`。这些持久化策略/执行表（含 legal hold 与回收站）属于 schema 准备；运维上应把 legal hold 与回收站视为尚未接入运行时自动化，依赖前请先核实所用版本的覆盖情况。
 - **审计日志同步**：`scripts/openace-ssh-sync` 自行按 30 天清理其审计日志（`/var/log/openace/ssh-sync.log`）。
 

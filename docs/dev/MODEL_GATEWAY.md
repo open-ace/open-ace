@@ -273,7 +273,7 @@ general_settings:
 1. `git rm app/modules/workspace/model_gateway/`
 2. 删除 `app/modules/workspace/llm_proxy_handler.py` 中的 model-gateway 接缝与导入（`if not _gateway.is_noop:` 代码块以及 `_forward_via_gateway` / `_gateway_error_response` 辅助函数；Phase-0 抽取出的 `_finalize_upstream_response` / `_emit_responses_sse` 可以保留或内联）。
 3. 从 `app/utils/config.py` 移除 `is_model_gateway_enabled`。
-4. 在 `app/__init__.py:register_blueprints` 注销蓝图，并删除 `app/routes/model_gateway.py`。
+4. 在 `app/__init__.py:register_blueprints` 注销 blueprint，并删除 `app/routes/model_gateway.py`。
 5. 删除管理页面 `frontend/src/components/features/management/ModelGatewayConfig.tsx`、其 API 客户端 `frontend/src/api/modelGateway.ts`，以及路由/导航/i18n 条目。
 6. 删除 `model_gateway_config` 表的迁移（`migrations/versions/20260627_001_add_model_gateway_config.py`）。
 7. 删除本文件。
