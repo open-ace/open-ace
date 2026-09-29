@@ -75,7 +75,7 @@ Configuration consistency (Issue #2242): when configuring multi-user mode manual
 
 ### Docker root mode
 
-The Docker image already contains everything: Node.js 22, `qwen-code-webui@0.2.43`, and `@qwen-code/qwen-code@0.23.3` (pinned in the Dockerfile). Nothing is installed on the host — the webui/CLI processes and the sudoers file all live inside the container:
+The Docker image already contains everything: Node.js 22, `qwen-code-webui@0.3.0`, and `@qwen-code/qwen-code@0.23.3` (pinned in the Dockerfile). Nothing is installed on the host — the webui/CLI processes and the sudoers file all live inside the container:
 
 - `docker-entrypoint.sh` generates `/etc/sudoers.d/open-ace-webui` at container startup (see below).
 - System users are created automatically: when an admin creates a user with a `system_account` in the Open ACE admin UI, the entrypoint creates the Linux user, the workspace directory (`/workspace/<username>/`), and the `~/.qwen/` directory. No manual `useradd` needed.
@@ -99,7 +99,7 @@ When running Open ACE directly on the host (package-method install, systemd serv
 2. **Install the pinned version pair** (the same validated combination shipped by the installers and the Docker image):
 
    ```bash
-   npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3
+   npm install -g qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3
 
    # Verify installation
    which qwen-code-webui
@@ -387,7 +387,7 @@ docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
 
 ### Docker root 模式
 
-Docker 镜像已内置全部依赖：Node.js 22、`qwen-code-webui@0.2.43`、`@qwen-code/qwen-code@0.23.3`（版本固定在 Dockerfile 中）。宿主机无需安装任何东西——webui/CLI 进程与 sudoers 全部在容器内：
+Docker 镜像已内置全部依赖：Node.js 22、`qwen-code-webui@0.3.0`、`@qwen-code/qwen-code@0.23.3`（版本固定在 Dockerfile 中）。宿主机无需安装任何东西——webui/CLI 进程与 sudoers 全部在容器内：
 
 - `docker-entrypoint.sh` 在容器启动时生成 `/etc/sudoers.d/open-ace-webui`（见下文）。
 - 系统用户自动创建：管理员在 Open ACE 后台创建带 `system_account` 的用户时，入口脚本会自动创建 Linux 用户、workspace 目录（`/workspace/<username>/`）和 `~/.qwen/` 目录，无需手动 `useradd`。
@@ -411,7 +411,7 @@ Docker 镜像已内置全部依赖：Node.js 22、`qwen-code-webui@0.2.43`、`@q
 2. **安装固定版本对**（与安装脚本、Docker 镜像一致的已验证组合）：
 
    ```bash
-   npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3
+   npm install -g qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3
 
    # 验证安装
    which qwen-code-webui

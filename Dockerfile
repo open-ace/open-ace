@@ -103,7 +103,7 @@ RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources
     && ps --version >/dev/null \
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3 \
+    && npm install -g qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3 \
     # === code-server Installation (for local workspace VS Code button) ===
     # NOTE: On Debian, the install script uses deb package which ignores --prefix
     # and always installs to /usr/bin/code-server

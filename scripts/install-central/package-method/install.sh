@@ -1714,8 +1714,8 @@ stop_webui_systemd_service() {
 }
 
 # Canonical qwen stack versions for the package-method runtime. Keep in sync
-# with the Dockerfile pair (qwen-code-webui@0.2.43 + @qwen-code/qwen-code@0.23.3).
-QWEBUI_VERSION="0.2.43"
+# with the Dockerfile pair (qwen-code-webui@0.3.0 + @qwen-code/qwen-code@0.23.3).
+QWEBUI_VERSION="0.3.0"
 QWEN_CLI_VERSION="0.23.3"
 
 # Node major version, 0 when node is absent (guarded: never aborts the script).
@@ -1783,7 +1783,7 @@ install_qwen_stack() {
         return 1
     fi
     print_info "Installing qwen-code-webui@${QWEBUI_VERSION} + @qwen-code/qwen-code@${QWEN_CLI_VERSION}..."
-    if ! npm install -g "qwen-code-webui@0.2.43"; then
+    if ! npm install -g "qwen-code-webui@0.3.0"; then
         print_error "Failed to install qwen-code-webui@${QWEBUI_VERSION}"
         return 1
     fi
@@ -1957,7 +1957,7 @@ if [ -n "$NPM_PREFIX" ] && [ ! -w "$NPM_PREFIX" ]; then
         exit 1
     fi
 fi
-"${NPM_CMD[@]}" install -g "qwen-code-webui@0.2.43"
+"${NPM_CMD[@]}" install -g "qwen-code-webui@0.3.0"
 "${NPM_CMD[@]}" install -g "@qwen-code/qwen-code@0.23.3"
 command -v qwen-code-webui >/dev/null 2>&1 || { echo "ERROR: qwen-code-webui not on PATH after install" >&2; exit 1; }
 INSTALLED_VER="$(qwen --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
@@ -2817,7 +2817,7 @@ configure_sudoers() {
     if [ -z "$webui_path" ]; then
         print_warning "qwen-code-webui executable not found"
         print_info "Please install qwen-code-webui first (pinned pair, Node >= 22):"
-        print_info "  npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3"
+        print_info "  npm install -g qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3"
         print_info ""
         print_info "After installation, manually configure sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
@@ -6634,7 +6634,7 @@ show_help() {
     echo ""
     echo "Multi-User Workspace Mode:"
     echo "  Requires qwen-code-webui installed (pinned pair, Node >= 22):"
-    echo "    npm install -g qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3"
+    echo "    npm install -g qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3"
     echo ""
     echo "  The installer will auto-configure sudoers for user switching."
     echo "  Each user needs a system account and ~/.qwen/ directory."
