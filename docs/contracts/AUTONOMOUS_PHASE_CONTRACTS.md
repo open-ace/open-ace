@@ -381,9 +381,9 @@ preparation → planning → development → pr_review → report → merge
 `PHASE_ORDER` 与 `PHASE_STATUS_MAP`（位于 `orchestrator.py`）是权威迁移表。
 merge 的后继阶段是 `acceptance_verification`（#2335）；
 `_next_phase("acceptance_verification") == "acceptance_verification"`
-（终态）；`_next_phase(<unknown>) == "planning"`（恢复默认值）。提交入口会拒绝
-任何不在 `PHASE_ORDER` 及其同样放行的两个伪 phase（`wait`、`completed`）之外的
-`next_phase`。
+（终态）；`_next_phase(<unknown>) == "planning"`（恢复默认值）。提交入口只放行
+`PHASE_ORDER` 中的 phase 以及它同样放行的两个伪 phase（`wait`、`completed`），
+其余 `next_phase` 一律拒绝。
 
 ---
 
