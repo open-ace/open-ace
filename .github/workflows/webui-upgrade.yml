@@ -4,12 +4,25 @@ name: WebUI Upgrade
 # bumping the pinned qwen stack (webui + the @qwen-code/qwen-code CLI it
 # drives) everywhere the pair is pinned.
 #
+# Pin sites = Dockerfile, scripts/, docs/, remote-agent/ — the same site
+# list the pins contract test enforces
+# (tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites).
+# remote-agent/ pins the CLI in four different variable forms in addition
+# to the literal `npm install -g @qwen-code/qwen-code@X.Y.Z` commands; a
+# bump that misses any site ships mixed versions, which is exactly what
+# the contract test exists to catch.
+#
 # The CLI pin follows the webui's own compatibility metadata:
 #   npm view qwen-code-webui@<version> qwenCode.recommendedCli
-# When that metadata is unavailable (webui releases that predate the field),
-# the CLI pin is left unchanged and the PR says so — the pair is then
-# "newest webui + previously pinned CLI", which stays inside the webui's
-# tested range.
+# When that metadata is unavailable (webui releases that predate the
+# field), the CLI pin is left unchanged and the PR says so — the pair is
+# then "newest webui + previously pinned CLI", which stays inside the
+# webui's tested range.
+#
+# GITHUB_TOKEN pushes fire no CI events (see the ci.yml `on:` note), so
+# after pushing the branch this workflow dispatches ci.yml on it with
+# healed_sha — the same remedy lint-heal.yml uses — which runs the real
+# unit suite (incl. the pins contract test) and stamps the PR Gate.
 #
 # One-time setup: Settings → Actions → General → Workflow permissions →
 # enable "Allow GitHub Actions to create and approve pull requests"
@@ -27,8 +40,10 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: write # push the chore/webui-* branch
+  pull-requests: write # open/edit/close the upgrade PRs
+  issues: write # create/add the 'dependencies' label
+  actions: write # dispatch ci.yml on the branch (GITHUB_TOKEN pushes fire no CI events)
 
 concurrency:
   group: webui-upgrade
@@ -39,28 +54,51 @@ jobs:
     name: Open qwen-stack upgrade PR
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
       - name: Resolve target versions
         id: versions
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
+          # Keep this site list in sync with the bump step below and with
+          # the pins contract test.
+          PIN_SITES="Dockerfile scripts/ docs/ remote-agent/"
+
           CURRENT_WEBUI=$(grep -rhoE 'qwen-code-webui@[0-9]+\.[0-9]+\.[0-9]+' \
-            Dockerfile scripts/ docs/ 2>/dev/null | head -1 | cut -d@ -f2)
+            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f2)
           if [ -z "$CURRENT_WEBUI" ]; then
-            echo "::error::no qwen-code-webui@X.Y.Z pin found under Dockerfile/, scripts/, docs/"
+            echo "::error::no qwen-code-webui@X.Y.Z pin found under Dockerfile/, scripts/, docs/, remote-agent/"
             exit 1
           fi
 
-          if [ -n "${{ inputs.version }}" ]; then
-            TARGET_WEBUI="${{ inputs.version }}"
+          CURRENT_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
+            $PIN_SITES 2>/dev/null | head -1 | cut -d@ -f3)
+
+          if [ -n "$INPUT_VERSION" ]; then
+            TARGET_WEBUI="$INPUT_VERSION"
           else
             TARGET_WEBUI=$(npm view qwen-code-webui version)
+          fi
+
+          # Both target values flow into sed patterns and shell below —
+          # validate the shape before use (also guards a typo'd or hostile
+          # dispatch input / npm metadata value).
+          if ! printf '%s' "$TARGET_WEBUI" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::target qwen-code-webui version '$TARGET_WEBUI' is not X.Y.Z"
+            exit 1
+          fi
+          # Fail fast on a typo'd dispatch input instead of opening a PR
+          # that pins a version nothing can install.
+          if ! npm view "qwen-code-webui@$TARGET_WEBUI" version >/dev/null 2>&1; then
+            echo "::error::qwen-code-webui@$TARGET_WEBUI does not exist on npm"
+            exit 1
           fi
 
           if [ "$CURRENT_WEBUI" = "$TARGET_WEBUI" ]; then
@@ -69,14 +107,29 @@ jobs:
             exit 0
           fi
 
+          # Refuse downgrades: if the pins ever run ahead of npm latest
+          # (e.g. a manual prerelease bump), the weekly run must not
+          # "upgrade" back down.
+          if [ "$(printf '%s\n%s\n' "$CURRENT_WEBUI" "$TARGET_WEBUI" | sort -V | tail -1)" \
+              = "$CURRENT_WEBUI" ]; then
+            echo "up-to-date=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::target $TARGET_WEBUI is not newer than the pinned $CURRENT_WEBUI; refusing to downgrade."
+            exit 0
+          fi
+
           # Preferred CLI: the version the webui itself declares as tested.
-          # Field selection on nested JSON works with npm view; missing
-          # metadata yields an empty string (pre-metadata releases).
+          # Missing metadata yields empty output with exit 0 (releases
+          # predating the field); a value that is not X.Y.Z is treated the
+          # same way.
           RECOMMENDED_CLI=$(npm view "qwen-code-webui@$TARGET_WEBUI" \
             qwenCode.recommendedCli 2>/dev/null | tr -d '[:space:]' || true)
+          if [ -n "$RECOMMENDED_CLI" ] \
+            && ! printf '%s' "$RECOMMENDED_CLI" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::warning::qwenCode.recommendedCli returned '$RECOMMENDED_CLI' (not X.Y.Z); keeping the pinned CLI"
+            RECOMMENDED_CLI=""
+          fi
           if [ -z "$RECOMMENDED_CLI" ]; then
-            RECOMMENDED_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
-              Dockerfile scripts/ docs/ 2>/dev/null | head -1 | cut -d@ -f3)
+            RECOMMENDED_CLI="$CURRENT_CLI"
             CLI_SOURCE="unchanged (webui metadata unavailable; keeping the pinned CLI)"
           else
             CLI_SOURCE="from qwen-code-webui@$TARGET_WEBUI qwenCode metadata"
@@ -84,57 +137,104 @@ jobs:
 
           {
             echo "current-webui=$CURRENT_WEBUI"
+            echo "current-cli=$CURRENT_CLI"
             echo "target-webui=$TARGET_WEBUI"
             echo "target-cli=$RECOMMENDED_CLI"
             echo "cli-source=$CLI_SOURCE"
+            echo "up-to-date=false"
           } >> "$GITHUB_OUTPUT"
-          echo "up-to-date=false" >> "$GITHUB_OUTPUT"
 
       - name: Bump the pins
         if: steps.versions.outputs.up-to-date == 'false'
+        env:
+          CURRENT: ${{ steps.versions.outputs.current-webui }}
+          CURRENT_CLI: ${{ steps.versions.outputs.current-cli }}
+          TARGET: ${{ steps.versions.outputs.target-webui }}
+          TARGET_CLI: ${{ steps.versions.outputs.target-cli }}
         run: |
           set -euo pipefail
-          CURRENT="${{ steps.versions.outputs.current-webui }}"
-          TARGET="${{ steps.versions.outputs.target-webui }}"
-          TARGET_CLI="${{ steps.versions.outputs.target-cli }}"
+          PIN_SITES="Dockerfile scripts/ docs/ remote-agent/"
 
           # Replace the exact current pin (webui) everywhere it appears.
-          for f in $(grep -rl "qwen-code-webui@$CURRENT" Dockerfile scripts/ docs/); do
+          for f in $(grep -rl "qwen-code-webui@$CURRENT" $PIN_SITES); do
             sed -i "s/qwen-code-webui@$CURRENT/qwen-code-webui@$TARGET/g" "$f"
           done
 
-          # Replace any @qwen-code/qwen-code@X.Y.Z with the target CLI.
-          CURRENT_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
-            Dockerfile scripts/ docs/ | head -1 | cut -d@ -f3)
+          # Replace any @qwen-code/qwen-code@X.Y.Z literal with the target CLI.
           if [ -n "$CURRENT_CLI" ] && [ -n "$TARGET_CLI" ] && [ "$CURRENT_CLI" != "$TARGET_CLI" ]; then
-            for f in $(grep -rl "@qwen-code/qwen-code@$CURRENT_CLI" Dockerfile scripts/ docs/); do
+            for f in $(grep -rl "@qwen-code/qwen-code@$CURRENT_CLI" $PIN_SITES); do
               sed -i "s|@qwen-code/qwen-code@$CURRENT_CLI|@qwen-code/qwen-code@$TARGET_CLI|g" "$f"
             done
           fi
 
-          # install.sh pins the pair in shell variables (the canonical
-          # source for package-method installs) — update those too, or the
-          # inline literals above would disagree with what gets installed.
-          INSTALL_SH=scripts/install-central/package-method/install.sh
-          if [ -f "$INSTALL_SH" ]; then
-            sed -i "s/^QWEBUI_VERSION=\"[^\"]*\"/QWEBUI_VERSION=\"$TARGET\"/" "$INSTALL_SH"
-            if [ -n "$TARGET_CLI" ]; then
-              sed -i "s/^QWEN_CLI_VERSION=\"[^\"]*\"/QWEN_CLI_VERSION=\"$TARGET_CLI\"/" "$INSTALL_SH"
-            fi
+          # Variable-form pins. Each site uses its own format; the list
+          # mirrors test_qwen_stack_pins_are_consistent_across_all_sites —
+          # keep them in sync. The package-method installer carries BOTH
+          # the variables and inline literals (its npm installs use the
+          # literals; the variables feed messages and post-install
+          # verification), so both must move together.
+          sed -i "s/^QWEBUI_VERSION=\"[^\"]*\"/QWEBUI_VERSION=\"$TARGET\"/" \
+            scripts/install-central/package-method/install.sh
+          if [ -n "$TARGET_CLI" ]; then
+            sed -i "s/^QWEN_CLI_VERSION=\"[^\"]*\"/QWEN_CLI_VERSION=\"$TARGET_CLI\"/" \
+              scripts/install-central/package-method/install.sh
+            sed -i "s/^QWEN_CLI_VERSION=\"[^\"]*\"/QWEN_CLI_VERSION=\"$TARGET_CLI\"/" \
+              remote-agent/install.sh
+            # [$] = literal $ in the regex; \$ in the replacement survives
+            # shell double-quoting as a plain $.
+            sed -i "s/^[$]QwenCliVersion = \"[^\"]*\"/\$QwenCliVersion = \"$TARGET_CLI\"/" \
+              remote-agent/install.ps1
+            sed -i "s/^QWEN_PINNED_VERSION = \"[^\"]*\"/QWEN_PINNED_VERSION = \"$TARGET_CLI\"/" \
+              remote-agent/terminal_menu.py
+            sed -i -E "s/^([[:space:]]*PINNED_VERSION = \")[^\"]*(\")/\1$TARGET_CLI\2/" \
+              remote-agent/cli_adapters/qwen_code.py
           fi
 
           git diff --stat
 
+          # Fail fast BEFORE any PR is opened: no stale literal pins may
+          # remain, and every variable-form pin must equal the target.
+          # The dispatched CI runs the real contract test; this catches a
+          # missed site with the specific file list instead of a red PR.
+          fail=0
+          if grep -rq "qwen-code-webui@$CURRENT" $PIN_SITES; then
+            echo "::error::stale qwen-code-webui@$CURRENT pins remain:"
+            grep -rn "qwen-code-webui@$CURRENT" $PIN_SITES
+            fail=1
+          fi
+          if [ -n "$CURRENT_CLI" ] && [ "$CURRENT_CLI" != "$TARGET_CLI" ] \
+            && grep -rq "@qwen-code/qwen-code@$CURRENT_CLI" $PIN_SITES; then
+            echo "::error::stale @qwen-code/qwen-code@$CURRENT_CLI pins remain:"
+            grep -rn "@qwen-code/qwen-code@$CURRENT_CLI" $PIN_SITES
+            fail=1
+          fi
+          assert_pin() { # file, fixed-string that must be present
+            if ! grep -qF -- "$2" "$1"; then
+              echo "::error::$1 does not contain expected pin: $2"
+              fail=1
+            fi
+          }
+          assert_pin scripts/install-central/package-method/install.sh "QWEBUI_VERSION=\"$TARGET\""
+          if [ -n "$TARGET_CLI" ]; then
+            assert_pin scripts/install-central/package-method/install.sh "QWEN_CLI_VERSION=\"$TARGET_CLI\""
+            assert_pin remote-agent/install.sh "QWEN_CLI_VERSION=\"$TARGET_CLI\""
+            assert_pin remote-agent/install.ps1 "\$QwenCliVersion = \"$TARGET_CLI\""
+            assert_pin remote-agent/terminal_menu.py "QWEN_PINNED_VERSION = \"$TARGET_CLI\""
+            assert_pin remote-agent/cli_adapters/qwen_code.py "PINNED_VERSION = \"$TARGET_CLI\""
+          fi
+          [ "$fail" -eq 0 ] || exit 1
+
       - name: Open or refresh the PR
+        id: pr
         if: steps.versions.outputs.up-to-date == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT: ${{ steps.versions.outputs.current-webui }}
+          TARGET: ${{ steps.versions.outputs.target-webui }}
+          TARGET_CLI: ${{ steps.versions.outputs.target-cli }}
+          CLI_SOURCE: ${{ steps.versions.outputs.cli-source }}
         run: |
           set -euo pipefail
-          TARGET="${{ steps.versions.outputs.target-webui }}"
-          CURRENT="${{ steps.versions.outputs.current-webui }}"
-          TARGET_CLI="${{ steps.versions.outputs.target-cli }}"
-          CLI_SOURCE="${{ steps.versions.outputs.cli-source }}"
           BRANCH="chore/webui-$TARGET"
 
           git config user.name "github-actions[bot]"
@@ -143,6 +243,8 @@ jobs:
           git add -A
           git commit -m "chore: upgrade qwen-code-webui $CURRENT -> $TARGET"
           git push --force origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           BODY="Automated qwen-stack upgrade.
 
@@ -153,18 +255,62 @@ jobs:
           (release v$TARGET notes list what changed since v$CURRENT.)
 
           Checklist before merge:
+          - [ ] CI green on this branch (auto-dispatched — GITHUB_TOKEN PRs fire no CI events on their own)
           - [ ] Sandbox and control-plane images rebuild cleanly
           - [ ] Interactive workspace smoke test against the new pair"
+
+          # Create the label on demand (idempotent) so the add below cannot
+          # fail on a missing label.
+          gh label create dependencies --force \
+            --description "Automated dependency upgrades" --color 0366d6 \
+            >/dev/null 2>&1 || true
 
           if gh pr view "$BRANCH" >/dev/null 2>&1; then
             echo "PR for $BRANCH already exists; branch force-pushed with the latest pins"
             gh pr edit "$BRANCH" --body "$BODY" || true
+          elif gh pr create \
+            --title "chore: upgrade qwen-code-webui $CURRENT -> $TARGET" \
+            --body "$BODY" \
+            --base main \
+            --head "$BRANCH" \
+            --label dependencies; then
+            echo "PR created for $BRANCH"
+          elif gh pr view "$BRANCH" >/dev/null 2>&1; then
+            echo "::warning::PR was created but a post-create step (e.g. labeling) failed; see the error above"
           else
-            gh pr create \
-              --title "chore: upgrade qwen-code-webui $CURRENT -> $TARGET" \
-              --body "$BODY" \
-              --base main \
-              --head "$BRANCH" \
-              --label dependencies || \
             echo "::warning::PR creation failed — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General"
           fi
+
+          # Supersede older upgrade PRs so unmerged ones don't pile up
+          # conflicting with each other. Never closes a PR for a NEWER
+          # target (e.g. a dispatch for an older version must not close
+          # the PR for the newest release).
+          while IFS='=' read -r num head; do
+            [ -n "$num" ] || continue
+            old_ver="${head#chore/webui-}"
+            [ "$old_ver" != "$TARGET" ] || continue
+            if [ "$(printf '%s\n%s\n' "$old_ver" "$TARGET" | sort -V | tail -1)" = "$TARGET" ]; then
+              echo "Closing superseded upgrade PR #$num ($head)"
+              gh pr close "$num" --comment "Superseded by the $TARGET upgrade ($BRANCH)." || true
+            fi
+          done < <(gh pr list --state open --json number,headRefName --limit 100 \
+            --jq '.[] | select(.headRefName | startswith("chore/webui-")) | "\(.number)=\(.headRefName)"')
+
+      - name: Dispatch CI on the branch
+        if: steps.versions.outputs.up-to-date == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN pushes fire no CI events (see the ci.yml `on:`
+          # note), so the PR opened above shows no checks on its own.
+          # Dispatch CI on the branch — the same remedy lint-heal.yml
+          # uses — which runs the real unit suite (incl. the pins
+          # contract test) and stamps the PR Gate.
+          jq -n --arg ref "$BRANCH" --arg sha "$HEAD_SHA" \
+            '{ref: $ref, inputs: {healed_sha: $sha}}' \
+            | gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
+              --method POST --input -
+          echo "CI dispatched on $BRANCH (healed_sha=$HEAD_SHA)"
