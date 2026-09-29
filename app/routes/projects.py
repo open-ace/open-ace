@@ -188,9 +188,10 @@ def api_create_project():
     data = request.get_json() or {}
 
     # Issue #3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_isolation_level_from_webui
+    from app.utils.isolation_level import get_isolation_level_from_webui, get_webui_instance
 
     isolation_level = get_isolation_level_from_webui(user_id)
+    sandbox_dir_created: bool | None = None
 
     path = data.get("path")
     name = data.get("name")
@@ -199,6 +200,11 @@ def api_create_project():
     create_dir = data.get("create_dir", True)
 
     # Issue #2897: Validate project name to prevent XSS and path injection
+    # Issue #3459: non-string JSON previously 500'd on str ops below.
+    if name is not None and not isinstance(name, str):
+        return jsonify({"error": "Project name must be a string"}), 400
+    if description is not None and not isinstance(description, str):
+        return jsonify({"error": "Description must be a string"}), 400
     if name:
         is_valid, error_msg = validate_project_name(name)
         if not is_valid:
@@ -207,6 +213,10 @@ def api_create_project():
     # Validate path
     if not path:
         return jsonify({"error": "Path is required"}), 400
+
+    # Issue #3459: non-string JSON previously 500'd on os.path.abspath.
+    if not isinstance(path, str):
+        return jsonify({"error": "Path must be a string"}), 400
 
     path = os.path.abspath(path)
 
@@ -248,8 +258,42 @@ def api_create_project():
                 400,
             )
 
-        # Skip host machine directory creation in sandboxed mode
-        # Directory already exists in sandbox container
+        # Issue #3459: the directory must exist INSIDE the sandbox container,
+        # and only the container can create it — ask the live instance's
+        # command channel (bounded wait; a wedged pod must not hang the
+        # request). The home root itself is PVC-provisioned; only subpaths
+        # need the mkdir. create_dir=False registers without creating,
+        # mirroring the non-sandboxed contract.
+        if create_dir:
+            sandbox_dir_created = False
+            instance = get_webui_instance(user_id)
+            launcher = getattr(instance, "launcher", None) if instance is not None else None
+            sandbox_id = getattr(instance, "sandbox_id", "") if instance is not None else ""
+            if launcher is not None and sandbox_id:
+                try:
+                    import shlex as _shlex
+
+                    sandbox_dir_created = bool(
+                        launcher.run_command_wait(
+                            sandbox_id, f"mkdir -p {_shlex.quote(path)}", timeout_seconds=10.0
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "sandboxed mkdir failed for user %s path %s: %s (#3459)",
+                        user_id,
+                        path,
+                        exc,
+                    )
+            if not sandbox_dir_created:
+                logger.warning(
+                    "sandboxed project %s for user %s: container-side mkdir did not "
+                    "confirm; the directory may be missing (#3459)",
+                    path,
+                    user_id,
+                )
+
+        # Host-side directory creation never applies in sandboxed mode.
         create_dir = False
     else:
         # Non-sandboxed mode: original validation logic
@@ -565,6 +609,11 @@ def api_create_project():
 
         if permission_warning:
             response["permission_warning"] = permission_warning
+
+        # Issue #3459: in sandboxed mode the container-side mkdir outcome is
+        # surfaced so the UI/agent can flag a project whose cwd is missing.
+        if sandbox_dir_created is not None:
+            response["sandbox_dir_created"] = sandbox_dir_created
 
         return jsonify(response), 201
 

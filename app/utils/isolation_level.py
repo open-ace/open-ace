@@ -10,6 +10,37 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def get_webui_instance(user_id: int | None) -> Any:
+    """Get the live WebUIInstance for a user, or None.
+
+    Single lookup path for callers that need the instance itself (e.g. #3459
+    sandbox-side mkdir needs sandbox_id + launcher), not just its level.
+
+    Args:
+        user_id: User ID to look up WebUIInstance.
+
+    Returns:
+        The WebUIInstance, or None (no manager / no instance / lookup error).
+    """
+    if not user_id:
+        return None
+
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        if not manager:
+            return None
+
+        return manager.get_user_instance(user_id)
+    except Exception as e:
+        # A real failure (import error, DB error) silently downgrades the
+        # caller to host-side path semantics — the exact class of bug #3427
+        # reports — so it must be visible at default log level.
+        logger.warning("Failed to get WebUIInstance for user %s: %s", user_id, e)
+        return None
+
+
 def get_isolation_level_from_webui(user_id: int | None) -> str | None:
     """Get isolation_level from WebUIInstance.
 
@@ -22,27 +53,8 @@ def get_isolation_level_from_webui(user_id: int | None) -> str | None:
     Returns:
         Isolation level string (e.g., "sandboxed", "os_user") or None.
     """
-    if not user_id:
-        return None
-
-    try:
-        from app.services.webui_manager import get_webui_manager
-
-        manager = get_webui_manager()
-        if not manager:
-            return None
-
-        instance = manager.get_user_instance(user_id)
-        if not instance:
-            return None
-
-        return instance.isolation_level
-    except Exception as e:
-        # A real failure (import error, DB error) silently downgrades the
-        # caller to host-side path semantics — the exact class of bug #3427
-        # reports — so it must be visible at default log level.
-        logger.warning("Failed to get isolation_level for user %s: %s", user_id, e)
-        return None
+    instance = get_webui_instance(user_id)
+    return instance.isolation_level if instance is not None else None
 
 
 def is_sandboxed(isolation_level: str | None) -> bool:

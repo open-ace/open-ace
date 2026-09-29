@@ -105,6 +105,12 @@ class TestCheckPathSandboxed:
         assert resp.status_code == 400
         assert resp.get_json()["valid"] is False
 
+    def test_non_string_path_returns_400_not_500(self, sandbox_client):
+        """#3459: list/dict JSON paths previously 500'd on startswith."""
+        resp = sandbox_client.post("/api/fs/check-path", json={"path": ["/workspace/qlfan"]})
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Path must be a string"
+
 
 class TestBrowseSandboxed:
     def test_explicit_workspace_path_not_rejected_by_host_bases(self, sandbox_client):
@@ -113,14 +119,43 @@ class TestBrowseSandboxed:
         resp = sandbox_client.get("/api/fs/browse?path=/workspace/qlfan")
         assert resp.status_code == 200
         body = resp.get_json()
-        # Host cannot list inside the sandbox → graceful not-exists fallback.
-        assert body.get("error") == "Directory does not exist"
-        assert body["fallback"]["currentPath"] == "/workspace/qlfan"
+        # #3459: host cannot see inside the container — empty listing + hint,
+        # no doomed host probes, no misleading "will be created" note.
+        assert body["currentPath"] == "/workspace/qlfan"
+        assert body["directories"] == []
+        assert body["files"] == []
+        assert body["canCreate"] is False
+        assert body["sandboxed"] is True
+        assert "sandbox container" in body["fallback_note"]
+
+    def test_home_default_returns_empty_listing(self, sandbox_client):
+        resp = sandbox_client.get("/api/fs/browse?path=home")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["currentPath"] == "/workspace/qlfan"
+        assert body["directories"] == []
+        assert body["sandboxed"] is True
+
+    def test_zero_host_probes(self, sandbox_client, monkeypatch):
+        """#3459: sandboxed browse must not touch the host filesystem —
+        including the legacy get_home_directory sudo probe that
+        _primary_home_root used to trigger (round-1 review M1)."""
+
+        def _explode(*args, **kwargs):
+            raise AssertionError("host probe reached")
+
+        monkeypatch.setattr("app.routes.fs.get_directory_info", _explode)
+        monkeypatch.setattr("app.routes.fs.list_subdirectories", _explode)
+        monkeypatch.setattr("app.routes.fs.run_as_user", _explode)
+        resp = sandbox_client.get("/api/fs/browse?path=/workspace/qlfan")
+        assert resp.status_code == 200
+        resp = sandbox_client.get("/api/fs/browse?path=home")
+        assert resp.status_code == 200
 
     def test_other_users_home_rejected(self, sandbox_client):
         resp = sandbox_client.get("/api/fs/browse?path=/workspace/bob")
         assert resp.status_code == 400
-        assert "home directory" in resp.get_json()["error"] or "home" in resp.get_json()["error"]
+        assert "home" in resp.get_json()["error"]
 
     def test_host_base_dir_path_rejected(self, sandbox_client):
         resp = sandbox_client.get("/api/fs/browse?path=/home/qlfan")
