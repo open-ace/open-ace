@@ -29,29 +29,27 @@ frontend/
 ├── src/
 │   ├── main.tsx                # Entry point
 │   ├── App.tsx                 # Root component with routing
-│   ├── api/                    # API client layer
+│   ├── api/                    # API client layer (30+ typed modules)
 │   │   ├── client.ts           # ApiClient (retry, timeout, error handling)
-│   │   ├── auth.ts             # Authentication APIs
-│   │   ├── dashboard.ts        # Dashboard data
-│   │   ├── messages.ts         # Message browsing
-│   │   ├── sessions.ts         # Session management
-│   │   ├── admin.ts            # User management
-│   │   ├── analysis.ts         # Analytics
-│   │   ├── remote.ts           # Remote machines & sessions
-│   │   ├── governance.ts       # Audit, content filter, security
-│   │   ├── tenant.ts           # Multi-tenant management
-│   │   ├── sso.ts              # SSO provider management
-│   │   ├── prompts.ts          # Prompt templates
-│   │   ├── projects.ts         # Project management
-│   │   ├── toolAccounts.ts     # Tool account mapping
-│   │   └── index.ts            # Re-exports
+│   │   ├── request.ts          # Shared request helpers
+│   │   ├── index.ts            # Re-exports
+│   │   └── ...                 # One module per backend domain:
+│   │                           # auth, dashboard, messages, sessions, admin,
+│   │                           # analysis, remote, governance, tenant, sso,
+│   │                           # prompts, projects, toolAccounts, autonomous,
+│   │                           # compliance, encryptionKeys, featureFlags,
+│   │                           # feishuConfig, fs, insights, mappingRules,
+│   │                           # modelGateway, notificationChannels, policy,
+│   │                           # projectCategories, report, roi, smtpConfig,
+│   │                           # system, users, workspace, alerts,
+│   │                           # aiAgentSettings (plus colocated *.test.ts)
 │   ├── components/
 │   │   ├── common/             # 49 shared UI components
 │   │   ├── layout/             # Layout shells (WorkLayout, ManageLayout)
 │   │   ├── features/           # Page-level components
-│   │   │   ├── analysis/       # TrendAnalysis, AnomalyDetection, ROIAnalysis
-│   │   │   ├── management/     # 37 admin pages
-│   │   │   ├── settings/       # SSOSettings
+│   │   │   ├── analysis/       # TrendAnalysis, AnomalyDetection, ROIAnalysis, UsageForecast, EnterpriseReport
+│   │   │   ├── management/     # Admin pages plus their modals/editors (UserManagement, TenantManagement, SecurityCenter, …)
+│   │   │   ├── settings/       # SSOSettings, BrandingSettings, AiAgentSettings, NotificationIntegration, FeishuConfig
 │   │   │   └── compliance/     # DataRetention, ComplianceReport
 │   │   └── work/               # Work-mode specific components
 │   ├── hooks/                  # React Query hooks
@@ -99,6 +97,10 @@ The dev server runs on port 3000 with `/api` and `/auth` requests proxied to the
 | `/work/prompts` | Prompts | Prompt templates |
 | `/work/usage` | UsageOverview | Personal usage stats |
 | `/work/insights` | InsightsReport | AI-generated insights |
+| `/work/files` | PersonalFiles | Personal file browser |
+| `/work/alerts` | UserAlerts | Personal alert center |
+| `/work/autonomous` | AutonomousDev | Autonomous development workflows (feature-gated) |
+| `/work/workspace` | — | Workspace iframe anchor |
 
 ### Manage Mode (`/manage/*`) — Admin only
 
@@ -107,20 +109,34 @@ Sidebar navigation layout (`ManageLayout`)
 | Route | Component | Description |
 |-------|-----------|-------------|
 | `/manage/dashboard` | Dashboard | Admin overview |
+| `/manage/analysis` | — | Redirects to `/manage/analysis/trend` |
 | `/manage/analysis/trend` | TrendAnalysis | Token trends |
+| `/manage/analysis/request-dashboard` | RequestDashboard | Request-level usage dashboard |
 | `/manage/analysis/anomaly` | AnomalyDetection | Usage anomalies |
 | `/manage/analysis/roi` | ROIAnalysis | ROI metrics |
+| `/manage/analysis/forecast` | UsageForecast | Usage forecasting |
+| `/manage/analysis/enterprise-report` | EnterpriseReport | Enterprise usage report |
+| `/manage/analysis/conversation-history` | ConversationHistory | Conversation history browser |
 | `/manage/messages` | Messages | Message browser |
 | `/manage/audit` | AuditCenter | Audit log viewer |
-| `/manage/quota` | QuotaManagement | Quota & alerts |
+| `/manage/quota` | QuotaAlerts | Quota & alerts |
 | `/manage/compliance` | Compliance | Data retention |
 | `/manage/security` | SecurityCenter | Security settings |
+| `/manage/policy/rules` | PolicyRouteGuard | Policy rules management |
 | `/manage/users` | UserManagement | User CRUD |
 | `/manage/tenants` | TenantManagement | Multi-tenant |
+| `/manage/tenants/:id` | TenantDetail | Tenant detail |
 | `/manage/projects` | ProjectManagement | Project CRUD |
-| `/manage/remote/machines` | RemoteMachines | Machine management |
-| `/manage/remote/api-keys` | ApiKeyManagement | API key proxy |
+| `/manage/remote/machines` | RemoteMachineManagement | Machine management |
 | `/manage/settings/sso` | SSOSettings | SSO configuration |
+| `/manage/settings/branding` | BrandingSettings | Branding and appearance |
+| `/manage/settings/api-keys` | APIKeyManagement | API key proxy management |
+| `/manage/settings/encryption-keys` | EncryptionKeyManagement | Encryption key management |
+| `/manage/settings/ai-agent` | AiAgentSettings | AI agent settings |
+| `/manage/settings/notification-integration` | NotificationIntegration | Notification integrations |
+| `/manage/settings/smtp` | SmtpConfig | SMTP configuration |
+| `/manage/settings/model-gateway` | ModelGatewayConfig | Model gateway (LiteLLM-compatible) |
+| `/manage/settings/feishu` | FeishuConfig | Feishu integration |
 
 Legacy routes (`/dashboard`, `/messages`, etc.) redirect admins to `/manage/...` and non-admins to `/work/...`.
 
@@ -247,29 +263,27 @@ frontend/
 ├── src/
 │   ├── main.tsx                # 入口文件
 │   ├── App.tsx                 # 根组件（含路由）
-│   ├── api/                    # API 客户端层
+│   ├── api/                    # API 客户端层（30+ 个带类型模块）
 │   │   ├── client.ts           # ApiClient（重试、超时、错误处理）
-│   │   ├── auth.ts             # 认证 API
-│   │   ├── dashboard.ts        # 仪表盘数据
-│   │   ├── messages.ts         # 消息浏览
-│   │   ├── sessions.ts         # 会话管理
-│   │   ├── admin.ts            # 用户管理
-│   │   ├── analysis.ts         # 数据分析
-│   │   ├── remote.ts           # 远程机器和会话
-│   │   ├── governance.ts       # 审计、内容过滤、安全
-│   │   ├── tenant.ts           # 多租户管理
-│   │   ├── sso.ts              # SSO 提供商管理
-│   │   ├── prompts.ts          # 提示词模板
-│   │   ├── projects.ts         # 项目管理
-│   │   ├── toolAccounts.ts     # 工具账户映射
-│   │   └── index.ts            # 统一导出
+│   │   ├── request.ts          # 共享请求辅助
+│   │   ├── index.ts            # 统一导出
+│   │   └── ...                 # 按后端领域一域一模块：
+│   │                           # auth、dashboard、messages、sessions、admin、
+│   │                           # analysis、remote、governance、tenant、sso、
+│   │                           # prompts、projects、toolAccounts、autonomous、
+│   │                           # compliance、encryptionKeys、featureFlags、
+│   │                           # feishuConfig、fs、insights、mappingRules、
+│   │                           # modelGateway、notificationChannels、policy、
+│   │                           # projectCategories、report、roi、smtpConfig、
+│   │                           # system、users、workspace、alerts、
+│   │                           # aiAgentSettings（含同目录 *.test.ts）
 │   ├── components/
 │   │   ├── common/             # 49 个共享 UI 组件
 │   │   ├── layout/             # 布局容器（WorkLayout、ManageLayout）
 │   │   ├── features/           # 页面级组件
-│   │   │   ├── analysis/       # TrendAnalysis、AnomalyDetection、ROIAnalysis
-│   │   │   ├── management/     # 37 个管理页面
-│   │   │   ├── settings/       # SSOSettings
+│   │   │   ├── analysis/       # TrendAnalysis、AnomalyDetection、ROIAnalysis、UsageForecast、EnterpriseReport
+│   │   │   ├── management/     # 管理页面及其弹窗/编辑器（UserManagement、TenantManagement、SecurityCenter 等）
+│   │   │   ├── settings/       # SSOSettings、BrandingSettings、AiAgentSettings、NotificationIntegration、FeishuConfig
 │   │   │   └── compliance/     # DataRetention、ComplianceReport
 │   │   └── work/               # 工作模式专用组件
 │   ├── hooks/                  # React Query hooks
@@ -317,6 +331,10 @@ npm run lint
 | `/work/prompts` | Prompts | 提示词模板 |
 | `/work/usage` | UsageOverview | 个人使用统计 |
 | `/work/insights` | InsightsReport | AI 生成的洞察 |
+| `/work/files` | PersonalFiles | 个人文件浏览 |
+| `/work/alerts` | UserAlerts | 个人告警中心 |
+| `/work/autonomous` | AutonomousDev | 自主开发工作流（受功能开关控制） |
+| `/work/workspace` | — | 工作区 iframe 锚点 |
 
 ### 管理模式 (`/manage/*`) — 仅管理员
 
@@ -325,20 +343,34 @@ npm run lint
 | 路由 | 组件 | 说明 |
 |------|------|------|
 | `/manage/dashboard` | Dashboard | 管理概览 |
+| `/manage/analysis` | — | 重定向到 `/manage/analysis/trend` |
 | `/manage/analysis/trend` | TrendAnalysis | Token 趋势 |
+| `/manage/analysis/request-dashboard` | RequestDashboard | 请求级用量仪表板 |
 | `/manage/analysis/anomaly` | AnomalyDetection | 使用异常 |
 | `/manage/analysis/roi` | ROIAnalysis | ROI 指标 |
+| `/manage/analysis/forecast` | UsageForecast | 用量预测 |
+| `/manage/analysis/enterprise-report` | EnterpriseReport | 企业用量报告 |
+| `/manage/analysis/conversation-history` | ConversationHistory | 对话历史浏览 |
 | `/manage/messages` | Messages | 消息浏览器 |
 | `/manage/audit` | AuditCenter | 审计日志查看 |
-| `/manage/quota` | QuotaManagement | 配额与告警 |
+| `/manage/quota` | QuotaAlerts | 配额与告警 |
 | `/manage/compliance` | Compliance | 数据保留 |
 | `/manage/security` | SecurityCenter | 安全设置 |
+| `/manage/policy/rules` | PolicyRouteGuard | 策略规则管理 |
 | `/manage/users` | UserManagement | 用户 CRUD |
 | `/manage/tenants` | TenantManagement | 多租户 |
+| `/manage/tenants/:id` | TenantDetail | 租户详情 |
 | `/manage/projects` | ProjectManagement | 项目 CRUD |
-| `/manage/remote/machines` | RemoteMachines | 机器管理 |
-| `/manage/remote/api-keys` | ApiKeyManagement | API Key 代理 |
+| `/manage/remote/machines` | RemoteMachineManagement | 机器管理 |
 | `/manage/settings/sso` | SSOSettings | SSO 配置 |
+| `/manage/settings/branding` | BrandingSettings | 品牌与外观 |
+| `/manage/settings/api-keys` | APIKeyManagement | API Key 代理管理 |
+| `/manage/settings/encryption-keys` | EncryptionKeyManagement | 加密密钥管理 |
+| `/manage/settings/ai-agent` | AiAgentSettings | AI Agent 设置 |
+| `/manage/settings/notification-integration` | NotificationIntegration | 通知集成 |
+| `/manage/settings/smtp` | SmtpConfig | SMTP 配置 |
+| `/manage/settings/model-gateway` | ModelGatewayConfig | 模型网关（LiteLLM 兼容） |
+| `/manage/settings/feishu` | FeishuConfig | 飞书集成 |
 
 旧版路由（`/dashboard`、`/messages` 等）会将管理员重定向到 `/manage/...`，普通用户重定向到 `/work/...`。
 

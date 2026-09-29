@@ -1,5 +1,5 @@
 """
-Integration test for the security model documented in docs/en/SECURITY.md.
+Integration test for the security model documented in the security model reference (docs/security/).
 
 Exercises the full, cross-component flow a real deployment relies on:
 

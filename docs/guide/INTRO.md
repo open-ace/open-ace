@@ -148,7 +148,9 @@ Start with the guide that matches your evaluation path:
 - [Deployment Guide](DEPLOYMENT.md) - local and production setup
 - [Remote Agent Guide](REMOTE_AGENT.md) - remote execution model, adapters, and machine registration
 - [Remote Workspace](REMOTE_WORKSPACE.md) - browser workspace and server-side remote-session design
+- [Autonomous Development](../dev/AUTONOMOUS_DEVELOPMENT.md) - autonomous workflow lifecycle, API, and isolation model
 - [Permission Model](../dev/PERMISSION_MODEL.md) - roles, admin boundaries, and access model
+- [Token Accounting](../dev/TOKEN_ACCOUNTING.md) - core concepts (Request / Message / Session / Conversation) and the usage-data pipeline
 - [Architecture](../dev/ARCHITECTURE.md) - backend, frontend, and runtime structure
 
 ## Bottom Line
@@ -308,7 +310,9 @@ Open ACE 支持多种部署路径：
 - [部署指南](DEPLOYMENT.md) - 本地与生产部署
 - [Remote Agent 指南](REMOTE_AGENT.md) - 远程执行模型、适配器、机器注册
 - [Remote Workspace](REMOTE_WORKSPACE.md) - 浏览器工作台与服务端远程会话设计
+- [自主开发工作流](../dev/AUTONOMOUS_DEVELOPMENT.md) - 自主工作流生命周期、API 与隔离模型
 - [权限模型](../dev/PERMISSION_MODEL.md) - 角色、管理边界与访问控制
+- [Token 统计链路](../dev/TOKEN_ACCOUNTING.md) - 核心概念（Request / Message / Session / Conversation）与用量数据链路
 - [系统架构](../dev/ARCHITECTURE.md) - 后端、前端与运行时结构
 
 ## 一句话总结

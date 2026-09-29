@@ -171,7 +171,7 @@ kubectl get cronjob -n open-ace
 
 ### ConfigMap
 
-Application configuration keys: `FLASK_APP`, `FLASK_ENV`, `PYTHONUNBUFFERED`, `LOG_LEVEL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`, `ENABLE_SSO`, `ENABLE_MULTI_TENANT`, `ENABLE_AUDIT_LOG`, `ENABLE_CONTENT_FILTER`, `WORKSPACE_BASE_DIR`, `AUDIT_LOG_RETENTION_DAYS`, `DATA_RETENTION_DAYS`
+Application configuration keys: `OPENACE_SECURITY_MODE` (required, set to `"production"` here — missing or invalid values fail startup), `FLASK_APP`, `PYTHONUNBUFFERED`, `LOG_LEVEL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`, `ENABLE_SSO`, `ENABLE_MULTI_TENANT`, `ENABLE_AUDIT_LOG`, `ENABLE_CONTENT_FILTER`, `WORKSPACE_BASE_DIR`, `AUDIT_LOG_RETENTION_DAYS`, `DATA_RETENTION_DAYS`
 
 ### Secret
 
@@ -245,7 +245,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## Monitoring
 
-The `/health` endpoint returns service status and git commit hash.
+The `/health` endpoint is deprecated and delegates to `/readyz` (its response includes `deprecated: true`). Use `/livez` for liveness and `/readyz` for readiness; `/readyz` also reports the service status and git commit hash.
 
 **Prometheus Monitoring**: the `prometheus.io/scrape` annotation scrapes the application `/metrics` endpoint (exported via `prometheus_flask_exporter`).
 
@@ -431,7 +431,7 @@ kubectl get cronjob -n open-ace
 
 ### ConfigMap
 
-应用配置键：`FLASK_APP`、`FLASK_ENV`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`WORKSPACE_BASE_DIR`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
+应用配置键：`OPENACE_SECURITY_MODE`（必填，此处为 `"production"` —— 缺失或非法值会导致启动失败）、`FLASK_APP`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`WORKSPACE_BASE_DIR`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
 
 ### Secret
 
@@ -468,7 +468,13 @@ kubectl get cronjob -n open-ace
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — 自愿驱逐期间至少保留两个 Web Pod 可用
+- `minAvailable: 50%` — 自愿驱逐期间至少保留 50% 的 Web Pod 可用
+
+**PDB 百分比行为**（Issue #1821 F6）：
+- 3 副本时：50% = 2 个可用（允许 1 次驱逐）—— **与旧的绝对值相同**
+- 2 副本时：50% = 1 个可用（允许 1 次驱逐）—— **比之前更宽松**
+- 1 副本时：50% = 1 个可用（允许 0 次驱逐）
+- 将 HPA 下限缩到 3 副本以下之前，请先评估该行为。
 
 ## 配置
 
@@ -499,7 +505,9 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## 监控
 
-`/health` 端点返回服务状态和 git commit hash。
+`/health` 端点已废弃，委托给 `/readyz`（响应包含 `deprecated: true`）。存活探针请使用 `/livez`，就绪探针请使用 `/readyz`；`/readyz` 同样返回服务状态和 git commit hash。
+
+**Prometheus 监控**：`prometheus.io/scrape` 注解会抓取应用 `/metrics` 端点（通过 `prometheus_flask_exporter` 导出）。
 
 ## 扩容
 

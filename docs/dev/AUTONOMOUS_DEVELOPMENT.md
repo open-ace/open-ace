@@ -448,7 +448,7 @@ Do not run this script inside containers — `/sys/fs/cgroup` is typically read-
 
 ## 15. API overview
 
-All endpoints require authentication and enforce workflow ownership or administrator access.
+All endpoints require authentication and enforce workflow ownership or administrator access, with one infrastructural exception noted below.
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -474,8 +474,9 @@ All endpoints require authentication and enforce workflow ownership or administr
 | `GET /api/autonomous/workflows/:id/pr-stats` | PR change statistics |
 | `DELETE /api/autonomous/workflows/:id` | Delete a workflow |
 | `DELETE /api/autonomous/batches/:id` | Delete a batch |
+| `POST /api/autonomous/internal/events/ingest` | Cross-process SSE event ingest (scheduler process → web process, #2187). Marked `@public_endpoint` but fail-closed: requires the shared-secret header (`server.events_ingest_key` / `SECRET_KEY`) plus a trusted loopback source; an unconfigured secret returns 503, never a no-auth fallback |
 
-`GET /tools` and `GET /models` are infrastructure endpoints and are out of scope for this overview.
+`GET /api/autonomous/tools` and `GET /api/autonomous/models` are authenticated infrastructure endpoints and are out of scope for this overview.
 
 See the [API reference](API.md) and `app/routes/autonomous.py` for complete fields and responses.
 
@@ -1050,7 +1051,7 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 
 ## 15. API 概览
 
-所有接口要求认证，并校验工作流所有者或管理员权限。
+所有接口要求认证，并校验工作流所有者或管理员权限；唯一的例外是下表注明的基础设施端点。
 
 | 接口 | 用途 |
 |------|------|
@@ -1076,8 +1077,9 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 | `GET /api/autonomous/workflows/:id/pr-stats` | PR 变更统计 |
 | `DELETE /api/autonomous/workflows/:id` | 删除工作流 |
 | `DELETE /api/autonomous/batches/:id` | 删除批次 |
+| `POST /api/autonomous/internal/events/ingest` | 跨进程 SSE 事件接入（调度器进程 → Web 进程，#2187）。标记为 `@public_endpoint` 但 fail-closed：必须携带共享密钥头（`server.events_ingest_key` / `SECRET_KEY`）且来源为可信 loopback；未配置密钥时返回 503，绝不降级为免认证 |
 
-`GET /tools` 与 `GET /models` 为基础设施端点，不在本概览内。
+`GET /api/autonomous/tools` 与 `GET /api/autonomous/models` 为需要认证的基础设施端点，不在本概览内。
 
 完整字段和返回结构以 [API 文档](API.md) 与 `app/routes/autonomous.py` 为准。
 

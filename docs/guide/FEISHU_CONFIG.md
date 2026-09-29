@@ -104,6 +104,24 @@ Current non-goals:
 - Feishu SSO login flow
 - general-purpose Feishu chatbot commands
 
+## config.json vs the `feishu_settings` Table
+
+There are two configuration channels; know which one you are using:
+
+| | `config.json` (`feishu` section) | `feishu_settings` table |
+|---|---|---|
+| **Managed by** | Server operators, by editing the file | System administrators, via the admin UI (`Manage -> Users -> Feishu settings`) backed by `/api/management/feishu-config` (admin-only GET/PUT/DELETE/test) |
+| **Secret storage** | Plaintext `app_secret` in the file | Encrypted at rest (`app_secret_enc`, Fernet); the API only returns a masked indicator, never the secret |
+| **Change flow** | Edit file + restart | UI save + test connection; no restart needed; changing credentials resets the stored verification status |
+
+Behavior at runtime (verified against `app/services/feishu_org_sync.py` and `app/repositories/notification_settings_repository.py`):
+
+- **One-time legacy import**: the first time the settings are read, if no `feishu_settings` row exists yet, the `feishu` section of `config.json` is imported into the table once and recorded in `config_import_state`. From then on `config.json` is not re-imported, and later edits to the file have no effect on stored settings.
+- **Priority**: when both exist, the database row wins field by field; `config.json` only supplies values while no database row exists.
+- **Deleting via the admin UI** removes the row and writes a tombstone that prevents the legacy `config.json` values from being silently re-imported.
+
+Security recommendation: prefer the management-UI (database) channel, especially in production — it keeps the App Secret out of plaintext config files. After the one-time import has run (or once you have saved credentials through the UI), remove the plaintext `app_secret` from `config.json`. If the instance encryption key is later rotated, the stored secret becomes undecryptable and the connection test returns `FEISHU_SECRET_UNREADABLE` (HTTP 409); re-enter and save the App Secret to fix it.
+
 ## Cache Management
 
 User and group information is cached to avoid frequent API calls.
@@ -257,6 +275,24 @@ python3 scripts/shared/feishu_group_cache.py test chat_xxxxx <app_id> <app_secre
 - 部门删除后自动删除本地团队
 - 飞书 SSO 登录流程
 - 通用飞书聊天机器人命令
+
+## config.json 与 `feishu_settings` 表
+
+系统存在两条配置通道，请确认自己使用的是哪一条：
+
+| | `config.json`（`feishu` 段） | `feishu_settings` 表 |
+|---|---|---|
+| **管理方式** | 服务器运维人员编辑文件 | 系统管理员通过管理界面（`管理 -> 用户 -> 飞书设置`），底层为 `/api/management/feishu-config`（仅管理员可用的 GET/PUT/DELETE/test） |
+| **密钥存储** | 文件中的明文 `app_secret` | 落库加密（`app_secret_enc`，Fernet）；接口只返回掩码标志，绝不返回密钥本身 |
+| **变更流程** | 改文件 + 重启 | 界面保存并测试连接；无需重启；变更凭证会自动重置已保存的校验状态 |
+
+运行时行为（依据 `app/services/feishu_org_sync.py` 与 `app/repositories/notification_settings_repository.py` 的实际实现）：
+
+- **一次性旧配置导入**：首次读取配置时，若 `feishu_settings` 表还没有记录，会把 `config.json` 的 `feishu` 段一次性导入表中，并在 `config_import_state` 里登记。此后不再重复导入，之后再修改该文件也不会影响已存储的配置。
+- **优先级**：两者同时存在时，数据库记录逐字段覆盖；`config.json` 只在数据库尚无记录时提供取值。
+- **通过管理界面删除**会同时删除记录并写入 tombstone，防止旧 `config.json` 中的值被静默重新导入。
+
+安全建议：优先使用管理界面（数据库）通道，生产环境尤其如此——它让 App Secret 不再以明文出现在配置文件里。一次性导入完成（或通过界面保存过凭证）之后，请把 `config.json` 中的明文 `app_secret` 删除。若之后轮换了实例加密密钥，已存储的密钥将无法解密，连接测试会返回 `FEISHU_SECRET_UNREADABLE`（HTTP 409）；重新录入并保存 App Secret 即可恢复。
 
 ## 缓存管理
 

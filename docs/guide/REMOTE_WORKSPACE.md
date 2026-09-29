@@ -8,6 +8,8 @@
 
 > Lets users select a remote machine in the browser and start an AI coding session — the AI CLI runs directly on the remote machine, with no SSH and no repeated setup.
 
+> This page documents the feature from the **server perspective**: architecture, admin setup, APIs, and security. Agent-side operations (installer TLS options in depth, start/stop scripts, `config.json` keys, the `openace` CLI, terminal server details) are documented in [REMOTE_AGENT.md](REMOTE_AGENT.md), which links back here.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -71,14 +73,14 @@ The remote workspace feature lets users pick a remote machine when creating a se
 
 ### Communication
 
-The Agent supports two transport modes with the server:
+The Agent uses a single transport to talk to the server:
 
 | Mode | Status | Use Case | Notes |
 |------|--------|----------|-------|
-| HTTP polling | Implemented, recommended | All scenarios | Agent POSTs actively; server returns pending commands; broadly compatible |
-| WebSocket | Planned | High-real-time scenarios | Requires gevent/websocket worker; currently returns 501 |
+| HTTP polling | Implemented; the only transport | All scenarios | Agent POSTs actively to `/api/remote/agent/message`; server returns pending commands; broadly compatible |
+| WebSocket | Removed | - | The legacy `GET /api/remote/agent/ws` endpoint is deprecated and now answers `410 Gone`, directing clients to HTTP polling |
 
-The Agent tries WebSocket first and falls back to HTTP polling on failure. For the current release, HTTP polling is recommended.
+There is no WebSocket-first fallback logic anymore: current agents use HTTP polling only, and no server-side WebSocket worker (gevent or otherwise) is needed for command transport.
 
 ---
 
@@ -324,6 +326,8 @@ Invoke-WebRequest -Uri "http://<server>:19888/api/remote/agent/install.ps1" | In
 
 ### Install Parameters
 
+This is the canonical installer parameter reference (kept in sync with the agent-side guide; see [REMOTE_AGENT.md](REMOTE_AGENT.md) for TLS policy, start/stop scripts, and the `openace` CLI).
+
 | Parameter | Required | Description | Default |
 |-----------|----------|-------------|---------|
 | `--server URL` | Yes | Open ACE server URL | - |
@@ -331,6 +335,8 @@ Invoke-WebRequest -Uri "http://<server>:19888/api/remote/agent/install.ps1" | In
 | `--name NAME` | No | Display name for the machine | hostname |
 | `--install-cli TOOL` | No | CLI tool to install | `qwen-code-cli` |
 | `--dir DIR` | No | Install directory | `~/.open-ace-agent` |
+| `--ca-bundle PATH` | No | PEM CA bundle for a private/self-signed server certificate | - |
+| `--insecure-skip-tls-verify` | No | Disable TLS verification (dangerous, explicit only; persists `skip_ssl_verify` plus the `allow_insecure_tls` admin gate) | off |
 
 Example — install Claude Code:
 
@@ -800,7 +806,7 @@ curl -b cookies.txt -X POST \
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/remote/agent/register` | Agent registration (uses the registration token) |
-| `GET` | `/api/remote/agent/ws` | WebSocket real-time transport (requires gevent; currently returns 501) |
+| `GET` | `/api/remote/agent/ws` | Deprecated legacy WebSocket transport; always returns `410 Gone` — use HTTP polling via `/api/remote/agent/message` |
 | `POST` | `/api/remote/agent/message` | HTTP polling transport (recommended) |
 | `POST` | `/api/remote/usage-report` | Agent reports token usage |
 
@@ -1018,19 +1024,16 @@ sudo journalctl -u open-ace-agent -f
 
 3. **Server URL**: check `server_url` in `config.json`; make sure it is correct and has no trailing slash.
 
-### Agent Stuck in a WebSocket Reconnect Loop
+### Agent Logs Show WebSocket Errors / Machine Stays Offline
 
-**Symptom**: The Agent log repeatedly shows `WebSocket error: Handshake status 405 METHOD NOT ALLOWED`, and the machine stays offline.
+**Symptom**: The Agent log repeatedly shows `WebSocket error: Handshake status 405 METHOD NOT ALLOWED` or `410 Gone` responses from `/api/remote/agent/ws`, and the machine stays offline.
 
-**Cause**: The Flask dev server (Werkzeug) does not support WebSocket upgrade requests, and the Agent failed to fall back from WebSocket to HTTP polling correctly.
+**Cause**: The server-side WebSocket transport has been removed. `GET /api/remote/agent/ws` is deprecated and always returns `410 Gone` with a pointer to `/api/remote/agent/message`; HTTP polling is the only transport. Agents from older releases still try WebSocket first and do not fall back correctly.
 
 **Fix**:
-1. Ensure the Agent code is up to date (contains the WebSocket → HTTP polling fallback fix)
+1. Update the Agent to a current release (HTTP polling only); reinstalling with a fresh registration token is the simplest path
 2. Restart the Agent: `sudo systemctl restart open-ace-agent`
-3. Check logs to confirm HTTP polling mode: `sudo journalctl -u open-ace-agent -n 20 | grep "HTTP polling"`
-4. Or configure the Agent to use HTTP directly: do not set the WebSocket URL in `config.json`
-
-**Long-term**: In production, enable WebSocket support by running under gevent or gunicorn + websocket worker.
+3. Check logs to confirm polling mode: `sudo journalctl -u open-ace-agent -n 20 | grep "HTTP polling"`
 
 ### Machine Shows Offline
 
@@ -1115,6 +1118,8 @@ If the token is consumed, the admin must generate a new one. Recommendation: gen
 
 > 让用户在浏览器中选择远程机器，启动 AI 编码会话，AI CLI 直接运行在远程机器上——无需 SSH，无需重复配置。
 
+> 本页从**服务器视角**介绍该功能：架构、管理员配置、API 与安全设计。Agent 侧的运维内容（安装器 TLS 参数详解、启停脚本、`config.json` 配置项、`openace` 命令行工具、终端服务器细节）见 [REMOTE_AGENT.md](REMOTE_AGENT.md)，该页也链接回本页。
+
 ## 目录
 
 - [概述](#概述)
@@ -1178,14 +1183,14 @@ Open ACE 工作区默认只能在服务器本机运行。用户需要操作远�
 
 ### 通信方式
 
-Agent 支持两种与服务器的通信方式：
+Agent 与服务器之间只有一种传输方式：
 
 | 方式 | 状态 | 适用场景 | 特点 |
 |------|------|---------|------|
-| HTTP 轮询 | 已实现，推荐使用 | 所有场景 | Agent 主动 POST，服务器返回待执行命令，兼容性好 |
-| WebSocket | 计划中 | 实时性要求高 | 需 gevent/websocket worker 支持，当前返回 501 |
+| HTTP 轮询 | 已实现，且是唯一传输方式 | 所有场景 | Agent 主动 POST 到 `/api/remote/agent/message`，服务器返回待执行命令，兼容性好 |
+| WebSocket | 已移除 | - | 旧端点 `GET /api/remote/agent/ws` 已弃用，现在固定返回 `410 Gone`，提示改用 HTTP 轮询 |
 
-Agent 优先尝试 WebSocket 连接，失败时自动降级为 HTTP 轮询。当前版本建议直接使用 HTTP 轮询模式。
+不再存在"先试 WebSocket、失败再降级"的逻辑：当前版本的 Agent 只使用 HTTP 轮询，命令传输也不需要服务端部署任何 WebSocket worker（gevent 等）。
 
 ---
 
@@ -1431,6 +1436,8 @@ Invoke-WebRequest -Uri "http://<server>:19888/api/remote/agent/install.ps1" | In
 
 ### 安装参数
 
+本表是安装器参数的权威参考（与 Agent 侧文档保持同步；TLS 策略、启停脚本和 `openace` 命令行工具见 [REMOTE_AGENT.md](REMOTE_AGENT.md)）。
+
 | 参数 | 必需 | 说明 | 默认值 |
 |------|------|------|--------|
 | `--server URL` | 是 | Open ACE 服务器地址 | - |
@@ -1438,6 +1445,8 @@ Invoke-WebRequest -Uri "http://<server>:19888/api/remote/agent/install.ps1" | In
 | `--name NAME` | 否 | 机器显示名称 | hostname |
 | `--install-cli TOOL` | 否 | 要安装的 CLI 工具 | `qwen-code-cli` |
 | `--dir DIR` | 否 | 安装目录 | `~/.open-ace-agent` |
+| `--ca-bundle PATH` | 否 | 私有 CA / 自签名服务器证书使用的 PEM CA bundle | - |
+| `--insecure-skip-tls-verify` | 否 | 关闭 TLS 验证（危险，仅显式使用；会同时写入 `skip_ssl_verify` 与管理员批准项 `allow_insecure_tls`） | 关闭 |
 
 示例 — 安装 Claude Code：
 
@@ -1907,7 +1916,7 @@ curl -b cookies.txt -X POST \
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `POST` | `/api/remote/agent/register` | Agent 注册（使用注册令牌） |
-| `GET` | `/api/remote/agent/ws` | WebSocket 实时通信（需要 gevent 支持，当前返回 501） |
+| `GET` | `/api/remote/agent/ws` | 已弃用的旧 WebSocket 传输端点；固定返回 `410 Gone`——请改用 HTTP 轮询 `/api/remote/agent/message` |
 | `POST` | `/api/remote/agent/message` | HTTP 轮询通信（推荐） |
 | `POST` | `/api/remote/usage-report` | Agent 上报 Token 用量 |
 
@@ -2125,19 +2134,16 @@ sudo journalctl -u open-ace-agent -f
 
 3. **服务器地址**：检查 `config.json` 中的 `server_url` 是否正确，注意不要有末尾斜杠。
 
-### Agent 卡在 WebSocket 重连循环
+### Agent 日志出现 WebSocket 错误 / 机器一直离线
 
-**症状**：Agent 日志反复显示 `WebSocket error: Handshake status 405 METHOD NOT ALLOWED`，机器状态始终为 offline。
+**症状**：Agent 日志反复显示 `WebSocket error: Handshake status 405 METHOD NOT ALLOWED`，或 `/api/remote/agent/ws` 返回 `410 Gone`，机器状态始终为 offline。
 
-**原因**：Flask 开发服务器（Werkzeug）不支持 WebSocket 升级请求，Agent 的 WebSocket 连接失败后没有正确降级到 HTTP 轮询。
+**原因**：服务端已移除 WebSocket 传输。`GET /api/remote/agent/ws` 已弃用，固定返回 `410 Gone` 并提示改用 `/api/remote/agent/message`；HTTP 轮询是唯一传输方式。旧版本 Agent 仍会先尝试 WebSocket，且无法正确降级。
 
 **解决方法**：
-1. 确保 Agent 代码已更新（包含 WebSocket 降级到 HTTP 轮询的修复）
+1. 把 Agent 升级到当前版本（仅 HTTP 轮询）；最简单的方式是用新的注册令牌重新安装
 2. 重启 Agent 服务：`sudo systemctl restart open-ace-agent`
-3. 查看日志确认已切换到 HTTP 轮询模式：`sudo journalctl -u open-ace-agent -n 20 | grep "HTTP polling"`
-4. 或者直接配置 Agent 使用 HTTP 模式：在 `config.json` 中不设置 WebSocket URL
-
-**长期方案**：在生产环境中使用 gevent 或 gunicorn + websocket worker 启用 WebSocket 支持。
+3. 查看日志确认已进入轮询模式：`sudo journalctl -u open-ace-agent -n 20 | grep "HTTP polling"`
 
 ### 机器显示 offline
 

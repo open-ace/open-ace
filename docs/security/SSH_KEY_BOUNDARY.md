@@ -223,7 +223,7 @@ Example:
 
 - [SSH Key Sync Configuration Reference](./SSH_SYNC_CONFIGURATION.md)
 - [Deployment Guide](../guide/DEPLOYMENT.md)
-- [Upgrade and Migration Guide](./SSH_SYNC_CONFIGURATION.md#升级迁移指南)
+- [Upgrade and Migration Guide](./SSH_SYNC_CONFIGURATION.md#upgrade-and-migration-guide)
 
 ### Changelog
 

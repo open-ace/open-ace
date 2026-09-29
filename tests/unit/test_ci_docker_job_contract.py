@@ -172,6 +172,17 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         }
     )
 
+    def _language_section(path, anchor):
+        # Language sections are delimited by the reserved anchors: the English
+        # section runs to "## 中文", the Chinese section to end of file.
+        text = path.read_text(encoding="utf-8")
+        start = text.index(f"## {anchor}")
+        if anchor == "English":
+            end = text.index("## 中文")
+        else:
+            end = len(text)
+        return text[start:end]
+
     def pins(sites, pattern):
         found = {}
         for name, text in sites.items():
@@ -192,22 +203,22 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         },
         r'^QWEBUI_VERSION="([0-9.]+)"',
     )["scripts/install-central/package-method/install.sh"]
-    webui["docs/cn/DEPLOYMENT.md"] = pins(
+    webui["docs/guide/MULTI_USER_WORKSPACE.md (English)"] = pins(
         {
-            "docs/cn/DEPLOYMENT.md": (repo / "docs" / "cn" / "DEPLOYMENT.md").read_text(
-                encoding="utf-8"
+            "docs/guide/MULTI_USER_WORKSPACE.md (English)": _language_section(
+                repo / "docs" / "guide" / "MULTI_USER_WORKSPACE.md", "English"
             )
         },
         r"npm install -g qwen-code-webui@([0-9.]+)",
-    )["docs/cn/DEPLOYMENT.md"]
-    webui["docs/en/DEPLOYMENT.md"] = pins(
+    )["docs/guide/MULTI_USER_WORKSPACE.md (English)"]
+    webui["docs/guide/MULTI_USER_WORKSPACE.md (Chinese)"] = pins(
         {
-            "docs/en/DEPLOYMENT.md": (repo / "docs" / "en" / "DEPLOYMENT.md").read_text(
-                encoding="utf-8"
+            "docs/guide/MULTI_USER_WORKSPACE.md (Chinese)": _language_section(
+                repo / "docs" / "guide" / "MULTI_USER_WORKSPACE.md", "中文"
             )
         },
         r"npm install -g qwen-code-webui@([0-9.]+)",
-    )["docs/en/DEPLOYMENT.md"]
+    )["docs/guide/MULTI_USER_WORKSPACE.md (Chinese)"]
 
     cli = {}
     for name in ("Dockerfile", "scripts/docker/webui-sandbox.Dockerfile"):
@@ -227,15 +238,15 @@ def test_qwen_stack_pins_are_consistent_across_all_sites():
         {"remote-agent/install.sh": cli_sites["remote-agent/install.sh"]},
         r'^QWEN_CLI_VERSION="([0-9.]+)"',
     )["remote-agent/install.sh"]
-    for doc in ("cn", "en"):
-        cli[f"docs/{doc}/DEPLOYMENT.md"] = pins(
+    for lang, anchor in (("en", "English"), ("cn", "中文")):
+        cli[f"docs/guide/MULTI_USER_WORKSPACE.md ({lang})"] = pins(
             {
-                f"docs/{doc}/DEPLOYMENT.md": (repo / "docs" / doc / "DEPLOYMENT.md").read_text(
-                    encoding="utf-8"
+                f"docs/guide/MULTI_USER_WORKSPACE.md ({lang})": _language_section(
+                    repo / "docs" / "guide" / "MULTI_USER_WORKSPACE.md", anchor
                 )
             },
             r"@qwen-code/qwen-code@([0-9.]+)",
-        )[f"docs/{doc}/DEPLOYMENT.md"]
+        )[f"docs/guide/MULTI_USER_WORKSPACE.md ({lang})"]
     cli["remote-agent/install.ps1 ($QwenCliVersion)"] = pins(
         {"remote-agent/install.ps1": cli_sites["remote-agent/install.ps1"]},
         r"^\$QwenCliVersion = \"([0-9.]+)\"",

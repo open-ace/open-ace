@@ -95,6 +95,25 @@ Current non-goals:
 - DingTalk SSO login flow
 - inbound DingTalk chatbot commands
 
+## config.json vs the `dingtalk_settings` Table
+
+There are two configuration channels; know which one you are using:
+
+| | `config.json` (`dingtalk` section) | `dingtalk_settings` table |
+|---|---|---|
+| **Managed by** | Server operators, by editing the file | System administrators, via the admin UI backed by `/api/management/dingtalk-config` (admin-only GET/PUT/DELETE plus `POST .../test`) |
+| **Secret storage** | Plaintext `app_secret` (and `alerts.dingtalk_webhook_secret`) in the file | Encrypted at rest (`app_secret_enc`, `fallback_webhook_secret_enc`, Fernet); the API only returns masked "configured" indicators, never the secrets |
+| **Change flow** | Edit file + restart | UI save + test connection; no restart needed |
+| **Fields** | `app_key`, `app_secret`, `org_sync_*`, `org_sync_root_dept_id` | `app_key`, `app_secret`, `fallback_webhook_secret`, `sync_enabled`, `target_tenant_id`, `interval_minutes`, `root_dept_id`, `max_runtime_seconds`, `auto_recovery` |
+
+Behavior at runtime (verified against `app/services/dingtalk_org_sync.py` and `app/repositories/notification_settings_repository.py`):
+
+- **One-time legacy import**: the first time the settings are read, if no `dingtalk_settings` row exists yet, the `dingtalk` section of `config.json` (plus the global `alerts.dingtalk_webhook_secret`) is imported into the table once and recorded in `config_import_state`. From then on `config.json` is not re-imported, and later edits to the file have no effect on stored settings.
+- **Priority**: when both exist, the database row wins field by field; `config.json` only supplies values while no database row exists.
+- **Deleting via the admin API** removes the row and writes a tombstone that prevents the legacy `config.json` values from being silently re-imported.
+
+Security recommendation: prefer the management-UI (database) channel, especially in production — it keeps the AppSecret and the robot signing secret out of plaintext config files. After the one-time import has run (or once you have saved credentials through the UI), remove the plaintext secrets from `config.json`. If the instance encryption key is later rotated, the stored secrets become undecryptable and the connection test fails with a secret-decryption error; re-enter and save them to fix it.
+
 ### 5. Configure DingTalk robot alerts
 
 In `Manage -> Quota Alerts -> Notification Preferences`, set the webhook URL to a DingTalk custom robot URL such as:
@@ -229,6 +248,25 @@ python3 scripts/shared/dingtalk_group_cache.py test chatabcd1234 <app_key> <app_
 - 部门删除后自动删除本地团队
 - 钉钉 SSO 登录流程
 - 入站钉钉机器人命令
+
+## config.json 与 `dingtalk_settings` 表
+
+系统存在两条配置通道，请确认自己使用的是哪一条：
+
+| | `config.json`（`dingtalk` 段） | `dingtalk_settings` 表 |
+|---|---|---|
+| **管理方式** | 服务器运维人员编辑文件 | 系统管理员通过管理界面，底层为 `/api/management/dingtalk-config`（仅管理员可用的 GET/PUT/DELETE 及 `POST .../test`） |
+| **密钥存储** | 文件中的明文 `app_secret`（以及 `alerts.dingtalk_webhook_secret`） | 落库加密（`app_secret_enc`、`fallback_webhook_secret_enc`，Fernet）；接口只返回"已配置"掩码标志，绝不返回密钥本身 |
+| **变更流程** | 改文件 + 重启 | 界面保存并测试连接；无需重启 |
+| **字段** | `app_key`、`app_secret`、`org_sync_*`、`org_sync_root_dept_id` | `app_key`、`app_secret`、`fallback_webhook_secret`、`sync_enabled`、`target_tenant_id`、`interval_minutes`、`root_dept_id`、`max_runtime_seconds`、`auto_recovery` |
+
+运行时行为（依据 `app/services/dingtalk_org_sync.py` 与 `app/repositories/notification_settings_repository.py` 的实际实现）：
+
+- **一次性旧配置导入**：首次读取配置时，若 `dingtalk_settings` 表还没有记录，会把 `config.json` 的 `dingtalk` 段（以及全局的 `alerts.dingtalk_webhook_secret`）一次性导入表中，并在 `config_import_state` 里登记。此后不再重复导入，之后再修改该文件也不会影响已存储的配置。
+- **优先级**：两者同时存在时，数据库记录逐字段覆盖；`config.json` 只在数据库尚无记录时提供取值。
+- **通过管理端 API 删除**会同时删除记录并写入 tombstone，防止旧 `config.json` 中的值被静默重新导入。
+
+安全建议：优先使用管理界面（数据库）通道，生产环境尤其如此——它让 AppSecret 与机器人加签密钥不再以明文出现在配置文件里。一次性导入完成（或通过界面保存过凭证）之后，请把 `config.json` 中的明文密钥删除。若之后轮换了实例加密密钥，已存储的密钥将无法解密，连接测试会因密钥解密失败而报错；重新录入并保存即可恢复。
 
 ### 5. 配置钉钉机器人告警
 

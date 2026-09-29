@@ -140,19 +140,13 @@ The security scanner runs in CI for every pull request:
 2. **Baseline Diff Check**: Detects changes to baseline (requires justification)
 3. **Metadata Validation**: Ensures all suppressions have complete metadata
 
-### Bypassing Security Checks
+## Exception Lifecycle
 
-In emergencies, use the `skip-security-check` label on PRs:
+Every suppression follows the same lifecycle: add with metadata → quarterly review → renew or remove. This section is the **authoritative** process for security-baseline exceptions — including the `skip-security-check` PR bypass label — for all baseline guides; [BANDIT_BASELINE.md](./BANDIT_BASELINE.md) links here instead of restating it.
 
-```bash
-gh pr edit --add-label skip-security-check
-```
+### Quarterly Audit
 
-⚠️ **Warning**: This should only be used in emergencies and requires review by security team.
-
-## Quarterly Audit
-
-Baseline suppressions are audited quarterly:
+Baseline suppressions are audited quarterly (January/April/July/October):
 
 1. Check `expires_at` dates - CI will fail if expired
 2. Review `owner` and `justification` - ensure they're still accurate
@@ -160,6 +154,22 @@ Baseline suppressions are audited quarterly:
 4. Assess `alternative_controls` - ensure they're still effective
 
 Audit reminders are currently manual — no scheduled workflow audits these suppressions yet (the quarterly `false-positive-review.yml` workflow covers test annotations, not security exceptions).
+
+### Emergency Bypass
+
+In emergencies, use the `skip-security-check` label on PRs:
+
+```bash
+gh pr edit --add-label skip-security-check
+```
+
+Requirements:
+
+1. Explain the reason for the bypass in the PR description
+2. Create a follow-up issue to track what needs to be fixed
+3. The PR can be merged only after approval by the Security Team or an Admin
+
+⚠️ **Warning**: `skip-security-check` is for emergencies only; abuse will be recorded and reviewed.
 
 ## Feature Flags
 
@@ -338,19 +348,13 @@ python scripts/lint/validate_baseline_metadata.py
 2. **Baseline Diff Check**：检测基线变更（需要说明理由）
 3. **Metadata Validation**：确保所有抑制都有完整元数据
 
-### 绕过安全检查
+## 例外生命周期
 
-紧急情况下，可在 PR 上使用 `skip-security-check` 标签：
+每条抑制都遵循同一生命周期：带元数据新增 → 季度审查 → 续期或移除。本节是安全基线例外的**权威**流程——包括 `skip-security-check` PR 绕过标签——适用于所有基线指南；[BANDIT_BASELINE.md](./BANDIT_BASELINE.md) 链接到此处，不再重复叙述。
 
-```bash
-gh pr edit --add-label skip-security-check
-```
+### 季度审计
 
-⚠️ **警告**：仅限紧急情况使用，且需要安全团队审查。
-
-## 季度审计
-
-基线抑制按季度审计：
+基线抑制按季度（1/4/7/10 月）审计：
 
 1. 检查 `expires_at` 日期——过期后 CI 会失败
 2. 复核 `owner` 与 `justification`——确认仍然准确
@@ -358,6 +362,22 @@ gh pr edit --add-label skip-security-check
 4. 评估 `alternative_controls`——确认仍然有效
 
 审计提醒目前靠人工——还没有定时 workflow 审计这些抑制（季度性的 `false-positive-review.yml` workflow 覆盖的是测试注解，不是安全例外）。
+
+### 紧急绕过
+
+紧急情况下，可在 PR 上使用 `skip-security-check` 标签：
+
+```bash
+gh pr edit --add-label skip-security-check
+```
+
+要求：
+
+1. 在 PR 描述中说明绕过原因
+2. 创建后续 Issue 跟踪需要修复的问题
+3. 经 Security Team 或 Admin 审批后方可合并
+
+⚠️ **警告**：`skip-security-check` 仅用于紧急情况，滥用将被记录审查。
 
 ## 功能开关
 

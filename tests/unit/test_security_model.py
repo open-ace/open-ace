@@ -1,5 +1,5 @@
 """
-Unit tests that verify the security model documented in docs/en/SECURITY.md.
+Unit tests that verify the security model documented in the security model reference (docs/security/).
 
 These tests assert the concrete, auditable guarantees the documentation makes:
   - API keys / SMTP passwords are Fernet-encrypted (AES-128-CBC + HMAC-SHA256).
@@ -154,7 +154,7 @@ def session_manager(tmp_path, monkeypatch):
 
 
 class TestApiEncryption:
-    """SECURITY.md §2 — Fernet encryption of API keys."""
+    """Security model §2 — Fernet encryption of API keys."""
 
     def test_encrypted_value_is_not_plaintext(self, proxy_service):
         raw_key = "sk-test-1234567890abcdef"
@@ -227,7 +227,7 @@ class TestApiEncryption:
 
 
 class TestSmtpEncryption:
-    """SECURITY.md §2 — SMTP passwords use the same Fernet path."""
+    """Security model §2 — SMTP passwords use the same Fernet path."""
 
     def test_smtp_password_round_trip_and_mask(self, monkeypatch):
         from app.utils.security_mode import reset_security_mode_cache
@@ -252,7 +252,7 @@ class TestSmtpEncryption:
 
 
 class TestRegistrationTokens:
-    """SECURITY.md §6.1 — registration tokens are one-time, hashed, 1-hour TTL."""
+    """Security model §6.1 — registration tokens are one-time, hashed, 1-hour TTL."""
 
     def test_token_is_256_bits_hex(self):
         from app.modules.workspace.agent_token import generate_registration_token
@@ -315,7 +315,7 @@ class TestRegistrationTokens:
 
 
 class TestProxyTokens:
-    """SECURITY.md §6.2 — proxy tokens are HMAC-signed and expire."""
+    """Security model §6.2 — proxy tokens are HMAC-signed and expire."""
 
     def test_default_ttl_is_shorter_than_24_hours_and_configurable(
         self, proxy_service, monkeypatch
@@ -433,7 +433,7 @@ class TestProxyTokens:
 
 
 class TestRbac:
-    """SECURITY.md §3 — 4 roles, 19 permissions, admin bypass, least privilege."""
+    """Security model §3 — 4 roles, 19 permissions, admin bypass, least privilege."""
 
     def test_exactly_four_default_roles(self):
         from app.services.permission_service import DEFAULT_ROLES
@@ -503,7 +503,7 @@ class TestRbac:
 
 
 class TestSensitiveStripping:
-    """SECURITY.md §6.5 — credential keys are stripped from CLI settings."""
+    """Security model §6.5 — credential keys are stripped from CLI settings."""
 
     def test_static_env_keys_stripped(self, proxy_service):
         settings = {
@@ -549,7 +549,7 @@ class TestSensitiveStripping:
 
 
 class TestPasswordHashing:
-    """SECURITY.md §4.1 — the project's hash_password uses bcrypt at 12 rounds.
+    """Security model §4.1 — the project's hash_password uses bcrypt at 12 rounds.
 
     These call the real ``app.routes.auth.hash_password`` / ``verify_password``
     instead of bcrypt directly, so they regress if the project ever changes its
@@ -573,7 +573,7 @@ class TestPasswordHashing:
 
 
 class TestLoginLockout:
-    """SECURITY.md §4.3 — lockout threshold/defaults."""
+    """Security model §4.3 — lockout threshold/defaults."""
 
     def test_defaults(self):
         from app.services.auth_service import _get_lockout_duration_minutes, _get_max_login_attempts
@@ -592,7 +592,7 @@ class TestLoginLockout:
 
 
 class TestSessionTimeout:
-    """SECURITY.md §4.2 — default 24h session timeout, configurable."""
+    """Security model §4.2 — default 24h session timeout, configurable."""
 
     def test_default_24h(self):
         from app.services.auth_service import SESSION_EXPIRATION_HOURS, _get_session_timeout_hours
@@ -606,7 +606,7 @@ class TestSessionTimeout:
 
 
 class TestAuthDecorators:
-    """SECURITY.md §5 — decorators set the public-endpoint marker."""
+    """Security model §5 — decorators set the public-endpoint marker."""
 
     def test_public_endpoint_marker_propagates(self):
         from app.auth.decorators import public_endpoint

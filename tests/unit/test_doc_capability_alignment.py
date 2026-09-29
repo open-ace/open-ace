@@ -19,9 +19,8 @@ def read_doc(path: str) -> str:
 
 def test_readme_and_docs_advertise_implemented_saml_support() -> None:
     readme = read_doc("README.md")
-    en_config = read_doc("docs/en/SAML_CONFIG.md")
-    cn_config = read_doc("docs/cn/SAML_CONFIG.md")
-    api_doc = read_doc("docs/en/API.md")
+    sso_config = read_doc("docs/guide/SSO_CONFIG.md")
+    api_doc = read_doc("docs/dev/API.md")
     saml_module = read_doc("app/modules/sso/saml.py")
 
     assert "#1784" not in readme
@@ -30,20 +29,16 @@ def test_readme_and_docs_advertise_implemented_saml_support() -> None:
     assert "OIDC/OAuth2/SAML" in readme
     assert "SAML 2.0 enterprise single sign-on" not in readme
 
-    assert "SAML 2.0 Service Provider" in en_config
-    assert "POST /api/sso/acs/<provider_name>" in en_config
-    assert "XML Signature" in en_config
-    assert "SAML 2.0 Service Provider" in cn_config
-    assert "POST /api/sso/acs/<provider_name>" in cn_config
-    assert "XML Signature" in cn_config
-    assert "SAML Metadata" in api_doc
+    assert "Service Provider" in sso_config
+    assert "POST /api/sso/acs/<provider_name>" in sso_config
+    assert "XML Signature" in sso_config
+    assert "SAML Service Provider metadata" in api_doc
     assert "class SAMLProvider" in saml_module
 
 
 def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
     readme = read_doc("README.md")
     dingtalk_doc = read_doc("docs/guide/DINGTALK_CONFIG.md")
-    config_guide = read_doc("config/CONFIG_GUIDE.md")
 
     assert "#1785" not in readme
     assert "#1785" not in dingtalk_doc
@@ -56,7 +51,6 @@ def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
 
     assert "将钉钉组织架构同步到 Open ACE" in dingtalk_doc
     assert "钉钉自定义机器人 webhook" in dingtalk_doc
-    assert "当前钉钉能力覆盖 OpenClaw 导入链路" in config_guide
 
 
 def test_terminal_docs_describe_windows_piped_subprocess() -> None:

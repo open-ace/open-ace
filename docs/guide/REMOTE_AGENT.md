@@ -8,6 +8,8 @@
 
 The remote agent is a Python daemon that runs on remote machines to provide AI coding tool access via the Open ACE platform.
 
+> This page covers the **agent perspective** — installing and running the daemon, TLS policy, CLI adapters, the terminal server, and the `openace` command. Server-side setup (registration tokens, API-key store, quotas, API reference) is documented in [REMOTE_WORKSPACE.md](REMOTE_WORKSPACE.md), which links back here.
+
 ## Architecture
 
 ```
@@ -64,7 +66,7 @@ used for short-lived testing.
 ### Requirements
 
 - Python 3.8+
-- websocket-client, requests, websockets (auto-installed)
+- websocket-client, requests, websockets, psutil; plus tomli on Python < 3.11 (auto-installed from `requirements.txt`)
 
 ## Starting and Managing the Agent
 
@@ -303,6 +305,8 @@ The agent handles these commands from the server:
 
 远程代理是一个运行在远程机器上的 Python 守护进程，通过 Open ACE 平台提供 AI 编码工具访问。
 
+> 本页从 **Agent 视角**展开——守护进程的安装与运行、TLS 策略、CLI 适配器、终端服务器和 `openace` 命令。服务器侧配置（注册令牌、API Key 存储、配额、API 参考）见 [REMOTE_WORKSPACE.md](REMOTE_WORKSPACE.md)，该页也链接回本页。
+
 ## 架构
 
 ```
@@ -357,7 +361,7 @@ curl --cacert /path/to/ca.pem -fsSL https://<server>/api/remote/agent/install.sh
 ### 系统要求
 
 - Python 3.8+
-- websocket-client、requests、websockets（自动安装）
+- websocket-client、requests、websockets、psutil；Python < 3.11 还需要 tomli（通过 `requirements.txt` 自动安装）
 
 ## 启动与管理
 

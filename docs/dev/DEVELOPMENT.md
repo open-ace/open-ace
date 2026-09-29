@@ -39,6 +39,15 @@ playwright install chromium
 python3 cli.py config init
 ```
 
+### Starting the Backend and First Login
+
+```bash
+# Start the Flask backend (API + built frontend) on port 19888
+python3 server.py
+```
+
+Open http://localhost:19888 and log in with the default account `admin` / `admin123`. Change this password immediately after the first login — see [DEPLOYMENT.md](../guide/DEPLOYMENT.md) for credentials handling and production hardening.
+
 ## Project Structure
 
 ```
@@ -51,7 +60,7 @@ open-ace/
 ├── app/                # Flask application
 │   ├── __init__.py     # create_app() factory
 │   ├── routes/         # 39 Blueprint route modules
-│   ├── services/       # 41 business logic services
+│   ├── services/       # 42 business logic services
 │   ├── repositories/   # 26 data access repositories
 │   ├── modules/        # Domain logic packages
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
@@ -226,8 +235,11 @@ tests/
 ├── e2e/                # End-to-end tests
 │   ├── browser/        # Browser behavior (regression is a marker)
 │   ├── manage/         # Admin UI tests
+│   ├── performance/    # E2E performance tests
 │   ├── remote/         # Remote workspace tests
-│   └── terminal/       # Terminal tests
+│   ├── terminal/       # Terminal tests
+│   ├── ui/             # UI/screenshot tests
+│   └── work/           # Work-mode UI tests
 ├── performance/        # Timing/resource tests (scheduled lane)
 └── conftest.py         # Shared fixtures
 ```
@@ -445,6 +457,15 @@ playwright install chromium
 python3 cli.py config init
 ```
 
+### 启动后端与首次登录
+
+```bash
+# 在 19888 端口启动 Flask 后端（API + 已构建的前端）
+python3 server.py
+```
+
+打开 http://localhost:19888，使用默认账号 `admin` / `admin123` 登录。首次登录后请立即修改该密码 —— 凭据处理与生产加固见 [DEPLOYMENT.md](../guide/DEPLOYMENT.md)。
+
 ## 项目结构
 
 ```
@@ -457,7 +478,7 @@ open-ace/
 ├── app/                # Flask 应用
 │   ├── __init__.py     # create_app() 工厂函数
 │   ├── routes/         # 39 个 Blueprint 路由模块
-│   ├── services/       # 41 个业务逻辑服务
+│   ├── services/       # 42 个业务逻辑服务
 │   ├── repositories/   # 26 个数据访问仓储
 │   ├── modules/        # 领域逻辑包
 │   │   ├── analytics/  # 使用分析、ROI、成本优化
@@ -632,8 +653,11 @@ tests/
 ├── e2e/                # 端到端测试
 │   ├── browser/        # 浏览器行为（regression 使用 marker）
 │   ├── manage/         # 管理 UI 测试
+│   ├── performance/    # E2E 性能测试
 │   ├── remote/         # 远程工作区测试
-│   └── terminal/       # 终端测试
+│   ├── terminal/       # 终端测试
+│   ├── ui/             # UI/截图测试
+│   └── work/           # Work 模式 UI 测试
 ├── performance/        # 时间/资源测试（定时 lane）
 ├── issues/             # 历史隔离区；禁止新增测试
 │   ├── 164/

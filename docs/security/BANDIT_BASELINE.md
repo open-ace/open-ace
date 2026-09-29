@@ -82,25 +82,9 @@ In the PR that adds the baseline finding:
 # Or generate it with a script (to be implemented)
 ```
 
-### Quarterly Review Process
+### Review & Bypass
 
-The baseline is reviewed once per quarter (in January/April/July/October). Note: there is currently no scheduled workflow that automatically creates review issues, so reviews must be initiated manually:
-
-1. The Security Team reviews all baseline findings
-2. Confirms whether each finding still needs to be exempted
-3. Removes findings that have been fixed or no longer apply
-4. Updates the `approved_at` dates
-
-### Emergency Bypass
-
-If Bandit checks need to be temporarily bypassed in a PR:
-
-1. Add the `skip-security-check` label to the PR
-2. Explain the reason for the bypass in the PR description
-3. Create a follow-up issue to track what needs to be fixed
-4. The PR can be merged only after Admin approval
-
-> ⚠️ **Warning**: `skip-security-check` is for emergencies only; abuse will be recorded and reviewed.
+Quarterly review of baseline findings and emergency bypass via the `skip-security-check` PR label follow the shared exception lifecycle defined in [API_EXCEPTIONS.md](./API_EXCEPTIONS.md#exception-lifecycle).
 
 ### Common LOW Severity Findings
 
@@ -195,25 +179,9 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 # 或运行脚本生成（待实现）
 ```
 
-### 季度审查机制
+### 审查与绕过
 
-每季度（1/4/7/10 月）审查一次 baseline（注：目前尚无自动生成审查 Issue 的定时工作流，需手动发起）：
-
-1. Security Team 审查所有 baseline findings
-2. 确认每个 finding 是否仍需豁免
-3. 移除已修复或不再适用的 findings
-4. 更新 `approved_at` 日期
-
-### 紧急绕过
-
-如果需要在 PR 中临时绕过 Bandit 检查：
-
-1. 添加 `skip-security-check` 标签到 PR
-2. 在 PR 描述中说明绕过原因
-3. 创建后续 Issue 跟踪需要修复的问题
-4. Admin 审批后方可合并
-
-> ⚠️ **警告**：`skip-security-check` 仅用于紧急情况，滥用将被记录审查。
+baseline findings 的季度审查与通过 `skip-security-check` 标签紧急绕过 PR 检查，统一遵循 [API_EXCEPTIONS.md](./API_EXCEPTIONS.md#例外生命周期) 中的例外生命周期。
 
 ### 常见 LOW Severity Findings
 

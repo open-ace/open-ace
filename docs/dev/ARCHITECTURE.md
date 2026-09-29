@@ -25,7 +25,7 @@ Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with thr
                        │ HTTP / WebSocket
 ┌──────────────────────┴──────────────────────────────────┐
 │                  Flask API Server                         │
-│  39 Blueprints │ 41 Services │ 26 Repositories │ 6 Modules│
+│  39 Blueprints │ 42 Services │ 26 Repositories │ 6 Modules│
 │  Background Schedulers │ Middleware │ Auth                 │
 └──────────┬───────────────────┬───────────────────────────┘
            │                   │
@@ -36,6 +36,8 @@ Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with thr
 └─────────────────┘  │  Claude/Qwen/Codex/ZCode/OpenClaw     │
                       └─────────────────────────────────────┘
 ```
+
+Module counts are file counts excluding `__init__.py` under `app/routes/`, `app/services/`, `app/repositories/`, and `app/modules/` as of this writing; they drift as code is added, so treat them as approximate.
 
 ## Backend Architecture
 
@@ -92,7 +94,7 @@ Modules (domain logic):
 | `project_categories_bp` | `/api` | Project category management |
 | `projects_bp` | `/api` | Project CRUD, stats, file scanning |
 | `quota_bp` | `/api` | Quota checking, enforcement |
-| `run_timeline_bp` | `/api` | Autonomous session run timeline events |
+| `run_timeline_bp` | `/api/remote` | Autonomous session run timeline events (`/api/remote/sessions/<id>/events` and `/approvals`) |
 | `remote_bp` | `/api/remote` | Remote machines, sessions, LLM proxy |
 | `report_bp` | `/api` | Usage reports |
 | `roi_bp` | `/api` | ROI analysis, cost optimization |
@@ -184,7 +186,11 @@ See [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) for the full table reference.
 | CORS headers | `after_request` handler for `/api/` routes from loopback WebUI origins plus explicit allowlist entries |
 | OPTIONS handler | Preflight CORS responses |
 | Error handlers | JSON for API routes, standard HTTP for pages |
-| `/health` | Returns service status and git commit hash |
+| `/livez` | Process liveness probe, no dependency checks |
+| `/readyz` | Readiness probe: database, config, dependencies |
+| `/metrics` | Prometheus metrics exposition |
+| `/security-status` | Security posture summary |
+| `/health` | **Deprecated** — delegates to `/readyz`, response includes `deprecated: true` |
 
 ## Background Services
 
@@ -250,17 +256,13 @@ See [REMOTE_AGENT.md](../guide/REMOTE_AGENT.md) for the client-side guide and [R
 
 ## Authentication
 
-Three auth decorators in `app/auth/decorators.py`:
+`app/auth/decorators.py` (plus `machine_access_required` / `machine_admin_required` in `app/routes/remote.py`) defines **9 authentication decorators** — `@admin_required` (deprecated), `@auth_required`, `@platform_admin_required`, `@machine_access_required`, `@same_tenant_user_required`, `@machine_admin_required`, `@api_key_admin_required`, `@any_admin_required`, and `@tenant_member_required` — along with the `@public_endpoint` / `@security_annotated` scanner markers.
 
-| Decorator | Purpose |
-|-----------|---------|
-| `@auth_required` | Valid session token required; optional `ownership='session'` or `'machine'` |
-| `@admin_required` | Admin role required |
-| `@public_endpoint` | Marks intentionally public endpoints |
+Session token extraction order: `session_token` cookie → `Authorization: Bearer` header (query-parameter session tokens are rejected; a small path allowlist accepts WebUI/proxy/browser URL tokens with audit logging).
 
-Token extraction order: `session_token` cookie → `Authorization: Bearer` header → `token` query param.
+Roles: `user`, `readonly`, `manager`, `tenant_admin`, `platform_admin`, plus legacy `admin`.
 
-See [PERMISSION_MODEL.md](PERMISSION_MODEL.md) for the full permission model.
+See [PERMISSION_MODEL.md](PERMISSION_MODEL.md) for the full role universe, decorator inventory with usage counts, and the `OPENACE_PLATFORM_ADMIN_STRICT_MODE` strict-mode switch.
 
 ---
 
@@ -285,7 +287,7 @@ Open ACE (AI Computing Explorer) 是一个企业级 AI 工作区平台，包含�
                        │ HTTP / WebSocket
 ┌──────────────────────┴──────────────────────────────────┐
 │                  Flask API Server                         │
-│  39 Blueprints │ 41 Services │ 26 Repositories │ 6 Modules│
+│  39 Blueprints │ 42 Services │ 26 Repositories │ 6 Modules│
 │  Background Schedulers │ Middleware │ Auth                 │
 └──────────┬───────────────────┬───────────────────────────┘
            │                   │
@@ -296,6 +298,8 @@ Open ACE (AI Computing Explorer) 是一个企业级 AI 工作区平台，包含�
 └─────────────────┘  │  Claude/Qwen/Codex/ZCode/OpenClaw     │
                       └─────────────────────────────────────┘
 ```
+
+模块计数是 `app/routes/`、`app/services/`、`app/repositories/`、`app/modules/` 下不含 `__init__.py` 的文件数（撰写本文时）；随着代码增加会漂移，请视为近似值。
 
 ## 后端架构
 
@@ -352,7 +356,7 @@ Modules (domain logic):
 | `project_categories_bp` | `/api` | 项目分类管理 |
 | `projects_bp` | `/api` | 项目 CRUD、统计、文件扫描 |
 | `quota_bp` | `/api` | 配额检查、执行 |
-| `run_timeline_bp` | `/api` | 自主会话运行时间线事件 |
+| `run_timeline_bp` | `/api/remote` | 自主会话运行时间线事件（`/api/remote/sessions/<id>/events` 与 `/approvals`） |
 | `remote_bp` | `/api/remote` | 远程机器、会话、LLM 代理 |
 | `report_bp` | `/api` | 使用报告 |
 | `roi_bp` | `/api` | ROI 分析、成本优化 |
@@ -444,7 +448,11 @@ Modules (domain logic):
 | CORS 头 | `after_request` 处理器，用于 `/api/` 路由的 loopback WebUI 跨域和显式白名单来源 |
 | OPTIONS 处理器 | 预检 CORS 响应 |
 | 错误处理器 | API 路由返回 JSON，页面返回标准 HTTP |
-| `/health` | 返回服务状态和 git commit hash |
+| `/livez` | 进程存活探针，不检查依赖 |
+| `/readyz` | 就绪探针：数据库、配置、依赖 |
+| `/metrics` | Prometheus 指标暴露 |
+| `/security-status` | 安全状态摘要 |
+| `/health` | **已废弃** —— 委托给 `/readyz`，响应包含 `deprecated: true` |
 
 ## 后台服务
 
@@ -510,14 +518,10 @@ Modules (domain logic):
 
 ## 认证
 
-`app/auth/decorators.py` 中的三个认证装饰器：
+`app/auth/decorators.py`（外加 `app/routes/remote.py` 中的 `machine_access_required` / `machine_admin_required`）定义了 **9 个认证装饰器** —— `@admin_required`（已弃用）、`@auth_required`、`@platform_admin_required`、`@machine_access_required`、`@same_tenant_user_required`、`@machine_admin_required`、`@api_key_admin_required`、`@any_admin_required`、`@tenant_member_required` —— 以及 `@public_endpoint` / `@security_annotated` 两个扫描器标记。
 
-| 装饰器 | 用途 |
-|--------|------|
-| `@auth_required` | 需要有效的 session token；可选 `ownership='session'` 或 `'machine'` |
-| `@admin_required` | 需要 admin 角色 |
-| `@public_endpoint` | 标记为有意公开的端点 |
+Session token 提取顺序：`session_token` cookie → `Authorization: Bearer` 头（查询参数中的 session token 会被拒绝；少量路径白名单接受 WebUI/proxy/browser URL token 并写审计日志）。
 
-Token 提取顺序：`session_token` cookie → `Authorization: Bearer` 头 → `token` 查询参数。
+角色：`user`、`readonly`、`manager`、`tenant_admin`、`platform_admin`，以及遗留的 `admin`。
 
-完整权限模型请参阅 [PERMISSION_MODEL.md](PERMISSION_MODEL.md)。
+完整角色宇宙、带使用计数的装饰器清单和 `OPENACE_PLATFORM_ADMIN_STRICT_MODE` 严格模式开关，请参阅 [PERMISSION_MODEL.md](PERMISSION_MODEL.md)。
