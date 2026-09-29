@@ -167,27 +167,28 @@ class TestBrowseSandboxed:
 class TestHomeEndpointSandboxed:
     """#3459 follow-up: /fs/home must not probe the host in sandboxed mode."""
 
-    def test_sandboxed_home_prefers_instance_path(self, sandbox_client):
-        from unittest.mock import patch
-
-        import app.routes.fs as fs_mod
-
-        with patch.object(fs_mod, "get_directory_info", side_effect=AssertionError("probe")):
+    def test_sandboxed_home_falls_back_to_computed_root(self, sandbox_client):
+        """Instance exists but user_home_path is empty → computed root."""
+        with patch("app.routes.fs.get_directory_info", side_effect=AssertionError("probe")):
             resp = sandbox_client.get("/api/fs/home")
         assert resp.status_code == 200
         body = resp.get_json()
-        # instance.user_home_path 为空 → 回退到计算根,同为 /workspace/qlfan
+        # fixture 的 user_home_path 为空 → 回退到计算根
         assert body["homePath"] == "/workspace/qlfan"
         assert body["canCreate"] is False
         assert body["sandboxed"] is True
 
-    def test_sandboxed_home_uses_instance_user_home_path(self):
+    def test_sandboxed_home_uses_instance_user_home_path_zero_probe(self):
+        """The instance-path branch (not just the computed-root fallback)
+        must stay probe-free — lock it with an exploding get_directory_info
+        (review MINOR: a regression confined to this branch was invisible)."""
         app = _make_app("sandboxed")
         with (
             patch(
                 "app.services.webui_manager.get_webui_manager",
                 return_value=_FakeManager("sandboxed", user_home_path="/workspace/qlfan/custom"),
             ),
+            patch("app.routes.fs.get_directory_info", side_effect=AssertionError("probe")),
         ):
             resp = app.test_client().get("/api/fs/home")
         assert resp.status_code == 200
