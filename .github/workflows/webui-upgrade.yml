@@ -71,8 +71,11 @@ jobs:
           set -euo pipefail
 
           # Keep this site list in sync with the bump step below and with
-          # the pins contract test.
-          PIN_SITES="Dockerfile scripts/ docs/ remote-agent/"
+          # the pins contract test. It carries grep options too (word-split
+          # on use): -I skips binaries (stray .pyc), and docs/dev-notes/ is
+          # history — a note quoting an old pin must neither fail the
+          # uniformity check nor be rewritten by the bump.
+          PIN_SITES="-I --exclude-dir=dev-notes Dockerfile scripts/ docs/ remote-agent/"
 
           # The repo's pin vocabulary is X.Y.Z only (the contract test's
           # patterns match nothing else). A manually pinned prerelease
@@ -177,7 +180,8 @@ jobs:
           TARGET_CLI: ${{ steps.versions.outputs.target-cli }}
         run: |
           set -euo pipefail
-          PIN_SITES="Dockerfile scripts/ docs/ remote-agent/"
+          # Same scope + grep options as the resolve step.
+          PIN_SITES="-I --exclude-dir=dev-notes Dockerfile scripts/ docs/ remote-agent/"
 
           # Replace the exact current pin (webui) everywhere it appears.
           for f in $(grep -rl "qwen-code-webui@$CURRENT" $PIN_SITES); do
@@ -290,7 +294,10 @@ jobs:
           Checklist before merge:
           - [ ] CI green on this branch (parked runs are approved / CI dispatched automatically — GITHUB_TOKEN PRs fire no CI events on their own)
           - [ ] Sandbox and control-plane images rebuild cleanly
-          - [ ] Interactive workspace smoke test against the new pair"
+          - [ ] Interactive workspace smoke test against the new pair
+
+          Note: the weekly run rebuilds this branch from main and force-pushes it
+          until it merges — commits pushed here by hand will be overwritten."
 
           # Create the label on demand (idempotent) so the add below cannot
           # fail on a missing label.
@@ -310,6 +317,22 @@ jobs:
             PR_STATE=MISSING
           fi
           PR_OPEN=false
+          create_pr() {
+            if gh pr create \
+              --title "chore: upgrade qwen-code-webui $CURRENT -> $TARGET" \
+              --body "$BODY" \
+              --base main \
+              --head "$BRANCH" \
+              --label dependencies; then
+              echo "PR created for $BRANCH"
+              PR_OPEN=true
+            elif [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
+              echo "::warning::PR was created but a post-create step (e.g. labeling) failed; see the error above"
+              PR_OPEN=true
+            else
+              echo "::warning::PR creation failed — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General"
+            fi
+          }
           case "$PR_STATE" in
             OPEN)
               echo "PR for $BRANCH already exists; branch force-pushed with the latest pins"
@@ -319,29 +342,21 @@ jobs:
             CLOSED)
               # A human closed the upgrade PR (e.g. to hold off); reopening
               # keeps the upgrade visible instead of silently stalling.
+              # GitHub refuses to reopen a PR whose head was force-pushed
+              # after closing — which the push above always does — so a
+              # failed reopen falls through to a fresh PR (only OPEN
+              # duplicates are forbidden) rather than stalling every week.
               echo "::notice::PR for $BRANCH was closed; reopening with the refreshed pins"
               if gh pr reopen "$BRANCH"; then
                 gh pr edit "$BRANCH" --body "$BODY" || true
                 PR_OPEN=true
               else
-                echo "::warning::could not reopen the PR for $BRANCH; see the error above"
+                echo "::notice::could not reopen the closed PR for $BRANCH; opening a fresh one"
+                create_pr
               fi
               ;;
             *)
-              if gh pr create \
-                --title "chore: upgrade qwen-code-webui $CURRENT -> $TARGET" \
-                --body "$BODY" \
-                --base main \
-                --head "$BRANCH" \
-                --label dependencies; then
-                echo "PR created for $BRANCH"
-                PR_OPEN=true
-              elif [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
-                echo "::warning::PR was created but a post-create step (e.g. labeling) failed; see the error above"
-                PR_OPEN=true
-              else
-                echo "::warning::PR creation failed — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General"
-              fi
+              create_pr
               ;;
           esac
           echo "pr-open=$PR_OPEN" >> "$GITHUB_OUTPUT"
