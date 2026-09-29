@@ -46,12 +46,14 @@ together with index consistency and endpoint/env coverage.
 | [INTRO](guide/INTRO.md) | Product introduction, core capabilities, quick start |
 | [DEPLOYMENT](guide/DEPLOYMENT.md) | Docker deployment (production-first) and local trial |
 | [MULTI_USER_WORKSPACE](guide/MULTI_USER_WORKSPACE.md) | Multi-user workspace: launch modes, sudoers, port ranges |
+| [WORKSPACE_ISOLATION](guide/WORKSPACE_ISOLATION.md) | Admin guide: choose, configure and verify workspace-user isolation per install method |
 | [UPGRADING](guide/UPGRADING.md) | Upgrade & rollback runbook, `baseline_2026_06_23` minimum |
 | [KUBERNETES](guide/KUBERNETES.md) | Kubernetes deployment (3 replicas, sticky routing) |
 | [NGINX](guide/NGINX.md) | Nginx reverse proxy for HTTPS and WebSocket |
 | [REMOTE_WORKSPACE](guide/REMOTE_WORKSPACE.md) | Remote workspace from the server perspective |
 | [REMOTE_AGENT](guide/REMOTE_AGENT.md) | Remote agent client — install, config, CLI adapters |
 | [SSO_CONFIG](guide/SSO_CONFIG.md) | SSO: SAML 2.0, OIDC, OAuth2, SLO, redirect allowlist |
+| [EXTERNAL_IDENTITY](guide/EXTERNAL_IDENTITY.md) | Server-to-server external identity: HMAC probes and token exchange |
 | [FEISHU_CONFIG](guide/FEISHU_CONFIG.md) | Feishu/Lark integration |
 | [DINGTALK_CONFIG](guide/DINGTALK_CONFIG.md) | DingTalk integration |
 | [KEY_MANAGEMENT](guide/KEY_MANAGEMENT.md) | Secret matrix, Fernet stores, atomic rotation |
@@ -91,7 +93,6 @@ together with index consistency and endpoint/env coverage.
 | [WORKSPACE_SESSION_DATA_CONTRACT](contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) | Data boundary of the workspace session tables |
 | [WORKSPACE_ISOLATION_CAPABILITIES](contracts/WORKSPACE_ISOLATION_CAPABILITIES.md) | Versioned multi-user isolation capability contract |
 | [TRANSCRIPT_CONTRACT](contracts/TRANSCRIPT_CONTRACT.md) | Pinned contract for remote session transcripts and replay |
-| [FILTER_PATTERNS_V2](contracts/FILTER_PATTERNS_V2.md) | Caller migration guide for the filter-rules API switch |
 
 ### security/
 
@@ -107,7 +108,7 @@ together with index consistency and endpoint/env coverage.
 | Role | Path |
 |------|------|
 | Evaluating Open ACE | INTRO → ARCHITECTURE → DEPLOYMENT |
-| Deployer / operator | DEPLOYMENT → ENV_REFERENCE → OPERATIONS → UPGRADING |
+| Deployer / operator | DEPLOYMENT → WORKSPACE_ISOLATION → ENV_REFERENCE → OPERATIONS → UPGRADING |
 | Something is broken | TROUBLESHOOTING → the linked component guide |
 | API integrator | API → PERMISSION_MODEL → SSO_CONFIG |
 | Frontend developer | FRONTEND_GUIDE → DEVELOPMENT |
@@ -180,12 +181,14 @@ docs/
 | [INTRO](guide/INTRO.md) | 产品介绍、核心能力、快速上手 |
 | [DEPLOYMENT](guide/DEPLOYMENT.md) | Docker 部署（生产路径优先）与本地试用 |
 | [MULTI_USER_WORKSPACE](guide/MULTI_USER_WORKSPACE.md) | 多用户工作区：启动方式、sudoers、端口段 |
+| [WORKSPACE_ISOLATION](guide/WORKSPACE_ISOLATION.md) | 管理员指南：按安装方式选择、配置并验证工作区用户隔离 |
 | [UPGRADING](guide/UPGRADING.md) | 升级与回滚 runbook、`baseline_2026_06_23` 最低基线 |
 | [KUBERNETES](guide/KUBERNETES.md) | Kubernetes 部署（3 副本、粘性路由） |
 | [NGINX](guide/NGINX.md) | Nginx 反向代理（HTTPS 与 WebSocket） |
 | [REMOTE_WORKSPACE](guide/REMOTE_WORKSPACE.md) | 服务端视角的远程工作区 |
 | [REMOTE_AGENT](guide/REMOTE_AGENT.md) | 远程 Agent 客户端——安装、配置、CLI 适配器 |
 | [SSO_CONFIG](guide/SSO_CONFIG.md) | SSO：SAML 2.0、OIDC、OAuth2、SLO、重定向白名单 |
+| [EXTERNAL_IDENTITY](guide/EXTERNAL_IDENTITY.md) | 服务器间外部身份：HMAC 探测与 token 交换 |
 | [FEISHU_CONFIG](guide/FEISHU_CONFIG.md) | 飞书集成 |
 | [DINGTALK_CONFIG](guide/DINGTALK_CONFIG.md) | 钉钉集成 |
 | [KEY_MANAGEMENT](guide/KEY_MANAGEMENT.md) | 密钥矩阵、Fernet store、原子轮换 |
@@ -225,7 +228,6 @@ docs/
 | [WORKSPACE_SESSION_DATA_CONTRACT](contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) | 工作区会话三表的数据边界 |
 | [WORKSPACE_ISOLATION_CAPABILITIES](contracts/WORKSPACE_ISOLATION_CAPABILITIES.md) | 版本化多用户隔离能力契约 |
 | [TRANSCRIPT_CONTRACT](contracts/TRANSCRIPT_CONTRACT.md) | 远程会话记录与重放的钉死契约 |
-| [FILTER_PATTERNS_V2](contracts/FILTER_PATTERNS_V2.md) | 过滤规则 API 切换的调用方迁移指南 |
 
 ### security/
 
@@ -241,7 +243,7 @@ docs/
 | 角色 | 路径 |
 |------|------|
 | 评估 Open ACE | INTRO → ARCHITECTURE → DEPLOYMENT |
-| 部署 / 运维 | DEPLOYMENT → ENV_REFERENCE → OPERATIONS → UPGRADING |
+| 部署 / 运维 | DEPLOYMENT → WORKSPACE_ISOLATION → ENV_REFERENCE → OPERATIONS → UPGRADING |
 | 出了问题 | TROUBLESHOOTING → 链接到的组件指南 |
 | API 集成 | API → PERMISSION_MODEL → SSO_CONFIG |
 | 前端开发 | FRONTEND_GUIDE → DEVELOPMENT |

@@ -834,7 +834,7 @@ class DailyStatsRepository:
                 "unique_days": result.get("unique_days", 0) or 0,
             }
 
-    def refresh_stats(self, date: str | None = None) -> bool:
+    def refresh_stats(self, date: str | None = None, *, since: str | None = None) -> bool:
         """
         Refresh daily_stats from daily_messages.
 
@@ -845,9 +845,16 @@ class DailyStatsRepository:
         Issue #1852: Now includes tenant_id for proper tenant isolation.
         Issue #2010: Use INSERT ... ON CONFLICT for atomic operation.
         Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management.
+        Issue #3424: Rows whose sender_name is NULL are deleted and re-inserted
+        in the same transaction. The unique key treats NULLs as distinct (the
+        constraint is not NULLS NOT DISTINCT; SQLite likewise), so the upsert
+        never matched them and every refresh appended another copy, inflating
+        trend totals and making each refresh slower.
 
         Args:
-            date: Optional specific date to refresh. If None, refreshes all.
+            date: Optional specific date to refresh.
+            since: Optional start date (inclusive): refresh ``date >= since``.
+                Ignored when ``date`` is given. If neither is set, refreshes all.
 
         Returns:
             bool: True if successful, False if skipped (lock unavailable) or failed.
@@ -856,6 +863,7 @@ class DailyStatsRepository:
         from app.services.scheduler_guard import LockAcquisitionError, SchedulerExecutionGuard
 
         start_time = time.time()
+        scope = date or (f"dates >= {since}" if since else "all dates")
 
         # Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management
         # This prevents concurrent workers from running the same aggregation
@@ -868,15 +876,13 @@ class DailyStatsRepository:
         try:
             with guard:
                 # Job body only runs if lock acquired
-                self._execute_refresh_stats(date, start_time)
+                self._execute_refresh_stats(date, start_time, since=since)
                 return True
 
         except LockAcquisitionError as e:
             # Lock not acquired - skip execution, no side effects
             duration_ms = (time.time() - start_time) * 1000
-            logger.info(
-                f"refresh_stats skipped for {date or 'all dates'}: {e} (took {duration_ms:.2f}ms)"
-            )
+            logger.info(f"refresh_stats skipped for {scope}: {e} (took {duration_ms:.2f}ms)")
             return False
 
         except Exception as e:
@@ -884,7 +890,9 @@ class DailyStatsRepository:
             logger.error(f"Failed to refresh daily stats: {e} (took {duration_ms:.2f}ms)")
             return False
 
-    def _execute_refresh_stats(self, date: str | None, start_time: float) -> None:
+    def _execute_refresh_stats(
+        self, date: str | None, start_time: float, since: str | None = None
+    ) -> None:
         """Execute the actual refresh_stats logic (called within guard context)."""
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -892,10 +900,19 @@ class DailyStatsRepository:
             # Refresh specific date
             date_condition = "date = ?"
             params: tuple[Any, ...] = (date,)
+        elif since:
+            # Refresh an open-ended recent window
+            date_condition = "date >= ?"
+            params = (since,)
         else:
             # Refresh all
             date_condition = "1=1"
             params = ()
+
+        # Issue #3424: NULL-sender groups can never hit the unique key, so the
+        # upsert below would append a duplicate for each of them. Drop the
+        # previous copies first, inside the same transaction.
+        purge_sql = f"DELETE FROM daily_stats WHERE sender_name IS NULL AND {date_condition}"
 
         if is_postgresql():
             # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
@@ -904,8 +921,7 @@ class DailyStatsRepository:
             # sender_name formats:
             # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
             # 2. Feishu: username (real name) -> match users.username
-            self.db.execute(
-                f"""
+            upsert_sql = f"""
                 INSERT INTO daily_stats
                 (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
                  total_input_tokens, total_output_tokens, message_count, updated_at)
@@ -937,16 +953,13 @@ class DailyStatsRepository:
                     total_output_tokens = EXCLUDED.total_output_tokens,
                     message_count = EXCLUDED.message_count,
                     updated_at = EXCLUDED.updated_at
-                """,
-                (now,) + params,
-            )
+                """
 
         else:
             # SQLite: use INSERT OR REPLACE with user_id populated
             # Issue #1852: Include tenant_id for tenant isolation
             # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
-            self.db.execute(
-                f"""
+            upsert_sql = f"""
                 INSERT OR REPLACE INTO daily_stats
                 (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
                  total_input_tokens, total_output_tokens, message_count, updated_at)
@@ -969,64 +982,63 @@ class DailyStatsRepository:
                 FROM daily_messages dm
                 WHERE {date_condition}
                 GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
-                """,
-                (now,) + params,
-            )
+                """
+
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(self.db._adapt_sql(purge_sql), params)
+            cursor.execute(self.db._adapt_sql(upsert_sql), (now,) + params)
+            conn.commit()
 
         duration_ms = (time.time() - start_time) * 1000
-        logger.info(f"refresh_stats took {duration_ms:.2f}ms for {date or 'all dates'}")
+        logger.info(f"refresh_stats took {duration_ms:.2f}ms for {date or since or 'all dates'}")
+
+    def get_refresh_start_date(self) -> str | None:
+        """Return the first date whose daily_stats may lag daily_messages.
+
+        Issue #3424: request paths (the dashboard trend API) used to re-aggregate
+        every date whenever stats looked stale. Only dates from the latest
+        aggregated date onward can be behind, so callers refresh that window
+        (``refresh_stats(since=...)``) and leave full rebuilds to the scheduler.
+
+        Returns:
+            str | None: The latest date already in daily_stats (re-aggregated
+            because it may have been partial), or None when daily_stats is empty
+            and a full refresh is required.
+        """
+        result = self.db.fetch_one("SELECT MAX(date) as max_date FROM daily_stats")
+        max_date = result.get("max_date") if result else None
+        return str(max_date) if max_date else None
 
     def needs_refresh(self) -> bool:
         """
         Check if daily_stats needs to be refreshed.
 
+        Issue #3424: this runs on the dashboard request path, so it must stay
+        cheap. It used to also flag NULL-sender rows whose (date, tool, host)
+        had any non-NULL-sender message; that EXISTS scan took tens of seconds
+        on a large daily_messages table and was true whenever NULL and non-NULL
+        senders legitimately shared a day, so every request triggered a full
+        refresh.
+
         Returns:
             bool: True if stats are empty or stale (missing recent data).
         """
         # Check if daily_stats is empty
-        query = "SELECT COUNT(*) as count FROM daily_stats"
-        result = self.db.fetch_one(query)
-        if not result or result["count"] == 0:
+        result = self.db.fetch_one("SELECT MAX(date) as max_date FROM daily_stats")
+        stats_max_date = result.get("max_date") if result else None
+        if not stats_max_date:
             return True
 
-        # Check if daily_stats has today's data
         # Compare max date in daily_stats vs max date in daily_messages
-        from datetime import datetime
-
-        datetime.now().strftime("%Y-%m-%d")
-
-        stats_max_date_query = "SELECT MAX(date) as max_date FROM daily_stats"
-        stats_result = self.db.fetch_one(stats_max_date_query)
-        stats_max_date = stats_result.get("max_date") if stats_result else None
-
-        messages_max_date_query = "SELECT MAX(date) as max_date FROM daily_messages"
-        messages_result = self.db.fetch_one(messages_max_date_query)
+        messages_result = self.db.fetch_one("SELECT MAX(date) as max_date FROM daily_messages")
         messages_max_date = messages_result.get("max_date") if messages_result else None
 
         # If daily_messages has newer data than daily_stats, need refresh
-        if messages_max_date and stats_max_date:
-            if messages_max_date > stats_max_date:
-                logger.info(
-                    f"daily_stats stale: messages max date {messages_max_date} > stats max date {stats_max_date}"
-                )
-                return True
-
-        # Check if sender_name is missing (NULL values that should have data)
-        # Only check rows where sender_name should NOT be NULL (corresponding daily_messages has data)
-        null_sender_query = """
-            SELECT COUNT(*) as count FROM daily_stats ds
-            WHERE ds.sender_name IS NULL
-            AND EXISTS (
-                SELECT 1 FROM daily_messages dm
-                WHERE dm.date = ds.date
-                AND dm.tool_name = ds.tool_name
-                AND dm.host_name = ds.host_name
-                AND dm.sender_name IS NOT NULL
+        if messages_max_date and str(messages_max_date) > str(stats_max_date):
+            logger.info(
+                f"daily_stats stale: messages max date {messages_max_date} > stats max date {stats_max_date}"
             )
-        """
-        null_result = self.db.fetch_one(null_sender_query)
-        if null_result and null_result.get("count", 0) > 0:
-            logger.info(f"daily_stats has {null_result['count']} rows missing sender_name")
             return True
 
         return False

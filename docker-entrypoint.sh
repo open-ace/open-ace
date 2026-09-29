@@ -12,6 +12,37 @@ set -e
 
 CONFIG_CHECK_LOG="/tmp/config-check.log"
 
+# ============================================================================
+# Workspace isolation input (Issue #3446)
+# ============================================================================
+# WORKSPACE_ISOLATION_BACKEND chooses workspace.isolation.backend when this
+# entrypoint generates config.json: "shared" (default, one WebUI), "plain"
+# (one OS account per user; needs root) or "opensandbox" (per-user pods on
+# Kubernetes). The confined backends (bwrap, local-gvisor, local-kata) need
+# the package install on a Linux host. The app itself validates config.json.
+export OPENACE_INSTALL_METHOD=docker
+if [ -n "${WORKSPACE_MULTI_USER_MODE:-}" ] || [ -n "${WORKSPACE_REQUIRED_ISOLATION_LEVEL:-}" ]; then
+    echo "ERROR: WORKSPACE_MULTI_USER_MODE / WORKSPACE_REQUIRED_ISOLATION_LEVEL were replaced by"
+    echo "       WORKSPACE_ISOLATION_BACKEND=shared|plain|opensandbox (Issue #3446)."
+    echo "       Multi-user OS-account mode: WORKSPACE_ISOLATION_BACKEND=plain"
+    exit 1
+fi
+WORKSPACE_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-}"
+case "$WORKSPACE_ISOLATION_BACKEND" in
+    ""|shared|plain|opensandbox) ;;
+    bwrap|local-gvisor|local-kata)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND=$WORKSPACE_ISOLATION_BACKEND is not available in the"
+        echo "       Docker install: the image ships no confine wrapper, bubblewrap needs systemd and"
+        echo "       unprivileged user namespaces, and per-user containers would need the host's"
+        echo "       docker.sock. Use \"plain\" or \"opensandbox\", or the package install."
+        exit 1
+        ;;
+    *)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND must be shared, plain or opensandbox (got '$WORKSPACE_ISOLATION_BACKEND')"
+        exit 1
+        ;;
+esac
+
 log_config_check() {
     local status="$1"
     local message="$2"
@@ -28,8 +59,8 @@ output_config_summary() {
     local uid
     uid=$(id -u)
 
-    # Determine mode
-    if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+    # Determine mode: per-user OS accounts need root
+    if [ "${WORKSPACE_ISOLATION_BACKEND}" = "plain" ]; then
         mode="multi-user"
     else
         mode="single-user"
@@ -46,7 +77,7 @@ output_config_summary() {
 
     if [ "$mode" = "multi-user" ]; then
         echo "Multi-user configuration:"
-        echo "  • WORKSPACE_MULTI_USER_MODE: ${WORKSPACE_MULTI_USER_MODE:-<not set>}"
+        echo "  • WORKSPACE_ISOLATION_BACKEND: ${WORKSPACE_ISOLATION_BACKEND:-<not set>}"
         echo "  • OPENACE_ALLOW_ROOT_MULTI_USER: ${OPENACE_ALLOW_ROOT_MULTI_USER:-<not set>}"
         echo "  • OPENACE_CONFIG_DIR: ${OPENACE_CONFIG_DIR:-<not set>}"
         echo "  • WORKSPACE_BASE_DIR: ${WORKSPACE_BASE_DIR:-/workspace}"
@@ -126,13 +157,14 @@ require_root_for_multi_user() {
         echo ""
         echo "Start the container as root AND set required variables:"
         echo "  docker run --user 0 \\"
-        echo "    -e WORKSPACE_MULTI_USER_MODE=true \\"
+        echo "    -e WORKSPACE_ISOLATION_BACKEND=plain \\"
         echo "    -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
         echo "    -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
         echo ""
         echo "Or keep single-user mode (the default):"
-        echo "  - If set via environment: unset WORKSPACE_MULTI_USER_MODE"
-        echo "  - If set via config.json: set 'multi_user_mode': false"
+        echo "  - If set via environment: unset WORKSPACE_ISOLATION_BACKEND"
+        echo "  - If set via config.json: set workspace.isolation to"
+        echo "    {\"level\": \"none\", \"backend\": \"shared\"}"
         log_config_check "ERROR" "Multi-user mode requires root but running as non-root"
         exit 1
     fi
@@ -164,7 +196,7 @@ require_root_for_multi_user() {
 }
 
 # Early fail-fast for the env-var trigger (before any setup work runs).
-if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+if [ "${WORKSPACE_ISOLATION_BACKEND}" = "plain" ]; then
     require_root_for_multi_user
 fi
 
@@ -509,12 +541,12 @@ check_security_baseline() {
     # ---- Root User Check (Issue #1893) ----
     if [ "$(id -u)" = "0" ]; then
         # Running as root - check if properly authorized for multi-user mode
-        if [ "${WORKSPACE_MULTI_USER_MODE}" != "true" ] || [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+        if [ "${WORKSPACE_ISOLATION_BACKEND}" != "plain" ] || [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
             echo "[ERROR] SECURITY: Container running as root without proper authorization."
             echo "        The image defaults to non-root user (uid 1000)."
             echo ""
             echo "If you need multi-user workspace mode:"
-            echo "  1. Set WORKSPACE_MULTI_USER_MODE=true"
+            echo "  1. Set WORKSPACE_ISOLATION_BACKEND=plain"
             echo "  2. Set OPENACE_ALLOW_ROOT_MULTI_USER=1"
             echo "  3. Use: docker run --user 0 ..."
             echo ""
@@ -791,6 +823,11 @@ generate_default_config() {
     # Skip if config already exists (user-mounted or previously generated)
     if [ -f "$CONFIG_FILE" ]; then
         echo "Config file exists at $CONFIG_FILE, skipping generation."
+        # Issue #3446: a config.json an older entrypoint generated carries the
+        # keys workspace.isolation replaced; the app refuses to start with them.
+        # A read-only mount cannot be converted: the app then names each key.
+        python3 /app/scripts/convert_workspace_isolation.py "$CONFIG_FILE" || \
+            echo "WARNING: could not convert $CONFIG_FILE to workspace.isolation (Issue #3446)"
         return 0
     fi
 
@@ -833,17 +870,15 @@ generate_default_config() {
         fi
     fi
     PORT="${PORT:-19888}"
-    DEFAULT_WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-false}"
-    if [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" != "true" ]; then
-        DEFAULT_WORKSPACE_MULTI_USER_MODE="false"
-    fi
-    # Issue #3374 (PR review round 3): multi-user installs pin an explicit
-    # isolation floor so a later launch-path degradation cannot silently
-    # drop per-user isolation. WORKSPACE_REQUIRED_ISOLATION_LEVEL overrides.
-    DEFAULT_REQUIRED_ISOLATION="${WORKSPACE_REQUIRED_ISOLATION_LEVEL:-}"
-    if [ -z "$DEFAULT_REQUIRED_ISOLATION" ] && [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        DEFAULT_REQUIRED_ISOLATION="os_user"
-    fi
+    # Issue #3446: workspace.isolation {level, backend}; the level is also
+    # the floor, so a later launch-path degradation refuses launches instead
+    # of silently dropping per-user isolation.
+    DEFAULT_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-shared}"
+    case "$DEFAULT_ISOLATION_BACKEND" in
+        plain) DEFAULT_ISOLATION_LEVEL="os_user" ;;
+        opensandbox) DEFAULT_ISOLATION_LEVEL="sandboxed" ;;
+        *) DEFAULT_ISOLATION_LEVEL="none" ;;
+    esac
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -877,8 +912,7 @@ generate_default_config() {
   "workspace": {
     "enabled": true,
     "url": "http://${SERVER_IP}",
-    "multi_user_mode": ${DEFAULT_WORKSPACE_MULTI_USER_MODE},
-    "required_isolation_level": "${DEFAULT_REQUIRED_ISOLATION}",
+    "isolation": {"level": "${DEFAULT_ISOLATION_LEVEL}", "backend": "${DEFAULT_ISOLATION_BACKEND}"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,
@@ -1028,7 +1062,45 @@ except Exception:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-    if [ "$HAS_APP_SCHEMA" = "yes" ]; then
+    # Issue #3397: fresh-database self-initialization.
+    # A fresh production install used to be REFUSED here: with no schema and
+    # no alembic_version table, scripts/check_min_revision.py exits 1 in
+    # production mode ("Fresh database detected"), so the documented compose
+    # deployment path could not boot at all — the acceptance run had to use a
+    # one-shot `alembic upgrade head && python3 scripts/init_db.py` container
+    # as a DECLARED DEVIATION. The entrypoint now SELF-initializes exactly
+    # that state: NO application schema AND no alembic_version table (the
+    # same two commands as the deviation workaround, run by the normal flow
+    # below). A database with existing schema OR a recorded revision is NEVER
+    # touched by this branch — it keeps the minimum-revision refusal and the
+    # regular upgrade path (init_db.py still seeds only when no application
+    # schema existed at boot). Quoted heredoc probe (the #3399 raw-quote class
+    # cannot recur); a probe failure yields "unknown", which is NOT fresh, so
+    # detection fails strict, never loose.
+    HAS_ALEMBIC_VERSION=$(python3 - <<'PY_FRESH_DB_PROBE_EOF' 2>/dev/null || echo "unknown"
+import os
+
+import psycopg2
+
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
+    )
+    result = 'yes' if cur.fetchone() else 'no'
+    conn.close()
+    print(result)
+except Exception:
+    print('unknown')
+PY_FRESH_DB_PROBE_EOF
+)
+    FRESH_DB="false"
+    if [ "$HAS_APP_SCHEMA" = "no" ] && [ "$HAS_ALEMBIC_VERSION" = "no" ]; then
+        FRESH_DB="true"
+        echo "Fresh database detected — self-initializing schema and seed (was #3397)."
+    elif [ "$HAS_APP_SCHEMA" = "yes" ]; then
         echo "Existing application schema detected."
     elif [ "$HAS_APP_SCHEMA" = "no" ]; then
         echo "No application schema detected. Treating this as a fresh installation."
@@ -1040,10 +1112,12 @@ except Exception:
     # Verify the database is on the supported (>= baseline_2026_06_23) lineage
     # before upgrading. Fresh databases (no alembic_version table) pass through;
     # the schema is built from the baseline snapshot below.
-    if ! python3 scripts/check_min_revision.py; then
-        echo "ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23)."
-        echo "       Restore a known-healthy backup already on the baseline lineage, then restart the container."
-        exit 1
+    if [ "$FRESH_DB" != "true" ]; then
+        if ! python3 scripts/check_min_revision.py; then
+            echo "ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23)."
+            echo "       Restore a known-healthy backup already on the baseline lineage, then restart the container."
+            exit 1
+        fi
     fi
 
     echo "Running database migrations..."
@@ -1145,17 +1219,29 @@ fi
 # This ensures the setting works even if docker-compose.yml is missing the env var
 CONFIG_MULTI_USER="false"
 if [ -f "$OPENACE_CONFIG_FILE" ]; then
-    CONFIG_MULTI_USER=$(python3 -c "import json, os; c=json.load(open(os.environ['OPENACE_CONFIG_FILE'])); print('true' if c.get('workspace',{}).get('multi_user_mode',False) else 'false')" 2>/dev/null || echo "false")
+    # OS-account setup is needed for backend "plain" (the only OS-account
+    # backend a Docker install can run; the app refuses the confined ones).
+    CONFIG_MULTI_USER=$(python3 -c "import json, os; c=json.load(open(os.environ['OPENACE_CONFIG_FILE'])); print('true' if (c.get('workspace',{}).get('isolation') or {}).get('backend') == 'plain' else 'false')" 2>/dev/null || echo "false")
 fi
 
-if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then
-    echo "Configuring multi-user workspace mode (env=$WORKSPACE_MULTI_USER_MODE, config=$CONFIG_MULTI_USER)..."
+if [ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then
+    echo "Configuring multi-user workspace mode (env=$WORKSPACE_ISOLATION_BACKEND, config=$CONFIG_MULTI_USER)..."
     # Fail fast if multi-user mode was enabled via config.json but the container
     # is not running as root with the explicit opt-in (see top-of-file guard).
     require_root_for_multi_user
 
-    # Issue #2730: Create shared project group
-    # All users are added to this group for shared project file system access
+    # Issue #2730 + #3396: shared-project groups.
+    # - openace-shared (GLOBAL): membership grants ONLY the right to create a
+    #   project directory inside the sticky <base>/shared namespace root
+    #   (root:openace-shared 3770). It is never the group-owner of project
+    #   content since #3396.
+    # - openace-shared-<tenant_id>: per-tenant CONTENT group — shared project
+    #   dirs are group-owned by it with 2770/660 (no others bits), so members
+    #   of OTHER tenants get EACCES at the OS layer even though they hold the
+    #   global membership for namespace creation.
+    # Enrollment of the DB users into BOTH groups happens in the DB-driven
+    # shared-group sync below (a /home-glob pass cannot know a directory's
+    # tenant). Tenant-less platform admins map to openace-shared-0.
     SHARED_GROUP="openace-shared"
     if ! getent group "$SHARED_GROUP" > /dev/null 2>&1; then
         groupadd -f "$SHARED_GROUP"
@@ -1164,17 +1250,126 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
         echo "  Shared project group already exists: $SHARED_GROUP"
     fi
 
-    # Add existing users in /home to the shared group
-    for user_dir in /home/*/; do
-        username=$(basename "$user_dir")
-        if id "$username" &>/dev/null; then
-            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
+    # Ensure workspace base directory exists
+    # Issue #3379: WORKSPACE_BASE_DIR may be a comma-separated list (the fs
+    # layer's _home_roots_for_user semantics) — a single `mkdir -p` on the
+    # raw value would create a literal "a,b" directory. Trimming is pure
+    # bash (review NIT): `echo | xargs` aborts under set -e when a base dir
+    # contains a quote character.
+    WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
+    IFS=',' read -r -a _workspace_base_dirs <<< "$WORKSPACE_DIR"
+    for _base_dir in "${_workspace_base_dirs[@]}"; do
+        _base_dir="${_base_dir#"${_base_dir%%[![:space:]]*}"}"
+        _base_dir="${_base_dir%"${_base_dir##*[![:space:]]}"}"
+        [ -z "$_base_dir" ] && continue
+        mkdir -p "$_base_dir"
+
+        # Issue #3379 (multi-user acceptance gap): provision the shared
+        # namespace root. POST /api/projects with create_dir runs
+        # `sudo -u <user> mkdir -p` — on a fresh volume the parent is
+        # root:root 0755 and every user's creation EACCESes (403). The
+        # #3376 first-class <base>/shared/<name> namespace needs its root
+        # to pre-exist, group-writable by openace-shared with setgid so
+        # shared files inherit the group. Idempotent on restarts; only the
+        # root itself is touched, never its contents.
+        #
+        # Review MINOR (account-named-shared guard): if a REAL account named
+        # "shared" exists, <base>/shared is that account's home root —
+        # re-chgrp/chmod on every restart would ping-pong ownership with the
+        # app's _ensure_workspace_dirs and group-open a private home in
+        # between. The app side already rejects the collision fail-closed at
+        # registration (path_guard); the entrypoint skips loudly instead.
+        if id "shared" &>/dev/null || { [ -e "$_base_dir/shared" ] && [ "$(stat -c '%U' "$_base_dir/shared" 2>/dev/null)" != "root" ]; }; then
+            echo "  WARNING: skipping shared-namespace provisioning for $_base_dir/shared — path collides with a real account or is not root-owned (administrator intervention required)"
+            continue
+        fi
+        # review round 2 (4004368890): degrade to a warning, not a crash loop —
+        # a failed provisioning only means shared-project creation 403s until
+        # an administrator fixes it; the app's own dir/ownership failures are
+        # warning-grade too, and set -e would otherwise restart-loop the whole
+        # service on e.g. a root_squash NFS base dir.
+        # chmod 3770 (was 3775; sticky since review round 3, 4004874853):
+        # +sticky — rename(2) only needs
+        # write+search on the parent, and openace-shared is a GLOBAL group
+        # (every tenant's account joins, for namespace creation only), so
+        # without the sticky bit any member could mv/replace another
+        # tenant's project directory. Sticky blocks non-owner renames at the
+        # root; sudo -u <user> mkdir for new projects and root-run
+        # setup_permissions_with_depth_limit are unaffected. Content-level
+        # cross-tenant access inside projects is fenced by the per-tenant
+        # groups (openace-shared-<tenant>, 2770/660 — Issue #3396).
+        # The OTHERS bits are now dropped (3775 -> 3770): the old others r-x
+        # let ANY non-member process on the host enumerate the namespace
+        # root and read shared project NAMES — metadata only (content access
+        # always needed the tenant group), but project names can be
+        # sensitive. Declared residual, inherent to the namespace design:
+        # openace-shared is global, so every active account — including
+        # OTHER tenants', who need the creation right — can still list the
+        # root via the GROUP r-x; per-tenant name secrecy is not achievable
+        # while namespace creation is a global right (content stays fenced).
+        # The unconditional chgrp+chmod below re-normalizes mode drift from
+        # any pre-existing 3775 deployment on the next boot (idempotent).
+        if ! { mkdir -p "$_base_dir/shared" && chgrp "$SHARED_GROUP" "$_base_dir/shared" && chmod 3770 "$_base_dir/shared"; }; then
+            echo "  WARNING: could not provision $_base_dir/shared — shared-project creation will fail (403) until an administrator fixes it"
         fi
     done
 
-    # Ensure workspace base directory exists
-    WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
-    mkdir -p "$WORKSPACE_DIR"
+    # Issue #3396 review (finding 8): the openace-chown wrapper's built-in
+    # ALLOWED_PREFIXES only covers /workspace and /home — a deployment with a
+    # custom WORKSPACE_BASE_DIR (e.g. /data) had EVERY revocation reclaim
+    # rejected by the wrapper, fail-soft, forever. Write the operator-facing
+    # override config from the configured base dirs (plus /home) so the
+    # wrapper's path guard tracks this deployment's layout. Root-owned 0644;
+    # the wrapper keeps its built-in defaults when the file is absent.
+    # PR #3402 review: the conf is DATA, one prefix per line — never shell
+    # code. The previous generation wrote a sourced `ALLOWED_PREFIXES=(...)`
+    # assignment, so a `"` or `$(...)` inside WORKSPACE_BASE_DIR became code
+    # the root-run wrapper would execute; the wrapper now stat-validates the
+    # file (root-owned, not group/world-writable) and character-validates
+    # every line ([A-Za-z0-9/._-] only), and this writer applies the same
+    # character filter before emitting. The WRITE is part of the if-condition
+    # (where set -e does not apply): a read-only /etc/openace mount or an
+    # unwritable conf must degrade to the warning, never crash-loop the
+    # container — bash 5 aborts under set -e on a failed `{ ...; } > file`
+    # redirection (bash 3.2 does not, which is why the harness passed on
+    # macOS but failed on CI).
+    _chown_conf_dir="/etc/openace"
+    _chown_conf="$_chown_conf_dir/openace-chown.conf"
+    if mkdir -p "$_chown_conf_dir" 2>/dev/null && {
+        echo "# Generated by docker-entrypoint.sh at boot — do not edit while running."
+        echo "# Consumed by scripts/openace-chown.sh (allowed chown prefixes, one per line)."
+        _wb_raw="${WORKSPACE_BASE_DIR:-/workspace}"
+        IFS=',' read -r -a _wb_list <<< "$_wb_raw"
+        for _wb in "${_wb_list[@]}"; do
+            _wb="${_wb#"${_wb%%[![:space:]]*}"}"
+            _wb="${_wb%"${_wb##*[![:space:]]}"}"
+            [ -z "$_wb" ] && continue
+            case "$_wb" in
+                /*) ;;
+                *) _wb="/$_wb" ;;
+            esac
+            # strip ALL trailing slashes, then skip what is left empty: the
+            # old strip-then-compare-to-"/" never matched, so a "/" entry
+            # produced a "/" prefix that disables the wrapper's path guard
+            # entirely
+            while [ "$_wb" != "${_wb%/}" ]; do _wb="${_wb%/}"; done
+            [ -z "$_wb" ] && continue
+            # only filesystem-safe characters are ever emitted: the wrapper
+            # runs as root, and env-derived shell syntax must not reach it
+            # (defense in depth — the wrapper re-validates every line)
+            case "$_wb" in
+                *[!A-Za-z0-9/._-]*) echo "  WARNING: skipping unsafe WORKSPACE_BASE_DIR entry '$_wb' in openace-chown.conf" >&2; continue ;;
+            esac
+            printf '%s/\n' "$_wb"
+        done
+        printf '/home/\n'
+    } > "$_chown_conf"; then
+        chmod 644 "$_chown_conf" 2>/dev/null || true
+    else
+        echo "  WARNING: could not write $_chown_conf — openace-chown stays on built-in prefixes (/workspace, /home)"
+    fi
+    unset _wb _wb_raw _wb_list _chown_conf_dir _chown_conf
+    unset _base_dir _workspace_base_dirs
 
     # Fix /home directory permissions (Issue #1249)
     # When data/home is mounted as /home, restrictive 700 permissions prevent
@@ -1189,40 +1384,117 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     fi
 
     # Sync workspace users from database to container
-    # This creates OS users for each database user with system_account
+    # This creates OS users for each database user with system_account.
+    # Issue #3390: accounts are pinned to their recorded users.system_uid
+    # (useradd -u) and deactivated users get nologin placeholder accounts,
+    # so uids are stable across container recreation and a deactivated
+    # user's uid is never inherited by an active account.
     if [ -n "$DATABASE_URL" ]; then
         echo "Syncing workspace users from database..."
-        python3 -c "
+        # Review on #3390: the plain `python3 -c ... | tee LOG || echo` pipeline
+        # masked python's exit status (tee returns 0; no pipefail file-wide) and
+        # piped stdout is block-buffered — a #3399-style boot-context death made
+        # all sync phases vanish silently with the WARNING never firing. The
+        # subshell scopes pipefail to this one pipeline, -u unbuffers, and the
+        # trailing || keeps set -e from crash-looping the service while making
+        # any sync failure (including the missing-account check below) loud.
+        ( set -o pipefail; python3 -u -c "
 import os
+import pwd
 import subprocess
+import sys
 import psycopg2
 
 workspace_base = os.environ.get('WORKSPACE_BASE_DIR', '/workspace')
 
-def create_system_user(username):
-    \"\"\"Create a system user and workspace directory if they don't exist.\"\"\"
+def uid_owner(uid):
+    \"\"\"Issue #3390: account NAME currently owning uid, or None if unassigned.\"\"\"
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
+
+def create_system_user(username, uid=None):
+    \"\"\"Create a system user and workspace directory if they don't exist.
+
+    Issue #3390 (uid pinning): uid is the recorded users.system_uid pin;
+    useradd -u keeps the account on the same numeric uid across container
+    recreations, so a fresh /etc/passwd can never hand this uid (and with it
+    the numeric ownership of the volume dirs) to a different account.
+    Returns the account's actual uid (for record-back) or None on failure.
+    \"\"\"
     # Check if user exists
     result = subprocess.run(['id', username], capture_output=True, text=True)
     if result.returncode == 0:
         print(f'  User {username} already exists')
+        # Issue #3390: an account that exists as a DEACTIVATED user's
+        # placeholder (nologin) must be upgraded back to a login shell when
+        # its own user is active again (reactivation across a recreate).
+        try:
+            shell = pwd.getpwnam(username).pw_shell
+        except KeyError:
+            shell = None
+        if shell == '/usr/sbin/nologin':
+            subprocess.run(['usermod', '-s', '/bin/bash', username], capture_output=True, text=True)
+            print(f'  Upgraded placeholder account {username} to /bin/bash (reactivated user, #3390)')
     else:
-        # Create user with home directory
-        result = subprocess.run(
-            ['useradd', '-m', '-s', '/bin/bash', username],
-            capture_output=True, text=True
-        )
+        # Issue #3390 collision guard (CREATE path only): a pinned uid owned
+        # by a DIFFERENT account means useradd would fail — or worse,
+        # renumbering would silently move the boundary between two users'
+        # files. Skip loudly for an admin; the pin stays recorded so the
+        # next sync retries with it. (When the account already exists above,
+        # the OS is the truth and the caller's drift branch converges the
+        # record instead — no useradd, nothing to collide.)
+        if uid is not None:
+            owner = uid_owner(uid)
+            if owner is not None and owner != username:
+                print(f'  ERROR (issue #3390): recorded uid {uid} for {username} is already owned by {owner} — skipping account creation, resolve the conflict manually (not renumbering)')
+                return None
+        # Create user with home directory; -u pins the recorded uid (#3390)
+        cmd = ['useradd', '-m', '-s', '/bin/bash']
+        if uid is not None:
+            cmd.extend(['-u', str(uid)])
+        cmd.append(username)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f'  Created user: {username}')
+            print(f'  Created user: {username}' + (f' (uid {uid})' if uid else ''))
         else:
             print(f'  Failed to create user {username}: {result.stderr}')
+            return None
 
     # Create workspace directory for user (always attempt if user exists or was just created)
     user_workspace = os.path.join(workspace_base, username)
     if not os.path.exists(user_workspace):
-        os.makedirs(user_workspace, exist_ok=True)
+        # Issue #3410: 0700, like /home/<user> — <base>/<account> is the fs
+        # API's home root; at 0755 any other account could read the whole
+        # workspace from a terminal or webui session.
+        os.makedirs(user_workspace, mode=0o700, exist_ok=True)
         # Set ownership to user
         subprocess.run(['chown', f'{username}:{username}', user_workspace], capture_output=True)
         print(f'  Created workspace directory: {user_workspace}')
+    elif username == 'shared':
+        # <base>/shared is the shared-project NAMESPACE ROOT (root:openace-shared
+        # 3770), not a user workspace — the same collision the provisioner at the
+        # top of this script and _ensure_workspace_dirs both refuse. Normalizing
+        # it to 0700 would break shared-project creation for every tenant.
+        print(f'  WARNING: skipping mode normalization for {user_workspace} '
+              f'(shared-project namespace root, not a user workspace)')
+    else:
+        # Issue #3410: converge volumes created before the 0700 default, but
+        # only when the directory really belongs to this account.
+        try:
+            if os.stat(user_workspace).st_uid == pwd.getpwnam(username).pw_uid:
+                os.chmod(user_workspace, 0o700)
+            else:
+                # A restored volume with a stale uid: loud, like every other
+                # skip around here — a silent one leaves it 0755 and wrong-
+                # owned through every boot until the account's first login.
+                print(f'  WARNING: {user_workspace} is owned by uid '
+                      f'{os.stat(user_workspace).st_uid}, not {username} '
+                      f'({pwd.getpwnam(username).pw_uid}); skipping mode '
+                      f'normalization (chown it or re-pin the uid)')
+        except (OSError, KeyError) as e:
+            print(f'  WARNING: cannot chmod 0700 {user_workspace}: {e}')
 
     # Fix home directory permissions (Issue #1205)
     # When /home is mounted as volume, useradd -m won't fix permissions on existing directory
@@ -1242,6 +1514,41 @@ def create_system_user(username):
     # Sync SSH keys if mounted (Issue #1122)
     # 【安全加固 Issue #2182 + #2328】使用独立的 Python 脚本实现安全同步（fail-closed）
     sync_ssh_keys_secure(username)
+
+    try:
+        return pwd.getpwnam(username).pw_uid
+    except KeyError:
+        return None
+
+def create_placeholder_user(username, uid):
+    \"\"\"Issue #3390: placeholder account for a deactivated/soft-deleted user.
+
+    A fresh container re-useradds only what this sync creates; without a
+    placeholder, useradd's sequential uid assignment hands this user's old
+    uid (and so the numeric ownership of their 0700 /home/<user> and
+    /workspace/<user>) to whichever active account lands on the number.
+    The placeholder is a nologin shell that only reserves the uid — home
+    dirs and workspaces are NOT created, chowned, or ssh-synced (the
+    volume dirs already carry this numeric owner; stat -c %U reports the
+    placeholder name from then on).
+    \"\"\"
+    result = subprocess.run(['id', username], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f'  Placeholder user {username} already exists (recorded uid {uid})')
+        return
+    owner = uid_owner(uid)
+    if owner is not None and owner != username:
+        # Name conflict with a live account (admin reused the account name)
+        # or a duplicate recorded pin — either way an admin decision, never
+        # renumber. The deactivated user's dirs stay on the orphan uid
+        # (owner UNKNOWN), which the isolation checks treat as safe.
+        print(f'  WARNING (issue #3390): recorded uid {uid} for deactivated user {username} is owned by {owner} — placeholder skipped, not renumbering')
+        return
+    result = subprocess.run(['useradd', '-u', str(uid), '-s', '/usr/sbin/nologin', username], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f'  Created placeholder user: {username} (uid {uid}, nologin)')
+    else:
+        print(f'  Failed to create placeholder user {username}: {result.stderr}')
 
 
 def sync_ssh_keys_secure(username):
@@ -1275,13 +1582,13 @@ def sync_ssh_keys_secure(username):
 
     # Validate script exists and is executable
     if not os.path.isfile(ssh_sync_script):
-        _log_sync_failure(username, "script_missing",
-                          f"{ssh_sync_script} not found")
+        _log_sync_failure(username, \"script_missing\",
+                          f\"{ssh_sync_script} not found\")
         return 1
 
     if not os.access(ssh_sync_script, os.X_OK):
-        _log_sync_failure(username, "script_not_executable",
-                          f"{ssh_sync_script} not executable")
+        _log_sync_failure(username, \"script_not_executable\",
+                          f\"{ssh_sync_script} not executable\")
         return 1
 
     # Execute secure sync
@@ -1306,16 +1613,16 @@ def sync_ssh_keys_secure(username):
                 print(f'    {result.stdout.strip()}')
             return 0
         else:
-            _log_sync_failure(username, "script_failed", result.stderr.strip())
+            _log_sync_failure(username, \"script_failed\", result.stderr.strip())
             return 1
 
     except subprocess.TimeoutExpired:
-        _log_sync_failure(username, "script_timeout",
-                          f"Script execution exceeded {timeout_seconds} seconds")
+        _log_sync_failure(username, \"script_timeout\",
+                          f\"Script execution exceeded {timeout_seconds} seconds\")
         return 1
 
     except Exception as e:
-        _log_sync_failure(username, "script_exception", str(e))
+        _log_sync_failure(username, \"script_exception\", str(e))
         return 1
 
 
@@ -1329,97 +1636,165 @@ def _log_sync_failure(username, reason, details):
 
     # 1. Structured JSON log (machine-readable)
     log_entry = {
-        "timestamp": timestamp,
-        "event": "SSH_SYNC_FAILURE",
-        "user": username,
-        "reason": reason,
-        "details": details,
-        "severity": "ERROR",
-        "remediation": _get_remediation_hint(reason)
+        \"timestamp\": timestamp,
+        \"event\": \"SSH_SYNC_FAILURE\",
+        \"user\": username,
+        \"reason\": reason,
+        \"details\": details,
+        \"severity\": \"ERROR\",
+        \"remediation\": _get_remediation_hint(reason)
     }
 
     try:
-        log_file = "/var/log/openace/ssh-sync-failure.json"
+        log_file = \"/var/log/openace/ssh-sync-failure.json\"
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
-        with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        with open(log_file, \"a\") as f:
+            f.write(json.dumps(log_entry) + \"\n\")
     except Exception:
         # Fallback to stderr if file logging fails
         pass
 
     # 2. Human-readable warning file (for operators)
     try:
-        warning_file = "/var/log/openace/ssh-sync-failure.warning"
+        warning_file = \"/var/log/openace/ssh-sync-failure.warning\"
         os.makedirs(os.path.dirname(warning_file), exist_ok=True)
 
-        with open(warning_file, "w") as f:
-            f.write(f"[{timestamp}] SSH Sync Failure\n")
-            f.write(f"User: {username}\n")
-            f.write(f"Reason: {reason}\n")
-            f.write(f"Details: {details}\n")
+        with open(warning_file, \"w\") as f:
+            f.write(f\"[{timestamp}] SSH Sync Failure\n\")
+            f.write(f\"User: {username}\n\")
+            f.write(f\"Reason: {reason}\n\")
+            f.write(f\"Details: {details}\n\")
             remediation = _get_remediation_hint(reason)
-            f.write(f"\nRemediation:\n{remediation}\n")
+            f.write(f\"\nRemediation:\n{remediation}\n\")
     except Exception:
         # Fallback to stderr if warning file creation fails
         pass
 
     # 3. Console output
-    print(f"  ERROR: SSH key sync failed for {username}", file=sys.stderr)
-    print(f"  Reason: {reason}", file=sys.stderr)
-    print(f"  Details: {details}", file=sys.stderr)
-    print(f"  See /var/log/openace/ssh-sync-failure.warning for details", file=sys.stderr)
+    print(f\"  ERROR: SSH key sync failed for {username}\", file=sys.stderr)
+    print(f\"  Reason: {reason}\", file=sys.stderr)
+    print(f\"  Details: {details}\", file=sys.stderr)
+    print(f\"  See /var/log/openace/ssh-sync-failure.warning for details\", file=sys.stderr)
 
 
 def _get_remediation_hint(reason):
     \"\"\"Return remediation guidance based on failure reason\"\"\"
     hints = {
-        "script_missing": (
-            "Ensure /usr/local/bin/openace-ssh-sync is installed.\n"
-            "For Docker: ensure the script is COPYed in Dockerfile.\n"
-            "For package installation: ensure the package installs the script."
+        \"script_missing\": (
+            \"Ensure /usr/local/bin/openace-ssh-sync is installed.\n\"
+            \"For Docker: ensure the script is COPYed in Dockerfile.\n\"
+            \"For package installation: ensure the package installs the script.\"
         ),
-        "script_not_executable": (
-            "Run: chmod +x /usr/local/bin/openace-ssh-sync"
+        \"script_not_executable\": (
+            \"Run: chmod +x /usr/local/bin/openace-ssh-sync\"
         ),
-        "script_failed": (
-            "Check /var/log/openace/ssh-sync.log for details.\n"
-            "Common causes: permission errors, invalid whitelist config."
+        \"script_failed\": (
+            \"Check /var/log/openace/ssh-sync.log for details.\n\"
+            \"Common causes: permission errors, invalid whitelist config.\"
         ),
-        "script_timeout": (
-            "Script took too long. Check for:\n"
-            "- Large number of files in /root/.ssh\n"
-            "- Slow filesystem\n"
-            "- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS"
+        \"script_timeout\": (
+            \"Script took too long. Check for:\n\"
+            \"- Large number of files in /root/.ssh\n\"
+            \"- Slow filesystem\n\"
+            \"- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS\"
         ),
-        "script_exception": (
-            "Unexpected error. Check:\n"
-            "- Python version >= 3.10\n"
-            "- PyYAML package installed\n"
-            "- /var/log/openace/ directory writable"
+        \"script_exception\": (
+            \"Unexpected error. Check:\n\"
+            \"- Python version >= 3.10\n\"
+            \"- PyYAML package installed\n\"
+            \"- /var/log/openace/ directory writable\"
         )
     }
-    return hints.get(reason, "Check logs for details.")
+    return hints.get(reason, \"Check logs for details.\")
 
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
 
-    # Get all users with system_account or username
-    cur.execute('SELECT username, system_account FROM users WHERE is_active = true')
+    # Get all users with system_account or username.
+    # Issue #3390: pull the recorded uid pin (users.system_uid) alongside the
+    # account so re-creation lands on the same numeric uid, and ALSO include
+    # deactivated/soft-deleted users that still have a pin — their placeholder
+    # accounts (below) keep that uid from being reassigned to an active
+    # account. ORDER BY id keeps the sync deterministic across recreations.
+    cur.execute(
+        'SELECT id, username, system_account, system_uid, is_active, deleted_at '
+        'FROM users '
+        'WHERE (deleted_at IS NULL AND is_active = true) OR system_uid IS NOT NULL '
+        'ORDER BY id'
+    )
     rows = cur.fetchall()
 
-    # Build a mapping of username -> system_account for owner lookup
-    user_mapping = {}
-    for username, system_account in rows:
+    # Classify (#3390): active rows get real accounts; every other row with a
+    # recorded pin gets a nologin placeholder so the uid is never inherited.
+    active_rows = []
+    placeholder_rows = []
+    for row_id, username, system_account, system_uid, is_active, deleted_at in rows:
         account = system_account or username
-        if account:
-            user_mapping[username] = account
-            create_system_user(account)
+        if not account:
+            continue
+        if deleted_at is None and is_active:
+            active_rows.append((row_id, username, account, system_uid))
+        elif system_uid is not None:
+            placeholder_rows.append((account, system_uid))
+
+    # Build a mapping of username -> system_account for owner lookup
+    user_mapping = {username: account for row_id, username, account, uid in active_rows}
+
+    # Issue #3390 ordering — pinned claims before any auto-assigned useradd:
+    #   1. active users WITH a recorded pin (deterministic uids, and the
+    #      account name wins any collision with a deactivated row),
+    #   2. placeholder accounts reserving deactivated users' uids,
+    #   3. active users WITHOUT a pin — useradd auto-assigns from the
+    #      remaining free uids (it can no longer land on a reserved pin),
+    #      and the assigned uid is recorded back so phase 1 covers them on
+    #      every future recreation.
+    for row_id, username, account, recorded_uid in active_rows:
+        if recorded_uid is None:
+            continue
+        actual_uid = create_system_user(account, uid=recorded_uid)
+        if actual_uid is not None and actual_uid != recorded_uid:
+            cur.execute('UPDATE users SET system_uid = %s WHERE id = %s', (actual_uid, row_id))
+            print(f'  Updated recorded uid for {account}: {recorded_uid} -> {actual_uid} (#3390 drift)')
+
+    for account, uid in placeholder_rows:
+        create_placeholder_user(account, uid)
+
+    for row_id, username, account, recorded_uid in active_rows:
+        if recorded_uid is not None:
+            continue
+        actual_uid = create_system_user(account)
+        if actual_uid is not None:
+            cur.execute('UPDATE users SET system_uid = %s WHERE id = %s', (actual_uid, row_id))
+            print(f'  Recorded uid {actual_uid} for {account} (#3390 pin bootstrap)')
+
+    # Persist the pins before the project-dir pass — a failure there must
+    # not lose them (the connection is otherwise read-only until close).
+    conn.commit()
+
+    # Review on #3390 (missing-actives verification): a collision skip, a
+    # useradd failure, or a mid-loop exception can each leave an ACTIVE user
+    # without an OS account — that user cannot log in to a workspace at all.
+    # Verify loudly and exit nonzero: the pipefail wrapper in the entrypoint
+    # turns this into the WARNING line (visible in container logs) without
+    # crash-looping the service. Review round 2: the exit happens only AFTER
+    # the project-dir pass below — that section already tolerates missing
+    # owners per-project (Warning + skip), so one failed account must not
+    # block every other user's project directories on every boot. The pins
+    # above were already committed, so the next recreation retries from the
+    # recorded state.
+    missing_actives = []
+    for row_id, username, account, recorded_uid in active_rows:
+        try:
+            pwd.getpwnam(account)
+        except KeyError:
+            missing_actives.append(account)
+    if missing_actives:
+        print(f'  ERROR (issue #3390): active users WITHOUT an OS account after sync: {sorted(missing_actives)} — see the collision/failure lines above; resolve manually')
 
     # Sync project directories from database (Issue #1083)
     print('Syncing project directories...')
-    import pwd
     cur.execute('SELECT path FROM projects WHERE is_active = true')
     project_rows = cur.fetchall()
 
@@ -1447,10 +1822,486 @@ try:
                 print(f'  Project directory exists: {path}')
 
     conn.close()
+    if missing_actives:
+        # exit nonzero only AFTER the project-dir pass (review on #3390:
+        # one failed account must not block everyone's project sync) —
+        # the pipefail wrapper turns this into the WARNING line.
+        sys.exit(1)
     print('User and project sync completed.')
 except Exception as e:
     print(f'Error syncing users and projects: {e}')
-" 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
+    # nonzero, or the pipefail wrapper never fires the WARNING (#3399-style
+    # silent death: a mid-stage exception — UPDATE failure, connection drop,
+    # makedirs PermissionError on root_squash NFS — used to end as exit 0,
+    # skipping conn.commit() and the missing-actives verification).
+    sys.exit(1)
+" 2>&1 | tee /app/logs/open-ace-user-sync.log ) || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
+    fi
+
+    # ========================================================================
+    # Issue #3390 declared residual, now closed: first-boot orphan-uid
+    # adoption.
+    # ========================================================================
+    # After an upgrade, a DEACTIVATED/soft-deleted user from BEFORE the pin
+    # era has no recorded uid (their rows are never re-synced), so the sync
+    # above creates no placeholder for them: their volume dirs (/home/<user>,
+    # <base>/<user>, <base>/shared leftovers) sit on uids no account owns
+    # (owner "UNKNOWN"), and a future account's auto-assigned useradd can
+    # numerically inherit them. Close the residual by scanning the volume
+    # trees AFTER the user-sync (its pinned accounts must exist first, or
+    # every pin of a recreated deployment would look orphaned) and reserving
+    # each unowned uid >= 1000 as a nologin placeholder account
+    # openace-orphan-<uid> — from then on useradd can never hand that uid
+    # (and with it the numeric ownership of the orphaned dirs) to anyone.
+    # Idempotent: an adopted uid resolves via getent on the next boot and is
+    # skipped silently. Quoted heredoc (verbatim python, no shell expansion
+    # — the #3399 class cannot recur here); failure degrades to the WARNING
+    # line, never aborts the boot.
+    if [ -n "$DATABASE_URL" ]; then
+    ( set -o pipefail; python3 -u - <<'ORPHAN_UID_SCAN_EOF' 2>&1 | tee /app/logs/open-ace-orphan-uid-scan.log ) || echo "WARNING: orphan-uid adoption scan failed - unreserved orphan uids may be inherited by a future account; check /app/logs/open-ace-orphan-uid-scan.log"
+import os
+import subprocess
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+# Scan roots: /home plus every configured workspace base dir (deduped) —
+# the trees the user-sync and the app create per-user content in.
+bases = [b.strip().rstrip('/') for b in os.environ.get('WORKSPACE_BASE_DIR', '/workspace').split(',') if b.strip()]
+roots = []
+for root in ['/home'] + bases:
+    if root and root not in roots:
+        roots.append(root)
+
+# Collect owner uids of existing entries (dirs AND files) up to depth 3 —
+# a user's home/workspace plus their immediate project trees. find -exec
+# stat {} + batches the stat calls (one fork per batch, not per entry).
+observed_uids = set()
+for root in roots:
+    if not os.path.isdir(root):
+        continue
+    r = run(['find', root, '-maxdepth', '3', '-exec', 'stat', '-c', '%u', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING (issue #3390): orphan-uid scan could not walk {root}: {r.stderr.strip()}')
+        continue
+    for token in r.stdout.split():
+        try:
+            uid = int(token)
+        except ValueError:
+            continue
+        observed_uids.add(uid)
+
+# Adopt: reserve every observed uid >= 1000 that no account owns (getent
+# passwd by uid fails) as a nologin placeholder. useradd -M creates no home;
+# the volume dirs already carry this numeric owner, and stat -c %U reports
+# the placeholder name from then on.
+adopted = 0
+for uid in sorted(u for u in observed_uids if u >= 1000):
+    if run(['getent', 'passwd', str(uid)]).returncode == 0:
+        continue  # owned by an account (or already reserved by a placeholder)
+    name = f'openace-orphan-{uid}'
+    r = run(['useradd', '-M', '-s', '/usr/sbin/nologin', '-u', str(uid), name])
+    if r.returncode == 0:
+        adopted += 1
+    else:
+        print(f'  WARNING (issue #3390): could not reserve orphan uid {uid} as {name}: {r.stderr.strip()} — the uid may be handed to a future account')
+if adopted:
+    print(f'Adopted {adopted} orphan uid(s) from volumes as reserved placeholders.')
+ORPHAN_UID_SCAN_EOF
+    fi
+
+    # ========================================================================
+    # Issue #3396: tenant-scoped shared-group sync (DB-driven).
+    # ========================================================================
+    # Replaces the two /home-glob usermod passes (#3389 rounds 2/3): a
+    # directory name cannot reveal its tenant, so enrollment is derived from
+    # the users table instead. For every ACTIVE user with an account:
+    #   - global openace-shared (namespace-root creation right), and
+    #   - openace-shared-<tenant_id> (tenant shared-content access).
+    # PR #3402 review: the sync is also AUTHORITATIVE for tenant-group
+    # MEMBERSHIP — every existing openace-shared-<t> group is converged onto
+    # the DB's exact member list (gpasswd -M / -d), so stale memberships
+    # (tenant moves, deactivations, deletes — whose removals used to run only
+    # in the request-handling container) cannot survive a restart of ANY
+    # container, the scheduler's included. The global openace-shared group is
+    # deliberately left alone (deactivated accounts keep namespace-root
+    # creation; no content access).
+    # It also RECONCILES shared project directories left on the legacy
+    # global group by pre-#3396 deployments: chgrp to the tenant group +
+    # 2770/660. The reconcile is skipped per project when the root already
+    # carries the tenant group AND mode (one stat per project on
+    # steady-state boots), and RECLAIMS directories of projects that are no
+    # longer active+shared (revocation whose reclaim failed fail-soft after
+    # the DB flip, soft-deleted shared projects) back to the creator:
+    # chown -R + dirs 0700 / files 0600.
+    # Quoted heredoc: the block is verbatim Python (no shell expansion) and
+    # is functionally tested by tests/unit/test_shared_namespace_provisioning_3379.py
+    # (extracted between the PY_SYNC_GROUPS_EOF markers).
+    # Review hardening (matches the #3390 user-sync pattern): the old plain
+    # `python3 - <<EOF ... | tee LOG || echo WARNING` pipeline masked a
+    # python-side death (tee returns 0; no pipefail file-wide) and the
+    # heredoc python's outermost handler caught every exception and exited
+    # 0 — so the WARNING could never fire. pipefail is now scoped to this
+    # one pipeline, -u unbuffers, and the python itself exits 1 when any
+    # enrollment/reconcile/reclaim step failed (per-row failures are still
+    # skipped past so one bad row cannot abort the rest) — the WARNING line
+    # is the loud signal that cross-tenant OS isolation may be degraded
+    # until the next restart; the entrypoint itself keeps booting.
+    if [ -n "$DATABASE_URL" ]; then
+    ( set -o pipefail; python3 -u - <<'PY_SYNC_GROUPS_EOF' 2>&1 | tee /app/logs/open-ace-shared-groups.log ) || echo "WARNING: shared-group sync failed - cross-tenant OS isolation may be degraded until restart; check /app/logs/open-ace-shared-groups.log"
+import os
+import subprocess
+import sys
+
+import psycopg2
+
+GLOBAL_GROUP = 'openace-shared'
+
+
+def tenant_group(tid):
+    # Mirrors app.utils.workspace.shared_tenant_group_name: NULL tenant
+    # (platform admins) maps to the pseudo-id 0; real tenant ids start at 1.
+    return f"openace-shared-{tid if tid is not None else 0}"
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def enroll(username, tid):
+    """Enroll one account in the global + tenant shared groups (idempotent).
+
+    Returns True when every membership is in place.
+    """
+    ok = True
+    for group in (GLOBAL_GROUP, tenant_group(tid)):
+        r = run(['groupadd', '-f', group])
+        if r.returncode != 0:
+            print(f'  WARNING: groupadd {group} failed: {r.stderr.strip()}')
+            ok = False
+            continue
+        r = run(['usermod', '-aG', group, username])
+        if r.returncode != 0:
+            print(f'  WARNING: usermod -aG {group} {username} failed: {r.stderr.strip()}')
+            ok = False
+    return ok
+
+
+def reconcile_shared(path, tid):
+    """Normalize one shared project dir to the tenant group (2770/660).
+
+    The fast path checks group AND mode: a dir chgrp'd correctly but left on
+    a wrong mode (e.g. legacy 2775) must still be normalized, not skipped.
+    Returns True when the dir ends up normalized.
+    """
+    group = tenant_group(tid)
+    r = run(['groupadd', '-f', group])
+    if r.returncode != 0:
+        print(f'  WARNING: groupadd {group} failed: {r.stderr.strip()}')
+        return False
+    stat = run(['stat', '-c', '%G %a', path])
+    if stat.returncode == 0:
+        parts = stat.stdout.strip().split()
+        if len(parts) == 2 and parts[0] == group and parts[1] == '2770':
+            return True  # already normalized (steady-state fast path)
+    print(f'  Reconciling shared project {path} -> group {group} (2770/660)')
+    ok = True
+    r = run(['chgrp', '-R', group, path])
+    if r.returncode != 0:
+        print(f'  WARNING: chgrp {group} {path} failed: {r.stderr.strip()}')
+        ok = False
+    # PR #3402 review: batch the chmod passes with `-exec ... {} +` (one
+    # chmod invocation per find BATCH, not one fork per entry — `{} ;`
+    # forked a chmod per file, so a node_modules-scale project could keep
+    # the pre-service-start reconcile running for tens of minutes and kill
+    # the container via healthcheck).
+    r = run(['find', path, '-type', 'd', '-exec', 'chmod', '2770', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 2770 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    r = run(['find', path, '-type', 'f', '-exec', 'chmod', '660', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 660 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    return ok
+
+
+def reclaim_revoked(path, owner):
+    """Re-apply the #3396 revocation reclaim for one no-longer-shared dir.
+
+    The app-side revoke runs fail-soft AFTER the DB flip, so a timeout or
+    crash leaves the dir group-accessible with is_shared already false —
+    the whole tenant would keep OS access to a now-private project forever.
+    Mirrors app.utils.workspace.revoke_shared_project_access: chown -R to
+    the creator, then dirs 0700 / files 0600 (ex-members get EACCES).
+    Returns True when the reclaim completed.
+    """
+    uid = run(['id', '-u', owner])
+    gid = run(['id', '-g', owner])
+    if uid.returncode != 0 or gid.returncode != 0:
+        print(f'  WARNING: cannot resolve owner {owner} for {path}: '
+              f'{(uid.stderr or gid.stderr).strip()}; not reclaimed')
+        return False
+    ownership = f'{uid.stdout.strip()}:{gid.stdout.strip()}'
+    print(f'  Reclaiming revoked shared project {path} -> owner {owner} (0700/0600)')
+    r = run(['chown', '-R', ownership, path])
+    if r.returncode != 0:
+        print(f'  WARNING: chown {ownership} {path} failed: {r.stderr.strip()}')
+        return False
+    ok = True
+    # batched `{} +` like the reconcile pass above (PR #3402 review: one
+    # fork per entry kept large reclaims in the pre-service-start window)
+    r = run(['find', path, '-type', 'd', '-exec', 'chmod', '0700', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 0700 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    r = run(['find', path, '-type', 'f', '-exec', 'chmod', '0600', '{}', '+'])
+    if r.returncode != 0:
+        print(f'  WARNING: chmod 0600 pass failed for {path}: {r.stderr.strip()}')
+        ok = False
+    return ok
+
+
+failures = 0
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+
+    # Round-2 review N1: user_repo.delete_user soft-deletes by setting
+    # deleted_at ONLY (is_active stays true), so the enrollment must filter
+    # deleted_at IS NULL — same classification as the user-sync above — or
+    # every restart re-enrolls deleted users into openace-shared-<t>, silently
+    # undoing the delete-path group drop app/routes/admin.py performs.
+    # PR #3402 review: system_account ONLY — no `or username` fallback. An
+    # unmapped user's username may equal ANOTHER user's system_account
+    # (system_account validates format only, uniqueness is not checked
+    # against usernames), and the old fallback enrolled that OS account into
+    # this user's tenant group across the tenant boundary; username is no
+    # longer selected so the fallback cannot come back silently.
+    cur.execute(
+        'SELECT system_account, tenant_id FROM users '
+        'WHERE is_active = true AND deleted_at IS NULL'
+    )
+    # PR #3402 review: the sync must also REMOVE, not just add. Tenant moves,
+    # deactivations and deletes drop the old group with fail-soft `gpasswd -d`
+    # in the REQUEST-handling container only — the scheduler container's
+    # /etc/group (its autonomous agents run via openace-run-as against it)
+    # kept every stale membership forever, and a failed removal in the app
+    # container survived its restarts. The DB is therefore the authority:
+    # `desired` holds the exact member list per tenant group, and the pass
+    # below converges every existing openace-shared-<t> group onto it. The
+    # GLOBAL openace-shared group is deliberately NOT converged (deactivated
+    # accounts keep it — accepted residual: it grants namespace-root
+    # creation only, no content access).
+    desired = {}
+    for system_account, tid in cur.fetchall():
+        if not system_account:
+            continue
+        if not enroll(system_account, tid):
+            failures += 1
+        desired.setdefault(tenant_group(tid), set()).add(system_account)
+    print('Shared-group enrollment complete.')
+
+    getent = run(['getent', 'group'])
+    if getent.returncode != 0:
+        print(f'  WARNING: getent group failed: {getent.stderr.strip()} — '
+              'stale tenant-group memberships NOT reconciled this boot')
+        failures += 1
+    else:
+        for line in getent.stdout.splitlines():
+            name = line.split(':', 1)[0]
+            if not name.startswith(GLOBAL_GROUP + '-'):
+                continue  # foreign groups and the global group itself
+            suffix = name[len(GLOBAL_GROUP) + 1:]
+            if not (suffix.isascii() and suffix.isdigit()):
+                # round-5 N2: tenant group suffixes are numeric by
+                # construction — an operator-created lookalike such as
+                # openace-shared-backup must never be converged (its
+                # members would be stripped one by one). isascii() is
+                # load-bearing: str.isdigit() alone ACCEPTS non-ASCII
+                # digits (e.g. fullwidth '１２３'), and a root-created
+                # openace-shared-<unicode-digits> group would pass the
+                # guard and be converged to the empty list.
+                continue
+            # round-5 N4: a desired member whose OS account is missing this
+            # boot (user-sync failure, #3399 shape) makes shadow-utils
+            # reject the WHOLE gpasswd -M call, silently keeping the group's
+            # stale list. Converge the present subset instead — the missing
+            # account's absence is already loud in the user-sync log.
+            # NSS transient hardening: getent rc==0 -> the account is
+            # present; rc==2 -> genuinely absent (getent's documented
+            # not-found); any OTHER rc is a transient NSS failure (socket
+            # timeout, sssd restart, nscd hiccup) — retry once, and if it
+            # STAYS ambiguous skip this group's convergence entirely this
+            # boot with a loud warning: a list built on an unreliable
+            # answer would either poison gpasswd -M with a missing account
+            # (N4 rejection, stale list kept) or silently strip a member
+            # who is actually present. The stale-but-valid membership waits
+            # one boot instead; the convergence is retried automatically.
+            members = []
+            ambiguous = False
+            for m in sorted(desired.get(name, ())):
+                rc = run(['getent', 'passwd', m]).returncode
+                if rc not in (0, 2):
+                    rc = run(['getent', 'passwd', m]).returncode
+                if rc == 0:
+                    members.append(m)
+                elif rc == 2:
+                    continue
+                else:
+                    ambiguous = True
+            if ambiguous:
+                print(f'  WARNING: NSS lookup for a member of {name} still ambiguous after retry — '
+                      'membership convergence skipped this boot (current members kept; retried next boot)')
+                continue
+            if members:
+                r = run(['gpasswd', '-M', ','.join(members), name])
+                if r.returncode != 0:
+                    print(f'  WARNING: gpasswd -M {name} failed: {r.stderr.strip()}')
+                    failures += 1
+            elif line.count(':') >= 3 and line.split(':', 3)[3].strip():
+                # shadow-utils `gpasswd -M ""` is a NO-OP (it does not clear
+                # the list), so a group whose desired set is EMPTY — every
+                # member moved/deleted/deactivated — must have its current
+                # members removed one by one.
+                for member in line.split(':', 3)[3].split(','):
+                    member = member.strip()
+                    if not member:
+                        continue
+                    r = run(['gpasswd', '-d', member, name])
+                    if r.returncode != 0:
+                        print(f'  WARNING: gpasswd -d {member} {name} failed: {r.stderr.strip()}')
+                        failures += 1
+
+    bases = [b.strip().rstrip('/') for b in os.environ.get('WORKSPACE_BASE_DIR', '/workspace').split(',') if b.strip()]
+    cur.execute('SELECT path, tenant_id FROM projects WHERE is_active = true AND is_shared = true')
+    # active_shared_paths is collected BEFORE any filtering (PR #3402 review):
+    # the reclaim pass below must refuse to touch anything that IS, CONTAINS
+    # or LIES INSIDE any live shared project, of any tenant.
+    active_shared_paths = []
+    for path, tid in cur.fetchall():
+        if not path:
+            continue
+        active_shared_paths.append(path.rstrip('/'))
+        # Only reconcile paths inside the configured workspace base dirs —
+        # rows pointing elsewhere are not ours to touch.
+        if not any(path == b or path.startswith(b + '/') for b in bases):
+            continue
+        if os.path.isdir(path):
+            if os.path.islink(path):
+                # round-5 N1: a symlink row is never a legitimate shared
+                # project root (registrations realpath at creation). Every
+                # check here is string-based and stat/find/chgrp would
+                # follow the link onto its TARGET — refuse, loudly.
+                failures += 1
+                print(f'  WARNING: shared project path {path} is a symlink — '
+                      'not reconciled; investigate (possible tampering)')
+                continue
+            try:
+                if not reconcile_shared(path, tid):
+                    failures += 1
+            except Exception as e:  # noqa: BLE001 - one bad row must not abort the rest
+                failures += 1
+                print(f'  WARNING: reconcile failed for {path}: {e}')
+
+    # Issue #3396 review: RECLAIM pass. Projects that are NOT active+shared
+    # (revoked is_shared=false, soft-deleted is_active=false — soft delete
+    # flips is_active, projects has no deleted_at column) but whose dir is
+    # still group-owned by their tenant group are leftover shared-state on
+    # disk; the app-side revoke ran fail-soft after the DB flip, and
+    # soft-DELETE of a shared project never reclaims at all.
+    #
+    # PR #3402 review (takeover hardening): private project registration has
+    # NO path-ownership validation (app/routes/projects.py only validates
+    # `if is_shared:`), and get_project_by_path is tenant-scoped, so ANY
+    # tenant's user could register another tenant's shared dir — or the
+    # <base>/shared namespace root itself — as a private project and have
+    # this pass chown -R it to them at the next boot. A dir is therefore
+    # reclaimed ONLY when it is provably THIS row's own shared leftover:
+    #   * strictly INSIDE a workspace base dir, and never a base dir or a
+    #     <base>/shared namespace root (the container's own plumbing);
+    #   * not overlapping (equal to / containing / inside) ANY live shared
+    #     project of ANY tenant;
+    #   * on THIS row's tenant group (openace-shared-<row.tenant_id>) — the
+    #     only group that proves this tenant shared it;
+    #   * a legacy pre-#3396 leftover on the GLOBAL group is reclaimed only
+    #     at the exact first-level <base>/shared/<name> shape those
+    #     deployments laid out (anything else on the global group cannot be
+    #     distinguished from namespace plumbing — declared residual for an
+    #     administrator);
+    #   * the owner is the row's system_account ONLY (no username fallback —
+    #     see the enrollment note above).
+    # Steady-state cost stays one isdir + one stat per not-shared row.
+    namespace_roots = {b + '/shared' for b in bases}
+
+    def overlaps(a, b):
+        return a == b or a.startswith(b + '/') or b.startswith(a + '/')
+
+    def first_level_shared_child(p):
+        # direct child of a <base>/shared namespace root (no deeper '/')
+        return any(
+            p.startswith(ns + '/') and '/' not in p[len(ns) + 1:] for ns in namespace_roots
+        )
+
+    cur.execute(
+        'SELECT p.path, p.tenant_id, u.system_account FROM projects p '
+        'LEFT JOIN users u ON p.created_by = u.id '
+        'WHERE NOT (p.is_active = true AND p.is_shared = true)'
+    )
+    for path, tid, system_account in cur.fetchall():
+        path = (path or '').rstrip('/')
+        if not path:
+            continue
+        # strictly inside a base dir; never a base dir or a namespace root
+        if not any(path.startswith(b + '/') for b in bases) or path in namespace_roots:
+            continue
+        # round-5 N1: a symlink can never be this row's own leftover —
+        # registrations realpath, so a legit project dir is a real dir. All
+        # checks below are string-based and isdir/stat/chown -R follow the
+        # link: without this guard a same-tenant private row aliased via
+        # `ln -s <base>/shared/<live-project> <own-path>` passes every
+        # check, and chown -R (which dereferences its command-line operand)
+        # hands the LIVE project's root to the attacker.
+        if os.path.islink(path):
+            continue
+        # never reclaim a dir that is, contains, or lies inside a LIVE
+        # shared project (any tenant) — that is a takeover, not a leftover
+        if any(overlaps(path, live) for live in active_shared_paths):
+            continue
+        if not system_account:
+            continue
+        if not os.path.isdir(path):
+            continue
+        try:
+            stat = run(['stat', '-c', '%G', path])
+            if stat.returncode != 0:
+                continue
+            group = stat.stdout.strip()
+            if group == tenant_group(tid):
+                pass  # this row's own tenant group — provably its leftover
+            elif group == GLOBAL_GROUP and first_level_shared_child(path):
+                pass  # legacy pre-#3396 leftover at the canonical shape
+            else:
+                # another tenant's group, an unshaped legacy global-group dir,
+                # or a dir that was never group-shared / is already reclaimed
+                continue
+            if not reclaim_revoked(path, system_account):
+                failures += 1
+        except Exception as e:  # noqa: BLE001 - one bad row must not abort the rest
+            failures += 1
+            print(f'  WARNING: reclaim failed for {path}: {e}')
+
+    conn.close()
+    print('Shared-group sync completed.')
+    if failures:
+        print(f'Shared-group sync finished with {failures} failure(s).')
+        sys.exit(1)
+except Exception as e:
+    print(f'Error syncing shared groups: {e}')
+    sys.exit(1)
+PY_SYNC_GROUPS_EOF
     fi
 
     # Configure sudoers for qwen-code-webui

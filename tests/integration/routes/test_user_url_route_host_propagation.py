@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
+from tests.unit._isolation_helpers import iso
+
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1306)]
 
 # The container-detected IP that browsers cannot reach. Config.url is seeded
@@ -60,7 +62,7 @@ def _stub_manager():
         WorkspaceConfig(
             enabled=True,
             url=UNREACHABLE_CONTAINER_IP,
-            multi_user_mode=False,
+            isolation=iso("shared"),
         )
     )
     manager.stop_cleanup_thread()
@@ -101,6 +103,7 @@ def test_user_url_route_uses_request_host_not_config_ip(
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         resp = _authed_get(
             workspace_app.test_client(),
@@ -111,7 +114,8 @@ def test_user_url_route_uses_request_host_not_config_ip(
     assert resp.status_code == 200
     data = resp.get_json()
 
-    # url must be built from the request host (single-user fixed port 3100),
+    # url must be built from the request host (single-user range port, 3100
+    # for the default range),
     # NOT the container IP.
     assert data["url"] == "http://my-host.example:3100", data["url"]
     assert UNREACHABLE_CONTAINER_IP not in data["url"]
@@ -138,6 +142,7 @@ def test_user_url_route_uses_localhost_in_default_case(
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         resp = _authed_get(
             workspace_app.test_client(),
@@ -169,7 +174,7 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
         WorkspaceConfig(
             enabled=True,
             url=UNREACHABLE_CONTAINER_IP,
-            multi_user_mode=True,
+            isolation=iso("plain"),
         )
     )
     manager.stop_cleanup_thread()
@@ -192,15 +197,25 @@ def test_user_url_route_multi_user_uses_request_host_and_instance_port(
     manager._instances = {MOCK_USER["id"]: instance}
 
     mock_get_manager.return_value = manager
-    mock_get_user.return_value = MOCK_USER
+    # The os_user floor also requires the user's OS-account mapping.
+    mock_get_user.return_value = {**MOCK_USER, "system_account": MOCK_USER["username"]}
 
-    resp = _authed_get(
-        workspace_app.test_client(),
-        "/api/workspace/user-url",
-        host="my-host.example:19888",
-    )
+    # Issue #3446: backend "plain" declares level os_user, and the declared
+    # level is the floor — the gate refuses unless the per-user launch path
+    # verifies. This test is about host propagation, so the host verifies
+    # (Linux, per-user launch possible for the mapped account).
+    with (
+        patch("app.services.workspace_isolation_contract._current_platform", return_value="linux"),
+        patch.object(WebUIManager, "per_user_launch_readiness", return_value=None),
+        patch.object(WebUIManager, "supports_per_user_launch", return_value=(True, None)),
+    ):
+        resp = _authed_get(
+            workspace_app.test_client(),
+            "/api/workspace/user-url",
+            host="my-host.example:19888",
+        )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()
     # host replaced from request, port taken from the instance (3123, not 3100)
     assert data["url"] == "http://my-host.example:3123", data["url"]

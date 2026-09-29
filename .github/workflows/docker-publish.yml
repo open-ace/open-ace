@@ -1,0 +1,158 @@
+name: Docker Publish
+
+# Publishes the production image so the `docker compose pull` /
+# `IMAGE_NAME=ghcr.io/open-ace/open-ace:vX.Y.Z` steps in docs/en/DEPLOYMENT.md
+# work without a local build.
+#
+# Registries:
+#   ghcr.io/open-ace/open-ace   always (primary); uses the built-in GITHUB_TOKEN.
+#                               After the very first push an org admin must set
+#                               the package visibility to Public once, or
+#                               anonymous pulls fail.
+#   docker.io/<ns>/open-ace     mirror, only when the DOCKERHUB_USERNAME and
+#                               DOCKERHUB_TOKEN secrets are set (namespace from
+#                               the DOCKERHUB_NAMESPACE variable, default
+#                               openace). Missing secrets skip it with a
+#                               warning. Backfill a release later with
+#                               `gh workflow run docker-publish.yml -f tag=vX.Y.Z`.
+#
+# Tags pushed for release vX.Y.Z: vX.Y.Z, X.Y.Z, X.Y, X, and latest (latest is
+# skipped for prereleases). The image is linux/amd64 only: the Dockerfile
+# installs the amd64 gh CLI .deb.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to (re)publish, e.g. v2.0.0"
+        required: true
+      latest:
+        description: "Also move the latest tag"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/open-ace
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || 'openace' }}/open-ace
+      PUSH_LATEST: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && inputs.latest) }}
+    steps:
+      - name: Validate tag and detect Docker Hub credentials
+        id: preflight
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag '$RELEASE_TAG' is not vX.Y.Z"
+            exit 1
+          fi
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN not set; publishing to GHCR only"
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          submodules: false
+
+      - name: Compute image tags
+        id: tags
+        env:
+          DOCKERHUB: ${{ steps.preflight.outputs.dockerhub }}
+        run: |
+          # GHCR requires a lowercase repository path.
+          ghcr="$(echo "$GHCR_IMAGE" | tr '[:upper:]' '[:lower:]')"
+          images=("$ghcr")
+          if [ "$DOCKERHUB" = "true" ]; then images+=("$DOCKERHUB_IMAGE"); fi
+          v="${RELEASE_TAG#v}"
+          major="${v%%.*}"
+          minor="${v#*.}"; minor="${minor%%.*}"
+          suffixes=("$RELEASE_TAG" "$v" "$major.$minor" "$major")
+          if [ "$PUSH_LATEST" = "true" ]; then suffixes+=("latest"); fi
+          {
+            echo "tags<<EOF"
+            for image in "${images[@]}"; do
+              for s in "${suffixes[@]}"; do echo "$image:$s"; done
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # Issue #3169: without an explicit target Docker builds the LAST
+          # stage (migration), not the web image.
+          target: production
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: open-ace:release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: |
+          # Same verify-only invocation as the ci.yml docker job.
+          docker run --rm -e OPENACE_SECURITY_MODE=development \
+            open-ace:release bash /app/scripts/verify-code-server.sh
+          test "$(docker run --rm --entrypoint id open-ace:release -u)" = "1000"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.preflight.outputs.dockerhub == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push images
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: production
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha
+
+      - name: Summary
+        run: |
+          {
+            echo "### Pushed images"
+            echo '```'
+            echo "${{ steps.tags.outputs.tags }}"
+            echo '```'
+            echo "First GHCR push? Set the package visibility to Public:"
+            echo "${{ github.server_url }}/orgs/${{ github.repository_owner }}/packages/container/package/open-ace/settings"
+          } >> "$GITHUB_STEP_SUMMARY"

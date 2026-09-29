@@ -74,8 +74,7 @@ This is the reference for `~/.open-ace/config.json`, the application-configurati
 |-------|-------------|---------|
 | `workspace.enabled` | Enable the workspace feature | `false` |
 | `workspace.url` | Workspace service address | `http://localhost:8080` |
-| `workspace.multi_user_mode` | Enable multi-user mode (one dedicated process per user) | `false` |
-| `workspace.required_isolation_level` | Isolation floor for multi-user installs (the entrypoint pins `os_user` when multi-user mode is on) | — |
+| `workspace.isolation` | Isolation between users: `{"level": ..., "backend": ...}`, see the table below and [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md) | `{"level": "none", "backend": "shared"}` |
 | `workspace.port_range_start` | First port of the per-user webui port pool | `3100` |
 | `workspace.port_range_end` | Last port of the per-user webui port pool | `3200` |
 | `workspace.max_instances` | Maximum concurrently running webui instances | `30` |
@@ -90,13 +89,26 @@ In multi-user mode, Open ACE starts an independent `qwen-code-webui` process for
 - User actions are recorded in the qwen logs under the correct identity
 - Data isolation and audit traceability in multi-user environments
 
+**`workspace.isolation`: level and backend** (each backend belongs to exactly one level; a mismatched pair, or any removed legacy key `multi_user_mode` / `required_isolation_level` / `os_user_confinement` / `sandbox_tier` / `confinement_*`, makes the server refuse to start and names the replacement):
+
+| level | backend | What it needs | Available in the Docker install |
+|---|---|---|---|
+| `none` | `shared` | Nothing (default) | ✅ |
+| `os_user` | `plain` | Per-user system accounts + the `openace-webui-launch` wrapper (provided by the install script) | ✅ (root overlay) |
+| `os_user` | `bwrap` | Linux + systemd + bubblewrap >= 0.8 + `webui_callback_url` + the confinement wrapper | ❌ |
+| `sandboxed` | `local-gvisor` | Same as `bwrap` + Docker + the gVisor runtime + the `local-gvisor` section of the root policy file | ❌ |
+| `sandboxed` | `local-kata` | Same as `bwrap` + Docker + `/dev/kvm` + Kata >= 3.32 + the `local-kata` section of the root policy file | ❌ |
+| `sandboxed` | `opensandbox` | OpenSandbox on Kubernetes + `webui_image` from `sandbox-backends.json` + `webui_callback_url` | ✅ |
+
+Optional keys: `tier` (`opensandbox` only); `limits` (`memory` / `cpu_percent` / `tasks`) and `egress_allow` (`bwrap` / `local-gvisor` / `local-kata` only); `container_webui` (`local-gvisor` / `local-kata` only).
+
 **Single-user example:**
 ```json
 {
   "workspace": {
     "enabled": true,
     "url": "http://localhost:8080",
-    "multi_user_mode": false
+    "isolation": {"level": "none", "backend": "shared"}
   }
 }
 ```
@@ -107,7 +119,7 @@ In multi-user mode, Open ACE starts an independent `qwen-code-webui` process for
   "workspace": {
     "enabled": true,
     "url": "http://localhost",
-    "multi_user_mode": true,
+    "isolation": {"level": "os_user", "backend": "plain"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,
@@ -251,8 +263,7 @@ Both integrations support user/group name resolution in imported sessions, manua
 |------|------|--------|
 | `workspace.enabled` | 是否启用 Workspace 功能 | `false` |
 | `workspace.url` | Workspace 服务地址 | `http://localhost:8080` |
-| `workspace.multi_user_mode` | 是否启用多用户模式（为每个用户启动独立进程） | `false` |
-| `workspace.required_isolation_level` | 多用户安装的隔离级别下限（多用户模式开启时 entrypoint 固定为 `os_user`） | — |
+| `workspace.isolation` | 用户之间的隔离：`{"level": ..., "backend": ...}`，见下表与 [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md) | `{"level": "none", "backend": "shared"}` |
 | `workspace.port_range_start` | 多用户模式下端口池起始端口 | `3100` |
 | `workspace.port_range_end` | 多用户模式下端口池结束端口 | `3200` |
 | `workspace.max_instances` | 最大同时运行的 webui 实例数 | `30` |
@@ -267,13 +278,26 @@ Both integrations support user/group name resolution in imported sessions, manua
 - 用户操作会以正确的身份记录到 qwen 日志中
 - 多用户环境下的数据隔离和审计追溯
 
+**`workspace.isolation`：level 与 backend**（每个 backend 只属于一个 level；不匹配的组合、已移除的旧键 `multi_user_mode` / `required_isolation_level` / `os_user_confinement` / `sandbox_tier` / `confinement_*` 都会让服务器拒绝启动并给出替代写法）：
+
+| level | backend | 需要什么 | Docker 安装可用 |
+|---|---|---|---|
+| `none` | `shared` | 无（默认） | ✅ |
+| `os_user` | `plain` | 每用户系统账户 + `openace-webui-launch` wrapper（安装脚本提供） | ✅（root 叠加配置） |
+| `os_user` | `bwrap` | Linux + systemd + bubblewrap ≥ 0.8 + `webui_callback_url` + 约束 wrapper | ❌ |
+| `sandboxed` | `local-gvisor` | 同 `bwrap` + Docker + gVisor 运行时 + root 策略文件 `local-gvisor` 分节 | ❌ |
+| `sandboxed` | `local-kata` | 同 `bwrap` + Docker + `/dev/kvm` + Kata ≥ 3.32 + root 策略文件 `local-kata` 分节 | ❌ |
+| `sandboxed` | `opensandbox` | Kubernetes 上的 OpenSandbox + `sandbox-backends.json` 中的 `webui_image` + `webui_callback_url` | ✅ |
+
+可选键：`tier`（仅 `opensandbox`）、`limits`（`memory` / `cpu_percent` / `tasks`）与 `egress_allow`（仅 `bwrap` / `local-gvisor` / `local-kata`）、`container_webui`（仅 `local-gvisor` / `local-kata`）。
+
 **单用户模式配置示例：**
 ```json
 {
   "workspace": {
     "enabled": true,
     "url": "http://localhost:8080",
-    "multi_user_mode": false
+    "isolation": {"level": "none", "backend": "shared"}
   }
 }
 ```
@@ -284,7 +308,7 @@ Both integrations support user/group name resolution in imported sessions, manua
   "workspace": {
     "enabled": true,
     "url": "http://localhost",
-    "multi_user_mode": true,
+    "isolation": {"level": "os_user", "backend": "plain"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,

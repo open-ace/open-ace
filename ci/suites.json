@@ -264,6 +264,11 @@
           "npm",
           "run",
           "build"
+        ],
+        [
+          "python3",
+          "-c",
+          "import importlib.util as u; s=u.spec_from_file_location('fc','../app/utils/frontend_check.py'); m=u.module_from_spec(s); s.loader.exec_module(m); r=m.check_frontend_build_integrity(strict=True); print('frontend_check against real build:', 'OK' if r.success else 'FAILED'); raise SystemExit(0 if r.success else '\\n'.join(r.errors))"
         ]
       ]
     },

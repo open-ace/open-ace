@@ -495,8 +495,11 @@ def run_tests():
             json={"vscode_id": str(uuid.uuid4()), "machine_id": machine_id_git},
             cookies={"session_token": auth_token},
         )
-        assert r.status_code == 200
-        log_step("通过", "VSCode Stop: 200")
+        # Issue #3376: stop of an unknown vscode_id fails closed (404) instead
+        # of returning 200 — never send unguarded stop commands.
+        assert r.status_code == 404
+        assert r.json().get("error_code") == "vscode_session_not_found"
+        log_step("通过", "VSCode Stop unknown id: 404 (fail-closed)")
 
         # 缺少参数
         r = requests.post(
@@ -517,8 +520,11 @@ def run_tests():
             json={"machine_id": machine_id_git},
             cookies={"session_token": auth_token},
         )
-        assert r.status_code == 200
-        log_step("通过", "VSCode Attach: 200")
+        # Issue #3376: attach to an unknown vscode_id fails closed (404) with
+        # the same semantics as stop and the terminal side.
+        assert r.status_code == 404
+        assert r.json().get("error_code") == "vscode_session_not_found"
+        log_step("通过", "VSCode Attach unknown id: 404 (fail-closed)")
 
         # 缺少 machine_id
         r = requests.post(

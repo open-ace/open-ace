@@ -259,7 +259,7 @@ Verification checklist:
 - [ ] Workspaces can be created and used normally
 - [ ] Existing AI sessions can be restored
 
-If you previously set `"multi_user_mode": true` in config.json, prefer the overlay file (or env vars) and set the config value back to `false`.
+Since v2.1.0 (Issue #3446) the old `multi_user_mode` key is rejected — the server refuses to start and names the replacement. Configure isolation with the `workspace.isolation` block (`{"level": ..., "backend": ...}`) or the `WORKSPACE_ISOLATION_BACKEND` env var; `scripts/convert_workspace_isolation.py` converts existing configs (see [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md)).
 
 ## Troubleshooting
 
@@ -571,7 +571,7 @@ openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 - [ ] 工作区可以正常创建和使用
 - [ ] 已有的 AI 会话可以恢复
 
-若之前在 config.json 中设置过 `"multi_user_mode": true`，建议改用 overlay 文件（或环境变量），并将该配置值改回 `false`。
+自 v2.1.0（Issue #3446）起旧的 `multi_user_mode` 键会被拒绝——服务拒绝启动并指出替代写法。请用 `workspace.isolation` 块（`{"level": ..., "backend": ...}`）或 `WORKSPACE_ISOLATION_BACKEND` 环境变量配置隔离；`scripts/convert_workspace_isolation.py` 可转换既有配置（见 [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md)）。
 
 ## 故障排查
 

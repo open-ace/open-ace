@@ -50,7 +50,7 @@ The 13 variables defined in `.env.example` split into secrets, gates, and plain 
 | `SSO_ALLOWED_REDIRECT_DOMAINS` | Not a secret: SSO redirect allowlist | Required for non-localhost SSO | Changing the list changes where SSO logins may land |
 | `DB_USER`, `DB_NAME` | Database identity | `ace` / `ace` | Not routine rotation; requires re-provisioning |
 | `PORT`, `SERVER_IP`, `WORKSPACE_PORT_RANGE_START/END` | Network addressing | — | Changes URLs/bookmarks; no secret impact |
-| `WORKSPACE_MULTI_USER_MODE` | Runtime mode switch | — | Changes security posture, not secrets |
+| `WORKSPACE_ISOLATION_BACKEND` | Workspace isolation backend switch (Issue #3446; replaces `WORKSPACE_MULTI_USER_MODE`) | — | Changes security posture, not secrets |
 
 ## Key Derivation
 
@@ -375,7 +375,7 @@ Proxy Token 使用 HMAC-SHA256 签名（非 Fernet）进行认证。
 | `SSO_ALLOWED_REDIRECT_DOMAINS` | 非密钥：SSO 重定向白名单 | 非 localhost SSO 必需 | 修改名单即改变 SSO 可跳转范围 |
 | `DB_USER`、`DB_NAME` | 数据库身份 | `ace` / `ace` | 非例行轮转；需重建 |
 | `PORT`、`SERVER_IP`、`WORKSPACE_PORT_RANGE_START/END` | 网络寻址 | — | 改变 URL/书签；与密钥无关 |
-| `WORKSPACE_MULTI_USER_MODE` | 运行模式开关 | — | 改变安全形态，不涉及密钥 |
+| `WORKSPACE_ISOLATION_BACKEND` | 工作区隔离 backend 开关（Issue #3446；取代 `WORKSPACE_MULTI_USER_MODE`） | — | 改变安全形态，不涉及密钥 |
 
 ## 密钥派生
 

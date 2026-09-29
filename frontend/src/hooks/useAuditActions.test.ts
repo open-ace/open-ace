@@ -22,6 +22,7 @@ describe('buildAuditActionMappings', () => {
     expect(mappings.actionToResourceTypes.agent_token_rotate).toEqual([
       'remote_machine',
       'agent_token',
+      'usage_report',
     ]);
   });
 
@@ -32,7 +33,11 @@ describe('buildAuditActionMappings', () => {
     );
 
     expect(mappings.resourceToCategories.session).toContain('auth');
-    expect(mappings.resourceToCategories.user).toEqual(['user_management', 'permission']);
+    expect(mappings.resourceToCategories.user).toEqual([
+      'user_management',
+      'permission',
+      'admin_access',
+    ]);
     expect(mappings.resourceToCategories.remote_machine).toEqual(['agent']);
   });
 });

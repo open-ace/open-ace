@@ -790,6 +790,27 @@ def build_create_request(
     # also stops the server injecting an egress sidecar that could not work.
     if config_mod.egress_enforcement_mode(endpoint) == config_mod.EGRESS_MODE_SIDECAR_FQDN:
         body["networkPolicy"] = build_network_policy(spec, endpoint)
+
+    # Process volumes field (Issue #3417): convert VolumeSpec to OpenSandbox API format
+    if spec.volumes:
+        volumes_list = []
+        for vol in spec.volumes:
+            if vol.kind == "persistent" and vol.pvc_claim_name:
+                pvc_spec: dict[str, Any] = {"claimName": vol.pvc_claim_name}
+                if vol.storage_size:
+                    pvc_spec["storage"] = vol.storage_size
+                if vol.storage_class:
+                    pvc_spec["storageClassName"] = vol.storage_class
+                volumes_list.append(
+                    {
+                        "name": vol.name,
+                        "mountPath": vol.mount_path,
+                        "pvc": pvc_spec,
+                    }
+                )
+        if volumes_list:
+            body["volumes"] = volumes_list
+
     return body
 
 

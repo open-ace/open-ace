@@ -45,7 +45,11 @@ DOC_PATTERNS = (
     "CODE_OF_CONDUCT.md",
     "LICENSE",
 )
-FRONTEND_PATTERNS = ("frontend/**", "static/js/**")
+# app/utils/frontend_check.py rides the frontend lane: the lane's last step
+# runs the checker against the REAL npm-run-build output, so checker/vite
+# drift (the #3394 P0 class) fails the lane instead of crash-looping
+# production boots (#3395 review finding 3).
+FRONTEND_PATTERNS = ("frontend/**", "static/js/**", "app/utils/frontend_check.py")
 POSTGRES_PATTERNS = (
     "app/models/**",
     "app/repositories/**",

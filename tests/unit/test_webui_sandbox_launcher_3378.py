@@ -1,4 +1,4 @@
-"""Issue #3378: SandboxedWebuiLauncher core (create body, restore, renew, destroy).
+"""Issue #3378: OpenSandboxWebuiLauncher core (create body, restore, renew, destroy).
 
 Fake-provider unit tests for the launcher halves of D2/D5: the create body the
 launcher assembles via policy.build_create_request (bootstrap-prefixed
@@ -23,7 +23,9 @@ import pytest
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import parse_backend_config
 from app.modules.workspace.autonomous.sandbox.opensandbox.fake_server import FakeOpenSandboxApi
 from app.services import webui_sandbox as ws
+from app.services import webui_sandbox_opensandbox as wso
 from app.services import workspace_isolation_contract as wic
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -141,9 +143,8 @@ class _StubConfig:
 
     enabled = True
     multi_user_mode = True
-    sandbox_tier = "kata"
+    isolation = iso("opensandbox", tier="kata")
     webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-    required_isolation_level = ""
 
 
 def _launcher(
@@ -152,9 +153,9 @@ def _launcher(
     ttl_minutes: int = 1440,
     backend=None,
     restore_timeout: float = 5.0,
-) -> tuple[ws.SandboxedWebuiLauncher, _FakeProxyService]:
+) -> tuple[wso.OpenSandboxWebuiLauncher, _FakeProxyService]:
     proxy_service = _FakeProxyService(ttl_minutes)
-    launcher = ws.SandboxedWebuiLauncher(
+    launcher = wso.OpenSandboxWebuiLauncher(
         backend_config=backend or _backend(),
         api_factory=lambda endpoint: fake,
         proxy_service_factory=lambda: proxy_service,
@@ -192,14 +193,21 @@ def test_create_body_carries_bootstrap_entrypoint_and_webui_metadata():
     assert "exec tail -f /dev/null" not in script
 
     meta = body["metadata"]
-    assert meta[ws.WEBUI_METADATA_KIND] == "webui"
-    assert meta[ws.WEBUI_METADATA_GENERATION] == ws.current_process_generation()
-    assert meta[ws.WEBUI_METADATA_OWNER] == "7"
+    assert meta[wso.WEBUI_METADATA_KIND] == "webui"
+    assert meta[wso.WEBUI_METADATA_GENERATION] == ws.current_process_generation()
+    assert meta[wso.WEBUI_METADATA_OWNER] == "7"
     assert meta["openace.generation"] == "1"  # workflow-generation key intact
 
     assert body["image"] == {"uri": _WEBUI_IMAGE}
-    # No host volume ever (D2/refusal 3): the body carries none at all.
-    assert "volumes" not in body
+    # Issue #3417: User workspace volume for persistence
+    assert "volumes" in body
+    assert len(body["volumes"]) == 1
+    vol = body["volumes"][0]
+    assert vol["name"] == "user-workspace-7"
+    assert vol["mountPath"] == "/workspace/user-7"  # fallback when no DB
+    assert "pvc" in vol
+    assert vol["pvc"]["claimName"] == "user-7-workspace"
+    assert vol["pvc"]["storage"] == "1Gi"  # default size
 
 
 def test_create_body_env_has_llm_proxy_keys_and_no_github_credentials():
@@ -305,7 +313,7 @@ def test_restore_uploads_extracts_then_touches_marker_in_order():
     result = _launch(launcher, snapshot=snapshot)
 
     assert result.restore_confirmed is True
-    assert fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH] == snapshot
+    assert fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] == snapshot
     commands = [b["command"] for b in fake.command_bodies]
     extract = next(c for c in commands if "tar -xf" in c)
     touch = next(c for c in commands if c.startswith("touch /workspace/.openace-restore-done"))
@@ -325,9 +333,9 @@ def test_first_launch_without_snapshot_uploads_empty_marker_tar():
     result = _launch(launcher, snapshot=None)
 
     assert result.restore_confirmed is True
-    uploaded = fake.uploaded[result.sandbox_id][ws.WEBUI_STATE_TAR_PATH]
+    uploaded = fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH]
     # A VALID empty tar (extraction succeeds, extracts nothing) — not 0 bytes.
-    assert uploaded == ws.empty_state_tar()
+    assert uploaded == wso.empty_state_tar()
     assert len(uploaded) >= 1024
     with tarfile.open(fileobj=__import__("io").BytesIO(uploaded)):
         pass
@@ -371,7 +379,7 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
     snapshot_slot = tmp_path / "webui-11.tar"
     snapshot_slot.write_bytes(_state_tar())
     snapshot_slot.chmod(0o000)
-    launcher = ws.SandboxedWebuiLauncher(
+    launcher = wso.OpenSandboxWebuiLauncher(
         backend_config=_backend(),
         api_factory=lambda endpoint: FakeOpenSandboxApi(),
         proxy_service_factory=lambda: _FakeProxyService(),
@@ -380,15 +388,15 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
         state_root_override=str(tmp_path),
     )
     try:
-        with pytest.raises(ws.SnapshotUnreadableError):
+        with pytest.raises(wso.SnapshotUnreadableError):
             launcher.load_snapshot(11)
 
-        with caplog.at_level("WARNING", logger="app.services.webui_sandbox"):
+        with caplog.at_level("WARNING", logger="app.services.webui_sandbox_opensandbox"):
             result = launcher.launch(
                 user_id=11,
                 callback_url="http://openace.open-ace.svc.cluster.local:8080",
                 snapshot=None,
-                restore_source=ws.RESTORE_SOURCE_DEGRADED,
+                restore_source=wso.RESTORE_SOURCE_DEGRADED,
             )
 
         # The degrade is honest: unconfirmed restore, exports refuse...
@@ -396,7 +404,7 @@ def test_degraded_unreadable_snapshot_start_never_writes_the_cp_record(tmp_path,
         assert launcher.export_snapshot(result.sandbox_id, restore_confirmed=False) is None
         # ...and the CP record that reconcile trusts DOES NOT EXIST.
         assert launcher.restore_confirmed_on_cp(result.sandbox_id) is False
-        record_dir = tmp_path / ws.RESTORE_CONFIRMED_DIRNAME
+        record_dir = tmp_path / wso.RESTORE_CONFIRMED_DIRNAME
         assert not record_dir.exists() or list(record_dir.iterdir()) == []
         # The entrypoint still got its unblock marker (empty-history start).
         commands = [b["command"] for b in launcher._api.command_bodies]  # noqa: SLF001
@@ -566,9 +574,8 @@ def test_contract_snapshot_upgrades_after_gvisor_probe(monkeypatch):
     class _Cfg:
         enabled = True
         multi_user_mode = True
-        sandbox_tier = ""
+        isolation = iso("opensandbox")
         webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-        required_isolation_level = ""
 
     class _StubManager:
         config = _Cfg()
@@ -659,7 +666,7 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
     proxy_service = _FakeProxyService()
 
     def _launcher_for(tier: str):
-        return ws.SandboxedWebuiLauncher(
+        return wso.OpenSandboxWebuiLauncher(
             backend_config=backend,
             tier=tier,
             api_factory=lambda endpoint: fakes[endpoint.tier],
@@ -716,10 +723,9 @@ def test_runtime_memo_is_per_tier_kata_launch_does_not_downgrade_gvisor(monkeypa
         enabled = True
         multi_user_mode = True
         webui_callback_url = "http://openace.open-ace.svc.cluster.local:8080"
-        required_isolation_level = ""
 
         def __init__(self, sandbox_tier: str):
-            self.sandbox_tier = sandbox_tier
+            self.isolation = iso("opensandbox", tier=sandbox_tier)
 
     class _StubManager:
         def __init__(self, sandbox_tier: str):
@@ -839,3 +845,151 @@ def test_token_minting_uses_webui_session_type():
     assert mint["session_type"] == "webui"
     assert mint["session_id"] == "webui:7"
     assert mint["extra_payload"] == {"scope": "local", "tool_name": "qwen-code"}
+
+
+# ── PVC volume boundary conditions (Issue #3417 review) ───────────────
+
+
+def test_pvc_volume_empty_storage_size_uses_default():
+    """Empty storage_size should omit the field, letting OpenSandbox use its
+    default (1Gi in the current implementation)."""
+    from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec, VolumeSpec
+
+    fake = FakeOpenSandboxApi()
+    launcher, _svc = _launcher(fake)
+    _launch(launcher, user_id=7)
+    body = fake.created_bodies[0]
+
+    vol = body["volumes"][0]
+    # Default storage_size from launcher is "1Gi"
+    assert vol["pvc"]["storage"] == "1Gi"
+
+    # If storage_size is empty string, it should be omitted from spec
+    # (but our launcher always provides a default, so this tests that
+    # the policy.py conversion omits empty fields correctly)
+    empty_size_spec = VolumeSpec(
+        name="test-vol",
+        mount_path="/workspace/test",
+        kind="persistent",
+        pvc_claim_name="test-claim",
+        storage_size="",  # empty
+    )
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(empty_size_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # storage field should not be present when storage_size is empty
+    assert "storage" not in result_body["volumes"][0]["pvc"]
+
+
+def test_pvc_volume_empty_storage_class_uses_cluster_default():
+    """Empty storage_class should omit the field, letting Kubernetes use the
+    cluster's default StorageClass."""
+    from app.modules.workspace.autonomous.sandbox.types import VolumeSpec
+
+    fake = FakeOpenSandboxApi()
+    launcher, _svc = _launcher(fake)
+    _launch(launcher, user_id=7)
+    body = fake.created_bodies[0]
+
+    vol = body["volumes"][0]
+    # storage_class is empty in our test config, should not be in spec
+    assert "storageClassName" not in vol["pvc"]
+
+
+def test_ephemeral_volume_kind_skips_pvc_processing():
+    """Non-persistent volume kind should not create a PVC spec."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+    from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec, VolumeSpec
+
+    ephemeral_spec = VolumeSpec(
+        name="ephemeral-vol",
+        mount_path="/workspace/ephemeral",
+        kind="ephemeral",  # not persistent
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(ephemeral_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # Ephemeral volumes should not be included in the volumes list
+    assert "volumes" not in result_body or len(result_body.get("volumes", [])) == 0
+
+
+def test_pvc_volume_empty_claim_name_skips_volume():
+    """Empty pvc_claim_name should skip the volume entirely (validation at
+    policy.py level)."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+    from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec, VolumeSpec
+
+    no_claim_spec = VolumeSpec(
+        name="no-claim-vol",
+        mount_path="/workspace/no-claim",
+        kind="persistent",
+        pvc_claim_name="",  # empty claim name
+        storage_size="5Gi",
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(no_claim_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    # Volume with empty claim name should not be included
+    assert "volumes" not in result_body or len(result_body.get("volumes", [])) == 0
+
+
+def test_pvc_volume_with_all_fields():
+    """Volume with all PVC fields specified should include all in the spec."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox import policy
+    from app.modules.workspace.autonomous.sandbox.types import RuntimeSpec, SandboxSpec, VolumeSpec
+
+    full_spec = VolumeSpec(
+        name="full-pvc-vol",
+        mount_path="/workspace/full",
+        kind="persistent",
+        pvc_claim_name="full-claim",
+        storage_size="10Gi",
+        storage_class="fast-ssd",
+    )
+
+    cfg = _backend()
+    endpoint = cfg.endpoints["kata"]
+    spec = SandboxSpec(
+        task_id="test-task",
+        project_path="/workspace",
+        cli_tool="qwen-code",
+        runtime=RuntimeSpec(image=_AGENT_IMAGE, runtime=endpoint.runtime_class, toolchain=""),
+        volumes=(full_spec,),
+    )
+    result_body = policy.build_create_request(spec, cfg, endpoint, generation=1)
+
+    assert "volumes" in result_body
+    vol = result_body["volumes"][0]
+    assert vol["name"] == "full-pvc-vol"
+    assert vol["mountPath"] == "/workspace/full"
+    assert vol["pvc"]["claimName"] == "full-claim"
+    assert vol["pvc"]["storage"] == "10Gi"
+    assert vol["pvc"]["storageClassName"] == "fast-ssd"

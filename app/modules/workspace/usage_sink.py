@@ -201,8 +201,12 @@ class StatsSink:
         """
         try:
             from app.repositories.daily_stats_repo import DailyStatsRepository
+            from app.utils.helpers import get_days_ago
 
-            DailyStatsRepository().refresh_stats()
+            # Issue #3424: new usage only lands on recent dates; re-aggregating
+            # every date on each piece of evidence scanned all of daily_messages.
+            # Yesterday is included to cover timezone skew around midnight.
+            DailyStatsRepository().refresh_stats(since=get_days_ago(1))
             return True
         except Exception as e:
             logger.debug("StatsSink refresh failed (non-critical): %s", e)

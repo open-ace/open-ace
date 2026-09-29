@@ -24,25 +24,37 @@ class TestRemoveUserFromSharedGroup(unittest.TestCase):
         """Should return True in non-Docker mode."""
         mock_is_docker.return_value = False
 
-        result = remove_user_from_shared_group("testuser")
+        result = remove_user_from_shared_group("testuser", tenant_id=7)
 
         self.assertTrue(result)
 
     @patch("app.utils.workspace.subprocess.run")
     @patch("app.utils.workspace._is_docker_multi_user_mode")
-    def test_successful_removal(self, mock_is_docker, mock_run):
-        """Should return True when user is successfully removed."""
+    def test_successful_removal_from_tenant_group(self, mock_is_docker, mock_run):
+        """Issue #3396: removal targets the TENANT content group, keeping
+        the global namespace-creation membership intact."""
+        mock_is_docker.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        result = remove_user_from_shared_group("testuser", tenant_id=7)
+
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["gpasswd", "-d", "testuser", "openace-shared-7"],
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("app.utils.workspace.subprocess.run")
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    def test_null_tenant_targets_pseudo_group(self, mock_is_docker, mock_run):
         mock_is_docker.return_value = True
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         result = remove_user_from_shared_group("testuser")
 
         self.assertTrue(result)
-        mock_run.assert_called_once_with(
-            ["gpasswd", "-d", "testuser", SHARED_GROUP_NAME],
-            capture_output=True,
-            text=True,
-        )
+        self.assertEqual(mock_run.call_args[0][0][3], "openace-shared-0")
 
     @patch("app.utils.workspace.subprocess.run")
     @patch("app.utils.workspace._is_docker_multi_user_mode")
@@ -110,6 +122,28 @@ class TestGetUserProjectActiveSessions(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
+    @patch("app.repositories.database.get_db_connection")
+    def test_reads_real_dict_row_shape(self, mock_get_conn):
+        """#3403: PG connections wrap cursors with RealDictCursor — the old
+        positional result[0] raised KeyError there and the except swallowed
+        it into a permanent '0 sessions'. The dict shape must read by the
+        SELECT's column alias."""
+
+        class RealDictRow(dict):
+            """Stands in for psycopg2.extras.RealDictRow (a dict subclass)."""
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = RealDictRow(count=7)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_get_conn.return_value = mock_conn
+
+        result = get_user_project_active_sessions(1, 100)
+
+        self.assertEqual(result, 7)
+
 
 class TestAddUserToSharedGroup(unittest.TestCase):
     """Tests for add_user_to_shared_group function (existing)."""
@@ -119,25 +153,23 @@ class TestAddUserToSharedGroup(unittest.TestCase):
         """Should return True in non-Docker mode."""
         mock_is_docker.return_value = False
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         self.assertTrue(result)
 
     @patch("app.utils.workspace.subprocess.run")
     @patch("app.utils.workspace._is_docker_multi_user_mode")
     def test_successful_addition(self, mock_is_docker, mock_run):
-        """Should return True when user is successfully added."""
+        """Should return True when user is successfully added to both groups."""
         mock_is_docker.return_value = True
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         self.assertTrue(result)
-        mock_run.assert_called_once_with(
-            ["usermod", "-aG", SHARED_GROUP_NAME, "testuser"],
-            capture_output=True,
-            text=True,
-        )
+        usermod_cmds = [c.args[0] for c in mock_run.call_args_list if c.args[0][0] == "usermod"]
+        self.assertIn(["usermod", "-aG", SHARED_GROUP_NAME, "testuser"], usermod_cmds)
+        self.assertIn(["usermod", "-aG", "openace-shared-7", "testuser"], usermod_cmds)
 
     @patch("app.utils.workspace.subprocess.run")
     @patch("app.utils.workspace._is_docker_multi_user_mode")
@@ -146,7 +178,7 @@ class TestAddUserToSharedGroup(unittest.TestCase):
         mock_is_docker.return_value = True
         mock_run.return_value = MagicMock(returncode=1, stderr="Error message")
 
-        result = add_user_to_shared_group("testuser")
+        result = add_user_to_shared_group("testuser", tenant_id=7)
 
         self.assertFalse(result)
 

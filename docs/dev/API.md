@@ -90,7 +90,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Single sign-on | `/api/sso` | 20 |
 | Integration and notification management | `/api/management` | 18 |
 | User and organization administration | `/api/admin` | 18 |
-| Tenants | `/api/tenants` | 18 |
+| Tenants | `/api/tenants` | 19 |
 | Compliance | `/api/compliance` | 17 |
 | Tool accounts | `/api/tool-accounts` | 14 |
 | Analysis | `/api/analysis` | 16 |
@@ -103,7 +103,8 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Return on investment | `/api/roi` | 7 |
 | Request statistics | `/api/request` | 6 |
 | Authentication and account | `/api/auth` | 6 |
-| Other endpoints | — | 90 |
+| External identity integration | `/api/integrations/external` | 2 |
+| Other endpoints | — | 87 |
 | Operational endpoints | — | 10 |
 | **Total** | | **426** |
 
@@ -349,7 +350,8 @@ Multi-tenant lifecycle and settings: create/update/suspend tenants, quotas, bill
 | POST | `/api/tenants/<int:tenant_id>/reset-period` | platform_admin_required | Reset billing period for a tenant (platform admin only). |
 | GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | same_tenant_or_platform_admin | Get tenant sensitive keywords with pagination. |
 | POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | same_tenant_or_platform_admin | Create a tenant sensitive keyword. |
-| PUT/DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | Update / delete one tenant sensitive keyword. |
+| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | Update one tenant sensitive keyword. |
+| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | Delete one tenant sensitive keyword. |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | same_tenant_or_platform_admin | Update tenant settings (same tenant or platform admin). |
 | GET | `/api/tenants/<int:tenant_id>/stats` | same_tenant_or_platform_admin | Get tenant statistics (same tenant or platform admin). |
 | POST | `/api/tenants/<int:tenant_id>/suspend` | platform_admin_required | Suspend a tenant (platform admin only). |
@@ -566,6 +568,15 @@ Session login/logout, password change and current-user profile.
 | GET | `/api/auth/me` | auth_required | Get current user info (alias for /auth/profile). |
 | GET | `/api/auth/profile` | auth_required | Get current user profile. |
 
+### External identity integration (`/api/integrations/external`)
+
+Default-off bridge for trusted external identity issuers. Both endpoints authenticate each request by its HMAC-SHA256 signature (`X-ACE-Issuer`/`X-ACE-Time`/`X-ACE-Nonce`/`X-ACE-Signature` headers, database-backed replay protection) — no cookie, bearer token, browser origin or query identity is ever accepted, hence the `-` Auth column. The policy file (`OPENACE_EXTERNAL_IDENTITY_POLICY_FILE`) gates the whole family: without it both endpoints return `404`.
+
+| Method | Path | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/integrations/external/capabilities` | - | Read-only probe: verifies the signed request and reports the mapped issuer identity plus whether the token exchange is available (providers and models configured and `OPENACE_EXTERNAL_TOKEN_ENABLED=1`); consumes nothing. |
+| POST | `/api/integrations/external/token` | - | Exchange a signed request for a short-lived scoped proxy token for the mapped user (`openace-external-v1`); idempotent per external identity, audited, returns the token, expiry and the fixed LLM proxy path. Returns `404` unless the policy file and `OPENACE_EXTERNAL_TOKEN_ENABLED=1` are set. |
+
 ### Other endpoints
 
 Smaller families without a dedicated section: analytics and insights, audit trails, content governance and policy, data fetch/upload pipelines, project categories, permission tasks, settings and schedulers, unmapped accounts, usage dashboards, API keys, user avatars and branding.
@@ -604,7 +615,6 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/filter-rules` | admin_required | Get content filter rules with pagination and filtering. |
 | POST | `/api/filter-rules` | platform_admin_required | Create a new content filter rule (idempotent). |
 | DELETE | `/api/filter-rules/<int:rule_id>` | platform_admin_required | Delete a content filter rule. |
-| GET | `/api/filter-rules/<int:rule_id>` | admin_required | Get a specific filter rule. |
 | PUT | `/api/filter-rules/<int:rule_id>` | platform_admin_required | Update a content filter rule. |
 | POST | `/api/frontend-errors` | public_endpoint | Receive frontend error reports (public endpoint, no auth required). |
 | GET | `/api/governance/audit-logs` | admin_required | Get audit logs with filters (full path alias for /audit/logs). |
@@ -640,8 +650,6 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/schedulers/quota-enforcement` | - | Get quota enforcement scheduler status. |
 | GET | `/api/security-settings` | admin_required | Get security settings. |
 | PUT | `/api/security-settings` | platform_admin_required | Update security settings. |
-| GET | `/api/security-settings/ssrf-status` | admin_required | Get SSRF protection status and configuration. |
-| POST | `/api/security-settings/ssrf/reset` | platform_admin_required | Reset SSRF configuration to default. |
 | GET | `/api/security-settings/upload-auth-status` | admin_required | Get upload authentication status. |
 | GET | `/api/senders` | - | Get list of all senders (cached for 5 minutes). |
 | GET | `/api/settings` | - | Get all system settings. |
@@ -778,7 +786,7 @@ SPA 路由位于应用根路径。
 | 单点登录 | `/api/sso` | 20 |
 | 集成与通知管理 | `/api/management` | 18 |
 | 用户与组织管理 | `/api/admin` | 18 |
-| 租户 | `/api/tenants` | 18 |
+| 租户 | `/api/tenants` | 19 |
 | 合规 | `/api/compliance` | 17 |
 | 工具账号 | `/api/tool-accounts` | 14 |
 | 分析 | `/api/analysis` | 16 |
@@ -791,7 +799,8 @@ SPA 路由位于应用根路径。
 | 投入产出 | `/api/roi` | 7 |
 | 请求统计 | `/api/request` | 6 |
 | 认证与账号 | `/api/auth` | 6 |
-| 其他端点 | — | 90 |
+| 外部身份集成 | `/api/integrations/external` | 2 |
+| 其他端点 | — | 87 |
 | 运维端点 | — | 10 |
 | **合计** | | **426** |
 
@@ -1037,7 +1046,8 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | POST | `/api/tenants/<int:tenant_id>/reset-period` | platform_admin_required | 重置租户计费周期（仅平台管理员）。 |
 | GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | same_tenant_or_platform_admin | 分页获取租户敏感词。 |
 | POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | same_tenant_or_platform_admin | 新增租户敏感词。 |
-| PUT/DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | 更新 / 删除一条租户敏感词。 |
+| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | 更新一条租户敏感词。 |
+| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | same_tenant_or_platform_admin | 删除一条租户敏感词。 |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | same_tenant_or_platform_admin | 更新租户设置（同租户或平台管理员）。 |
 | GET | `/api/tenants/<int:tenant_id>/stats` | same_tenant_or_platform_admin | 获取租户统计（同租户或平台管理员）。 |
 | POST | `/api/tenants/<int:tenant_id>/suspend` | platform_admin_required | 暂停租户（仅平台管理员）。 |
@@ -1254,6 +1264,15 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/auth/me` | auth_required | 获取当前用户信息（/auth/profile 的别名）。 |
 | GET | `/api/auth/profile` | auth_required | 获取当前用户资料。 |
 
+### 外部身份集成（`/api/integrations/external`）
+
+默认关闭的可信外部身份发行方接入桥。两个端点都按每请求的 HMAC-SHA256 签名认证（`X-ACE-Issuer`/`X-ACE-Time`/`X-ACE-Nonce`/`X-ACE-Signature` 请求头，数据库防重放）——不接受任何 Cookie、Bearer 令牌、浏览器 Origin 或查询参数身份，因此 Auth 列为 `-`。策略文件（`OPENACE_EXTERNAL_IDENTITY_POLICY_FILE`）门控整个族：未配置时两个端点均返回 `404`。
+
+| Method | Path | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/integrations/external/capabilities` | - | 只读探测：验证签名请求，返回映射的发行方身份，以及令牌交换是否可用（已配置 providers 与 models 且 `OPENACE_EXTERNAL_TOKEN_ENABLED=1`）；不消耗任何状态。 |
+| POST | `/api/integrations/external/token` | - | 将签名请求交换为映射用户的短期限定范围代理令牌（`openace-external-v1`）；按外部身份幂等、写入审计，返回令牌、过期时间与固定的 LLM 代理路径。未配置策略文件或 `OPENACE_EXTERNAL_TOKEN_ENABLED=1` 时返回 `404`。 |
+
 ### 其他端点
 
 未单列的小族：分析与洞察、审计、内容治理与策略、数据拉取/上传管道、项目分类、权限任务、设置与调度器、未映射账号、用量看板、API Key、用户头像与品牌配置。
@@ -1292,7 +1311,6 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/filter-rules` | admin_required | 分页且带过滤地获取内容过滤规则。 |
 | POST | `/api/filter-rules` | platform_admin_required | 创建内容过滤规则（幂等）。 |
 | DELETE | `/api/filter-rules/<int:rule_id>` | platform_admin_required | 删除内容过滤规则。 |
-| GET | `/api/filter-rules/<int:rule_id>` | admin_required | 获取单条过滤规则。 |
 | PUT | `/api/filter-rules/<int:rule_id>` | platform_admin_required | 更新内容过滤规则。 |
 | POST | `/api/frontend-errors` | public_endpoint | 接收前端错误上报（公共端点，无需认证）。 |
 | GET | `/api/governance/audit-logs` | admin_required | 按条件筛选获取审计日志（/audit/logs 的完整路径别名）。 |
@@ -1328,8 +1346,6 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/schedulers/quota-enforcement` | - | 获取配额执行调度器状态。 |
 | GET | `/api/security-settings` | admin_required | 获取安全设置。 |
 | PUT | `/api/security-settings` | platform_admin_required | 更新安全设置。 |
-| GET | `/api/security-settings/ssrf-status` | admin_required | 获取 SSRF 防护状态与配置。 |
-| POST | `/api/security-settings/ssrf/reset` | platform_admin_required | 将 SSRF 配置重置为默认值。 |
 | GET | `/api/security-settings/upload-auth-status` | admin_required | 获取上传认证状态。 |
 | GET | `/api/senders` | - | 获取全部发送者列表（缓存 5 分钟）。 |
 | GET | `/api/settings` | - | 获取全部系统设置。 |

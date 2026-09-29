@@ -13,9 +13,13 @@ import { apiClient } from '@/api/client';
 import type { AuditActionItem, AuditCategory, AuditActionsResponse } from '@/types';
 
 /**
- * Fallback audit action options (31 types matching backend AuditAction enum).
- * Used when API is unavailable or returns an error.
- * MUST be kept in sync with backend AuditAction enum in audit_logger.py.
+ * Fallback audit action options used when API is unavailable or returns an
+ * error. Mirrors the backend AuditAction enum (audit_logger.py) in full —
+ * every value, label, category, and i18n_key matches what
+ * GET /api/audit-actions derives from get_action_categories().
+ *
+ * Kept in sync with the backend enum by tests/unit/test_audit_action_fallback_sync.py,
+ * which fails whenever either side drifts (missing or extra action values).
  */
 export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
   // Authentication
@@ -63,10 +67,22 @@ export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
     i18n_key: 'actionUserDelete',
   },
   {
+    value: 'user_restore',
+    label: 'User Restore',
+    category: 'user_management',
+    i18n_key: 'actionUserRestore',
+  },
+  {
     value: 'user_password_change',
     label: 'Password Change',
     category: 'user_management',
     i18n_key: 'actionUserPasswordChange',
+  },
+  {
+    value: 'user_password_change_failed',
+    label: 'Password Change Failed',
+    category: 'user_management',
+    i18n_key: 'actionUserPasswordChangeFailed',
   },
   {
     value: 'user_role_change',
@@ -93,6 +109,36 @@ export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
     category: 'permission',
     i18n_key: 'actionPermissionRevoke',
   },
+  {
+    value: 'shared_project_permission_setup_start',
+    label: 'Shared Project Permission Setup Start',
+    category: 'permission',
+    i18n_key: 'actionSharedProjectPermissionSetupStart',
+  },
+  {
+    value: 'shared_project_permission_setup_complete',
+    label: 'Shared Project Permission Setup Complete',
+    category: 'permission',
+    i18n_key: 'actionSharedProjectPermissionSetupComplete',
+  },
+  {
+    value: 'project_user_add',
+    label: 'Project User Add',
+    category: 'permission',
+    i18n_key: 'actionProjectUserAdd',
+  },
+  {
+    value: 'project_user_remove',
+    label: 'Project User Remove',
+    category: 'permission',
+    i18n_key: 'actionProjectUserRemove',
+  },
+  {
+    value: 'project_user_batch_update',
+    label: 'Project User Batch Update',
+    category: 'permission',
+    i18n_key: 'actionProjectUserBatchUpdate',
+  },
   // Quota
   {
     value: 'quota_update',
@@ -111,6 +157,13 @@ export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
     label: 'Quota Exceeded',
     category: 'quota',
     i18n_key: 'actionQuotaExceeded',
+  },
+  // Tenant Billing
+  {
+    value: 'tenant_billing_period_reset',
+    label: 'Tenant Billing Period Reset',
+    category: 'tenant_billing',
+    i18n_key: 'actionTenantBillingPeriodReset',
   },
   // Data
   {
@@ -212,6 +265,218 @@ export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
     category: 'agent',
     i18n_key: 'actionAgentReconnect',
   },
+  {
+    value: 'agent_token_rotate_confirmed',
+    label: 'Token Rotate Confirmed',
+    category: 'agent',
+    i18n_key: 'actionAgentTokenRotateConfirmed',
+  },
+  {
+    value: 'agent_token_force_revoked',
+    label: 'Token Force Revoked',
+    category: 'agent',
+    i18n_key: 'actionAgentTokenForceRevoked',
+  },
+  {
+    value: 'usage_report_accepted',
+    label: 'Usage Report Accepted',
+    category: 'agent',
+    i18n_key: 'actionUsageReportAccepted',
+  },
+  {
+    value: 'usage_report_auth_failure',
+    label: 'Usage Report Auth Failure',
+    category: 'agent',
+    i18n_key: 'actionUsageReportAuthFailure',
+  },
+  {
+    value: 'usage_report_binding_mismatch',
+    label: 'Usage Report Binding Mismatch',
+    category: 'agent',
+    i18n_key: 'actionUsageReportBindingMismatch',
+  },
+  // SSRF Protection
+  {
+    value: 'llm_proxy_url_blocked',
+    label: 'LLM Proxy URL Blocked',
+    category: 'ssrf_protection',
+    i18n_key: 'actionLLMProxyURLBlocked',
+  },
+  {
+    value: 'allowlist_entry_invalid',
+    label: 'Allowlist Entry Invalid',
+    category: 'ssrf_protection',
+    i18n_key: 'actionAllowlistEntryInvalid',
+  },
+  {
+    value: 'ip_resolved_mismatch',
+    label: 'IP Resolved Mismatch',
+    category: 'ssrf_protection',
+    i18n_key: 'actionIPResolvedMismatch',
+  },
+  {
+    value: 'ssrf_config_reset',
+    label: 'SSRF Config Reset',
+    category: 'ssrf_protection',
+    i18n_key: 'actionSSRFConfigReset',
+  },
+  {
+    value: 'proxy_key_echo_blocked',
+    label: 'Proxy Key Echo Blocked',
+    category: 'ssrf_protection',
+    i18n_key: 'actionProxyKeyEchoBlocked',
+  },
+  // External Identity
+  {
+    value: 'external_token_issued',
+    label: 'External Token Issued',
+    category: 'external_identity',
+    i18n_key: 'actionExternalTokenIssued',
+  },
+  // URL Token Security
+  {
+    value: 'query_session_token_rejected',
+    label: 'Query Session Token Rejected',
+    category: 'url_token_security',
+    i18n_key: 'actionQuerySessionTokenRejected',
+  },
+  {
+    value: 'webui_token_in_query_used',
+    label: 'WebUI Token in Query Used',
+    category: 'url_token_security',
+    i18n_key: 'actionWebuiTokenInQueryUsed',
+  },
+  {
+    value: 'proxy_token_in_query_used',
+    label: 'Proxy Token in Query Used',
+    category: 'url_token_security',
+    i18n_key: 'actionProxyTokenInQueryUsed',
+  },
+  {
+    value: 'browser_token_in_query_used',
+    label: 'Browser Token in Query Used',
+    category: 'url_token_security',
+    i18n_key: 'actionBrowserTokenInQueryUsed',
+  },
+  {
+    value: 'url_token_path_violation',
+    label: 'URL Token Path Violation',
+    category: 'url_token_security',
+    i18n_key: 'actionUrlTokenPathViolation',
+  },
+  {
+    value: 'legacy_webui_token_used',
+    label: 'Legacy WebUI Token Used',
+    category: 'url_token_security',
+    i18n_key: 'actionLegacyWebuiTokenUsed',
+  },
+  {
+    value: 'token_leak_suspected',
+    label: 'Token Leak Suspected',
+    category: 'url_token_security',
+    i18n_key: 'actionTokenLeakSuspected',
+  },
+  // Admin Access
+  {
+    value: 'admin_cross_tenant_access',
+    label: 'Admin Cross-Tenant Access',
+    category: 'admin_access',
+    i18n_key: 'actionAdminCrossTenantAccess',
+  },
+  {
+    value: 'admin_global_session_list',
+    label: 'Admin Global Session List',
+    category: 'admin_access',
+    i18n_key: 'actionAdminGlobalSessionList',
+  },
+  // SMTP Configuration
+  {
+    value: 'smtp_config_save',
+    label: 'SMTP Config Save',
+    category: 'smtp_config',
+    i18n_key: 'actionSmtpConfigSave',
+  },
+  {
+    value: 'smtp_config_delete',
+    label: 'SMTP Config Delete',
+    category: 'smtp_config',
+    i18n_key: 'actionSmtpConfigDelete',
+  },
+  // Feishu Configuration
+  {
+    value: 'feishu_config_save',
+    label: 'Feishu Config Save',
+    category: 'feishu_config',
+    i18n_key: 'actionFeishuConfigSave',
+  },
+  {
+    value: 'feishu_config_delete',
+    label: 'Feishu Config Delete',
+    category: 'feishu_config',
+    i18n_key: 'actionFeishuConfigDelete',
+  },
+  // Notification Integration
+  {
+    value: 'webhook_config_save',
+    label: 'Webhook Config Save',
+    category: 'notification_integration',
+    i18n_key: 'actionWebhookConfigSave',
+  },
+  {
+    value: 'webhook_config_delete',
+    label: 'Webhook Config Delete',
+    category: 'notification_integration',
+    i18n_key: 'actionWebhookConfigDelete',
+  },
+  {
+    value: 'dingtalk_config_save',
+    label: 'DingTalk Config Save',
+    category: 'notification_integration',
+    i18n_key: 'actionDingtalkConfigSave',
+  },
+  {
+    value: 'dingtalk_config_delete',
+    label: 'DingTalk Config Delete',
+    category: 'notification_integration',
+    i18n_key: 'actionDingtalkConfigDelete',
+  },
+  // Tool Account Mapping
+  {
+    value: 'tool_account_mapping_create',
+    label: 'Tool Account Mapping Create',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingCreate',
+  },
+  {
+    value: 'tool_account_mapping_update',
+    label: 'Tool Account Mapping Update',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingUpdate',
+  },
+  {
+    value: 'tool_account_mapping_delete',
+    label: 'Tool Account Mapping Delete',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingDelete',
+  },
+  {
+    value: 'tool_account_mapping_batch',
+    label: 'Tool Account Mapping Batch',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingBatch',
+  },
+  {
+    value: 'tool_account_mapping_verify',
+    label: 'Tool Account Mapping Verify',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingVerify',
+  },
+  {
+    value: 'tool_account_mapping_verify_batch',
+    label: 'Tool Account Mapping Verify Batch',
+    category: 'tool_account_mapping',
+    i18n_key: 'actionToolAccountMappingVerifyBatch',
+  },
 ];
 
 export const AUDIT_CATEGORIES_FALLBACK: AuditCategory[] = [
@@ -226,13 +491,14 @@ export const AUDIT_CATEGORIES_FALLBACK: AuditCategory[] = [
     key: 'permission',
     label: 'Permission',
     i18n_key: 'categoryPermission',
-    resource_types: ['user'],
+    resource_types: ['user', 'project'],
   },
+  { key: 'quota', label: 'Quota', i18n_key: 'categoryQuota', resource_types: ['quota_alert'] },
   {
-    key: 'quota',
-    label: 'Quota',
-    i18n_key: 'categoryQuota',
-    resource_types: ['quota_alert'],
+    key: 'tenant_billing',
+    label: 'Tenant Billing',
+    i18n_key: 'categoryTenantBilling',
+    resource_types: ['tenant'],
   },
   {
     key: 'data',
@@ -244,19 +510,68 @@ export const AUDIT_CATEGORIES_FALLBACK: AuditCategory[] = [
     key: 'system',
     label: 'System',
     i18n_key: 'categorySystem',
-    resource_types: ['content_filter', 'filter_rule', 'security_settings', 'ai_agent_settings'],
+    resource_types: [
+      'content_filter',
+      'filter_rule',
+      'security_settings',
+      'ai_agent_settings',
+      'tenant_settings',
+    ],
   },
-  {
-    key: 'content',
-    label: 'Content',
-    i18n_key: 'categoryContent',
-    resource_types: ['content'],
-  },
+  { key: 'content', label: 'Content', i18n_key: 'categoryContent', resource_types: ['content'] },
   {
     key: 'agent',
     label: 'Agent',
     i18n_key: 'categoryAgent',
-    resource_types: ['remote_machine', 'agent_token'],
+    resource_types: ['remote_machine', 'agent_token', 'usage_report'],
+  },
+  {
+    key: 'ssrf_protection',
+    label: 'SSRF Protection',
+    i18n_key: 'categorySSRFProtection',
+    resource_types: ['llm_proxy', 'allowlist'],
+  },
+  {
+    key: 'external_identity',
+    label: 'External Identity',
+    i18n_key: 'categoryExternalIdentity',
+    resource_types: ['external_identity'],
+  },
+  {
+    key: 'url_token_security',
+    label: 'URL Token Security',
+    i18n_key: 'categoryUrlTokenSecurity',
+    resource_types: ['url_token', 'session'],
+  },
+  {
+    key: 'admin_access',
+    label: 'Admin Access',
+    i18n_key: 'categoryAdminAccess',
+    resource_types: ['session', 'user'],
+  },
+  {
+    key: 'smtp_config',
+    label: 'SMTP Configuration',
+    i18n_key: 'categorySmtpConfig',
+    resource_types: ['smtp_config'],
+  },
+  {
+    key: 'feishu_config',
+    label: 'Feishu Configuration',
+    i18n_key: 'categoryFeishuConfig',
+    resource_types: ['feishu_config'],
+  },
+  {
+    key: 'notification_integration',
+    label: 'Notification Integration',
+    i18n_key: 'categoryNotificationIntegration',
+    resource_types: ['webhook_config', 'dingtalk_config'],
+  },
+  {
+    key: 'tool_account_mapping',
+    label: 'Tool Account Mapping',
+    i18n_key: 'categoryToolAccountMapping',
+    resource_types: ['tool_account_mapping'],
   },
 ];
 

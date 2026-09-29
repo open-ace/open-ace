@@ -94,7 +94,7 @@ Recommended configuration:
 - Monitor Redis health and circuit breaker state
 - Use `preStop` hook to allow active connections to drain
 
-**Multi-user workspace note:** The Docker image itself defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive, and the default Kubernetes manifest reinforces this with `runAsNonRoot: true` / `runAsUser: 1000`. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root (`runAsUser: 0`) **and** sets `OPENACE_ALLOW_ROOT_MULTI_USER=1`; the entrypoint fail-fasts without both, and you should document that exception in your cluster change process.
+**Multi-user workspace note:** The Docker image itself defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive, and the default Kubernetes manifest reinforces this with `runAsNonRoot: true` / `runAsUser: 1000`. If you use the `plain` isolation backend (`workspace.isolation`) and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root (`runAsUser: 0`) **and** sets `OPENACE_ALLOW_ROOT_MULTI_USER=1`; the entrypoint fail-fasts without both, and you should document that exception in your cluster change process.
 
 ### Service & Ingress
 
@@ -354,7 +354,7 @@ k8s/
 - 监控 Redis 健康状态和熔断器状态
 - 使用 `preStop` hook 允许活跃连接排空
 
-**多用户工作区说明：** Docker 镜像本身通过 `USER 1000` 指令默认以非 root 用户 `open-ace`（uid 1000）运行，默认 Kubernetes 清单也通过 `runAsNonRoot: true` / `runAsUser: 1000` 予以加强。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行（`runAsUser: 0`）**并** 设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`；入口脚本在缺少两者之一时会直接报错退出，并请在集群变更流程中记录该例外。
+**多用户工作区说明：** Docker 镜像本身通过 `USER 1000` 指令默认以非 root 用户 `open-ace`（uid 1000）运行，默认 Kubernetes 清单也通过 `runAsNonRoot: true` / `runAsUser: 1000` 予以加强。如果使用 `plain` 隔离 backend（`workspace.isolation`）且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行（`runAsUser: 0`）**并** 设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`；入口脚本在缺少两者之一时会直接报错退出，并请在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 

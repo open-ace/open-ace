@@ -53,7 +53,8 @@ Rotation impact describes what happens when you change the value on an existing 
 
 | Variable | Default | Purpose | Rotation impact | Source |
 |----------|---------|---------|-----------------|--------|
-| `WORKSPACE_MULTI_USER_MODE` | `false` | `true` enables multi-user workspace mode (per-user system accounts + WebUI instances, container runs as root). When set manually, `OPENACE_ALLOW_ROOT_MULTI_USER=1` and `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace` must be set too (Issue #2242) | Toggling changes the runtime security posture; see [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) | `.env.example`, `docker-compose.yml` |
+| `WORKSPACE_ISOLATION_BACKEND` | `shared` | Workspace isolation backend (Issue #3446, v2.1.0; replaces `WORKSPACE_MULTI_USER_MODE` / `WORKSPACE_REQUIRED_ISOLATION_LEVEL`): `shared` = one shared WebUI, `plain` = one OS account per user (needs the root multi-user overlay with `OPENACE_ALLOW_ROOT_MULTI_USER=1` and `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`), `opensandbox` = per-user pods on Kubernetes. Docker installs accept only these three values; the config.json counterpart is `workspace.isolation` (see [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md) and [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md)) | Changes the runtime security posture; takes effect after restart | `.env.example`, `docker-compose.yml`, `docker-entrypoint.sh` |
+| `WORKSPACE_MULTI_USER_MODE` | `false` | Superseded in v2.1.0 (Issue #3446) by `WORKSPACE_ISOLATION_BACKEND` — use `WORKSPACE_ISOLATION_BACKEND=plain` for the old `true`. Historically: `true` enabled multi-user workspace mode (per-user system accounts + WebUI instances, container runs as root; with `OPENACE_ALLOW_ROOT_MULTI_USER=1` and `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`, Issue #2242) | Setting it (or `WORKSPACE_REQUIRED_ISOLATION_LEVEL`) now makes `docker-entrypoint.sh` refuse to start, naming the replacement | pre-v2.1.0 `.env.example` / `docker-compose.yml`; rejected by `docker-entrypoint.sh` |
 
 ## Image and Compose Internals (docker-compose.yml)
 
@@ -61,7 +62,7 @@ Declared inline by the Compose files; override in `.env` when needed.
 
 | Variable | Default | Purpose | Rotation impact | Source |
 |----------|---------|---------|-----------------|--------|
-| `IMAGE_NAME` | `openace/open-ace:latest` | Application image for the `open-ace` and `scheduler` services | Pinning a different tag is the standard upgrade/rollback lever (see [UPGRADING.md](UPGRADING.md)) | `docker-compose.yml` |
+| `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` | Application image for the `open-ace` and `scheduler` services | Pinning a different tag is the standard upgrade/rollback lever (see [UPGRADING.md](UPGRADING.md)) | `docker-compose.yml` |
 | `BASE_REGISTRY` | `docker.io` | Base-image registry override (e.g. `docker.m.daocloud.io` for mainland China); affects the build stage and the PostgreSQL image reference | Rebuild/re-pull required | `docker-compose.yml` |
 | `DATABASE_URL` | constructed | `postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}` — assembled by Compose from the `DB_*` variables | Follows `DB_*` rotation | `docker-compose.yml` |
 | `WORKSPACE_BASE_DIR` | `/workspace` (Compose) | Root directory for user projects; supports comma-separated multiple directories. Bare-metal root runs must set it explicitly (`/root` is rejected by the blacklist) | Moving it orphans existing project directories | `docker-compose.yml`, `app/utils/workspace.py` |
@@ -164,7 +165,8 @@ For the single-user development path, missing secrets are not an error: `docker-
 
 | 变量 | 默认值 | 作用 | 轮转影响 | 出处 |
 |------|--------|------|----------|------|
-| `WORKSPACE_MULTI_USER_MODE` | `false` | `true` 启用多用户工作区模式（每用户系统账号 + WebUI 实例，容器以 root 运行）。手动设置时必须同时设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1` 与 `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`（Issue #2242） | 切换改变运行时安全形态；见 [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) | `.env.example`、`docker-compose.yml` |
+| `WORKSPACE_ISOLATION_BACKEND` | `shared` | 工作区隔离 backend（Issue #3446，v2.1.0；取代 `WORKSPACE_MULTI_USER_MODE` / `WORKSPACE_REQUIRED_ISOLATION_LEVEL`）：`shared` = 单个共享 WebUI，`plain` = 每用户一个 OS 账户（需 root 多用户 overlay，且需 `OPENACE_ALLOW_ROOT_MULTI_USER=1` 与 `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`），`opensandbox` = Kubernetes 上每用户一个 pod。Docker 安装只接受这三个取值；config.json 侧对应 `workspace.isolation`（见 [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md) 与 [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md)） | 切换改变运行时安全形态；重启生效 | `.env.example`、`docker-compose.yml`、`docker-entrypoint.sh` |
+| `WORKSPACE_MULTI_USER_MODE` | `false` | v2.1.0（Issue #3446）已被 `WORKSPACE_ISOLATION_BACKEND` 取代——原来的 `true` 对应 `WORKSPACE_ISOLATION_BACKEND=plain`。历史行为：`true` 启用多用户工作区模式（每用户系统账号 + WebUI 实例，容器以 root 运行；需同时设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1` 与 `OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`，Issue #2242） | 现在设置它（或 `WORKSPACE_REQUIRED_ISOLATION_LEVEL`）会使 `docker-entrypoint.sh` 直接拒绝启动并给出替代写法 | v2.1.0 之前的 `.env.example` / `docker-compose.yml`；由 `docker-entrypoint.sh` 拒绝 |
 
 ## 镜像与 Compose 内部变量（docker-compose.yml）
 
@@ -172,7 +174,7 @@ For the single-user development path, missing secrets are not an error: `docker-
 
 | 变量 | 默认值 | 作用 | 轮转影响 | 出处 |
 |------|--------|------|----------|------|
-| `IMAGE_NAME` | `openace/open-ace:latest` | `open-ace` 与 `scheduler` 服务使用的应用镜像 | 固定不同 tag 是标准的升级/回滚手段（见 [UPGRADING.md](UPGRADING.md)） | `docker-compose.yml` |
+| `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` | `open-ace` 与 `scheduler` 服务使用的应用镜像 | 固定不同 tag 是标准的升级/回滚手段（见 [UPGRADING.md](UPGRADING.md)） | `docker-compose.yml` |
 | `BASE_REGISTRY` | `docker.io` | 基础镜像仓库覆盖（如国内 `docker.m.daocloud.io`）；影响构建阶段与 PostgreSQL 镜像引用 | 需重新构建/拉取 | `docker-compose.yml` |
 | `DATABASE_URL` | 拼接生成 | `postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}`——由 Compose 从 `DB_*` 变量拼装 | 跟随 `DB_*` 轮转 | `docker-compose.yml` |
 | `WORKSPACE_BASE_DIR` | `/workspace`（Compose） | 用户项目根目录；支持逗号分隔多目录。裸机以 root 运行时必须显式设置（`/root` 在黑名单中会被拒绝） | 移动后既有项目目录将脱离管理 | `docker-compose.yml`、`app/utils/workspace.py` |

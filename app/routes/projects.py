@@ -40,8 +40,10 @@ from app.utils.request_context import get_current_tenant_id
 from app.utils.validators import validate_project_name
 from app.utils.workspace import (
     _is_docker_multi_user_mode,
+    ensure_shared_namespace_root,
     estimate_file_count_fast,
     get_workspace_base_dirs,
+    revoke_shared_project_access,
     setup_permissions_with_depth_limit,
 )
 
@@ -185,6 +187,12 @@ def api_create_project():
     system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    from app.utils.isolation_level import get_isolation_level_from_webui, get_webui_instance
+
+    isolation_level = get_isolation_level_from_webui(user_id)
+    sandbox_dir_created: bool | None = None
+
     path = data.get("path")
     name = data.get("name")
     description = data.get("description")
@@ -192,6 +200,11 @@ def api_create_project():
     create_dir = data.get("create_dir", True)
 
     # Issue #2897: Validate project name to prevent XSS and path injection
+    # Issue #3459: non-string JSON previously 500'd on str ops below.
+    if name is not None and not isinstance(name, str):
+        return jsonify({"error": "Project name must be a string"}), 400
+    if description is not None and not isinstance(description, str):
+        return jsonify({"error": "Description must be a string"}), 400
     if name:
         is_valid, error_msg = validate_project_name(name)
         if not is_valid:
@@ -201,24 +214,106 @@ def api_create_project():
     if not path:
         return jsonify({"error": "Path is required"}), 400
 
+    # Issue #3459: non-string JSON previously 500'd on os.path.abspath.
+    if not isinstance(path, str):
+        return jsonify({"error": "Path must be a string"}), 400
+
     path = os.path.abspath(path)
 
-    # Check if path is absolute
-    if not os.path.isabs(path):
-        return jsonify({"error": "Path must be absolute"}), 400
+    # Issue #3427: Handle sandboxed mode
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
-    # Check path format based on platform
-    system = platform.system()
-    if system == "Windows":
-        if not (len(path) >= 2 and path[1] == ":"):
-            return jsonify({"error": "Invalid Windows path format"}), 400
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # Shared-project topology (#3376) is defined over host workspace base
+        # dirs and cannot admit /workspace paths; reject explicitly instead
+        # of letting the host-flavoured check produce a misleading message.
+        if is_shared:
+            return (
+                jsonify({"error": "Shared projects are not supported in sandboxed isolation mode"}),
+                400,
+            )
+
+        # Validate against the SAME isolation-aware home roots fs browsing
+        # uses (#3420: /workspace/<account>, account = system_account or
+        # username). A literal startswith("/workspace/<username>") both
+        # mis-identifies the account and admits sibling-prefix paths like
+        # /workspace/<username>evil, so match on path boundaries instead.
+        from app.routes.fs import _home_roots_for_user
+
+        home_roots = _home_roots_for_user(g.user, isolation_level)
+        if not home_roots:
+            return jsonify({"error": "No sandbox home directory available for this user"}), 400
+
+        if not any(path == root or path.startswith(root.rstrip("/") + "/") for root in home_roots):
+            allowed = ", ".join(home_roots)
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "In sandboxed mode, your project must be created under "
+                            f"{allowed}. The path you provided ({path}) is not allowed."
+                        )
+                    }
+                ),
+                400,
+            )
+
+        # Issue #3459: the directory must exist INSIDE the sandbox container,
+        # and only the container can create it — ask the live instance's
+        # command channel (bounded wait; a wedged pod must not hang the
+        # request). The home root itself is PVC-provisioned; only subpaths
+        # need the mkdir. create_dir=False registers without creating,
+        # mirroring the non-sandboxed contract.
+        if create_dir:
+            sandbox_dir_created = False
+            instance = get_webui_instance(user_id)
+            launcher = getattr(instance, "launcher", None) if instance is not None else None
+            sandbox_id = getattr(instance, "sandbox_id", "") if instance is not None else ""
+            if launcher is not None and sandbox_id:
+                try:
+                    import shlex as _shlex
+
+                    sandbox_dir_created = bool(
+                        launcher.run_command_wait(
+                            sandbox_id, f"mkdir -p {_shlex.quote(path)}", timeout_seconds=10.0
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "sandboxed mkdir failed for user %s path %s: %s (#3459)",
+                        user_id,
+                        path,
+                        exc,
+                    )
+            if not sandbox_dir_created:
+                logger.warning(
+                    "sandboxed project %s for user %s: container-side mkdir did not "
+                    "confirm; the directory may be missing (#3459)",
+                    path,
+                    user_id,
+                )
+
+        # Host-side directory creation never applies in sandboxed mode.
+        create_dir = False
     else:
-        if not path.startswith("/"):
-            return jsonify({"error": "Path must start with /"}), 400
+        # Non-sandboxed mode: original validation logic
 
-    # Check for path traversal
-    if ".." in path:
-        return jsonify({"error": "Path traversal not allowed"}), 400
+        # Check if path is absolute
+        if not os.path.isabs(path):
+            return jsonify({"error": "Path must be absolute"}), 400
+
+        # Check path format based on platform
+        system = platform.system()
+        if system == "Windows":
+            if not (len(path) >= 2 and path[1] == ":"):
+                return jsonify({"error": "Invalid Windows path format"}), 400
+        else:
+            if not path.startswith("/"):
+                return jsonify({"error": "Path must start with /"}), 400
+
+        # Check for path traversal
+        if ".." in path:
+            return jsonify({"error": "Path traversal not allowed"}), 400
 
     # Issue #3376 review round 1: a shared project's path extends every
     # tenant member's fs browse roots (fs._allowed_roots_for_user). Without
@@ -292,6 +387,64 @@ def api_create_project():
                 400,
             )
 
+    else:
+        # PR #3402 review (#3396 boot-reclaim hardening): PRIVATE
+        # registrations had no path validation at all (everything above
+        # gates on ``if is_shared:``), and the tenant-scoped
+        # get_project_by_path below never 409s across tenants — so any
+        # tenant's user could register another tenant's shared project
+        # directory (or the <base>/shared namespace root, or a base dir)
+        # as a private project. The boot reclaim pass is hardened against
+        # exactly those rows, but the API must not accept them in the
+        # first place. A private path must not BE a workspace base dir or
+        # a shared-namespace root, and must not overlap (be equal to, lie
+        # inside, or contain) an ACTIVE project row of ANOTHER tenant.
+        # Fail-soft on the enumeration like the shared-path check above.
+        base_dirs = get_workspace_base_dirs()
+        resolved = os.path.realpath(path).rstrip(os.sep)
+        if any(resolved == os.path.realpath(b).rstrip(os.sep) for b in base_dirs):
+            return jsonify({"error": "Path must not be a workspace base directory itself"}), 400
+        if any(
+            resolved == ns or resolved.startswith(ns + os.sep)
+            for ns in shared_namespace_roots(base_dirs)
+        ):
+            # The whole namespace subtree, not just the root: <base>/shared
+            # is sticky and group-writable by EVERY tenant's accounts (the
+            # global creation group) with others traversal — a "private"
+            # dir there is not private. Private projects belong in the
+            # creator's own workspace.
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Path is inside the shared namespace (<base>/shared) — "
+                            "register shared projects there and private projects "
+                            "in your own workspace"
+                        )
+                    }
+                ),
+                400,
+            )
+        try:
+            foreign_paths = [
+                os.path.realpath(p.path).rstrip(os.sep)
+                for p in project_repo.get_all_projects()
+                if p.tenant_id != tenant_id and p.path
+            ]
+        except Exception as e:  # noqa: BLE001 - guard is best-effort
+            logger.warning("Failed to enumerate projects for private path check: %s", e)
+            foreign_paths = []
+        for other in foreign_paths:
+            if (
+                resolved == other
+                or resolved.startswith(other + os.sep)
+                or other.startswith(resolved + os.sep)
+            ):
+                return (
+                    jsonify({"error": "Path overlaps a project of another tenant"}),
+                    400,
+                )
+
     # Check if project already exists
     existing = project_repo.get_project_by_path(path, tenant_id=tenant_id)
     if existing:
@@ -300,6 +453,45 @@ def api_create_project():
     # Create directory if requested and doesn't exist
     dir_created = False
     if create_dir:
+        # Issue #3393: on-demand shared-namespace-root provisioning. The
+        # entrypoint (Docker) or install.sh (package) normally provisions
+        # <base>/shared at boot/install time; on a deployment where that
+        # never ran — or the root went missing — the FIRST shared-project
+        # creation ran `mkdir -p <base>/shared/<name>` as the creating user
+        # against a root-owned 0755 parent and EACCESed (403). Provision the
+        # one namespace root this path lives under BEFORE the user-side
+        # mkdir; failures degrade to a clean 5xx, never a crash (the helper
+        # is a no-op outside Docker multi-user mode and leaves an existing
+        # root untouched).
+        if is_shared:
+            resolved_path = os.path.realpath(path)
+            for base in base_dirs:
+                if not base:
+                    continue
+                resolved_base = os.path.realpath(base).rstrip(os.sep)
+                if resolved_path != resolved_base and not resolved_path.startswith(
+                    resolved_base + os.sep
+                ):
+                    continue
+                provisioned, provision_error = ensure_shared_namespace_root(base)
+                if not provisioned:
+                    logger.error(
+                        "Failed to provision shared namespace root under %s: %s (#3393)",
+                        base,
+                        provision_error,
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "error": (
+                                    "Failed to provision the shared namespace root "
+                                    f"({provision_error}); contact an administrator"
+                                )
+                            }
+                        ),
+                        500,
+                    )
+                break
         try:
             effective_system_account = get_effective_system_account(system_account)
             if effective_system_account:
@@ -371,6 +563,7 @@ def api_create_project():
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -398,6 +591,7 @@ def api_create_project():
                     user_id=user_id,
                     path=path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if success and task_info:
@@ -415,6 +609,11 @@ def api_create_project():
 
         if permission_warning:
             response["permission_warning"] = permission_warning
+
+        # Issue #3459: in sandboxed mode the container-side mkdir outcome is
+        # surfaced so the UI/agent can flag a project whose cwd is missing.
+        if sandbox_dir_created is not None:
+            response["sandbox_dir_created"] = sandbox_dir_created
 
         return jsonify(response), 201
 
@@ -489,6 +688,7 @@ def api_update_project(project_id):
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -507,6 +707,7 @@ def api_update_project(project_id):
                     user_id=user_id,
                     path=project.path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if not success:
@@ -520,11 +721,63 @@ def api_update_project(project_id):
         tenant_id=tenant_id,
     )
 
+    # Issue #3396: revocation (is_shared True -> False) must RECLAIM OS-level
+    # access, not only flip the DB flag — group-member accounts otherwise
+    # keep read/write through their shells/agents (the API layer's browse
+    # 400s never reach the OS channel). The project becomes the creator's
+    # private project: chown -R creator + dirs 0700 / files 0600. Runs after
+    # the DB flip (same ordering as the create path's permission setup) and
+    # is FAIL-SOFT: a reclaim failure is logged and surfaced as a warning in
+    # the response, but the revocation itself stands.
+    revoke_warning = None
+    if success and is_shared is False and project.is_shared:
+        if _is_docker_multi_user_mode():
+            owner_account = None
+            if project.created_by:
+                creator = user_repo.get_user_by_id(project.created_by)
+                if creator:
+                    # system_account ONLY (PR #3402 review): an unmapped
+                    # user's username may equal another user's system_account,
+                    # and the fallback would hand the reclaimed tree to that
+                    # other OS account.
+                    owner_account = creator.get("system_account")
+            if not owner_account:
+                revoke_warning = (
+                    "Revocation recorded, but the OS-level permission reclaim was skipped: "
+                    "cannot determine the creator's system account"
+                )
+                logger.warning(
+                    "Shared-project revocation for %s could not resolve creator "
+                    "(created_by=%s) — OS access not reclaimed (#3396)",
+                    project.path,
+                    project.created_by,
+                )
+            else:
+                reclaim_ok, reclaim_error = revoke_shared_project_access(
+                    project.path,
+                    owner_account,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                if not reclaim_ok:
+                    revoke_warning = (
+                        f"Revocation recorded, but the OS-level permission reclaim failed: "
+                        f"{reclaim_error}"
+                    )
+                    logger.warning(
+                        "OS-level reclaim failed for revoked shared project %s: %s (#3396)",
+                        project.path,
+                        reclaim_error,
+                    )
+
     if success:
         project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
-        return jsonify({"success": True, "project": project.to_dict()})
+        response = {"success": True, "project": project.to_dict()}
+        if revoke_warning:
+            response["permission_warning"] = revoke_warning
+        return jsonify(response)
 
     return jsonify({"error": "Failed to update project"}), 500
 
@@ -694,10 +947,12 @@ def api_add_project_user(project_id):
     if not target_system_account:
         return jsonify({"error": "User has no system account, cannot manage file permissions"}), 400
 
-    # Add user to shared group (file system permission)
+    # Enroll the target user in the shared groups (file system permission).
+    # Issue #3396: enrollment is TENANT-scoped (global openace-shared for
+    # namespace-root creation + openace-shared-<tenant> for content access).
     from app.utils.workspace import add_user_to_shared_group
 
-    if not add_user_to_shared_group(target_system_account):
+    if not add_user_to_shared_group(target_system_account, tenant_id=target_tenant_id):
         return jsonify({"error": "Failed to add user to shared group"}), 500
 
     # Add user to project in database
@@ -763,19 +1018,18 @@ def api_remove_project_user(project_id, target_user_id):
 
     active_sessions = get_user_project_active_sessions(target_user_id, project_id)
 
-    # Get target user's system_account
-    target_system_account = target_user.get("system_account")
-
     # Remove user from project in database
     if not project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id):
         return jsonify({"error": "Failed to remove user from project"}), 500
 
-    # Remove user from shared group (file system permission)
-    if target_system_account:
-        from app.utils.workspace import remove_user_from_shared_group
-
-        if not remove_user_from_shared_group(target_system_account):
-            logger.warning(f"Failed to remove {target_system_account} from shared group")
+    # Issue #3396: NO group revocation here. Shared projects are visible to
+    # the whole tenant on the read side (fs._allowed_roots_for_user uses the
+    # tenant's shared paths, not per-project user rows), so removing this
+    # row must not strip the user's tenant-wide OS access — that would
+    # recreate an API-vs-OS divergence in the opposite direction. Tenant
+    # group membership tracks TENANT membership (see the admin tenant-move
+    # and deactivation paths); full OS revocation of a project happens on
+    # the is_shared True->False flip (revoke_shared_project_access).
 
     # Record audit log
     _log_project_user_audit(
@@ -876,38 +1130,44 @@ def api_batch_update_project_users(project_id):
             operation_errors.append(f"User {target_user_id} has no system account")
             continue
 
-        users_to_add.append({"user_id": target_user_id, "system_account": target_system_account})
+        users_to_add.append(
+            {
+                "user_id": target_user_id,
+                "system_account": target_system_account,
+                "tenant_id": target_tenant_id,
+            }
+        )
 
     # If validation errors, return before making any changes
     if operation_errors:
         return jsonify({"error": operation_errors[0], "errors": operation_errors}), 400
 
     # Phase 2: Execute all group operations
-    added_accounts: list[str] = []
-    removed_accounts: list[str] = []
+    added_accounts: list[dict] = []
 
-    # Add users to shared group
+    # Enroll added users in the tenant-scoped shared groups (Issue #3396)
     for user_info in users_to_add:
-        if not add_user_to_shared_group(user_info["system_account"]):
+        if not add_user_to_shared_group(
+            user_info["system_account"], tenant_id=user_info["tenant_id"]
+        ):
             # Rollback previous group additions
             for account in added_accounts:
-                remove_user_from_shared_group(account)
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
             return (
                 jsonify({"error": f"Failed to add user {user_info['user_id']} to shared group"}),
                 500,
             )
-        added_accounts.append(user_info["system_account"])
+        added_accounts.append(
+            {"system_account": user_info["system_account"], "tenant_id": user_info["tenant_id"]}
+        )
 
-    # Remove users from shared group
-    for target_user_id in to_remove:
-        target_user = user_repo.get_user_by_id(target_user_id)
-        if target_user:
-            target_system_account = target_user.get("system_account")
-            if target_system_account:
-                if not remove_user_from_shared_group(target_system_account):
-                    logger.warning(f"Failed to remove {target_system_account} from shared group")
-                else:
-                    removed_accounts.append(target_system_account)
+    # Removed users: Issue #3396 — NO tenant-group revocation here. The
+    # tenant group grants tenant-wide shared access that matches the read
+    # side (per-project user rows do not gate it); stripping it here would
+    # deny OS access the API still grants. Project-level OS revocation is
+    # the is_shared True->False flip's job.
 
     # Phase 3: Execute database operations in transaction
     try:
@@ -918,18 +1178,16 @@ def api_batch_update_project_users(project_id):
         if "error" in result:
             # Rollback group operations
             for account in added_accounts:
-                remove_user_from_shared_group(account)
-            for account in removed_accounts:
-                add_user_to_shared_group(account)
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
             return jsonify({"error": result["error"]}), 500
 
     except Exception as e:
         logger.error(f"Database error during batch update: {e}")
         # Rollback group operations
         for account in added_accounts:
-            remove_user_from_shared_group(account)
-        for account in removed_accounts:
-            add_user_to_shared_group(account)
+            remove_user_from_shared_group(account["system_account"], tenant_id=account["tenant_id"])
         return jsonify({"error": "Database operation failed"}), 500
 
     # Record audit log
@@ -1069,6 +1327,7 @@ def api_fix_project_permissions(project_id):
             path=project.path,
             priority=PERMISSION_PRIORITY_MANUAL_FIX,  # Higher priority for manual fix
             depth_limit=depth_limit,
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:
@@ -1092,6 +1351,7 @@ def api_fix_project_permissions(project_id):
             timeout=60,
             user_id=user_id,  # Issue #2745: Pass user_id for audit log
             project_id=project_id,  # Issue #2745: Pass project_id for audit log
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:

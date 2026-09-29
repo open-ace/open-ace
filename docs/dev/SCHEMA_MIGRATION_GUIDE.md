@@ -248,18 +248,25 @@ def upgrade():
 
 ### Compatibility window
 
-How application versions map to schema versions:
+How application releases map to schema versions:
 
-| App version | Min schema version | Max schema version | Window |
-|-------------|--------------------|--------------------|--------|
-| v2.1        | baseline_2026_06_23 | HEAD              | 10 revisions |
-| v2.0        | baseline_2026_06_23 | 20260717_004      | 5 revisions |
+| App version | Minimum upgrade starting point | Required at runtime |
+|-------------|--------------------------------|---------------------|
+| v2.0.x      | `baseline_2026_06_23`          | Alembic head shipped with the release |
+| v1.2.x      | `baseline_2026_06_23`          | Alembic head shipped with the release |
+
+Databases on a pre-baseline revision (e.g. a historical hash from before
+v1.2.0) cannot be upgraded in place; there is no supported migration path from
+them.
 
 **Decision logic**:
-- On startup the application checks whether the schema version is inside the
-  compatibility window
-- Too old: startup fails with an upgrade prompt
-- Too new: startup fails with an application-upgrade prompt
+- Install / upgrade: `scripts/check_min_revision.py` runs before
+  `alembic upgrade head` and accepts any revision in the baseline lineage, so
+  the upgrade can apply the missing migrations. A pre-baseline revision fails
+  the install with an error.
+- Web and scheduler startup: `check_schema_compatibility()`
+  (`app/repositories/schema_guard.py`) requires the fully migrated head, so
+  services never run on a partially migrated schema.
 
 ## Forbidden Operations
 
@@ -724,17 +731,18 @@ def upgrade():
 
 ### 兼容窗口
 
-应用版本与模式版本的对应关系：
+应用版本与 schema 版本的兼容关系：
 
-| 应用版本 | 最低模式版本 | 最高模式版本 | 窗口 |
-|---------|-------------|-------------|------|
-| v2.1     | baseline_2026_06_23 | HEAD        | 10 个 revision |
-| v2.0     | baseline_2026_06_23 | 20260717_004 | 5 个 revision |
+| 应用版本 | 最低升级起点 | 运行时要求 |
+|---------|-------------|-----------|
+| v2.0.x  | `baseline_2026_06_23` | 该版本随附的 Alembic head |
+| v1.2.x  | `baseline_2026_06_23` | 该版本随附的 Alembic head |
+
+仍停留在基线之前 revision（如 v1.2.0 之前的历史 hash）的数据库不支持原地升级，没有受支持的迁移路径。
 
 **判定逻辑**：
-- 启动时应用检查模式版本是否在兼容窗口内
-- 过旧：启动失败并提示升级
-- 过新：启动失败并提示升级应用
+- 安装 / 升级：`scripts/check_min_revision.py` 在 `alembic upgrade head` 之前运行，接受基线谱系内的任意 revision，以便升级补齐缺失的迁移；基线之前的 revision 直接报错并中止安装。
+- Web 与调度器启动：`check_schema_compatibility()`（`app/repositories/schema_guard.py`）要求已迁移到 head，确保服务不会在迁移未完成的 schema 上运行。
 
 ## 禁止操作
 

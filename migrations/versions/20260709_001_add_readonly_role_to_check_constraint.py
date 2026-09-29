@@ -107,6 +107,9 @@ def upgrade() -> None:
             # through this SQLite table-recreate when the DB was bootstrapped
             # from a newer schema snapshot (the tenant_version precedent).
             "tokens_valid_after": "TIMESTAMP",
+            # Issue #3390: pinned OS uid for multi-user accounts — same
+            # carry-through as tokens_valid_after (snapshot-bootstrapped DB).
+            "system_uid": "INTEGER",
         }
 
         # Build CREATE TABLE statement dynamically
@@ -211,6 +214,9 @@ def downgrade() -> None:
             # through this SQLite table-recreate when the DB was bootstrapped
             # from a newer schema snapshot (the tenant_version precedent).
             "tokens_valid_after": "TIMESTAMP",
+            # Issue #3390: pinned OS uid for multi-user accounts — same
+            # carry-through as tokens_valid_after (snapshot-bootstrapped DB).
+            "system_uid": "INTEGER",
         }
 
         # Build CREATE TABLE statement dynamically

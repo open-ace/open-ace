@@ -1,6 +1,6 @@
 """Issue #3378: build_create_request extensions + fake background:true modelling.
 
-The sandboxed WebUI launcher (webui_sandbox.py) reuses the ONE create-request
+The sandboxed WebUI launcher (webui_sandbox_opensandbox.py) reuses the ONE create-request
 builder. These tests pin the three optional overrides — entrypoint suffix
 (bootstrap preserved verbatim), timeout override, extra metadata merge — and the
 fake server's ``background: true`` /command semantics the launcher's restore and

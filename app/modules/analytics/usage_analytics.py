@@ -543,6 +543,8 @@ class UsageAnalytics:
     def _get_first_activity_date(self, tenant_id: int | None = None) -> str | None:
         """Get the first activity date for a tenant or globally.
 
+        Issue #3243: Read from daily_messages, not daily_usage, so the forecast
+        window boundary matches the same data source as the forecast series.
         Issue #3244: Used to bound forecast window start for new users.
 
         Args:
@@ -554,14 +556,14 @@ class UsageAnalytics:
         if tenant_id is not None:
             query = """
                 SELECT MIN(date) as first_date
-                FROM daily_usage
+                FROM daily_messages
                 WHERE tenant_id = ?
             """
             result = self.db.fetch_one(query, (tenant_id,))
         else:
             query = """
                 SELECT MIN(date) as first_date
-                FROM daily_usage
+                FROM daily_messages
             """
             result = self.db.fetch_one(query)
 
@@ -576,6 +578,11 @@ class UsageAnalytics:
     ) -> ContinuousDailyTotals:
         """Get continuous daily totals with missing days filled as zeros.
 
+        Issue #3243: Query daily_messages (not daily_usage) so the forecast
+        series uses the same source and units as the historical data API;
+        requests mirrors the history API's per-message COUNT(*)
+        (daily_stats.message_count; hourly_stats applies an extra
+        timestamp IS NOT NULL filter the forecast deliberately does not).
         Issue #3244: Ensures the forecast window contains exactly the specified
         number of consecutive calendar days, filling missing days with zeros.
 
@@ -615,8 +622,8 @@ class UsageAnalytics:
                     SELECT
                         date,
                         SUM(tokens_used) as tokens,
-                        SUM(request_count) as requests
-                    FROM daily_usage
+                        COUNT(*) as requests
+                    FROM daily_messages
                     WHERE date >= ? AND date <= ? AND tenant_id = ?
                     GROUP BY date
                     ORDER BY date
@@ -627,8 +634,8 @@ class UsageAnalytics:
                     SELECT
                         date,
                         SUM(tokens_used) as tokens,
-                        SUM(request_count) as requests
-                    FROM daily_usage
+                        COUNT(*) as requests
+                    FROM daily_messages
                     WHERE date >= ? AND date <= ?
                     GROUP BY date
                     ORDER BY date

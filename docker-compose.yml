@@ -47,7 +47,7 @@
 #
 # The docker-compose.multi-user.yml overlay adds:
 #   - user: "0"                        # Run container as root
-#   - WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode
+#   - WORKSPACE_ISOLATION_BACKEND=plain  # One OS account per user (#3446)
 #   - OPENACE_ALLOW_ROOT_MULTI_USER=1  # Explicit root authorization
 #   - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace  # Config persistence
 #
@@ -71,7 +71,7 @@ services:
         # Base image registry. Override for networks where Docker Hub is
         # unreachable (e.g. mainland China): BASE_REGISTRY=docker.m.daocloud.io
         BASE_REGISTRY: ${BASE_REGISTRY:-docker.io}
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:
@@ -98,7 +98,7 @@ services:
       # The entrypoint check_security_baseline() reads DB_PASSWORD directly, not from DATABASE_URL.
       - DB_PASSWORD=${DB_PASSWORD:-}
       # Multi-user Workspace
-      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
+      - WORKSPACE_ISOLATION_BACKEND=${WORKSPACE_ISOLATION_BACKEND:-shared}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -159,7 +159,7 @@ services:
 # Uses leader election to ensure only one active scheduler.
 # For single-instance development, omit this service.
   scheduler:
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace-scheduler
     restart: unless-stopped
     profiles:
@@ -168,6 +168,13 @@ services:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
       - SCHEDULER_MODE=scheduler
+      # Issue #3133: the entrypoint treats SCHEDULER_MODE=scheduler as a
+      # production-capable path and requires an explicit OPENACE_SECURITY_MODE,
+      # so starting the scheduler from this base file alone crashed on boot.
+      # Default to development, matching the app service above; production
+      # deployments must set OPENACE_SECURITY_MODE explicitly in .env (the
+      # multi-user overlay already defaults it to production).
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-development}
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
@@ -185,8 +192,13 @@ services:
       - workspace-data:/workspace
       # #3237: the same volume the app service mounts, at the same path.
       - agent-state:/var/lib/openace
+    # Issue #3455: under compose this service runs the same web entrypoint as
+    # the app service (SCHEDULER_MODE=scheduler starts the scheduler services
+    # in-process); only the standalone app/scheduler_worker.py used by the k8s
+    # deployment serves :9090/metrics. Probe /readyz on the port this
+    # container actually serves, like the open-ace service above.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -13,6 +13,7 @@ import os
 import pytest
 
 from app.services import workspace_isolation_contract as wic
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3378)]
 
@@ -23,14 +24,18 @@ _DEFAULT_IMAGE = f"ghcr.io/open-ace/agent@{_DIGEST}"
 
 
 class _Cfg:
+    """A workspace config whose isolation backend is ``opensandbox`` by default."""
+
     def __init__(self, **kwargs):
         self.enabled = True
-        self.multi_user_mode = True
-        self.sandbox_tier = ""
+        self.isolation = iso("opensandbox")
         self.webui_callback_url = ""
-        self.required_isolation_level = ""
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @property
+    def multi_user_mode(self):
+        return self.isolation.backend != "shared"
 
 
 class _Attestations:
@@ -187,8 +192,10 @@ def test_probe_reports_api_key_missing(monkeypatch):
     # And the snapshot carries it so the /user-url gate can surface it.
     monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
     snap = wic.build_workspace_isolation_snapshot(_OsUserManager())
-    assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
-    assert "sandbox_api_key_missing" in [r.code for r in snap.reasons]
+    # Issue #3446: the configured backend is not ready -> unsupported with the
+    # probe reason (no fallback to os_user).
+    assert snap.supported is False
+    assert [r.code for r in snap.reasons] == ["sandbox_api_key_missing"]
     # The gate prefers the probe reason for a sandboxed request.
     verdict = wic.evaluate_isolation_requirement(
         "sandboxed", snapshot=snap, system_account=None, manager=None
@@ -265,7 +272,7 @@ def test_probe_honors_explicit_sandbox_tier(monkeypatch):
     monkeypatch.setattr(sbcfg, "load_backend_config", lambda explicit=None: backend)
     monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
     cfg = _Cfg(
-        sandbox_tier="gvisor",
+        isolation=iso("opensandbox", tier="gvisor"),
         webui_callback_url="http://openace.open-ace.svc.cluster.local:8080",
     )
     ok, tier, reason = wic._sandboxed_readiness(cfg)
@@ -277,10 +284,11 @@ def test_probe_honors_explicit_sandbox_tier(monkeypatch):
 
 
 class _OsUserManager:
-    """Manager stub with a healthy os_user launch probe (linux, multi-user)."""
+    """Manager stub with a healthy launch probe; the backend is opensandbox
+    unless given."""
 
-    def __init__(self, multi_user_mode=True):
-        self.config = _Cfg(multi_user_mode=multi_user_mode)
+    def __init__(self, isolation=None):
+        self.config = _Cfg(isolation=isolation or iso("opensandbox"))
         self.per_user_launch_readiness = lambda: None
 
 
@@ -304,12 +312,12 @@ def test_snapshot_reports_sandboxed_when_probe_passes(monkeypatch):
 
 def test_snapshot_os_user_unchanged_without_backend(monkeypatch, no_sandbox_backend):
     monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
-    snap = wic.build_workspace_isolation_snapshot(_OsUserManager())
+    snap = wic.build_workspace_isolation_snapshot(_OsUserManager(isolation=iso("plain")))
     assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
     assert snap.reasons == ()
 
 
-def test_snapshot_appends_sandbox_reason_when_configured_but_failing(monkeypatch):
+def test_a_failing_pod_backend_is_unsupported_not_os_user(monkeypatch):
     import app.modules.workspace.autonomous.sandbox.opensandbox.config as sbcfg
 
     backend = _BackendCfg(endpoints={"kata": _Endpoint(webui_image="")})
@@ -317,13 +325,15 @@ def test_snapshot_appends_sandbox_reason_when_configured_but_failing(monkeypatch
     monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_WEBUI_MINUTES", "1440")
     monkeypatch.setattr(wic, "_current_platform", lambda: "linux")
     snap = wic.build_workspace_isolation_snapshot(_OsUserManager())
-    # os_user still wins; the sandbox failure rides along for the gate.
-    assert snap.isolation_level == wic.ISOLATION_LEVEL_OS_USER
+    # Issue #3446: no silent fallback to os_user — the pod backend's reason.
+    assert snap.supported is False
+    assert snap.isolation_level == wic.ISOLATION_LEVEL_NONE
+    assert snap.backend == "opensandbox"
     assert [r.code for r in snap.reasons] == ["webui_image_missing"]
 
 
 def test_policy_revision_bumped():
-    assert wic.POLICY_REVISION == "2026-09-12.2"
+    assert wic.POLICY_REVISION == "2026-09-26.3"
 
 
 def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
@@ -349,9 +359,14 @@ def test_sandboxed_snapshot_matrix_marks_unwired_entry_points(ready_backend):
     for name in ("terminal", "vscode", "filesystem_api"):
         assert entry_points[name] == "sandboxed_entry_not_wired"
     # The os_user/default matrix is untouched.
-    assert wic.ENTRY_POINT_STATUSES["terminal"] == "partial"
-    assert wic.ENTRY_POINT_STATUSES["filesystem_api"] == "partial"
-    assert wic.ENTRY_POINT_STATUSES["vscode"] == "partial"
+    # Issue #3410 recalibration: the os_user matrix these compare against is
+    # no longer "partial" for any of the three — filesystem_api is enforced
+    # and the two remote entries carry their own scope token. The point of
+    # this assertion is unchanged: the SANDBOXED matrix must differ from the
+    # os_user one for the unwired entries.
+    assert wic.ENTRY_POINT_STATUSES["filesystem_api"] == "enforced"
+    assert wic.ENTRY_POINT_STATUSES["terminal"] == "remote_machine_scope"
+    assert wic.ENTRY_POINT_STATUSES["vscode"] == "remote_machine_scope"
 
 
 def test_cold_worker_sandbox_snapshot_is_provisional(monkeypatch):

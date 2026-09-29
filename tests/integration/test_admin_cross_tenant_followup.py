@@ -199,10 +199,12 @@ def _governance_request(
         patch("app.auth.decorators._load_user_from_token", return_value=actor),
         patch("app.routes.governance.quota_manager", quota_mgr or MagicMock()),
         patch("app.routes.governance.governance_repo", gov_repo),
-        patch(
-            "app.modules.governance.content_filter_singleton.get_content_filter",
-            return_value=content_filter,
-        ),
+        # Patch the name governance.py bound at import time: patching
+        # content_filter_singleton.get_content_filter is a no-op for the route
+        # and let the platform-admin POST /content/filter/patterns case install
+        # pattern "p" on the real process singleton, which then redacted every
+        # later assistant message in the same xdist worker ("res*onse").
+        patch("app.routes.governance.get_content_filter", return_value=content_filter),
         patch("app.routes.governance.audit_logger"),
         patch(
             "app.repositories.user_repo.UserRepository", return_value=user_repo or _FakeUserRepo()
@@ -591,6 +593,25 @@ class TestContentFilterMutationsArePlatformAdminOnly:
     def test_legacy_admin_is_allowed_in_non_strict_mode(self, method, path, body):
         response, _ = _governance_request(LEGACY_ADMIN, method, path, json_body=body)
         assert response.status_code not in (401, 403), response.get_data(as_text=True)
+
+    @pytest.mark.regression
+    def test_platform_admin_add_pattern_does_not_touch_real_singleton(self):
+        """The mutation must hit the injected filter, never the process singleton."""
+        from app.modules.governance.content_filter_singleton import get_content_filter
+
+        real_patterns = dict(get_content_filter().patterns)
+        injected = MagicMock()
+        response, _ = _governance_request(
+            PLATFORM_ADMIN,
+            "POST",
+            "/api/content/filter/patterns",
+            json_body={"name": "n", "pattern": "p"},
+            content_filter=injected,
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        injected.add_custom_pattern.assert_called_once_with("n", "p", "medium")
+        assert get_content_filter().patterns == real_patterns
 
 
 # ── security settings (global config table -> platform admin only) ─────────

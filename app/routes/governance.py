@@ -432,31 +432,35 @@ def api_filter_stats():
 @governance_bp.route("/content/filter/patterns", methods=["POST"])
 @platform_admin_required
 def api_add_pattern():
-    """Add a custom content filter pattern.
+    """Add a custom content filter pattern."""
 
-    DEPRECATED: This endpoint is deprecated and will be removed in a future version.
-    Use POST /api/filter-rules instead.
+    data = request.get_json() or {}
+    name = data.get("name")
+    pattern = data.get("pattern")
+    risk = data.get("risk", "medium")
 
-    Issue #3058: This endpoint does not persist patterns to database.
-    """
-    # Return deprecation warning
-    return (
-        jsonify(
-            {
-                "success": False,
-                "error": "Deprecated",
-                "message": "This endpoint is deprecated and will be removed in a future version.",
-                "migration_guide": "Use POST /api/filter-rules instead.",
-                "documentation": "/docs/contracts/FILTER_PATTERNS_V2.md",
-            }
-        ),
-        200,
-        {
-            "Deprecation": "true",
-            "Sunset": "Sat, 01 Feb 2027 00:00:00 GMT",
-            "Link": '</api/filter-rules>; rel="successor-version"',
-        },
-    )
+    if not name or not pattern:
+        return jsonify({"error": "Name and pattern are required"}), 400
+
+    try:
+        get_content_filter().add_custom_pattern(name, pattern, risk)
+
+        # Log the action
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.SYSTEM_CONFIG_CHANGE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="content_filter",
+            details={"action": "add_pattern", "name": name, "risk": risk},
+            **client_info,
+        )
+
+        return jsonify({"success": True, "pattern": name})
+
+    except Exception as e:
+        logger.error(f"Failed to add pattern: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @governance_bp.route("/content/filter/keywords", methods=["POST"])
@@ -477,7 +481,7 @@ def api_add_keyword():
                 "error": "Deprecated",
                 "message": "This endpoint is deprecated and will be removed in a future version.",
                 "migration_guide": "Use POST /api/tenants/{tenant_id}/sensitive-keywords instead.",
-                "documentation": "/docs/dev/API.md",
+                "documentation": "/docs/api/migrations/sensitive-keywords-v2.md",
             }
         ),
         200,
@@ -555,112 +559,18 @@ def _validate_filter_rule_input(
 @governance_bp.route("/filter-rules", methods=["GET"])
 @admin_required
 def api_get_filter_rules():
-    """Get content filter rules with pagination and filtering.
+    """Get all content filter rules."""
 
-    Query Parameters:
-        limit: Maximum number of records (default 100, max 1000).
-        offset: Number of records to skip (default 0).
-        type: Filter by type (keyword, regex, pii).
-        severity: Filter by severity (low, medium, high).
-        is_enabled: Filter by enabled status (true/false).
+    rules = governance_repo.get_filter_rules()
 
-    Returns:
-        JSON response with rules list and pagination info.
-    """
-    # Get query parameters
-    limit = min(request.args.get("limit", default=100, type=int), 1000)
-    offset = request.args.get("offset", default=0, type=int)
-
-    # Get filter parameters
-    rule_type = request.args.get("type")
-    severity = request.args.get("severity")
-    is_enabled_str = request.args.get("is_enabled")
-
-    # Parse is_enabled filter
-    is_enabled = None
-    if is_enabled_str is not None:
-        is_enabled = is_enabled_str.lower() in ("true", "1", "yes")
-
-    # Validate filter parameters if provided
-    if rule_type is not None and rule_type not in VALID_RULE_TYPES:
-        return (
-            jsonify(
-                {
-                    "error": f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}"
-                }
-            ),
-            400,
-        )
-
-    if severity is not None and severity not in VALID_SEVERITIES:
-        return (
-            jsonify(
-                {
-                    "error": f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
-                }
-            ),
-            400,
-        )
-
-    # Get rules from repository
-    rules, total = governance_repo.get_filter_rules_paginated(
-        limit=limit,
-        offset=offset,
-        rule_type=rule_type,
-        severity=severity,
-        is_enabled=is_enabled,
-    )
-
-    return jsonify(
-        {
-            "rules": rules,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        }
-    )
-
-
-@governance_bp.route("/filter-rules/<int:rule_id>", methods=["GET"])
-@admin_required
-def api_get_filter_rule(rule_id):
-    """Get a specific filter rule.
-
-    Args:
-        rule_id: Rule ID from URL path.
-
-    Returns:
-        JSON response with rule details.
-    """
-    rule = governance_repo.get_filter_rule(rule_id)
-
-    if rule is None:
-        return jsonify({"error": "Filter rule not found"}), 404
-
-    return jsonify(rule)
+    return jsonify(rules)
 
 
 @governance_bp.route("/filter-rules", methods=["POST"])
 @platform_admin_required
 def api_create_filter_rule():
-    """Create a new content filter rule (idempotent).
+    """Create a new content filter rule."""
 
-    If a rule with the same pattern already exists, returns the existing
-    record with is_new=False instead of creating a duplicate.
-
-    Request Body:
-        pattern: Pattern to match (required).
-        type: Type of pattern (default: "keyword", enum: keyword|regex|pii).
-        severity: Severity level (default: "medium", enum: low|medium|high).
-        action: Action to take (default: "warn", enum: warn|block|redact).
-        description: Optional description.
-        is_enabled: Whether rule is enabled (default: true).
-
-    Returns:
-        201: Created {"success": true, "id": int, "is_new": true}
-        200: Already exists {"success": true, "id": int, "is_new": false}
-        400: Validation failed {"error": "..."}
-    """
     data = request.get_json() or {}
     pattern = data.get("pattern")
     rule_type = data.get("type", "keyword")
@@ -672,17 +582,12 @@ def api_create_filter_rule():
     if not pattern:
         return jsonify({"error": "Pattern is required"}), 400
 
-    pattern = pattern.strip()
-    if not pattern:
-        return jsonify({"error": "Pattern cannot be empty"}), 400
-
     # Validate input
     is_valid, error_msg = _validate_filter_rule_input(pattern, rule_type, severity, action)
     if not is_valid:
         return jsonify({"error": error_msg}), 400
 
-    # Create rule (idempotent)
-    rule, is_new = governance_repo.create_filter_rule_idempotent(
+    rule_id = governance_repo.create_filter_rule(
         pattern=pattern,
         rule_type=rule_type,
         severity=severity,
@@ -691,97 +596,41 @@ def api_create_filter_rule():
         is_enabled=is_enabled,
     )
 
-    if rule is None:
-        return jsonify({"error": "Failed to create filter rule"}), 500
+    if rule_id:
+        # Invalidate content filter cache
+        invalidate_content_filter_cache()
 
-    rule_id = rule["id"]
+        # Log the action
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.SYSTEM_CONFIG_CHANGE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="filter_rule",
+            resource_id=str(rule_id),
+            resource_name=pattern,
+            details={"action": "create", "pattern": pattern, "type": rule_type},
+            **client_info,
+        )
 
-    # Invalidate content filter cache
-    invalidate_content_filter_cache()
+        return jsonify({"success": True, "id": rule_id}), 201
 
-    # Log the action
-    client_info = get_client_info()
-    audit_logger.log_action(
-        action=AuditAction.SYSTEM_CONFIG_CHANGE,
-        user_id=g.user_id,
-        username=g.user.get("username"),
-        resource_type="filter_rule",
-        resource_id=str(rule_id),
-        resource_name=pattern,
-        details={
-            "action": "create",
-            "pattern": pattern,
-            "type": rule_type,
-            "is_new": is_new,
-        },
-        **client_info,
-    )
-
-    response_data = {"success": True, "id": rule_id, "is_new": is_new}
-    status_code = 201 if is_new else 200
-    return jsonify(response_data), status_code
+    return jsonify({"error": "Failed to create filter rule"}), 500
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["PUT"])
 @platform_admin_required
 def api_update_filter_rule(rule_id):
-    """Update a content filter rule.
-
-    Args:
-        rule_id: Rule ID from URL path.
-
-    Request Body:
-        pattern: New pattern (optional).
-        type: New type (optional, enum: keyword|regex|pii).
-        severity: New severity (optional, enum: low|medium|high).
-        action: New action (optional, enum: warn|block|redact).
-        description: New description (optional).
-        is_enabled: New enabled status (optional).
-
-    Returns:
-        JSON response with success status.
-    """
-    # Check if rule exists
-    existing = governance_repo.get_filter_rule(rule_id)
-    if existing is None:
-        return jsonify({"error": "Filter rule not found"}), 404
+    """Update a content filter rule."""
 
     data = request.get_json() or {}
 
-    # Validate input if pattern or type is being updated
-    new_pattern = data.get("pattern")
-    new_type = data.get("type")
-    new_severity = data.get("severity")
-    new_action = data.get("action")
-
-    # Validate and normalize pattern if being updated
-    if new_pattern is not None:
-        new_pattern = new_pattern.strip()
-        if not new_pattern:
-            return jsonify({"error": "Pattern cannot be empty"}), 400
-
-    # Use existing values for validation if not provided
-    validate_pattern = new_pattern if new_pattern is not None else existing.get("pattern", "")
-    validate_type = new_type if new_type is not None else existing.get("type", "keyword")
-    validate_severity = (
-        new_severity if new_severity is not None else existing.get("severity", "medium")
-    )
-    validate_action = new_action if new_action is not None else existing.get("action", "warn")
-
-    # Validate if any relevant field is being changed
-    if new_pattern or new_type or new_severity or new_action:
-        is_valid, error_msg = _validate_filter_rule_input(
-            validate_pattern, validate_type, validate_severity, validate_action
-        )
-        if not is_valid:
-            return jsonify({"error": error_msg}), 400
-
     success = governance_repo.update_filter_rule(
         rule_id=rule_id,
-        pattern=new_pattern,
-        rule_type=new_type,
-        severity=new_severity,
-        action=new_action,
+        pattern=data.get("pattern"),
+        rule_type=data.get("type"),
+        severity=data.get("severity"),
+        action=data.get("action"),
         description=data.get("description"),
         is_enabled=data.get("is_enabled"),
     )
@@ -811,18 +660,7 @@ def api_update_filter_rule(rule_id):
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["DELETE"])
 @platform_admin_required
 def api_delete_filter_rule(rule_id):
-    """Delete a content filter rule.
-
-    Args:
-        rule_id: Rule ID from URL path.
-
-    Returns:
-        JSON response with success status.
-    """
-    # Check if rule exists
-    existing = governance_repo.get_filter_rule(rule_id)
-    if existing is None:
-        return jsonify({"error": "Filter rule not found"}), 404
+    """Delete a content filter rule."""
 
     success = governance_repo.delete_filter_rule(rule_id)
 
@@ -897,148 +735,6 @@ def api_update_security_settings():
 
 
 # ============================================================================
-# Upload Authentication Status (Issue #3327)
-# ============================================================================
-
-
-@governance_bp.route("/security-settings/upload-auth-status", methods=["GET"])
-@admin_required
-def api_get_upload_auth_status():
-    """Get upload authentication status.
-
-    Issue #3327: Returns upload auth status without exposing the key value.
-    All admins can view upload auth status (global config, no tenant isolation).
-    """
-
-    try:
-        status = governance_repo.get_upload_auth_status()
-        return jsonify(status)
-    except RuntimeError as e:
-        # Production mode with weak key
-        logger.error("Upload auth key validation failed: %s", e)
-        return jsonify({"error": "Upload auth key configuration is invalid", "detail": str(e)}), 500
-    except Exception as e:
-        logger.exception("Failed to get upload auth status: %s", e)
-        return jsonify({"error": "Failed to get upload auth status"}), 500
-
-
-# ============================================================================
-# SSRF Protection Configuration (Issue #3328)
-# ============================================================================
-
-
-@governance_bp.route("/security-settings/ssrf-status", methods=["GET"])
-@admin_required
-def api_get_ssrf_status():
-    """Get SSRF protection status and configuration.
-
-    Issue #3328: Returns SSRF protection status, default policy,
-    current configuration, and interception statistics.
-
-    All admins can view SSRF status.
-    """
-
-    try:
-        status = governance_repo.get_ssrf_status()
-        return jsonify(status)
-    except Exception as e:
-        logger.exception("Failed to get SSRF status: %s", e)
-        return jsonify({"error": "Failed to get SSRF status"}), 500
-
-
-@governance_bp.route("/security-settings/ssrf/reset", methods=["POST"])
-@platform_admin_required
-def api_reset_ssrf_config():
-    """Reset SSRF configuration to default.
-
-    Issue #3328: Reset port whitelist and/or global allowlist to default values.
-
-    Only platform admins can reset SSRF configuration because it affects
-    all tenants globally.
-
-    Request body:
-        {
-            "reset_ports": true,
-            "reset_global_allowlist": true,
-            "expected_version": 2,
-            "reason": "Optional reason for audit log"
-        }
-
-    Returns:
-        JSON response with reset result.
-    """
-
-    data = request.get_json() or {}
-
-    reset_ports = data.get("reset_ports", False)
-    reset_global_allowlist = data.get("reset_global_allowlist", False)
-    expected_version = data.get("expected_version")
-    reason = data.get("reason", "")
-
-    # Validate required fields
-    if expected_version is None:
-        return jsonify({"error": "expected_version is required"}), 400
-
-    if not reset_ports and not reset_global_allowlist:
-        return jsonify({"error": "At least one reset item must be specified"}), 400
-
-    try:
-        result = governance_repo.reset_ssrf_config(
-            reset_ports=reset_ports,
-            reset_global_allowlist=reset_global_allowlist,
-            expected_version=expected_version,
-        )
-
-        # Log the action
-        client_info = get_client_info()
-        audit_logger.log_action(
-            action=AuditAction.SSRF_CONFIG_RESET,
-            user_id=g.user_id,
-            username=g.user.get("username"),
-            resource_type="security_settings",
-            severity="warning",
-            details={
-                "action": "ssrf_config_reset",
-                "reset_items": result["reset_items"],
-                "reason": reason,
-                "from_version": expected_version,
-                "to_version": result["new_config_version"],
-            },
-            **client_info,
-        )
-
-        return jsonify(
-            {
-                "success": True,
-                "reset_items": result["reset_items"],
-                "new_config_version": result["new_config_version"],
-                "message": "SSRF configuration reset to default",
-            }
-        )
-
-    except ValueError as e:
-        # Version conflict
-        error_msg = str(e)
-        if "version conflict" in error_msg.lower():
-            current_version = governance_repo._get_config_version()
-            return (
-                jsonify(
-                    {
-                        "error": "CONFIG_VERSION_CONFLICT",
-                        "message": "Configuration has been modified by another admin. Please refresh and try again.",
-                        "current_version": current_version,
-                    }
-                ),
-                409,
-            )
-        return jsonify({"error": error_msg}), 400
-
-    except Exception as e:
-        logger.exception("Failed to reset SSRF config: %s", e)
-        return jsonify({"error": "Failed to reset SSRF configuration"}), 500
-
-
-# ============================================================================
 # Password Policy (accessible to all authenticated users)
 # ============================================================================
 
@@ -1062,6 +758,32 @@ def api_get_password_policy():
     """
     policy = governance_repo.get_password_policy()
     return jsonify(policy)
+
+
+# ============================================================================
+# Upload Authentication Status (Issue #3327)
+# ============================================================================
+
+
+@governance_bp.route("/security-settings/upload-auth-status", methods=["GET"])
+@admin_required
+def api_get_upload_auth_status():
+    """Get upload authentication status.
+
+    Issue #3327: Returns upload auth status without exposing the key value.
+    All admins can view upload auth status (global config, no tenant isolation).
+    """
+
+    try:
+        status = governance_repo.get_upload_auth_status()
+        return jsonify(status)
+    except RuntimeError as e:
+        # Production mode with weak key
+        logger.error("Upload auth key validation failed: %s", e)
+        return jsonify({"error": "Upload auth key configuration is invalid", "detail": str(e)}), 500
+    except Exception as e:
+        logger.exception("Failed to get upload auth status: %s", e)
+        return jsonify({"error": "Failed to get upload auth status"}), 500
 
 
 # ============================================================================

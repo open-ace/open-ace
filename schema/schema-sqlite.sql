@@ -575,6 +575,12 @@ CREATE TABLE encryption_keys (
  last_used_at TIMESTAMP
 );
 
+CREATE TABLE external_identity_nonces (
+ issuer text NOT NULL,
+ nonce text NOT NULL,
+ expires_at INTEGER NOT NULL
+);
+
 CREATE TABLE feishu_settings (
  app_id TEXT NOT NULL,
  app_secret_enc text NOT NULL,
@@ -1592,6 +1598,7 @@ CREATE TABLE users (
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
  tokens_valid_after TIMESTAMP,
+ system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
@@ -1794,6 +1801,8 @@ CREATE UNIQUE INDEX web_user_auth_sessions_session_token_key ON web_user_auth_se
 
 CREATE UNIQUE INDEX workflow_milestones_milestone_id_key ON workflow_milestones (milestone_id);
 
+CREATE UNIQUE INDEX external_identity_nonces_key ON external_identity_nonces (issuer, nonce);
+
 CREATE INDEX idx_agent_approvals_run_id ON agent_approvals (run_id);
 
 CREATE INDEX idx_agent_approvals_session_id ON agent_approvals (session_id);
@@ -1944,6 +1953,8 @@ CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
 
+CREATE INDEX idx_external_identity_nonces_expires ON external_identity_nonces (expires_at);
+
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules (type);
@@ -2013,6 +2024,10 @@ CREATE INDEX idx_messages_tool_name ON daily_messages (tool_name);
 CREATE INDEX idx_messages_usage_trend_covering ON daily_messages (date, role, sender_name) WHERE ((role) = 'assistant');
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, date, role) WHERE ((user_id IS NOT NULL) AND ((role) = 'assistant'));
+
+CREATE INDEX idx_messages_user_host ON daily_messages (user_id, host_name) WHERE (user_id IS NOT NULL);
+
+CREATE INDEX idx_messages_user_tool ON daily_messages (user_id, tool_name) WHERE (user_id IS NOT NULL);
 
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 

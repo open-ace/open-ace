@@ -35,6 +35,7 @@ def _active_webui_token_user(monkeypatch):
 
 
 from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(42)]
 
@@ -63,7 +64,7 @@ def test_workspace_config_from_dict():
     data = {
         "enabled": True,
         "url": "http://192.168.1.100",
-        "multi_user_mode": True,
+        "isolation": {"level": "os_user", "backend": "plain"},
         "port_range_start": 8000,
         "port_range_end": 8999,
         "max_instances": 20,
@@ -72,7 +73,7 @@ def test_workspace_config_from_dict():
     config = WorkspaceConfig(
         enabled=data.get("enabled", False),
         url=data.get("url", "http://localhost"),
-        multi_user_mode=data.get("multi_user_mode", False),
+        isolation=iso(data["isolation"]["backend"]),
         port_range_start=data.get("port_range_start", 3100),
         port_range_end=data.get("port_range_end", 3200),
         max_instances=data.get("max_instances", 30),
@@ -145,7 +146,7 @@ def test_manager_port_allocation():
 
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("plain"),
         port_range_start=3100,
         port_range_end=3110,  # Small range for testing
     )
@@ -181,7 +182,7 @@ def test_manager_token_generation():
 
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("plain"),
         token_secret="test-secret-key",
     )
 
@@ -216,7 +217,7 @@ def test_manager_get_user_webui_url_single_user():
     config = WorkspaceConfig(
         enabled=True,
         url="http://localhost:8080",
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
 
     manager = WebUIManager(config)
@@ -237,11 +238,17 @@ def test_manager_get_user_webui_url_single_user():
 
     manager._launch_webui_process = MagicMock(side_effect=fake_launch)
     manager._wait_for_service_ready = MagicMock(return_value=True)
+    # The single-user port is derived from the configured range's first FREE
+    # port (default start 3100); stub the availability probe so the test does
+    # not depend on the runner's port table (same determinism rule as the
+    # multi-user instance-limit test).
+    manager._is_port_available = MagicMock(return_value=True)
 
     url, token = manager.get_user_webui_url(user_id=1, system_account="testuser")
 
-    # Single-user mode pins the WebUI to the fixed port 3100 (Issue #3129):
-    # the config URL's host is kept but its port is replaced with 3100.
+    # Single-user mode pins the WebUI to the range's first free port — the
+    # default range starts at 3100 (Issue #3129): the config URL's host is
+    # kept but its port is replaced with 3100.
     assert url == "http://localhost:3100"
     # Token is generated for iframe auth in cross-origin API calls
     # v2 format: v2:user_id:port:timestamp:random:signature
@@ -255,7 +262,7 @@ def test_manager_instance_limit():
 
     config = WorkspaceConfig(
         enabled=True,
-        multi_user_mode=True,
+        isolation=iso("plain"),
         max_instances=2,
         port_range_start=3100,
         port_range_end=3110,
@@ -305,7 +312,7 @@ def test_config_json_sample():
     workspace = config.get("workspace", {})
 
     # Check new parameters
-    assert "multi_user_mode" in workspace, "multi_user_mode not in config"
+    assert "isolation" in workspace, "workspace.isolation not in config"
     assert "port_range_start" in workspace, "port_range_start not in config"
     assert "port_range_end" in workspace, "port_range_end not in config"
     assert "max_instances" in workspace, "max_instances not in config"

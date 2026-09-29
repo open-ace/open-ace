@@ -37,13 +37,12 @@ These endpoints require `platform_admin` or `admin` role.
 | POST | `/api/api/encryption-keys/rotate` | `rotate_key` | encryption_keys.py | 113 |
 | GET | `/api/api/encryption-keys/sync-status` | `get_sync_status` | encryption_keys.py | 203 |
 | POST | `/api/api/encryption-keys/validate` | `validate_key` | encryption_keys.py | 52 |
-| POST | `/api/content/filter/keywords` | `api_add_keyword` | governance.py | 463 |
+| POST | `/api/content/filter/keywords` | `api_add_keyword` | governance.py | 467 |
 | POST | `/api/content/filter/patterns` | `api_add_pattern` | governance.py | 433 |
-| POST | `/api/filter-rules` | `api_create_filter_rule` | governance.py | 644 |
-| PUT | `/api/filter-rules/<int:rule_id>` | `api_update_filter_rule` | governance.py | 726 |
-| DELETE | `/api/filter-rules/<int:rule_id>` | `api_delete_filter_rule` | governance.py | 812 |
-| PUT | `/api/security-settings` | `api_update_security_settings` | governance.py | 867 |
-| POST | `/api/security-settings/ssrf/reset` | `api_reset_ssrf_config` | governance.py | 950 |
+| POST | `/api/filter-rules` | `api_create_filter_rule` | governance.py | 570 |
+| PUT | `/api/filter-rules/<int:rule_id>` | `api_update_filter_rule` | governance.py | 622 |
+| DELETE | `/api/filter-rules/<int:rule_id>` | `api_delete_filter_rule` | governance.py | 661 |
+| PUT | `/api/security-settings` | `api_update_security_settings` | governance.py | 705 |
 | GET | `/api/tenants` | `list_tenants` | tenant.py | 120 |
 | POST | `/api/tenants` | `create_tenant` | tenant.py | 178 |
 | GET | `/api/tenants/<int:tenant_id>` | `get_tenant` | tenant.py | 146 |
@@ -62,24 +61,24 @@ These endpoints require `admin`, `platform_admin`, or `tenant_admin` role.
 
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
-| POST | `/api/admin/dingtalk/sync` | `api_sync_dingtalk_org` | admin.py | 1668 |
-| GET | `/api/admin/dingtalk/sync/lock-state` | `api_dingtalk_sync_lock_state` | admin.py | 1770 |
-| POST | `/api/admin/dingtalk/sync/release-lock` | `api_release_dingtalk_sync_lock` | admin.py | 1785 |
-| POST | `/api/admin/feishu/sync` | `api_sync_feishu_org` | admin.py | 1636 |
-| GET | `/api/admin/feishu/sync/lock-state` | `api_feishu_sync_lock_state` | admin.py | 1740 |
-| POST | `/api/admin/feishu/sync/release-lock` | `api_release_feishu_sync_lock` | admin.py | 1755 |
-| POST | `/api/admin/quota/health-check` | `api_quota_health_check` | admin.py | 1492 |
-| GET | `/api/admin/quota/stats` | `api_quota_stats` | admin.py | 1323 |
-| GET | `/api/admin/quota/usage` | `api_quota_usage` | admin.py | 1269 |
-| POST | `/api/admin/quota/validate-allocation` | `api_validate_quota_allocation` | admin.py | 1424 |
+| POST | `/api/admin/dingtalk/sync` | `api_sync_dingtalk_org` | admin.py | 1797 |
+| GET | `/api/admin/dingtalk/sync/lock-state` | `api_dingtalk_sync_lock_state` | admin.py | 1899 |
+| POST | `/api/admin/dingtalk/sync/release-lock` | `api_release_dingtalk_sync_lock` | admin.py | 1914 |
+| POST | `/api/admin/feishu/sync` | `api_sync_feishu_org` | admin.py | 1765 |
+| GET | `/api/admin/feishu/sync/lock-state` | `api_feishu_sync_lock_state` | admin.py | 1869 |
+| POST | `/api/admin/feishu/sync/release-lock` | `api_release_feishu_sync_lock` | admin.py | 1884 |
+| POST | `/api/admin/quota/health-check` | `api_quota_health_check` | admin.py | 1621 |
+| GET | `/api/admin/quota/stats` | `api_quota_stats` | admin.py | 1452 |
+| GET | `/api/admin/quota/usage` | `api_quota_usage` | admin.py | 1398 |
+| POST | `/api/admin/quota/validate-allocation` | `api_validate_quota_allocation` | admin.py | 1553 |
 | GET | `/api/admin/users` | `api_get_users` | admin.py | 227 |
 | POST | `/api/admin/users` | `api_create_user` | admin.py | 260 |
-| PUT | `/api/admin/users/<int:user_id>` | `api_update_user` | admin.py | 415 |
-| DELETE | `/api/admin/users/<int:user_id>` | `api_delete_user` | admin.py | 571 |
-| PUT | `/api/admin/users/<int:user_id>/password` | `api_update_user_password` | admin.py | 884 |
-| PUT | `/api/admin/users/<int:user_id>/quota` | `api_update_user_quota` | admin.py | 1010 |
-| POST | `/api/admin/users/<int:user_id>/reset-password` | `api_reset_user_password` | admin.py | 922 |
-| POST | `/api/admin/users/<int:user_id>/restore` | `api_restore_user` | admin.py | 677 |
+| PUT | `/api/admin/users/<int:user_id>` | `api_update_user` | admin.py | 419 |
+| DELETE | `/api/admin/users/<int:user_id>` | `api_delete_user` | admin.py | 682 |
+| PUT | `/api/admin/users/<int:user_id>/password` | `api_update_user_password` | admin.py | 1013 |
+| PUT | `/api/admin/users/<int:user_id>/quota` | `api_update_user_quota` | admin.py | 1139 |
+| POST | `/api/admin/users/<int:user_id>/reset-password` | `api_reset_user_password` | admin.py | 1051 |
+| POST | `/api/admin/users/<int:user_id>/restore` | `api_restore_user` | admin.py | 804 |
 | GET | `/api/ai-agent/settings` | `api_get_ai_agent_settings` | ai_agent_settings.py | 37 |
 | PUT | `/api/ai-agent/settings` | `api_update_ai_agent_settings` | ai_agent_settings.py | 45 |
 | POST | `/api/ai-agent/settings/validate-github-token` | `api_validate_github_token` | ai_agent_settings.py | 91 |
@@ -108,8 +107,7 @@ These endpoints require `admin`, `platform_admin`, or `tenant_admin` role.
 | GET | `/api/content/filter/stats` | `api_filter_stats` | governance.py | 423 |
 | GET | `/api/fetch` | `api_fetch` | fetch.py | 431 |
 | GET | `/api/fetch/remote` | `api_fetch_remote` | fetch.py | 441 |
-| GET | `/api/filter-rules` | `api_get_filter_rules` | governance.py | 556 |
-| GET | `/api/filter-rules/<int:rule_id>` | `api_get_filter_rule` | governance.py | 625 |
+| GET | `/api/filter-rules` | `api_get_filter_rules` | governance.py | 560 |
 | GET | `/api/governance/audit-logs` | `api_governance_audit_logs` | governance.py | 122 |
 | GET | `/api/mapping-rules` | `get_all_rules` | mapping_rules.py | 61 |
 | POST | `/api/mapping-rules` | `create_rule` | mapping_rules.py | 120 |
@@ -133,9 +131,8 @@ These endpoints require `admin`, `platform_admin`, or `tenant_admin` role.
 | POST | `/api/remote/machines/<machine_id>/token/revoke` | `revoke_machine_token` | remote.py | 1561 |
 | POST | `/api/remote/machines/<machine_id>/token/rotate` | `rotate_machine_token` | remote.py | 1450 |
 | POST | `/api/remote/machines/register` | `register_machine` | remote.py | 1093 |
-| GET | `/api/security-settings` | `api_get_security_settings` | governance.py | 857 |
-| GET | `/api/security-settings/ssrf-status` | `api_get_ssrf_status` | governance.py | 931 |
-| GET | `/api/security-settings/upload-auth-status` | `api_get_upload_auth_status` | governance.py | 905 |
+| GET | `/api/security-settings` | `api_get_security_settings` | governance.py | 695 |
+| GET | `/api/security-settings/upload-auth-status` | `api_get_upload_auth_status` | governance.py | 769 |
 | POST | `/api/sso/providers` | `register_provider` | sso.py | 569 |
 | GET | `/api/sso/providers/<provider_name>` | `get_provider_detail` | sso.py | 500 |
 | PUT | `/api/sso/providers/<provider_name>` | `update_provider` | sso.py | 664 |
@@ -157,10 +154,10 @@ These endpoints allow tenant_admin to access their own tenant, or platform_admin
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
 | POST | `/api/tenants/<int:tenant_id>/check-quota` | `check_tenant_quota` | tenant.py | 582 |
-| GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_get_tenant_keywords` | governance.py | 1073 |
-| POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_create_tenant_keyword` | governance.py | 1126 |
-| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_update_tenant_keyword` | governance.py | 1197 |
-| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_delete_tenant_keyword` | governance.py | 1266 |
+| GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_get_tenant_keywords` | governance.py | 795 |
+| POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_create_tenant_keyword` | governance.py | 848 |
+| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_update_tenant_keyword` | governance.py | 919 |
+| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_delete_tenant_keyword` | governance.py | 988 |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | `update_tenant_settings` | tenant.py | 375 |
 | GET | `/api/tenants/<int:tenant_id>/stats` | `get_tenant_stats` | tenant.py | 566 |
 | GET | `/api/tenants/<int:tenant_id>/usage` | `get_tenant_usage` | tenant.py | 545 |
@@ -168,8 +165,8 @@ These endpoints allow tenant_admin to access their own tenant, or platform_admin
 
 ## Summary
 
-- Total platform_admin_required endpoints: 25
-- Total admin_required endpoints: 86
+- Total platform_admin_required endpoints: 24
+- Total admin_required endpoints: 84
 - Total same_tenant_or_platform_admin endpoints: 8
 
 **Note**: Issue #2276 ensures backward compatibility — the `admin` role can access all `platform_admin_required` endpoints.
@@ -207,13 +204,12 @@ Issue #2276：所有管理端点的权限要求。
 | POST | `/api/api/encryption-keys/rotate` | `rotate_key` | encryption_keys.py | 113 |
 | GET | `/api/api/encryption-keys/sync-status` | `get_sync_status` | encryption_keys.py | 203 |
 | POST | `/api/api/encryption-keys/validate` | `validate_key` | encryption_keys.py | 52 |
-| POST | `/api/content/filter/keywords` | `api_add_keyword` | governance.py | 463 |
+| POST | `/api/content/filter/keywords` | `api_add_keyword` | governance.py | 467 |
 | POST | `/api/content/filter/patterns` | `api_add_pattern` | governance.py | 433 |
-| POST | `/api/filter-rules` | `api_create_filter_rule` | governance.py | 644 |
-| PUT | `/api/filter-rules/<int:rule_id>` | `api_update_filter_rule` | governance.py | 726 |
-| DELETE | `/api/filter-rules/<int:rule_id>` | `api_delete_filter_rule` | governance.py | 812 |
-| PUT | `/api/security-settings` | `api_update_security_settings` | governance.py | 867 |
-| POST | `/api/security-settings/ssrf/reset` | `api_reset_ssrf_config` | governance.py | 950 |
+| POST | `/api/filter-rules` | `api_create_filter_rule` | governance.py | 570 |
+| PUT | `/api/filter-rules/<int:rule_id>` | `api_update_filter_rule` | governance.py | 622 |
+| DELETE | `/api/filter-rules/<int:rule_id>` | `api_delete_filter_rule` | governance.py | 661 |
+| PUT | `/api/security-settings` | `api_update_security_settings` | governance.py | 705 |
 | GET | `/api/tenants` | `list_tenants` | tenant.py | 120 |
 | POST | `/api/tenants` | `create_tenant` | tenant.py | 178 |
 | GET | `/api/tenants/<int:tenant_id>` | `get_tenant` | tenant.py | 146 |
@@ -232,24 +228,24 @@ Issue #2276：所有管理端点的权限要求。
 
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
-| POST | `/api/admin/dingtalk/sync` | `api_sync_dingtalk_org` | admin.py | 1668 |
-| GET | `/api/admin/dingtalk/sync/lock-state` | `api_dingtalk_sync_lock_state` | admin.py | 1770 |
-| POST | `/api/admin/dingtalk/sync/release-lock` | `api_release_dingtalk_sync_lock` | admin.py | 1785 |
-| POST | `/api/admin/feishu/sync` | `api_sync_feishu_org` | admin.py | 1636 |
-| GET | `/api/admin/feishu/sync/lock-state` | `api_feishu_sync_lock_state` | admin.py | 1740 |
-| POST | `/api/admin/feishu/sync/release-lock` | `api_release_feishu_sync_lock` | admin.py | 1755 |
-| POST | `/api/admin/quota/health-check` | `api_quota_health_check` | admin.py | 1492 |
-| GET | `/api/admin/quota/stats` | `api_quota_stats` | admin.py | 1323 |
-| GET | `/api/admin/quota/usage` | `api_quota_usage` | admin.py | 1269 |
-| POST | `/api/admin/quota/validate-allocation` | `api_validate_quota_allocation` | admin.py | 1424 |
+| POST | `/api/admin/dingtalk/sync` | `api_sync_dingtalk_org` | admin.py | 1797 |
+| GET | `/api/admin/dingtalk/sync/lock-state` | `api_dingtalk_sync_lock_state` | admin.py | 1899 |
+| POST | `/api/admin/dingtalk/sync/release-lock` | `api_release_dingtalk_sync_lock` | admin.py | 1914 |
+| POST | `/api/admin/feishu/sync` | `api_sync_feishu_org` | admin.py | 1765 |
+| GET | `/api/admin/feishu/sync/lock-state` | `api_feishu_sync_lock_state` | admin.py | 1869 |
+| POST | `/api/admin/feishu/sync/release-lock` | `api_release_feishu_sync_lock` | admin.py | 1884 |
+| POST | `/api/admin/quota/health-check` | `api_quota_health_check` | admin.py | 1621 |
+| GET | `/api/admin/quota/stats` | `api_quota_stats` | admin.py | 1452 |
+| GET | `/api/admin/quota/usage` | `api_quota_usage` | admin.py | 1398 |
+| POST | `/api/admin/quota/validate-allocation` | `api_validate_quota_allocation` | admin.py | 1553 |
 | GET | `/api/admin/users` | `api_get_users` | admin.py | 227 |
 | POST | `/api/admin/users` | `api_create_user` | admin.py | 260 |
-| PUT | `/api/admin/users/<int:user_id>` | `api_update_user` | admin.py | 415 |
-| DELETE | `/api/admin/users/<int:user_id>` | `api_delete_user` | admin.py | 571 |
-| PUT | `/api/admin/users/<int:user_id>/password` | `api_update_user_password` | admin.py | 884 |
-| PUT | `/api/admin/users/<int:user_id>/quota` | `api_update_user_quota` | admin.py | 1010 |
-| POST | `/api/admin/users/<int:user_id>/reset-password` | `api_reset_user_password` | admin.py | 922 |
-| POST | `/api/admin/users/<int:user_id>/restore` | `api_restore_user` | admin.py | 677 |
+| PUT | `/api/admin/users/<int:user_id>` | `api_update_user` | admin.py | 419 |
+| DELETE | `/api/admin/users/<int:user_id>` | `api_delete_user` | admin.py | 682 |
+| PUT | `/api/admin/users/<int:user_id>/password` | `api_update_user_password` | admin.py | 1013 |
+| PUT | `/api/admin/users/<int:user_id>/quota` | `api_update_user_quota` | admin.py | 1139 |
+| POST | `/api/admin/users/<int:user_id>/reset-password` | `api_reset_user_password` | admin.py | 1051 |
+| POST | `/api/admin/users/<int:user_id>/restore` | `api_restore_user` | admin.py | 804 |
 | GET | `/api/ai-agent/settings` | `api_get_ai_agent_settings` | ai_agent_settings.py | 37 |
 | PUT | `/api/ai-agent/settings` | `api_update_ai_agent_settings` | ai_agent_settings.py | 45 |
 | POST | `/api/ai-agent/settings/validate-github-token` | `api_validate_github_token` | ai_agent_settings.py | 91 |
@@ -278,8 +274,7 @@ Issue #2276：所有管理端点的权限要求。
 | GET | `/api/content/filter/stats` | `api_filter_stats` | governance.py | 423 |
 | GET | `/api/fetch` | `api_fetch` | fetch.py | 431 |
 | GET | `/api/fetch/remote` | `api_fetch_remote` | fetch.py | 441 |
-| GET | `/api/filter-rules` | `api_get_filter_rules` | governance.py | 556 |
-| GET | `/api/filter-rules/<int:rule_id>` | `api_get_filter_rule` | governance.py | 625 |
+| GET | `/api/filter-rules` | `api_get_filter_rules` | governance.py | 560 |
 | GET | `/api/governance/audit-logs` | `api_governance_audit_logs` | governance.py | 122 |
 | GET | `/api/mapping-rules` | `get_all_rules` | mapping_rules.py | 61 |
 | POST | `/api/mapping-rules` | `create_rule` | mapping_rules.py | 120 |
@@ -303,9 +298,8 @@ Issue #2276：所有管理端点的权限要求。
 | POST | `/api/remote/machines/<machine_id>/token/revoke` | `revoke_machine_token` | remote.py | 1561 |
 | POST | `/api/remote/machines/<machine_id>/token/rotate` | `rotate_machine_token` | remote.py | 1450 |
 | POST | `/api/remote/machines/register` | `register_machine` | remote.py | 1093 |
-| GET | `/api/security-settings` | `api_get_security_settings` | governance.py | 857 |
-| GET | `/api/security-settings/ssrf-status` | `api_get_ssrf_status` | governance.py | 931 |
-| GET | `/api/security-settings/upload-auth-status` | `api_get_upload_auth_status` | governance.py | 905 |
+| GET | `/api/security-settings` | `api_get_security_settings` | governance.py | 695 |
+| GET | `/api/security-settings/upload-auth-status` | `api_get_upload_auth_status` | governance.py | 769 |
 | POST | `/api/sso/providers` | `register_provider` | sso.py | 569 |
 | GET | `/api/sso/providers/<provider_name>` | `get_provider_detail` | sso.py | 500 |
 | PUT | `/api/sso/providers/<provider_name>` | `update_provider` | sso.py | 664 |
@@ -327,10 +321,10 @@ Issue #2276：所有管理端点的权限要求。
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
 | POST | `/api/tenants/<int:tenant_id>/check-quota` | `check_tenant_quota` | tenant.py | 582 |
-| GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_get_tenant_keywords` | governance.py | 1073 |
-| POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_create_tenant_keyword` | governance.py | 1126 |
-| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_update_tenant_keyword` | governance.py | 1197 |
-| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_delete_tenant_keyword` | governance.py | 1266 |
+| GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_get_tenant_keywords` | governance.py | 795 |
+| POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `api_create_tenant_keyword` | governance.py | 848 |
+| PUT | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_update_tenant_keyword` | governance.py | 919 |
+| DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `api_delete_tenant_keyword` | governance.py | 988 |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | `update_tenant_settings` | tenant.py | 375 |
 | GET | `/api/tenants/<int:tenant_id>/stats` | `get_tenant_stats` | tenant.py | 566 |
 | GET | `/api/tenants/<int:tenant_id>/usage` | `get_tenant_usage` | tenant.py | 545 |
@@ -338,8 +332,8 @@ Issue #2276：所有管理端点的权限要求。
 
 ## 汇总
 
-- platform_admin_required 端点总数：25
-- admin_required 端点总数：86
+- platform_admin_required 端点总数：24
+- admin_required 端点总数：84
 - same_tenant_or_platform_admin 端点总数：8
 
 **注**：Issue #2276 保证向后兼容——`admin` 角色可以访问所有 `platform_admin_required` 端点。

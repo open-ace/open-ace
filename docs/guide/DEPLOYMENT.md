@@ -64,7 +64,7 @@ cd open-ace
 # 2. Generate and validate .env (SECRET_KEY, OPENACE_ENCRYPTION_KEY, DB_PASSWORD, ...)
 ./scripts/bootstrap-compose-env.sh
 
-# 3. Start (pulls the pre-built openace/open-ace:latest image by default)
+# 3. Start (pulls the pre-built ghcr.io/open-ace/open-ace:latest image by default)
 docker compose up -d --wait
 
 # 4. Verify
@@ -83,7 +83,7 @@ Password: admin123
 
 Details:
 
-- The image is `openace/open-ace:latest` (override with `IMAGE_NAME`, e.g. to pin `openace/open-ace:v1.2.0` or a locally built `open-ace:dev`). Developers can build locally with `docker build -t open-ace:dev --target production .`.
+- The image is `ghcr.io/open-ace/open-ace:latest` (override with `IMAGE_NAME`, e.g. to pin `ghcr.io/open-ace/open-ace:v2.1.0` or a locally built `open-ace:dev`). Developers can build locally with `docker build -t open-ace:dev --target production .`.
 - `docker compose down` does not delete data; all state lives in named volumes (see [Data Persistence](#data-persistence)).
 - The container runs as the non-root `open-ace` user (uid 1000) by default. Only multi-user mode needs root (see [Multi-User Workspaces](#multi-user-workspaces)).
 - The scheduler worker is an optional profile in single-user mode: `docker compose --profile scheduler up -d`.
@@ -104,10 +104,12 @@ For servers without internet access, use the image export script from `scripts/i
 The plain Docker equivalent also works:
 
 ```bash
-docker pull openace/open-ace:latest
-docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz
+docker pull ghcr.io/open-ace/open-ace:latest
+docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz
 gunzip -c open-ace-images.tar.gz | docker load
 ```
+
+Pre-built images are published to GitHub Container Registry for every release (`ghcr.io/open-ace/open-ace:latest`, `:vX.Y.Z`, `:X.Y.Z`, `:X.Y`, `:X`) and are `linux/amd64` only; Apple Silicon hosts run them under emulation. To build the image from your checkout instead (e.g. when `ghcr.io` is unreachable), run `docker compose up -d --build --wait`.
 
 For mainland China networks where Docker Hub is unreachable, set `BASE_REGISTRY=docker.m.daocloud.io` in `.env` so both the build and the PostgreSQL image resolve from a mirror.
 
@@ -145,10 +147,10 @@ Environment variables most deployments touch:
 | `PORT` | `19888` | Host port for the web UI (container always listens on 19888) |
 | `SERVER_IP` | auto-detected | Address browsers use to reach the server (Issue #1306); set explicitly when accessing from other machines, e.g. `SERVER_IP=192.168.1.100` |
 | `WORKSPACE_PORT_RANGE_START` / `WORKSPACE_PORT_RANGE_END` | `3100` / `3200` | Published port range for per-user workspace WebUI instances |
-| `WORKSPACE_MULTI_USER_MODE` | `false` | Enable multi-user workspace mode |
+| `WORKSPACE_ISOLATION_BACKEND` | `shared` | Isolation backend (Issue #3446): `plain` = one OS account per user (needs the multi-user overlay), `opensandbox` = OpenSandbox pods; replaces `WORKSPACE_MULTI_USER_MODE` |
 | `DB_USER` / `DB_NAME` | `ace` / `ace` | PostgreSQL user and database name |
 | `DB_PASSWORD` | dev default | Strong password required in production |
-| `IMAGE_NAME` | `openace/open-ace:latest` | Application image |
+| `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` | Application image |
 | `BASE_REGISTRY` | `docker.io` | Base image registry override |
 
 ### Port Configuration
@@ -356,9 +358,23 @@ launchctl load ~/Library/LaunchAgents/com.open-ace.web.plist
 
 ## Multi-User Workspaces
 
-Multi-user mode gives each user an isolated system account and a dedicated `qwen-code-webui` instance, running the container as root. See [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) for the three startup methods, sudoers configuration, and version requirements.
+With an OS-account isolation backend (`workspace.isolation.backend` `plain`, `bwrap`, `local-gvisor` or `local-kata`), Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. The `plain` backend needs the container to run as root. See [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) for the startup methods, sudoers configuration, and version requirements.
+
+> To choose between the isolation modes (per-user OS account, confined, local gVisor/Kata container, OpenSandbox pod), configure one and verify what is in force, see the admin guide [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md). The package installer sets up the sudoers rules and wrappers for you; the manual configuration in [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) is for installs without it.
+
+> **Isolation and the Docker install.** The Docker install supports the `none` and per-user `os_user` levels, plus `sandboxed` through OpenSandbox pods on Kubernetes. The confined `os_user` mode and the local gVisor/Kata sandboxes need the package install on a Linux host. Choose your install method with [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-what-your-install-method-allows) in mind.
 
 ## Upgrading
+
+> **Upgrading to v2.1**: workspace isolation moved to one `workspace.isolation {"level", "backend"}` block (Issue #3446), and the server refuses to start on the old keys (`multi_user_mode`, `required_isolation_level`, `os_user_confinement`, ...). Package and Docker installs convert the config automatically; source installs and read-only mounted configs must run `python3 scripts/convert_workspace_isolation.py <path/to/config.json>` first. Docker: use `WORKSPACE_ISOLATION_BACKEND` instead of `WORKSPACE_MULTI_USER_MODE`. See [Workspace isolation](WORKSPACE_ISOLATION.md). Run `alembic upgrade head` (v2.1 adds two indexes, built without blocking writes on PostgreSQL).
+
+> **Upgrading from v1.x to v2.0**: check these before restarting on v2.0.
+> 1. Python 3.10+ is required for source and package installs.
+> 2. Set `OPENACE_ENCRYPTION_KEY` to your previous `SECRET_KEY` value before the first restart (see [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md)).
+> 3. The Docker image runs as uid 1000; make mounted volumes writable by it, and use `docker-compose.multi-user.yml` for multi-user workspace mode.
+> 4. The database must already be on `baseline_2026_06_23` or later; run `alembic upgrade head`.
+>
+> Full list: the `v2.0.0` section of [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md).
 
 Pull the new image and restart; database migrations run automatically on container startup, subject to the minimum upgrade baseline `baseline_2026_06_23`. Steps, migration failure handling, and rollback are covered in [UPGRADING.md](UPGRADING.md).
 
@@ -369,7 +385,7 @@ Pull the new image and restart; database migrations run automatically on contain
 docker compose down
 
 # Remove images
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # Remove data volumes (complete cleanup)
 docker volume rm open-ace_agent-state open-ace_config-data open-ace_postgres-data open-ace_workspace-data
@@ -504,7 +520,7 @@ cd open-ace
 # 2. 生成并校验 .env（SECRET_KEY、OPENACE_ENCRYPTION_KEY、DB_PASSWORD 等）
 ./scripts/bootstrap-compose-env.sh
 
-# 3. 启动（默认拉取 openace/open-ace:latest 预构建镜像）
+# 3. 启动（默认拉取 ghcr.io/open-ace/open-ace:latest 预构建镜像）
 docker compose up -d --wait
 
 # 4. 验证
@@ -523,7 +539,7 @@ docker compose logs -f open-ace
 
 说明：
 
-- 镜像为 `openace/open-ace:latest`（可用 `IMAGE_NAME` 覆盖，例如固定为 `openace/open-ace:v1.2.0` 或本地构建的 `open-ace:dev`）。开发者可本地构建：`docker build -t open-ace:dev --target production .`。
+- 镜像为 `ghcr.io/open-ace/open-ace:latest`（可用 `IMAGE_NAME` 覆盖，例如固定为 `ghcr.io/open-ace/open-ace:v2.1.0` 或本地构建的 `open-ace:dev`）。开发者可本地构建：`docker build -t open-ace:dev --target production .`。
 - `docker compose down` 不会删除数据；所有状态都在命名卷中（见[数据持久化](#数据持久化)）。
 - 容器默认以非 root 用户 `open-ace`（uid 1000）运行。只有多用户模式需要 root（见[多用户工作区](#多用户工作区)）。
 - 单用户模式下 scheduler 调度worker是可选 profile：`docker compose --profile scheduler up -d`。
@@ -544,10 +560,12 @@ docker compose logs -f open-ace
 也可以用原生 Docker 命令完成：
 
 ```bash
-docker pull openace/open-ace:latest
-docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz
+docker pull ghcr.io/open-ace/open-ace:latest
+docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz
 gunzip -c open-ace-images.tar.gz | docker load
 ```
+
+每个版本的预构建镜像都发布到 GitHub Container Registry（`ghcr.io/open-ace/open-ace:latest`、`:vX.Y.Z`、`:X.Y.Z`、`:X.Y`、`:X`），仅提供 `linux/amd64`，Apple Silicon 主机以模拟方式运行。若无法访问 `ghcr.io`，可改为从当前代码本地构建：`docker compose up -d --build --wait`。
 
 国内网络无法访问 Docker Hub 时，在 `.env` 中设置 `BASE_REGISTRY=docker.m.daocloud.io`，让构建和 PostgreSQL 镜像都走镜像源。
 
@@ -585,10 +603,10 @@ python3 server.py
 | `PORT` | `19888` | 宿主机 Web 端口（容器内固定监听 19888） |
 | `SERVER_IP` | 自动探测 | 浏览器访问服务使用的地址（Issue #1306）；从其他机器访问时显式设置，如 `SERVER_IP=192.168.1.100` |
 | `WORKSPACE_PORT_RANGE_START` / `WORKSPACE_PORT_RANGE_END` | `3100` / `3200` | 发布的每用户工作区 WebUI 实例端口段 |
-| `WORKSPACE_MULTI_USER_MODE` | `false` | 启用多用户工作区模式 |
+| `WORKSPACE_ISOLATION_BACKEND` | `shared` | 隔离 backend（Issue #3446）：`plain` = 每用户一个 OS 账户（需多用户 overlay），`opensandbox` = OpenSandbox pod；取代 `WORKSPACE_MULTI_USER_MODE` |
 | `DB_USER` / `DB_NAME` | `ace` / `ace` | PostgreSQL 用户与数据库名 |
 | `DB_PASSWORD` | 开发默认值 | 生产环境必须设置强密码 |
-| `IMAGE_NAME` | `openace/open-ace:latest` | 应用镜像 |
+| `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` | 应用镜像 |
 | `BASE_REGISTRY` | `docker.io` | 基础镜像仓库覆盖 |
 
 ### 端口配置
@@ -796,9 +814,23 @@ launchctl load ~/Library/LaunchAgents/com.open-ace.web.plist
 
 ## 多用户工作区
 
-多用户模式为每个用户提供隔离的系统账号和独立的 `qwen-code-webui` 实例，容器以 root 运行。三种启动方式、sudoers 配置与版本要求见 [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md)。
+使用 OS 账户类隔离 backend（`workspace.isolation.backend` 为 `plain`、`bwrap`、`local-gvisor` 或 `local-kata`）时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。其中 `plain` 需要容器以 root 运行。启动方式、sudoers 配置与版本要求见 [MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md)。
+
+> 如何在几种隔离方式（每用户 OS 账户、受约束、本机 gVisor/Kata 容器、OpenSandbox pod）之间选择、如何配置并验证实际生效的隔离，见管理员指南 [WORKSPACE_ISOLATION.md](WORKSPACE_ISOLATION.md)。包安装脚本会为你配置 sudoers 规则与 wrapper；[MULTI_USER_WORKSPACE.md](MULTI_USER_WORKSPACE.md) 中的手工配置适用于不使用安装脚本的安装。
+
+> **隔离与 Docker 安装。** Docker 安装支持 `none` 与每用户 `os_user` 等级，以及通过 Kubernetes 上的 OpenSandbox pod 实现的 `sandboxed`。受约束的 `os_user` 与本机 gVisor/Kata 沙箱需要 Linux 主机上的包安装。选择安装方式前请先看 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-安装方式决定了哪些可用)。
 
 ## 升级
+
+> **升级到 v2.1**：工作区隔离改为单一的 `workspace.isolation {"level", "backend"}` 配置块（Issue #3446），旧配置键（`multi_user_mode`、`required_isolation_level`、`os_user_confinement` 等）会使服务器拒绝启动。包安装与 Docker 安装会自动转换配置；源码安装和只读挂载的配置须先运行 `python3 scripts/convert_workspace_isolation.py <config.json 路径>`。Docker 请用 `WORKSPACE_ISOLATION_BACKEND` 代替 `WORKSPACE_MULTI_USER_MODE`。详见[工作区隔离](WORKSPACE_ISOLATION.md)。执行 `alembic upgrade head`（v2.1 新增两个索引，在 PostgreSQL 上构建时不阻塞写入）。
+
+> **从 v1.x 升级到 v2.0**：以 v2.0 重启前请先确认：
+> 1. 源码 / 离线包安装需要 Python 3.10+。
+> 2. 首次重启前把 `OPENACE_ENCRYPTION_KEY` 设为原 `SECRET_KEY` 的值（见 [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md)）。
+> 3. Docker 镜像以 uid 1000 运行；挂载卷须对其可写，多用户工作区模式请使用 `docker-compose.multi-user.yml`。
+> 4. 数据库须已处于 `baseline_2026_06_23` 或之后；执行 `alembic upgrade head`。
+>
+> 完整列表见 [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md) 的 `v2.0.0` 段落。
 
 拉取新镜像并重启即可；数据库迁移在容器启动时自动执行，且受最低升级基线 `baseline_2026_06_23` 约束。详细步骤、迁移失败处置与回滚见 [UPGRADING.md](UPGRADING.md)。
 
@@ -809,7 +841,7 @@ launchctl load ~/Library/LaunchAgents/com.open-ace.web.plist
 docker compose down
 
 # 删除镜像
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # 删除数据卷（彻底清理）
 docker volume rm open-ace_agent-state open-ace_config-data open-ace_postgres-data open-ace_workspace-data

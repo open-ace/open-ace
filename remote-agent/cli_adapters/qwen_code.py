@@ -34,7 +34,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
 
     def get_install_command(self) -> str:
         """Return the command to install qwen-code CLI."""
-        return f"npm install -g {self.NPM_PACKAGE}@{self.PINNED_VERSION}"
+        return "npm install -g @qwen-code/qwen-code@0.23.3"
 
     def get_install_requirements_hint(self) -> str:
         """Manual-recovery prerequisite hint (surfaced with install_command).

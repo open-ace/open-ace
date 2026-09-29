@@ -238,7 +238,7 @@ if ($InstallCli) {
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 } else {
-                npm install -g "@qwen-code/qwen-code@$QwenCliVersion" 2>&1 | Out-Null
+                npm install -g "@qwen-code/qwen-code@0.23.3" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                     # Propagate npm failure (PR #3386 review): the config
                     # declares cli_tool=qwen-code-cli, so a soft warn would
