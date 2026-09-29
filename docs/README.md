@@ -54,7 +54,6 @@ Bandit baseline), [api/](api/) (generated API permission matrix, filter
 pattern migrations), and [architecture/](architecture/) (autonomous phase
 contracts). Process write-ups — fix retrospectives, runbooks, audits, and
 agent handoffs — are archived in [dev-notes/](dev-notes/README.md).
-Launch and outreach materials live in [marketing/](marketing/README.md).
 
 ### Reading Guide by Role
 
@@ -66,7 +65,7 @@ Launch and outreach materials live in [marketing/](marketing/README.md).
 | DevOps / Deployment | DEPLOYMENT → KUBERNETES → NGINX |
 | API integrator | API → PERMISSION_MODEL → CONCEPTS |
 | Managing remote machines | REMOTE_WORKSPACE → REMOTE_AGENT |
-| Growing the project | MARKETING → REPOSITORY_SETUP |
+| Growing the project | REPOSITORY_SETUP |
 
 ---
 
@@ -108,8 +107,7 @@ SANDBOX_BACKENDS、TRANSCRIPT_CONTRACT、WORKSPACE_ISOLATION_CAPABILITIES、
 GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、REPOSITORY_SETUP）。
 安全规范在 [security/](security/)，API 参考在 [api/](api/)，自主开发阶段契约在
 [architecture/](architecture/)。过程性文档（修复复盘、runbook、审计、agent 交接）
-归档于 [dev-notes/](dev-notes/README.md)，发布传播材料在
-[marketing/](marketing/README.md)。
+归档于 [dev-notes/](dev-notes/README.md)。
 
 ### 按角色阅读指南
 
@@ -121,7 +119,7 @@ GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、REPOSITORY_SETUP）。
 | 运维 / 部署 | DEPLOYMENT → KUBERNETES → NGINX |
 | API 集成 | API → PERMISSION_MODEL → CONCEPTS |
 | 管理远程机器 | REMOTE_WORKSPACE → REMOTE_AGENT |
-| 推广项目 | MARKETING → REPOSITORY_SETUP |
+| 推广项目 | REPOSITORY_SETUP |
 
 ---
 
@@ -135,7 +133,6 @@ docs/
 ├── security/            # Security baselines and boundaries / 安全规范
 ├── api/                 # API reference artifacts (generated matrix, migrations) / API 参考
 ├── architecture/        # Cross-cutting architecture contracts / 架构契约
-├── marketing/           # Launch and outreach materials / 发布传播材料
 ├── images/              # Documentation images / 文档图片
 └── dev-notes/           # Process write-up archive (fix retros, audits, runbooks) / 过程文档归档
 ```

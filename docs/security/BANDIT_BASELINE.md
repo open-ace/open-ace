@@ -1,18 +1,24 @@
-# Bandit Baseline 维护指南
+# Bandit Baseline Maintenance Guide — Bandit Baseline 维护指南
 
-本文档说明如何维护 `scripts/lint/bandit_baseline.json` 文件。
+[English](#english) | [中文](#中文)
 
-## 概述
+---
 
-Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们阻断 PR。本文件遵循 **severity + confidence 分层策略**：
+## English
 
-| 严重性 | 置信度 | 处理方式 |
+This document explains how to maintain the `scripts/lint/bandit_baseline.json` file.
+
+### Overview
+
+The Bandit baseline is used to exempt known low-severity security findings so that they do not block PRs. This file follows the **severity + confidence tiering policy**:
+
+| Severity | Confidence | Handling |
 |--------|--------|----------|
-| HIGH | HIGH/MEDIUM/LOW | 阻断 PR（不可豁免） |
-| MEDIUM | 任意 | 警告但不阻断 |
-| LOW | 任意 | 可豁免到 baseline |
+| HIGH | HIGH/MEDIUM/LOW | Blocks the PR (cannot be exempted) |
+| MEDIUM | Any | Warns but does not block |
+| LOW | Any | Can be exempted into the baseline |
 
-## Baseline 文件结构
+### Baseline File Structure
 
 ```json
 {
@@ -34,7 +40,120 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 }
 ```
 
-### 字段说明
+#### Field Reference
+
+| Field | Required | Description |
+|------|------|------|
+| `test_id` | ✅ | Bandit test ID (e.g., B101) |
+| `severity` | ✅ | Finding severity (only LOW can be exempted) |
+| `confidence` | ✅ | Bandit confidence |
+| `file` | ✅ | File path (relative to the repository root) |
+| `line` | ✅ | Line number |
+| `reason` | ✅ | Explanation of the exemption |
+| `approved_by` | ✅ | Approver (security-team or admin) |
+| `approved_at` | ✅ | Approval date |
+
+### Process for Adding a New Baseline Finding
+
+#### 1. Evaluate the Finding
+
+First confirm that the finding should not be fixed:
+
+- **Must be exempted**: only LOW severity findings
+- **Must not be exempted**: HIGH severity findings; the code must be fixed
+
+#### 2. Explain in the PR
+
+In the PR that adds the baseline finding:
+
+1. Explain why the finding can be exempted
+2. Reference related issues (if any)
+3. State whether a fix is planned
+
+#### 3. Obtain Approval
+
+- The PR can be merged only after approval by the **Security Team** or an **Admin**
+- The approver is recorded in the `approved_by` field
+
+#### 4. Update the Baseline File
+
+```bash
+# Manually add the finding to the baseline
+# Or generate it with a script (to be implemented)
+```
+
+### Quarterly Review Process
+
+The baseline is reviewed once per quarter (in January/April/July/October). Note: there is currently no scheduled workflow that automatically creates review issues, so reviews must be initiated manually:
+
+1. The Security Team reviews all baseline findings
+2. Confirms whether each finding still needs to be exempted
+3. Removes findings that have been fixed or no longer apply
+4. Updates the `approved_at` dates
+
+### Emergency Bypass
+
+If Bandit checks need to be temporarily bypassed in a PR:
+
+1. Add the `skip-security-check` label to the PR
+2. Explain the reason for the bypass in the PR description
+3. Create a follow-up issue to track what needs to be fixed
+4. The PR can be merged only after Admin approval
+
+> ⚠️ **Warning**: `skip-security-check` is for emergencies only; abuse will be recorded and reviewed.
+
+### Common LOW Severity Findings
+
+| Test ID | Name | Common Scenario |
+|---------|------|----------|
+| B101 | assert_used | assert statements in test files |
+| B311 | random_module | Randomness for non-cryptographic purposes |
+
+### References
+
+- [Bandit documentation](https://bandit.readthedocs.io/)
+- [Bandit Test IDs](https://bandit.readthedocs.io/en/latest/plugins/index.html)
+- [Issue #1856](https://github.com/open-ace/open-ace/issues/1856) - CI quality gate improvements
+
+---
+
+## 中文
+
+本文档说明如何维护 `scripts/lint/bandit_baseline.json` 文件。
+
+### 概述
+
+Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们阻断 PR。本文件遵循 **severity + confidence 分层策略**：
+
+| 严重性 | 置信度 | 处理方式 |
+|--------|--------|----------|
+| HIGH | HIGH/MEDIUM/LOW | 阻断 PR（不可豁免） |
+| MEDIUM | 任意 | 警告但不阻断 |
+| LOW | 任意 | 可豁免到 baseline |
+
+### Baseline 文件结构
+
+```json
+{
+  "generated_at": "2026-07-19",
+  "version": "1.0.0",
+  "description": "Bandit baseline for known low-severity findings.",
+  "findings": [
+    {
+      "test_id": "B101",
+      "severity": "LOW",
+      "confidence": "HIGH",
+      "file": "tests/test_example.py",
+      "line": 42,
+      "reason": "assert usage in test file is expected",
+      "approved_by": "security-team",
+      "approved_at": "2026-07-19"
+    }
+  ]
+}
+```
+
+#### 字段说明
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -47,16 +166,16 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 | `approved_by` | ✅ | 审批人（security-team 或 admin） |
 | `approved_at` | ✅ | 审批日期 |
 
-## 添加新 Baseline Finding 的流程
+### 添加新 Baseline Finding 的流程
 
-### 1. 评估 Finding
+#### 1. 评估 Finding
 
 首先确认 finding 不应修复：
 
 - **必须豁免**：仅 LOW severity findings
 - **禁止豁免**：HIGH severity findings，必须修复代码
 
-### 2. 在 PR 中说明
+#### 2. 在 PR 中说明
 
 在添加 baseline finding 的 PR 中：
 
@@ -64,19 +183,19 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 2. 引用相关 Issue（如有）
 3. 说明是否有计划修复
 
-### 3. 获取审批
+#### 3. 获取审批
 
 - **Security Team** 或 **Admin** 审批后方可合并
 - 审批人在 `approved_by` 字段记录
 
-### 4. 更新 Baseline 文件
+#### 4. 更新 Baseline 文件
 
 ```bash
 # 手动添加 finding 到 baseline
 # 或运行脚本生成（待实现）
 ```
 
-## 季度审查机制
+### 季度审查机制
 
 每季度（1/4/7/10 月）审查一次 baseline（注：目前尚无自动生成审查 Issue 的定时工作流，需手动发起）：
 
@@ -85,7 +204,7 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 3. 移除已修复或不再适用的 findings
 4. 更新 `approved_at` 日期
 
-## 紧急绕过
+### 紧急绕过
 
 如果需要在 PR 中临时绕过 Bandit 检查：
 
@@ -96,14 +215,14 @@ Bandit baseline 用于豁免已知的低严重性安全 findings，避免它们�
 
 > ⚠️ **警告**：`skip-security-check` 仅用于紧急情况，滥用将被记录审查。
 
-## 常见 LOW Severity Findings
+### 常见 LOW Severity Findings
 
 | Test ID | 名称 | 常见场景 |
 |---------|------|----------|
 | B101 | assert_used | 测试文件中的 assert 语句 |
 | B311 | random_module | 非加密用途的随机数 |
 
-## 参考资料
+### 参考资料
 
 - [Bandit 文档](https://bandit.readthedocs.io/)
 - [Bandit Test IDs](https://bandit.readthedocs.io/en/latest/plugins/index.html)
