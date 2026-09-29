@@ -51,10 +51,11 @@ SERVER_URL=""
 REGISTRATION_TOKEN=""
 MACHINE_NAME=$(hostname)
 # Pinned qwen-code CLI version: keep in sync with the control plane's
-# Dockerfile pair (webui 0.2.43 + cli 0.23.3). The Node >= 22 gate and the
-# adapter flags are validated against THIS version; @latest would drift the
-# agent onto unvalidated engines/CLI changes while npm still exits 0 on a
-# mere EBADENGINE warning (PR #3386 review).
+# Dockerfile pair (test_qwen_stack_pins_are_consistent_across_all_sites
+# enforces it). The Node >= 22 gate and the adapter flags are validated
+# against THIS version; @latest would drift the agent onto unvalidated
+# engines/CLI changes while npm still exits 0 on a mere EBADENGINE warning
+# (PR #3386 review).
 QWEN_CLI_VERSION="0.23.3"
 INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"

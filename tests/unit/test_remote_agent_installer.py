@@ -10,6 +10,22 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _read_pin(rel_path: str, pattern: str) -> str:
+    match = re.search(pattern, (REPO_ROOT / rel_path).read_text(encoding="utf-8"), re.MULTILINE)
+    assert match is not None, f"{rel_path}: pin not found via {pattern!r}"
+    return match.group(1)
+
+
+# The pinned qwen stack pair, read from the installers rather than hard-coded
+# so an automated pin bump (.github/workflows/webui-upgrade.yml) needs no test
+# edits; test_qwen_stack_pins_are_consistent_across_all_sites guarantees every
+# other pin site agrees with these two.
+WEBUI_PIN = _read_pin(
+    "scripts/install-central/package-method/install.sh", r'^QWEBUI_VERSION="([0-9.]+)"'
+)
+CLI_PIN = _read_pin("remote-agent/install.sh", r'^QWEN_CLI_VERSION="([0-9.]+)"')
+
+
 def runtime_agent_files():
     agent_dir = REPO_ROOT / "remote-agent"
     excluded = {"install.ps1", "install.sh", "uninstall.ps1", "uninstall.sh"}
@@ -201,7 +217,7 @@ def _run_qwen_stack(
     node_version: str | None,
     qwen_version: str | None,
     *,
-    webui_version: str | None = "0.2.43",
+    webui_version: str | None = WEBUI_PIN,
     shadow_webui_version: str | None = None,
 ):
     """Execute install_qwen_stack() from the installer under a fake PATH.
@@ -268,7 +284,7 @@ def test_qwen_stack_gates_node20_before_any_npm_install(tmp_path):
     """Regression (PR #3386 review): a host with npm present and Node 20 must
     not reach `npm install` at all (npm exits 0 on a mere EBADENGINE warning
     and used to install an unsupported combination)."""
-    result, npm_log = _run_qwen_stack(tmp_path, node_version="v20.19.1", qwen_version="0.23.3")
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v20.19.1", qwen_version=CLI_PIN)
 
     assert result.returncode == 1
     # npm was never invoked (recorder log absent or empty)
@@ -276,12 +292,12 @@ def test_qwen_stack_gates_node20_before_any_npm_install(tmp_path):
 
 
 def test_qwen_stack_installs_pinned_versions_on_node22(tmp_path):
-    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version="0.23.3")
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version=CLI_PIN)
 
     assert result.returncode == 0
     assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
+        f"install -g qwen-code-webui@{WEBUI_PIN}",
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}",
     ]
 
 
@@ -298,11 +314,11 @@ def test_qwen_stack_verifies_webui_version_at_selected_executable(tmp_path):
     A stale qwen-code-webui at a resolver candidate location (checked before
     PATH) keeps serving its old version even after npm installs the pinned
     pair elsewhere — presence + CLI-only verification used to print
-    "webui@0.2.43 ready" while the runtime would launch the old webui."""
+    "webui@<pin> ready" while the runtime would launch the old webui."""
     result, npm_log = _run_qwen_stack(
         tmp_path,
         node_version="v22.22.3",
-        qwen_version="0.23.3",
+        qwen_version=CLI_PIN,
         shadow_webui_version="0.2.40",
     )
 
@@ -471,7 +487,7 @@ def test_deploy_remote_node20_without_upgrade_route_refuses(tmp_path):
     """Node 20 on the simulated remote, non-root without passwordless sudo
     and no supported package manager: refuse BEFORE any npm install."""
     result, npm_log = _run_remote_qwen_stack(
-        tmp_path, node_version="v20.19.1", qwen_version="0.23.3"
+        tmp_path, node_version="v20.19.1", qwen_version=CLI_PIN
     )
 
     assert result.returncode == 1
@@ -483,15 +499,15 @@ def test_deploy_remote_root_without_sudo_installs_directly(tmp_path):
     result, npm_log = _run_remote_qwen_stack(
         tmp_path,
         node_version="v22.22.3",
-        qwen_version="0.23.3",
+        qwen_version=CLI_PIN,
         uid="0",
         with_sudo=False,
     )
 
     assert result.returncode == 0
     assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
+        f"install -g qwen-code-webui@{WEBUI_PIN}",
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}",
     ]
 
 
@@ -500,7 +516,7 @@ def test_deploy_remote_user_scoped_npm_needs_no_sudo(tmp_path):
     result, npm_log = _run_remote_qwen_stack(
         tmp_path,
         node_version="v22.22.3",
-        qwen_version="0.23.3",
+        qwen_version=CLI_PIN,
         uid="1000",
         with_sudo=False,
         prefix_writable=True,
@@ -508,8 +524,8 @@ def test_deploy_remote_user_scoped_npm_needs_no_sudo(tmp_path):
 
     assert result.returncode == 0
     assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
+        f"install -g qwen-code-webui@{WEBUI_PIN}",
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}",
     ]
 
 
@@ -519,7 +535,7 @@ def test_deploy_remote_unwritable_prefix_without_sudo_refuses(tmp_path):
     result, npm_log = _run_remote_qwen_stack(
         tmp_path,
         node_version="v22.22.3",
-        qwen_version="0.23.3",
+        qwen_version=CLI_PIN,
         uid="1000",
         with_sudo=False,
         prefix_writable=False,
@@ -533,7 +549,7 @@ def test_deploy_remote_system_prefix_uses_passwordless_sudo(tmp_path):
     result, npm_log = _run_remote_qwen_stack(
         tmp_path,
         node_version="v22.22.3",
-        qwen_version="0.23.3",
+        qwen_version=CLI_PIN,
         uid="1000",
         with_sudo=True,
         prefix_writable=False,
@@ -541,8 +557,8 @@ def test_deploy_remote_system_prefix_uses_passwordless_sudo(tmp_path):
 
     assert result.returncode == 0
     assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
+        f"install -g qwen-code-webui@{WEBUI_PIN}",
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}",
     ]
 
 
@@ -605,8 +621,8 @@ def test_maybe_install_proceeds_when_workspace_enabled(tmp_path):
         f'if [ "$1" = "config" ]; then echo "{npm_prefix}"; exit 0; fi\n'
         f'echo "$@" >> "{npm_log}"',
     )
-    shim("qwen", "echo '0.23.3'")
-    shim("qwen-code-webui", "echo '0.2.43'")
+    shim("qwen", f"echo '{CLI_PIN}'")
+    shim("qwen-code-webui", f"echo '{WEBUI_PIN}'")
 
     harness = (
         "print_info() { :; }\nprint_success() { :; }\nprint_warning() { :; }\n"
@@ -625,8 +641,8 @@ def test_maybe_install_proceeds_when_workspace_enabled(tmp_path):
 
     assert result.returncode == 0
     assert npm_log.read_text(encoding="utf-8").splitlines() == [
-        "install -g qwen-code-webui@0.2.43",
-        "install -g @qwen-code/qwen-code@0.23.3",
+        f"install -g qwen-code-webui@{WEBUI_PIN}",
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}",
     ]
 
 
@@ -673,7 +689,7 @@ def _run_agent_qwen_case(tmp_path, npm_exit: int, qwen_version: str | None):
     harness = (
         "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
         "log_error() { :; }\nget_node_major() { echo 22; }\n"
-        "QWEN_CLI_VERSION=0.23.3\n"
+        f"QWEN_CLI_VERSION={CLI_PIN}\n"
         "INSTALL_CLI=qwen-code-cli\n"
         'case "$INSTALL_CLI" in\n            qwen-code-cli)\n'
         + _agent_qwen_case_body()
@@ -694,7 +710,7 @@ def test_agent_installer_qwen_npm_failure_is_fatal(tmp_path):
     """PR #3386 review: npm failing for the requested qwen CLI must abort the
     install (the machine config declares cli_tool=qwen-code-cli), not warn
     and register an agent whose default CLI cannot start."""
-    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=1, qwen_version="0.23.3")
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=1, qwen_version=CLI_PIN)
 
     assert result.returncode == 1
     assert "CASE_COMPLETED" not in result.stdout
@@ -708,12 +724,14 @@ def test_agent_installer_qwen_version_verification_is_fatal(tmp_path):
 
 
 def test_agent_installer_qwen_happy_path_completes(tmp_path):
-    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version="0.23.3")
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version=CLI_PIN)
 
     assert result.returncode == 0
     assert "CASE_COMPLETED" in result.stdout
     # the install must be PINNED, not @latest (PR #3386 review)
-    assert npm_log.read_text(encoding="utf-8").strip() == ("install -g @qwen-code/qwen-code@0.23.3")
+    assert npm_log.read_text(encoding="utf-8").strip() == (
+        f"install -g @qwen-code/qwen-code@{CLI_PIN}"
+    )
 
 
 def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
@@ -773,7 +791,7 @@ def test_deploy_upgrade_api_only_remote_config_skips_stack(tmp_path):
     # ... the stack-probe ran ...
     assert "command -v qwen-code-webui" in ssh_calls
     # ... but the pinned install (bash -s -- <versions>) was never invoked
-    assert "-- 0.2.43" not in ssh_calls
+    assert f"-- {WEBUI_PIN}" not in ssh_calls
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
 
 
@@ -800,12 +818,12 @@ def _run_ps1_qwen_case(tmp_path, npm_exit: int, with_qwen: bool):
     shim("npm", f"echo npm-output; exit {npm_exit}")
     shim("node", "echo 'v22.22.3'")
     if with_qwen:
-        shim("qwen", "echo '0.23.3'")
+        shim("qwen", f"echo '{CLI_PIN}'")
 
     harness = (
         "$prevErrorAction = $ErrorActionPreference\n"
         "$ErrorActionPreference = 'Continue'\n"
-        "$QwenCliVersion = '0.23.3'\n"
+        f"$QwenCliVersion = '{CLI_PIN}'\n"
         "switch ('qwen-code-cli') {\n"
         # the extracted body already closes the qwen case block; the wrapper
         # opens the switch and closes it ONCE (an extra brace makes the whole
@@ -908,7 +926,7 @@ def test_deploy_upgrade_key_missing_remote_config_skips_stack(tmp_path):
     result, npm_log, ssh_calls = _run_api_only_remote(tmp_path, home)
 
     assert result.returncode == 0
-    assert "-- 0.2.43" not in ssh_calls
+    assert f"-- {WEBUI_PIN}" not in ssh_calls
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
 
 
@@ -949,22 +967,22 @@ def _run_api_only_remote(tmp_path, home):
 
 
 def test_local_stack_rejects_similar_version_0_23_30(tmp_path):
-    """Exact-match verification: 0.23.30 must NOT satisfy a 0.23.3 pin."""
-    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version="0.23.30")
+    """Exact-match verification: the pin plus a trailing digit (0.23.30 vs a 0.23.3 pin) must NOT satisfy it."""
+    result, npm_log = _run_qwen_stack(tmp_path, node_version="v22.22.3", qwen_version=f"{CLI_PIN}0")
 
     assert result.returncode == 1
 
 
 def test_remote_stack_rejects_similar_version_0_23_30(tmp_path):
     result, npm_log = _run_remote_qwen_stack(
-        tmp_path, node_version="v22.22.3", qwen_version="0.23.30"
+        tmp_path, node_version="v22.22.3", qwen_version=f"{CLI_PIN}0"
     )
 
     assert result.returncode == 1
 
 
 def test_agent_case_rejects_similar_version_0_23_30(tmp_path):
-    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version="0.23.30")
+    result, npm_log = _run_agent_qwen_case(tmp_path, npm_exit=0, qwen_version=f"{CLI_PIN}0")
 
     assert result.returncode == 1
     assert "CASE_COMPLETED" not in result.stdout
@@ -1027,7 +1045,7 @@ def test_menu_qwen_precheck_refuses_old_qwen_on_path(tmp_path):
 def test_menu_qwen_precheck_rejects_similar_version(tmp_path):
     import json
 
-    result = _run_qwen_precheck(tmp_path, node_version="v22.22.3", qwen_version="0.23.30")
+    result = _run_qwen_precheck(tmp_path, node_version="v22.22.3", qwen_version=f"{CLI_PIN}0")
     ok, reason = json.loads(result.stdout)
 
     assert ok is False
@@ -1036,7 +1054,7 @@ def test_menu_qwen_precheck_rejects_similar_version(tmp_path):
 def test_menu_qwen_precheck_accepts_pinned_pair(tmp_path):
     import json
 
-    ok_installed = _run_qwen_precheck(tmp_path, "v22.22.3", "0.23.3")
+    ok_installed = _run_qwen_precheck(tmp_path, "v22.22.3", CLI_PIN)
     ok_missing = _run_qwen_precheck(tmp_path, "v22.22.3", None)
 
     assert json.loads(ok_installed.stdout) == [True, ""]
@@ -1146,7 +1164,7 @@ def test_executor_qwen_missing_error_includes_node_requirement(tmp_path):
     payload = json.loads(result.stdout)
 
     assert payload["success"] is False
-    assert "npm install -g @qwen-code/qwen-code@0.23.3" in payload["error"]
+    assert f"npm install -g @qwen-code/qwen-code@{CLI_PIN}" in payload["error"]
     assert "Node.js >= 22" in payload["error"]
 
 
@@ -1199,7 +1217,7 @@ def _run_agent_cli_preflight(
     uid: str,
     with_sudo: bool,
     node_version: str | None,
-    qwen_version: str | None = "0.23.3",
+    qwen_version: str | None = CLI_PIN,
 ):
     """Execute the CLI pre-flight with a chosen privilege landscape.
 
@@ -1231,7 +1249,7 @@ def _run_agent_cli_preflight(
     harness = (
         "log_info() { :; }\nlog_success() { :; }\nlog_warn() { :; }\n"
         'log_error() { echo "ERR: $*"; }\n'
-        "QWEN_CLI_VERSION=0.23.3\n"
+        f"QWEN_CLI_VERSION={CLI_PIN}\n"
         "INSTALL_CLI=qwen-code-cli\n"
         + _agent_cli_preflight_body()
         + '\necho "PREFLIGHT_COMPLETED"\n'
@@ -1271,7 +1289,7 @@ def test_agent_preflight_nonroot_with_sudo_installs_via_sudo(tmp_path):
 
     assert result.returncode == 0
     assert "PREFLIGHT_COMPLETED" in result.stdout
-    assert "npm install -g @qwen-code/qwen-code@0.23.3" in sudo_log.read_text(encoding="utf-8")
+    assert f"npm install -g @qwen-code/qwen-code@{CLI_PIN}" in sudo_log.read_text(encoding="utf-8")
     assert not npm_log.exists() or npm_log.read_text(encoding="utf-8") == ""
     assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""
 
@@ -1286,7 +1304,7 @@ def test_agent_preflight_nonroot_nosudo_uses_user_prefix(tmp_path):
     assert result.returncode == 0
     log = npm_log.read_text(encoding="utf-8")
     assert "--prefix" in log
-    assert "@qwen-code/qwen-code@0.23.3" in log
+    assert f"@qwen-code/qwen-code@{CLI_PIN}" in log
     assert not service_log.exists() or service_log.read_text(encoding="utf-8") == ""
 
 
@@ -1334,7 +1352,7 @@ def _run_agent_different_server_preflight(tmp_path):
     # (PR #3386 R17 review: a Node-20 shim masked the missing exit with an
     # unrelated later failure)
     shim("node", "echo 'v22.22.3'")
-    shim("qwen", "echo '0.23.3'")
+    shim("qwen", f"echo '{CLI_PIN}'")
     shim("uname", "echo Linux")
 
     install_dir = tmp_path / "agent"
@@ -1350,7 +1368,7 @@ def _run_agent_different_server_preflight(tmp_path):
         'log_error() { echo "ERR: $*"; }\n'
         + fn
         + f'INSTALL_DIR="{install_dir}"\nSERVER_URL="https://new.example"\n'
-        f'PYTHON_PATH="{sys.executable}"\nQWEN_CLI_VERSION=0.23.3\n'
+        f'PYTHON_PATH="{sys.executable}"\nQWEN_CLI_VERSION={CLI_PIN}\n'
         "INSTALL_CLI=qwen-code-cli\n"
         'EXISTING_CONFIG_FOUND=false\nEXISTING_SERVER=""\nEXISTING_DIR=""\n'
         'EXISTING_MACHINE_ID=""\nDEFAULT_DIR="$HOME/.open-ace-agent"\n'
