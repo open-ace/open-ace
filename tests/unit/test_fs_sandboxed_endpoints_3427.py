@@ -32,13 +32,14 @@ USER = {
 
 
 class _FakeInstance:
-    def __init__(self, isolation_level):
+    def __init__(self, isolation_level, user_home_path=""):
         self.isolation_level = isolation_level
+        self.user_home_path = user_home_path
 
 
 class _FakeManager:
-    def __init__(self, isolation_level):
-        self._instance = _FakeInstance(isolation_level)
+    def __init__(self, isolation_level, user_home_path=""):
+        self._instance = _FakeInstance(isolation_level, user_home_path)
 
     def get_user_instance(self, user_id):
         return self._instance
@@ -161,6 +162,72 @@ class TestBrowseSandboxed:
         resp = sandbox_client.get("/api/fs/browse?path=/home/qlfan")
         assert resp.status_code == 400
         assert "Path must be under" in resp.get_json()["error"]
+
+
+class TestHomeEndpointSandboxed:
+    """#3459 follow-up: /fs/home must not probe the host in sandboxed mode."""
+
+    def test_sandboxed_home_prefers_instance_path(self, sandbox_client):
+        from unittest.mock import patch
+
+        import app.routes.fs as fs_mod
+
+        with patch.object(fs_mod, "get_directory_info", side_effect=AssertionError("probe")):
+            resp = sandbox_client.get("/api/fs/home")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        # instance.user_home_path 为空 → 回退到计算根,同为 /workspace/qlfan
+        assert body["homePath"] == "/workspace/qlfan"
+        assert body["canCreate"] is False
+        assert body["sandboxed"] is True
+
+    def test_sandboxed_home_uses_instance_user_home_path(self):
+        app = _make_app("sandboxed")
+        with (
+            patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=_FakeManager("sandboxed", user_home_path="/workspace/qlfan/custom"),
+            ),
+        ):
+            resp = app.test_client().get("/api/fs/home")
+        assert resp.status_code == 200
+        assert resp.get_json()["homePath"] == "/workspace/qlfan/custom"
+
+    def test_sandboxed_home_zero_forks(self, sandbox_client, monkeypatch):
+        monkeypatch.setattr("app.routes.fs.run_as_user", None)  # 调用即 TypeError
+        monkeypatch.setattr(
+            "app.routes.fs.get_directory_info",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("host probe")),
+        )
+        resp = sandbox_client.get("/api/fs/home")
+        assert resp.status_code == 200
+
+    def test_os_user_home_still_probes_host(self):
+        """Host semantics for os_user: the writable probe is legitimate."""
+        app = _make_app("os_user")
+        from unittest.mock import patch
+
+        with (
+            patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=_FakeManager("os_user"),
+            ),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=["/home"]),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_readable": True,
+                    "is_writable": True,
+                },
+            ) as probe,
+        ):
+            resp = app.test_client().get("/api/fs/home")
+        assert resp.status_code == 200
+        assert resp.get_json()["canCreate"] is True
+        probe.assert_called_once()
+        assert "sandboxed" not in resp.get_json()
 
 
 class TestFileIoEndpointsGated:
