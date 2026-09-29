@@ -139,10 +139,14 @@ def test_forecast_returns_message_count_not_request_count(tmp_db):
     assert forecast["daily_forecast"]["requests"] == 3  # 3 messages per day average
 
 
-def test_forecast_insufficient_data_returns_unavailable(tmp_db):
-    """Verify forecast returns unavailable when daily_messages has insufficient data."""
-    # Insert only 5 days of data (below minimum of 7)
-    for i in range(5):
+def test_forecast_partial_data_degrades_quality(tmp_db):
+    """#3244 semantics: partial data degrades quality instead of disabling forecast.
+
+    4 days of data with a 2-day gap inside the first-activity-bounded window
+    (Issue #3244 bounds window start to first activity date) → missing_days
+    reaches the degraded threshold → forecast available with quality "fair".
+    """
+    for i in (0, 1, 4, 5):  # yesterday, 2d ago, 5d ago, 6d ago — 4d/3d ago stay empty
         date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=i + 1)).strftime(
             "%Y-%m-%d"
         )
@@ -151,6 +155,15 @@ def test_forecast_insufficient_data_returns_unavailable(tmp_db):
     analytics = UsageAnalytics(db=tmp_db)
     forecast = analytics.get_forecast(days=7, tenant_id=1)
 
-    # Should return unavailable due to insufficient data
+    assert forecast["forecast_available"] is True
+    assert forecast["quality_level"] == "fair"
+    assert forecast["quality_metrics"]["sample_days"] == 4
+
+
+def test_forecast_no_data_returns_unavailable(tmp_db):
+    """With no daily_messages data at all the forecast is unavailable."""
+    analytics = UsageAnalytics(db=tmp_db)
+    forecast = analytics.get_forecast(days=7, tenant_id=1)
+
     assert forecast["forecast_available"] is False
-    assert "reason" in forecast
+    assert forecast["reason"] == "No historical data available"
