@@ -1737,25 +1737,9 @@ def api_create_directory():
     if len(dir_path) > 4096:
         return jsonify({"success": False, "error": "Path too long"}), 400
 
-    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
-    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
-
-    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
-        # In sandboxed mode, the path should be under /workspace
-        if not dir_path.startswith("/workspace"):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Path must be under /workspace in sandboxed mode",
-                    }
-                ),
-                400,
-            )
-        base_dirs = ["/workspace"]
-    else:
-        # Validate path format — restrict to workspace base dir(s)
-        base_dirs = get_workspace_base_dirs()
+    # Validate path format — restrict to workspace base dir(s). Sandbox users
+    # were gated above, so isolation never reaches this host-side branch.
+    base_dirs = get_workspace_base_dirs()
     if not is_valid_path(dir_path, allowed_prefixes=base_dirs):
         # Provide specific error message with allowed paths
         allowed_paths = ", ".join(base_dirs)
@@ -1777,8 +1761,7 @@ def api_create_directory():
     # relied on OS DAC alone. Reuse check-path's admissible set (NOT browse's):
     # the two are halves of the #2317 flow — validate a path, then create it —
     # so a path check-path reports creatable must stay creatable here.
-    # Issue #3427: Pass isolation_level to _check_path_rejection_reason.
-    reason = _check_path_rejection_reason(dir_path, user, isolation_level)
+    reason = _check_path_rejection_reason(dir_path, user)
     if reason is not None:
         return jsonify({"success": False, "error": f"{reason}. Provided path: {dir_path}"}), 400
 
