@@ -73,6 +73,9 @@ def parse_date_range():
     2. end_date + days (calculated from end_date backwards)
     3. Default: end_date=today, days=30
 
+    A days-only request covers exactly N calendar days ending at end_date,
+    with both bounds inclusive (start_date and end_date each count as a day).
+
     Returns:
         tuple: (start_date: str, end_date: str, days: int)
     """
@@ -96,9 +99,12 @@ def parse_date_range():
         if start_date > end_date:
             start_date, end_date = end_date, start_date
     else:
-        # No start_date provided: calculate from end_date - days
+        # No start_date provided: derive start_date so the range spans
+        # exactly N calendar days ending at end_date. The SQL filters in
+        # UsageAnalytics use double-inclusive bounds (date >= ? AND date <= ?),
+        # so subtract (days - 1), not days. Issue #3254.
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        start_dt = end_dt - timedelta(days=days)
+        start_dt = end_dt - timedelta(days=days - 1)
         start_date = start_dt.strftime("%Y-%m-%d")
 
     return start_date, end_date, days

@@ -1,5 +1,6 @@
 """Unit tests for analytics routes date range parsing."""
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -130,8 +131,9 @@ class TestParseDateRange:
         with app.test_client():
             with app.test_request_context("/test?end_date=2026-01-31&days=7"):
                 start_date, end_date, days = parse_date_range()
-                # start_date should be end_date - 7 days = 2026-01-24
-                assert start_date == "2026-01-24"
+                # Exactly 7 calendar days ending at end_date:
+                # start_date = end_date - (days - 1) = 2026-01-25
+                assert start_date == "2026-01-25"
                 assert end_date == "2026-01-31"
                 assert days == 7
 
@@ -191,10 +193,41 @@ class TestParseDateRange:
         with app.test_client():
             with app.test_request_context("/test?end_date=2025-12-01&days=30"):
                 start_date, end_date, days = parse_date_range()
-                # start_date should be 2025-12-01 - 30 days = 2025-11-01
-                assert start_date == "2025-11-01"
+                # Exactly 30 calendar days ending at end_date:
+                # start_date = 2025-12-01 - (30 - 1) days = 2025-11-02
+                assert start_date == "2025-11-02"
                 assert end_date == "2025-12-01"
                 assert days == 30
+
+    @pytest.mark.parametrize(
+        "days,expected_start",
+        [
+            (1, "2026-09-29"),
+            (7, "2026-09-23"),
+            (30, "2026-08-31"),
+            (90, "2026-07-02"),
+            (365, "2025-09-30"),
+        ],
+    )
+    def test_days_only_covers_exactly_n_calendar_days(self, days, expected_start):
+        """Issue #3254: days-only quick ranges must cover exactly N calendar days.
+
+        The SQL filters use double-inclusive bounds (date >= ? AND date <= ?),
+        so a days-only request derived with end_date - days spanned N + 1 days.
+        """
+        app = self._create_app_with_request_context()
+        with app.test_client():
+            with app.test_request_context(f"/test?end_date=2026-09-29&days={days}"):
+                start_date, end_date, returned_days = parse_date_range()
+                assert start_date == expected_start
+                assert end_date == "2026-09-29"
+                assert returned_days == days
+                # Inclusive span start..end is exactly N calendar days.
+                span = (
+                    datetime.strptime(end_date, "%Y-%m-%d")
+                    - datetime.strptime(start_date, "%Y-%m-%d")
+                ).days + 1
+                assert span == days
 
     def test_historical_range_with_explicit_dates(self):
         """Test explicit historical date range."""
