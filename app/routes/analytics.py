@@ -5,6 +5,7 @@ API routes for usage analytics and reporting.
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
@@ -64,9 +65,30 @@ def validate_forecast_days(days_str: str | None) -> tuple[int, dict | None]:
     return days, None
 
 
+# Strict YYYY-MM-DD: zero-padded month/day only. strptime alone accepts
+# non-padded forms ("2026-9-29"), and the raw string flows verbatim into SQL
+# string comparisons (date >= ? AND date <= ?) where it would sort wrongly
+# against zero-padded date columns -- so reject it here instead.
+_STRICT_YMD_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+
+def _parse_strict_ymd(value: str) -> datetime | None:
+    """Return the parsed datetime for a strict zero-padded YYYY-MM-DD string.
+
+    None when the format is not exactly YYYY-MM-DD or the date is not a real
+    calendar date (e.g. 2026-02-30).
+    """
+    if not _STRICT_YMD_RE.fullmatch(value):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def parse_date_range():
     """
-    Parse date range from request parameters.
+    Parse and strictly validate date range from request parameters.
 
     Priority:
     1. Explicit start_date + end_date
@@ -76,38 +98,116 @@ def parse_date_range():
     A days-only request covers exactly N calendar days ending at end_date,
     with both bounds inclusive (start_date and end_date each count as a day).
 
+    Validation rules (issue #3253):
+    - days: read as the raw string so "not provided" is distinguishable from
+      "provided but invalid". When provided at all, it must be plain ASCII
+      digits (int() also accepts "+7"/" 7"/"1_0"/full-width digits, which are
+      rejected here) with 1 <= days <= 365 -- even when an explicit start_date
+      makes it unused for deriving the range. Default 30 when absent.
+    - start_date / end_date: when provided, must be strict zero-padded
+      YYYY-MM-DD (non-padded "2026-9-29" sorts wrongly in the SQL string
+      comparison, so it is rejected, not normalized).
+    - start_date must not be later than end_date (no silent swap).
+
     Returns:
-        tuple: (start_date: str, end_date: str, days: int)
+        tuple: (start_date: str | None, end_date: str | None, days: int | None,
+                error: dict | None)
+        On validation failure the first three values are None and ``error``
+        holds the 400 response dict (same structure as validate_forecast_days);
+        callers must return it immediately without running any query.
     """
-    # Get end_date (default to today)
-    end_date = request.args.get(
-        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-    )
+    today_str = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
-    # Get days parameter with validation
-    days = request.args.get("days", default=30, type=int)
-    if days <= 0:
-        days = 1
-    if days > 365:
-        days = 365
+    # --- days: raw string; validate whenever provided ---
+    days = 30
+    days_raw = request.args.get("days")
+    if days_raw is not None:
+        # Plain ASCII digits only (a \d regex and int() are Unicode-aware and
+        # would both accept full-width digits; int() also accepts "+7", " 7"
+        # and "1_0"), none of which are legitimate query params.
+        if re.fullmatch(r"[0-9]{1,3}", days_raw) is None:
+            return (
+                None,
+                None,
+                None,
+                {
+                    "error": "invalid_parameter",
+                    "message": "days must be an integer",
+                    "parameter": "days",
+                    "received": days_raw,
+                    "valid_range": "1-365",
+                },
+            )
+        days = int(days_raw)
+        if days < 1 or days > 365:
+            return (
+                None,
+                None,
+                None,
+                {
+                    "error": "invalid_parameter",
+                    "message": "days must be between 1 and 365",
+                    "parameter": "days",
+                    "received": days,
+                    "valid_range": "1-365",
+                },
+            )
 
-    # Priority: use explicit start_date if provided
+    # --- end_date: defaults to today, strict YYYY-MM-DD when provided ---
+    end_date = request.args.get("end_date", today_str)
+    end_dt = _parse_strict_ymd(end_date)
+    if end_dt is None:
+        return (
+            None,
+            None,
+            None,
+            {
+                "error": "invalid_parameter",
+                "message": "end_date must be a valid date in YYYY-MM-DD format",
+                "parameter": "end_date",
+                "received": end_date,
+                "valid_range": "YYYY-MM-DD",
+            },
+        )
+
+    # --- start_date: explicit value takes priority over days-derived start ---
     start_date = request.args.get("start_date")
-
-    if start_date:
-        # Validate start_date <= end_date, swap if needed
-        if start_date > end_date:
-            start_date, end_date = end_date, start_date
+    if start_date is not None:
+        start_dt = _parse_strict_ymd(start_date)
+        if start_dt is None:
+            return (
+                None,
+                None,
+                None,
+                {
+                    "error": "invalid_parameter",
+                    "message": "start_date must be a valid date in YYYY-MM-DD format",
+                    "parameter": "start_date",
+                    "received": start_date,
+                    "valid_range": "YYYY-MM-DD",
+                },
+            )
+        if start_dt > end_dt:
+            return (
+                None,
+                None,
+                None,
+                {
+                    "error": "invalid_parameter",
+                    "message": "start_date must not be later than end_date",
+                    "parameter": "start_date",
+                    "received": start_date,
+                },
+            )
     else:
         # No start_date provided: derive start_date so the range spans
         # exactly N calendar days ending at end_date. The SQL filters in
         # UsageAnalytics use double-inclusive bounds (date >= ? AND date <= ?),
         # so subtract (days - 1), not days. Issue #3254.
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         start_dt = end_dt - timedelta(days=days - 1)
         start_date = start_dt.strftime("%Y-%m-%d")
 
-    return start_date, end_date, days
+    return start_date, end_date, days, None
 
 
 @analytics_bp.route("/analytics/report", methods=["GET"])
@@ -117,8 +217,10 @@ def api_usage_report():
 
     Issue #3245: Tenant isolation for report.
     """
-    # Get date range using shared parser
-    start_date, end_date, days = parse_date_range()
+    # Get date range using shared parser (400 on invalid parameters, #3253)
+    start_date, end_date, days, error = parse_date_range()
+    if error:
+        return jsonify(error), 400
 
     include_trends = request.args.get("trends", "true").lower() == "true"
     include_anomalies = request.args.get("anomalies", "true").lower() == "true"
@@ -209,8 +311,10 @@ def api_efficiency_metrics():
 
     Issue #3245: Tenant isolation for efficiency metrics.
     """
-    # Get date range using shared parser
-    start_date, end_date, days = parse_date_range()
+    # Get date range using shared parser (400 on invalid parameters, #3253)
+    start_date, end_date, days, error = parse_date_range()
+    if error:
+        return jsonify(error), 400
 
     # Resolve tenant scope for data isolation
     tenant_id, denial = resolve_admin_tenant_scope()
@@ -231,8 +335,11 @@ def api_export_analytics():
 
     Issue #3245: Tenant isolation for export.
     """
-    # Get date range using shared parser
-    start_date, end_date, days = parse_date_range()
+    # Get date range using shared parser (400 on invalid parameters, #3253)
+    start_date, end_date, days, error = parse_date_range()
+    if error:
+        return jsonify(error), 400
+
     format_type = request.args.get("format", "json")
 
     # Resolve tenant scope for data isolation
