@@ -3115,7 +3115,7 @@ export const Workspace: React.FC = () => {
                     variant="outline-primary"
                     onClick={() =>
                       window.open(
-                        'https://github.com/open-ace/open-ace/blob/main/docs/cn/DEPLOYMENT.md',
+                        'https://github.com/open-ace/open-ace/blob/main/docs/guide/DEPLOYMENT.md',
                         '_blank'
                       )
                     }

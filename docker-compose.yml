@@ -35,7 +35,7 @@
 #   docker compose up -d
 #
 # 🔒 HTTPS reverse proxy:
-#   Follow docs/en/NGINX.md or docs/cn/NGINX.md
+#   Follow docs/guide/NGINX.md
 #
 # 🔧 Developer build (for local testing):
 #   docker build -t open-ace:dev --target production .
@@ -52,7 +52,7 @@
 #   - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace  # Config persistence
 #
 # For multi-user deployment guide, see:
-#   docs/cn/DEPLOYMENT.md#多用户工作区部署
+#   docs/guide/MULTI_USER_WORKSPACE.md
 #
 # ============================================================================
 

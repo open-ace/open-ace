@@ -990,7 +990,7 @@ gVisor/Kata 和 pod 安全上下文强制执行，agent 对这两者都无从影
 
 ---
 
-## 6. Fail-closed reason code
+## 6. Fail-closed reason codes
 
 每个拒绝都携带一个机器可读的 code，出现在异常与审计事件中。
 

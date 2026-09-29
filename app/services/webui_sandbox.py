@@ -15,8 +15,8 @@ long-lived interactive pod. What IS reused, by name:
   only evidence the declared runtime class and egress enforcement are real.
   A probe failure destroys the pod, exactly as the provider does for agent pods.
 
-Design decisions pinned by docs/superpowers/plans/2026-09-12-issue-3378-*.md
-(v5): D2 (bootstrap-prefixed entrypoint + restore gate + per-instance secret),
+Design decisions pinned by the #3378 plan (archived in git history before the
+2026-09 docs restructure): D2 (bootstrap-prefixed entrypoint + restore gate + per-instance secret),
 D5 (renew clamped to the proxy-token expiry so a pod never outlives its baked-in
 LLM credentials), D6 (export guarded on the restore-done ground truth).
 """

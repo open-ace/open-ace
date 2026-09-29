@@ -202,7 +202,7 @@ docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wa
 | `OPENACE_ALLOW_ROOT_MULTI_USER` | `1` | 显式授权 root 运行 |
 | `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace` | 配置持久化路径 |
 
-> 📖 **详细文档**：[多用户工作区部署](docs/guide/DEPLOYMENT.md#多用户工作区部署)
+> 📖 **详细文档**：[多用户工作区部署](docs/guide/MULTI_USER_WORKSPACE.md)
 
 ---
 

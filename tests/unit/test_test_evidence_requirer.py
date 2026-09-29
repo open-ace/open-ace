@@ -73,7 +73,7 @@ class TestRequiredEvidenceDomains:
             (["migrations/0001_init.py"], set()),
             (["src/app.ts"], set()),  # .ts outside frontend/
             (["package-lock.json"], set()),
-            (["docs/cn/x.rst"], set()),
+            (["docs/guide/x.md"], set()),
         ],
     )
     def test_domain_derivation(self, changed, expected, full_tree):

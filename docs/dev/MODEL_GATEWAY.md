@@ -1,4 +1,4 @@
-# Model Gateway (LiteLLM-compatible) — POC — 模型网关（LiteLLM 兼容）— POC
+# Model Gateway (LiteLLM-compatible POC) — 模型网关（LiteLLM 兼容，POC）
 
 [English](#english) | [中文](#中文)
 

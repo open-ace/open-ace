@@ -182,7 +182,7 @@ Controls prompt template ownership enforcement:
 - `true` (default): Enforce ownership checks
 - `false`: Log only, do not reject requests (for gradual rollout)
 
-The one-time gradual rollout plan (phasing, rollback procedure, success criteria) has been moved to [docs/dev-notes/2026-09-29-enforce-prompt-owership-rollout.md](../dev-notes/2026-09-29-enforce-prompt-owership-rollout.md).
+The one-time gradual rollout plan (phasing, rollback procedure, success criteria) has been moved to [docs/dev-notes/2026-09-29-enforce-prompt-ownership-rollout.md](../dev-notes/2026-09-29-enforce-prompt-ownership-rollout.md).
 
 ## Security Review Checklist
 
@@ -390,7 +390,7 @@ gh pr edit --add-label skip-security-check
 - `true`（默认）：强制执行所有权检查
 - `false`：仅记录日志，不拒绝请求（用于灰度发布）
 
-一次性灰度方案（阶段划分、回滚步骤、成功标准）已迁至 [docs/dev-notes/2026-09-29-enforce-prompt-owership-rollout.md](../dev-notes/2026-09-29-enforce-prompt-owership-rollout.md)。
+一次性灰度方案（阶段划分、回滚步骤、成功标准）已迁至 [docs/dev-notes/2026-09-29-enforce-prompt-ownership-rollout.md](../dev-notes/2026-09-29-enforce-prompt-ownership-rollout.md)。
 
 ## 安全审查清单
 

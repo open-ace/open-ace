@@ -247,7 +247,7 @@ tests/
 Regression and issue provenance are pytest markers, not additional copies or
 top-level directories. Put a new bug test in its single runtime layer and use
 `pytest.mark.regression` plus `pytest.mark.issue(number)`. See
-`docs/TEST_LAYERS.md` for the migration and CI policy.
+`docs/dev/TEST_LAYERS.md` for the migration and CI policy.
 
 ### Writing Tests
 
@@ -668,7 +668,7 @@ tests/
 
 回归和 issue 来源使用 pytest marker 表达，不再创建顶层目录或复制测试。新的缺陷
 测试只放在一个运行层级，并添加 `pytest.mark.regression` 与
-`pytest.mark.issue(number)`；迁移和 CI 规则见 `docs/TEST_LAYERS.md`。
+`pytest.mark.issue(number)`；迁移和 CI 规则见 `docs/dev/TEST_LAYERS.md`。
 
 ### 编写测试
 

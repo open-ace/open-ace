@@ -256,7 +256,7 @@ See [REMOTE_AGENT.md](../guide/REMOTE_AGENT.md) for the client-side guide and [R
 
 ## Authentication
 
-`app/auth/decorators.py` (plus `machine_access_required` / `machine_admin_required` in `app/routes/remote.py`) defines **9 authentication decorators** — `@admin_required` (deprecated), `@auth_required`, `@platform_admin_required`, `@machine_access_required`, `@same_tenant_user_required`, `@machine_admin_required`, `@api_key_admin_required`, `@any_admin_required`, and `@tenant_member_required` — along with the `@public_endpoint` / `@security_annotated` scanner markers.
+`app/auth/decorators.py` (plus `machine_access_required` / `machine_admin_required` in `app/routes/remote.py`) defines **10 authentication decorators** — `@admin_required` (deprecated), `@auth_required`, `@platform_admin_required`, `@same_tenant_or_platform_admin`, `@machine_access_required`, `@same_tenant_user_required`, `@machine_admin_required`, `@api_key_admin_required`, `@any_admin_required`, and `@tenant_member_required` — along with the `@public_endpoint` / `@security_annotated` scanner markers.
 
 Session token extraction order: `session_token` cookie → `Authorization: Bearer` header (query-parameter session tokens are rejected; a small path allowlist accepts WebUI/proxy/browser URL tokens with audit logging).
 
@@ -518,7 +518,7 @@ Modules (domain logic):
 
 ## 认证
 
-`app/auth/decorators.py`（外加 `app/routes/remote.py` 中的 `machine_access_required` / `machine_admin_required`）定义了 **9 个认证装饰器** —— `@admin_required`（已弃用）、`@auth_required`、`@platform_admin_required`、`@machine_access_required`、`@same_tenant_user_required`、`@machine_admin_required`、`@api_key_admin_required`、`@any_admin_required`、`@tenant_member_required` —— 以及 `@public_endpoint` / `@security_annotated` 两个扫描器标记。
+`app/auth/decorators.py`（外加 `app/routes/remote.py` 中的 `machine_access_required` / `machine_admin_required`）定义了 **10 个认证装饰器** —— `@admin_required`（已弃用）、`@auth_required`、`@platform_admin_required`、`@same_tenant_or_platform_admin`、`@machine_access_required`、`@same_tenant_user_required`、`@machine_admin_required`、`@api_key_admin_required`、`@any_admin_required`、`@tenant_member_required` —— 以及 `@public_endpoint` / `@security_annotated` 两个扫描器标记。
 
 Session token 提取顺序：`session_token` cookie → `Authorization: Bearer` 头（查询参数中的 session token 会被拒绝；少量路径白名单接受 WebUI/proxy/browser URL token 并写审计日志）。
 

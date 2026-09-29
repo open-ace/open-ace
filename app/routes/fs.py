@@ -1211,7 +1211,7 @@ def api_create_directory():
 # ============================================================
 # File upload / download / delete (personal files page).
 #
-# Multi-user sudo strategy (see docs/personal-files-upload.md):
+# Multi-user sudo strategy (see docs/guide/MULTI_USER_WORKSPACE.md):
 # - Docker multi-user mode: process runs as root. We write to a temp file
 #   inside the target dir, chown it to the target system_account, then
 #   atomically rename. No sudo is involved — root uses kernel capabilities

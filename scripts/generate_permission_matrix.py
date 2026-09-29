@@ -38,36 +38,53 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
     content = file_path.read_text()
     lines = content.split("\n")
 
-    # Extract blueprint url_prefix from file content
-    # Look for patterns like: Blueprint("name", __name__, url_prefix="/api/tenants")
-    bp_prefix_match = re.search(r'url_prefix\s*=\s*["\']([^"\']+)["\']', content)
-    if bp_prefix_match:
-        bp_prefix = bp_prefix_match.group(1)
-    else:
-        # Fallback: derive from file name
-        bp_name = file_path.stem.replace(".py", "")
-        bp_prefix = f"/api/{bp_name}"
+    # Resolve blueprint prefixes the way Flask does at registration time:
+    # register_blueprint(bp, url_prefix=...) in app/__init__.py wins; a
+    # url_prefix in the Blueprint() constructor is the fallback. Never
+    # fabricate "/api/{file_name}" -- most blueprints register under plain
+    # "/api" while their route paths already carry the full sub-prefix.
+    file_prefix_match = re.search(
+        r"Blueprint\(\s*[\"\']\w+[\"\']\s*,\s*__name__\s*,\s*url_prefix\s*=\s*[\"\']([^\"\']+)[\"\']",
+        content,
+    )
+    file_prefix = file_prefix_match.group(1) if file_prefix_match else ""
+    init_src = (Path("app") / "__init__.py").read_text(encoding="utf-8")
+    register_map = dict(
+        re.findall(r'register_blueprint\((\w+),\s*url_prefix="([^"]+)"\)', init_src)
+    )
 
     # Accumulate decorators for the current function being defined.
     # Each entry is (line_number, line_text).
     current_decorators: list[tuple[int, str]] = []
 
+    # Decorator arguments may continue on following lines (the line after
+    # ``@bp.route(`` carries the path). Track paren depth so continuation
+    # lines extend the pending decorator instead of resetting the stack.
+    paren_depth = 0
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
+        if paren_depth > 0 and current_decorators:
+            ln, txt = current_decorators[-1]
+            current_decorators[-1] = (ln, txt + "\n" + stripped)
+            paren_depth += stripped.count("(") - stripped.count(")")
+            continue
         if stripped.startswith("@"):
             current_decorators.append((i, stripped))
+            paren_depth = stripped.count("(") - stripped.count(")")
         elif stripped.startswith("def "):
-            # Process accumulated decorators for this function
+            # Process accumulated decorators for this function. Decorators
+            # may span lines (``@bp.route(\n  "/path", ...``), so route
+            # matching runs against the whole accumulated blob -- ``\s*``
+            # in ROUTE_DECORATOR_RE crosses newlines.
             func_match = re.search(r"def (\w+)", stripped)
             func_name = func_match.group(1) if func_match else "unknown"
 
             # Find route decorator (any blueprint variable name)
             route_line = None
-            for dec_line_num, dec_line_text in current_decorators:
-                if ROUTE_DECORATOR_RE.search(dec_line_text):
-                    route_line = dec_line_text
-                    break
+            decorator_blob = "\n".join(d for _, d in current_decorators)
+            if ROUTE_DECORATOR_RE.search(decorator_blob):
+                route_line = decorator_blob
 
             # Find permission decorator (first match wins)
             perm_decorator = None
@@ -89,12 +106,12 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
             # Only add endpoint if both route and permission decorator exist
             if route_line and perm_decorator:
                 route_match = ROUTE_DECORATOR_RE.search(route_line)
-                verb = route_match.group(2)
-                path = route_match.group(3)
+                var, verb, path = route_match.groups()
+                bp_prefix = register_map.get(var, file_prefix)
 
                 if verb == "route":
                     # Extract HTTP methods from methods=[...] when present
-                    method_match = re.search(r"methods=\[(.*?)\]", route_line)
+                    method_match = re.search(r"methods=\[(.*?)\]", route_line, re.S)
                     if method_match:
                         verbs = re.findall(r"[\"\'](\w+)[\"\']", method_match.group(1))
                         method = "/".join(v.upper() for v in verbs) if verbs else "GET"

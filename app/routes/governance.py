@@ -477,7 +477,7 @@ def api_add_keyword():
                 "error": "Deprecated",
                 "message": "This endpoint is deprecated and will be removed in a future version.",
                 "migration_guide": "Use POST /api/tenants/{tenant_id}/sensitive-keywords instead.",
-                "documentation": "/docs/contracts/sensitive-keywords-v2.md",
+                "documentation": "/docs/dev/API.md",
             }
         ),
         200,

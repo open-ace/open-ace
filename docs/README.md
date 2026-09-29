@@ -68,9 +68,9 @@ together with index consistency and endpoint/env coverage.
 | [DEVELOPMENT](dev/DEVELOPMENT.md) | Dev environment setup and first run |
 | [ARCHITECTURE](dev/ARCHITECTURE.md) | System architecture — backend, frontend, agent layers |
 | [MODULES](dev/MODULES.md) | The six `app/modules/` packages: duties and invariants |
-| [API](dev/API.md) | REST reference — all 419 endpoints, generated inventory |
+| [API](dev/API.md) | REST reference — all 425 endpoints, generated inventory |
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | Generated elevated-permission matrix (do not hand-edit) |
-| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | Six-role RBAC, nine auth decorators, strict mode |
+| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | Six-role RBAC, ten auth decorators, strict mode |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token collection pipeline + Request/Message/Session concepts |
 | [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | Autonomous development lifecycle and three-session design |
 | [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM-compatible model gateway |
@@ -133,7 +133,11 @@ under `docs/<section>/`, the Chinese half under
 `i18n/zh-Hans/docusaurus-plugin-content-docs/current/<section>/`, preserving
 the site's language switcher. `dev-notes/` is not published. Because the
 anchors are the split points, they are reserved: a curated document must
-contain each anchor exactly once.
+contain each anchor exactly once. The splitter also requires the combined
+H1 (`# EN title — CN title` — the em-dash separator is where it cuts the
+page title) and the nav line; `check_docs_bilingual.py` enforces all three.
+At write time it rewrites `../images/` links to `/img/`, and links that
+leave `docs/` (dev-notes, repo files) to GitHub blob URLs.
 
 ---
 
@@ -198,9 +202,9 @@ docs/
 | [DEVELOPMENT](dev/DEVELOPMENT.md) | 开发环境搭建与首次运行 |
 | [ARCHITECTURE](dev/ARCHITECTURE.md) | 系统架构——后端、前端、Agent 层 |
 | [MODULES](dev/MODULES.md) | `app/modules/` 六个模块：职责与不变量 |
-| [API](dev/API.md) | REST 参考——全部 419 个端点（清单生成） |
+| [API](dev/API.md) | REST 参考——全部 425 个端点（清单生成） |
 | [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | 生成的提权端点矩阵（勿手改） |
-| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | 六角色 RBAC、九个认证装饰器、严格模式 |
+| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | 六角色 RBAC、十个认证装饰器、严格模式 |
 | [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token 采集链路 + Request/Message/Session 概念 |
 | [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | 自主开发生命周期与三会话设计 |
 | [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM 兼容模型网关 |
@@ -260,4 +264,7 @@ docs/
 `docs/<section>/`，中文半边发布在
 `i18n/zh-Hans/docusaurus-plugin-content-docs/current/<section>/`，保留站点
 的语言切换体验。`dev-notes/` 不上站。因为锚点就是切分点，它们是保留标题：
-正式文档中每个锚点必须恰好出现一次。
+正式文档中每个锚点必须恰好出现一次。切分器还要求联合 H1（`# EN title — CN title`，
+em dash 即页面标题的切分点）与导航行；三者均由 `check_docs_bilingual.py` 强制。
+写入时它会把 `../images/` 链接改写为 `/img/`，把越出 `docs/` 的链接（dev-notes、
+仓库文件）改写为 GitHub blob URL。

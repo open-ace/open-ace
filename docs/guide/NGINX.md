@@ -688,7 +688,11 @@ location / {
 }
 ```
 
-然后重载 nginx：`nginx -s reload`。
+然后重载 nginx：
+
+```bash
+nginx -s reload
+```
 
 > **注意**：这是 nginx 特有的限制。直连 Flask/gevent 没有请求体大小限制。
 

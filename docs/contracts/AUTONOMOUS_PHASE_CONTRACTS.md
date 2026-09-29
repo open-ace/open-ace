@@ -325,7 +325,7 @@ state flows through `_commit_phase_result`.
 
 ## 中文
 
-以下为中文参考翻译，权威版本以 English 节为准 / The English section above is authoritative.
+以下为中文参考翻译，权威版本以 English 节为准 / The English section above is authoritative. 中文节标题降一级（###）是刻意的：守护测试 tests/unit/test_phase_b_acceptance.py 按二级标题解析英文契约，中文节不得引入同形态二级标题。 / Chinese headings are deliberately one level lower (###): the guard test parses the English contract by level-2 headings, so the Chinese half must not introduce same-shaped H2s.
 
 ### 目的（Purpose）
 

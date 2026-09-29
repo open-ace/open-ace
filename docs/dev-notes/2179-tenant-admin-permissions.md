@@ -1,3 +1,8 @@
+> **Archived 2026-09-29 (docs governance).** This is the issue #2179 implementation
+> write-up, kept as a process record. The long-lived role/permission semantics now
+> live in `docs/dev/PERMISSION_MODEL.md`; per-endpoint permission facts are
+> generated into `docs/dev/API_PERMISSION_MATRIX.md`.
+
 # 租户管理员权限模型
 
 ## Issue #2179

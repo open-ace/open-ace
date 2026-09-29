@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baseline_runbook": "docs/TEST_LAYERS.md#baseline",
+  "baseline_runbook": "docs/dev/TEST_LAYERS.md#baseline",
   "toolchain": {
     "production_python": "3.11",
     "min_python": "3.10",

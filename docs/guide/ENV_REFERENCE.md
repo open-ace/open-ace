@@ -106,8 +106,7 @@ Declared by the Kubernetes manifests (see [KUBERNETES.md](KUBERNETES.md)); sever
 | `OPENACE_CORS_ALLOWED_ORIGINS` | unset | Comma-separated explicit API CORS allowlist for non-loopback WebUI origins | Tightening blocks requests from removed origins | `app/__init__.py` |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | `8388608` | Maximum inbound browser WebSocket message size for the terminal / VSCode raw bridges | Lower values reject large paste payloads | `app/ws_frame.py` |
 | `OPENACE_TEST_MODE` | unset | `1` marks a CI/test context: skips production-level security checks | Never enable in production | `app/utils/security_mode.py` |
-| `OPENCLAW_TOKEN` | unset | OpenClaw API token for data collection | Rotation requires updating the collector | `app/__init__.py` |
-| `SMTP_PASSWORD` | unset | Email SMTP password | Rotation requires matching the mail server | `app/__init__.py` |
+| `OPENCLAW_TOKEN` | unset | OpenClaw API token for data collection | Rotation requires updating the collector | `scripts/fetch_openclaw.py` |
 | `OPENACE_REPLICA_ENDPOINTS` | unset | Comma-separated replica endpoints queried for encryption-key config-version sync status | Informational only (sync dashboard) | `app/routes/encryption_keys.py` |
 
 ## Auto-Generated Secrets
@@ -179,7 +178,7 @@ For the single-user development path, missing secrets are not an error: `docker-
 | `WORKSPACE_BASE_DIR` | `/workspace`（Compose） | 用户项目根目录；支持逗号分隔多目录。裸机以 root 运行时必须显式设置（`/root` 在黑名单中会被拒绝） | 移动后既有项目目录将脱离管理 | `docker-compose.yml`、`app/utils/workspace.py` |
 | `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace`（overlay） | 配置持久化目录；必须与 `config-data` 卷挂载路径一致 | 指向别处会丢失自动生成的配置与密钥 | `docker-compose.multi-user.yml` |
 | `OPENACE_ALLOW_ROOT_MULTI_USER` | `1`（overlay） | root 多用户运行的显式授权（Issue #1893） | 去掉后多用户模式拒绝启动 | `docker-compose.multi-user.yml` |
-| `OPENACE_AGENT_STATE_ROOT` | `/var/lib/openace/agent-state` | CLI 转写记录目录；应用与 scheduler 服务必须完全一致（Issue #3237） | 不一致会破坏跨服务的转写清理 | `docker-compose.yml` |
+| `OPENACE_AGENT_STATE_ROOT` | `/var/lib/openace/agent-state` | CLI 会话记录目录；应用与 scheduler 服务必须完全一致（Issue #3237） | 不一致会破坏跨服务的会话清理 | `docker-compose.yml` |
 | `FETCH_USE_SUDO` | `false` | 采集器是否使用 sudo（容器内以 root 运行，无需 sudo；Issue #1121） | — | `docker-compose.yml` |
 | `FLASK_ENV` | `production`（scheduler 服务） | 传统环境标志；作为安全模式信号已废弃，v2.1.0 移除——请迁移到 `OPENACE_SECURITY_MODE`（用 `scripts/migrate_security_mode.sh`） | v2.1.0 起依赖它设置安全模式将失效 | `docker-compose.yml`、`.env.example`、`app/utils/security_mode.py` |
 
@@ -218,8 +217,7 @@ For the single-user development path, missing secrets are not an error: `docker-
 | `OPENACE_CORS_ALLOWED_ORIGINS` | 未设置 | 非 loopback WebUI 源的显式 API CORS 白名单，逗号分隔 | 收紧会拒绝被移除源的请求 | `app/__init__.py` |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | `8388608` | 浏览器侧终端 / VSCode 原始桥接入站 WebSocket 最大消息字节数 | 调小会拒绝大的粘贴内容 | `app/ws_frame.py` |
 | `OPENACE_TEST_MODE` | 未设置 | `1` 标记 CI/测试上下文：跳过生产级安全检查 | 生产环境绝不可开启 | `app/utils/security_mode.py` |
-| `OPENCLAW_TOKEN` | 未设置 | OpenClaw 数据采集 API token | 轮转需同步更新采集端 | `app/__init__.py` |
-| `SMTP_PASSWORD` | 未设置 | 邮件 SMTP 密码 | 轮转需与邮件服务器一致 | `app/__init__.py` |
+| `OPENCLAW_TOKEN` | 未设置 | OpenClaw 数据采集 API token | 轮转需同步更新采集端 | `scripts/fetch_openclaw.py` |
 | `OPENACE_REPLICA_ENDPOINTS` | 未设置 | 逗号分隔的副本端点，用于查询加密密钥配置版本同步状态 | 仅信息展示（同步面板） | `app/routes/encryption_keys.py` |
 
 ## 自动生成的密钥

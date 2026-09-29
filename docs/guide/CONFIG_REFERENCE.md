@@ -6,7 +6,7 @@
 
 ## English
 
-This is the reference for `~/.open-ace/config.json`, the application-configuration file of the Open ACE server. It covers every field of the current sample (`config/config.json.sample`) and the behavior notes from `config/CONFIG_GUIDE.md`.
+This is the reference for `~/.open-ace/config.json`, the application-configuration file of the Open ACE server. It covers every field of the current sample (`config/config.json.sample`) and the behavior notes from `the former config/CONFIG_GUIDE.md (absorbed here)`.
 
 ## Location and Precedence
 
@@ -183,7 +183,7 @@ Both integrations support user/group name resolution in imported sessions, manua
 
 ## 中文
 
-本文是 `~/.open-ace/config.json`（Open ACE 服务端应用配置文件）的参考文档，覆盖当前示例文件（`config/config.json.sample`）的全部字段，并整理了 `config/CONFIG_GUIDE.md` 中的行为说明。
+本文是 `~/.open-ace/config.json`（Open ACE 服务端应用配置文件）的参考文档，覆盖当前示例文件（`config/config.json.sample`）的全部字段，并整理了 `the former config/CONFIG_GUIDE.md (absorbed here)` 中的行为说明。
 
 ## 位置与优先级
 

@@ -1528,7 +1528,7 @@ export const SecurityCenter: React.FC = () => {
       : t('uploadAuthDisabled', language);
 
     // Determine document URL based on language
-    const docUrl = language === 'zh' ? '/docs/cn/DEPLOYMENT.md' : '/docs/en/DEPLOYMENT.md';
+    const docUrl = 'https://github.com/open-ace/open-ace/blob/main/docs/guide/DEPLOYMENT.md';
 
     return (
       <Card title={t('uploadAuthStatus', language)} className="mb-4">
