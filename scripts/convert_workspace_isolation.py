@@ -220,7 +220,7 @@ def _convert_legacy(
         raise ConversionError(
             f"os_user_confinement {ws.get('os_user_confinement')!r} is not bwrap, runsc, kata "
             'or off; set workspace.isolation yourself, e.g. {"level": "os_user", '
-            '"backend": "bwrap"} (see docs/en/WORKSPACE_ISOLATION.md)'
+            '"backend": "bwrap"} (see docs/guide/WORKSPACE_ISOLATION.md)'
         )
     # The old capability snapshot checked OpenSandbox first, whatever
     # multi_user_mode or os_user_confinement said: a (default) tier with a
