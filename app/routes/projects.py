@@ -187,6 +187,11 @@ def api_create_project():
     system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
+    # Issue #3427: Get isolation level from WebUIInstance
+    from app.utils.isolation_level import get_isolation_level_from_webui
+
+    isolation_level = get_isolation_level_from_webui(user_id)
+
     path = data.get("path")
     name = data.get("name")
     description = data.get("description")
@@ -205,22 +210,66 @@ def api_create_project():
 
     path = os.path.abspath(path)
 
-    # Check if path is absolute
-    if not os.path.isabs(path):
-        return jsonify({"error": "Path must be absolute"}), 400
+    # Issue #3427: Handle sandboxed mode
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
-    # Check path format based on platform
-    system = platform.system()
-    if system == "Windows":
-        if not (len(path) >= 2 and path[1] == ":"):
-            return jsonify({"error": "Invalid Windows path format"}), 400
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # Shared-project topology (#3376) is defined over host workspace base
+        # dirs and cannot admit /workspace paths; reject explicitly instead
+        # of letting the host-flavoured check produce a misleading message.
+        if is_shared:
+            return (
+                jsonify({"error": "Shared projects are not supported in sandboxed isolation mode"}),
+                400,
+            )
+
+        # Validate against the SAME isolation-aware home roots fs browsing
+        # uses (#3420: /workspace/<account>, account = system_account or
+        # username). A literal startswith("/workspace/<username>") both
+        # mis-identifies the account and admits sibling-prefix paths like
+        # /workspace/<username>evil, so match on path boundaries instead.
+        from app.routes.fs import _home_roots_for_user
+
+        home_roots = _home_roots_for_user(g.user, isolation_level)
+        if not home_roots:
+            return jsonify({"error": "No sandbox home directory available for this user"}), 400
+
+        if not any(path == root or path.startswith(root.rstrip("/") + "/") for root in home_roots):
+            allowed = ", ".join(home_roots)
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "In sandboxed mode, your project must be created under "
+                            f"{allowed}. The path you provided ({path}) is not allowed."
+                        )
+                    }
+                ),
+                400,
+            )
+
+        # Skip host machine directory creation in sandboxed mode
+        # Directory already exists in sandbox container
+        create_dir = False
     else:
-        if not path.startswith("/"):
-            return jsonify({"error": "Path must start with /"}), 400
+        # Non-sandboxed mode: original validation logic
 
-    # Check for path traversal
-    if ".." in path:
-        return jsonify({"error": "Path traversal not allowed"}), 400
+        # Check if path is absolute
+        if not os.path.isabs(path):
+            return jsonify({"error": "Path must be absolute"}), 400
+
+        # Check path format based on platform
+        system = platform.system()
+        if system == "Windows":
+            if not (len(path) >= 2 and path[1] == ":"):
+                return jsonify({"error": "Invalid Windows path format"}), 400
+        else:
+            if not path.startswith("/"):
+                return jsonify({"error": "Path must start with /"}), 400
+
+        # Check for path traversal
+        if ".." in path:
+            return jsonify({"error": "Path traversal not allowed"}), 400
 
     # Issue #3376 review round 1: a shared project's path extends every
     # tenant member's fs browse roots (fs._allowed_roots_for_user). Without
