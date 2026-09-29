@@ -213,10 +213,11 @@ if (Test-Path "$InstallDir\requirements.txt") {
 }
 
 # Pinned qwen-code CLI version: keep in sync with the control plane's
-# Dockerfile pair (webui 0.2.43 + cli 0.23.3). The Node >= 22 gate and the
-# adapter flags are validated against THIS version; @latest would drift the
-# agent onto unvalidated engines/CLI changes while npm still exits 0 on a
-# mere EBADENGINE warning (PR #3386 review).
+# Dockerfile pair (test_qwen_stack_pins_are_consistent_across_all_sites
+# enforces it). The Node >= 22 gate and the adapter flags are validated
+# against THIS version; @latest would drift the agent onto unvalidated
+# engines/CLI changes while npm still exits 0 on a mere EBADENGINE warning
+# (PR #3386 review).
 $QwenCliVersion = "0.23.3"
 
 # Step 5: Optionally install CLI tool
