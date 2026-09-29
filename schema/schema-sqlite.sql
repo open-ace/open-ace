@@ -2025,6 +2025,10 @@ CREATE INDEX idx_messages_usage_trend_covering ON daily_messages (date, role, se
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, date, role) WHERE ((user_id IS NOT NULL) AND ((role) = 'assistant'));
 
+CREATE INDEX idx_messages_user_host ON daily_messages (user_id, host_name) WHERE (user_id IS NOT NULL);
+
+CREATE INDEX idx_messages_user_tool ON daily_messages (user_id, tool_name) WHERE (user_id IS NOT NULL);
+
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);

@@ -52,7 +52,7 @@
   声明代替）。
 - CI 上由独立 job `multiuser-acceptance` 执行（main-push 触发，观察期），自带
   buildx 构建并以 `IMAGE_NAME=open-ace:$GITHUB_SHA` 驱动 compose——受测代码与
-  镜像指纹严格对应，不会误拉 `openace/open-ace:latest`。
+  镜像指纹严格对应，不会误拉 `ghcr.io/open-ace/open-ace:latest`。
 
 ## 2. 执行步骤
 

@@ -1323,6 +1323,39 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Issue #3446: convert config.json to workspace.isolation {level, backend}.
+# The server refuses to start with the keys the block replaced, and
+# configure_sudoers reads isolation.backend, so EVERY install and upgrade path
+# runs this before the sudoers rules are written. Idempotent.
+convert_workspace_isolation_config() {
+    local config_file="$1"
+    shift
+    [ -f "$config_file" ] || return 0
+    # The server finds sandbox-backends.json through OPENACE_SANDBOX_BACKENDS
+    # in its unit; the converter must look at the same file.
+    local sandbox_backends="${OPENACE_SANDBOX_BACKENDS:-}"
+    if [ -z "$sandbox_backends" ] && command -v systemctl &>/dev/null; then
+        # The unit's effective environment (drop-ins and quoting included).
+        sandbox_backends=$(systemctl show -p Environment --value open-ace.service 2>/dev/null | tr ' ' '\n' | sed -n 's/^"\{0,1\}OPENACE_SANDBOX_BACKENDS=//p' | tr -d '"' | tail -1)
+    fi
+    if ! OPENACE_SANDBOX_BACKENDS="$sandbox_backends" \
+        python3 "$SOURCE_DIR/scripts/convert_workspace_isolation.py" "$config_file" "$@"; then
+        print_error "Could not convert $config_file to workspace.isolation (Issue #3446); fix it by hand, see docs/en/WORKSPACE_ISOLATION.md"
+        return 1
+    fi
+}
+
+# Same, for the remote install's ~/.open-ace/config.json (runs the copy just
+# scp'd to the remote target, before the remote server starts).
+convert_workspace_isolation_config_remote() {
+    local remote="$1"
+    local target_path="$2"
+    if ! ssh "$remote" "if [ -f ~/.open-ace/config.json ]; then sb=\$(systemctl show -p Environment --value open-ace.service 2>/dev/null | tr ' ' '\\n' | sed -n 's/^OPENACE_SANDBOX_BACKENDS=//p' | tail -1); OPENACE_SANDBOX_BACKENDS=\"\$sb\" python3 '$target_path/scripts/convert_workspace_isolation.py' ~/.open-ace/config.json; fi"; then
+        print_error "Could not convert the remote config.json to workspace.isolation (Issue #3446); fix it by hand, see docs/en/WORKSPACE_ISOLATION.md"
+        exit 1
+    fi
+}
+
 # Update config.json with workspace settings
 update_config_workspace() {
     local config_file="$1"
@@ -1335,13 +1368,20 @@ update_config_workspace() {
 
     print_info "Updating workspace configuration in $config_file..."
 
+    # Issue #3446: workspace.isolation {level, backend}; converts the keys it
+    # replaced, and applies the wizard's multi-user answer as plain / shared
+    # (as the old installer wrote multi_user_mode) unless the config names
+    # another backend (bwrap, local-*, opensandbox), which is kept.
+    local multi_default="false"
+    [ "$(echo "${WORKSPACE_MULTI_USER_MODE:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ] && multi_default="true"
+    convert_workspace_isolation_config "$config_file" --multi-user "$multi_default" || return 1
+
     # Use Python to update JSON
     # Convert bash "true"/"false" to Python True/False
     if command -v python3 &>/dev/null; then
         # Use environment variables to pass values safely (avoids special character issues in heredoc)
         export _CONFIG_FILE="$config_file"
         export _WS_ENABLED="$WORKSPACE_ENABLED"
-        export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
         export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
         export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
         export _WS_MAX_INSTANCES="$WORKSPACE_MAX_INSTANCES"
@@ -1364,12 +1404,6 @@ def bash_to_bool(val):
     return val.lower() == 'true'
 
 config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
-config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
-# Issue #3374 (PR review round 5): required_isolation_level is NOT pinned
-# here. This runs before the webui-launch wrapper step, and the wrapper
-# install is non-fatal; pinning 'os_user' on a host without the wrapper
-# rejects every launch at runtime (probe reports launch_path_degraded).
-# The pin happens after the wrapper lands — see pin_workspace_isolation_floor.
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))
@@ -1840,7 +1874,7 @@ maybe_install_qwen_stack_remote() {
     # pre-workspace API-only deployments are not forced onto the qwen stack
     # (PR #3386 review). An unreadable config also falls back to "missing".
     local flags
-    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False)).lower())"' 2>/dev/null || echo missing)"
+    flags="$(ssh "$remote" 'python3 -c "import json,os; p=os.path.expanduser(\"~/.open-ace/config.json\"); print(\"missing\") if not os.path.exists(p) else print(str(json.load(open(p)).get(\"workspace\",{}).get(\"enabled\",False)).lower(), str(((json.load(open(p)).get(\"workspace\",{}).get(\"isolation\") or {}).get(\"backend\",\"shared\") != \"shared\") or bool(json.load(open(p)).get(\"workspace\",{}).get(\"multi_user_mode\",False))).lower())"' 2>/dev/null || echo missing)"
     if [ "$flags" != "missing" ] && [ -n "$flags" ]; then
         WORKSPACE_ENABLED="${flags%% *}"
         WORKSPACE_MULTI_USER_MODE="${flags##* }"
@@ -2501,49 +2535,65 @@ install_webui_launch_wrapper() {
     return 0
 }
 
-# Pin workspace.required_isolation_level='os_user' for multi-user installs
-# (Issue #3374). Must be called only AFTER install_webui_launch_wrapper and
-# only when the wrapper is executable: the runtime probe keys off the
-# wrapper, so a pin on a wrapper-less host reports launch_path_degraded and
-# rejects every launch — an installed-but-bricked deployment (PR review
-# round 5). Reuses the same executable check the sudoers rule keys off.
-pin_workspace_isolation_floor() {
-    local config_file="$1"
+# Install the confined-launch wrapper + its root-owned policy file (Issue #3431,
+# Option 1). Harmless until an operator sets workspace.isolation.backend to
+# "bwrap", "local-gvisor" or "local-kata": the wrapper is only invoked then. The policy file pins which
+# executables the root wrapper may start as a user and the PATH they see; an
+# existing file keeps its entries and only gains the current webui path. Must
+# run BEFORE configure_sudoers (the rule keys off -x on the wrapper).
+install_webui_confine_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-webui-confine.py"
+    local dst="/usr/local/bin/openace-webui-confine"
+    local policy="/etc/openace/webui-confine.json"
 
-    if ! command -v python3 &>/dev/null; then
-        print_warning "python3 not found; cannot pin required_isolation_level in $config_file"
+    if [ ! -f "$src" ]; then
+        print_warning "openace-webui-confine.py not found at $src; skipping"
         return 1
     fi
-    if [ ! -f "$config_file" ]; then
-        print_warning "Config file $config_file not found; cannot pin required_isolation_level"
+    if ! install -o root -g root -m 0755 "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to install $dst (need root?)"
         return 1
     fi
 
-    _CONFIG_FILE="$config_file" python3 << 'EOF'
-import json
-import os
-
-path = os.environ['_CONFIG_FILE']
-with open(path, 'r') as f:
-    config = json.load(f)
-
-workspace = config.setdefault('workspace', {})
-# PR review round 6: report only what was actually configured — a flat
-# else would tell single-user/disagreeing configs an isolation floor
-# exists when none was pinned.
-if not workspace.get('multi_user_mode'):
-    print("multi-user mode off; no isolation floor needed")
-elif workspace.get('required_isolation_level'):
-    print("required_isolation_level already set; keeping existing floor")
-else:
-    workspace['required_isolation_level'] = 'os_user'
-    with open(path, 'w') as f:
-        json.dump(config, f, indent=2)
-    print("Pinned workspace.required_isolation_level=os_user")
-EOF
-    if [ $? -ne 0 ]; then
-        print_warning "Failed to pin required_isolation_level in $config_file"
+    local webui_path="/usr/bin/qwen-code-webui"
+    if [ ! -x "$webui_path" ]; then
+        webui_path=$(find_webui_executable 2>/dev/null)
+    fi
+    local node_dir=""
+    if command -v node >/dev/null 2>&1; then
+        node_dir=$(dirname "$(command -v node)")
+    fi
+    install -d -o root -g root -m 0755 /etc/openace
+    # shellcheck disable=SC2016  # single-quoted Python, expanded by python3
+    if ! POLICY="$policy" WEBUI="$webui_path" NODE_DIR="$node_dir" python3 -c '
+import json, os
+path, webui, node_dir = os.environ["POLICY"], os.environ["WEBUI"], os.environ["NODE_DIR"]
+data = {}
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+webuis = [w for w in data.get("webui", []) if isinstance(w, str)]
+if webui and webui not in webuis:
+    webuis.append(webui)
+parts = [p for p in data.get("path", "/usr/local/bin:/usr/bin:/bin").split(":") if p]
+if node_dir and node_dir not in parts:
+    parts.insert(0, node_dir)
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    # keep every other key the operator set (bases, denied_groups, ...)
+    json.dump(dict(data, webui=webuis, path=":".join(parts)), handle, indent=2)
+    handle.write("\n")
+os.replace(tmp, path)
+'; then
+        print_warning "Failed to write $policy"
         return 1
+    fi
+    chown root:root "$policy"
+    chmod 0644 "$policy"
+    print_success "Installed webui-confine wrapper to $dst (policy: $policy)"
+    if ! command -v bwrap >/dev/null 2>&1; then
+        print_info "Confined workspaces (workspace.isolation.backend=\"bwrap\") also need bubblewrap: apt-get install bubblewrap / dnf install bubblewrap"
     fi
     return 0
 }
@@ -2829,6 +2879,33 @@ configure_sudoers() {
     # 【安全加固 Issue #2181】安全 wrapper 规则生成
     # 遍历所有安全 wrapper，为每个存在的 wrapper 生成规则
     # 注意：openace-write-as 已包含在此循环中，不再单独处理
+    # Issue #3431: the confined-launch wrapper. Only its `launch` mode needs
+    # root; every argument is validated by the wrapper, which also refuses any
+    # executable not listed in the root-owned /etc/openace/webui-confine.json.
+    local confine_rule=""
+    if [ -x /usr/local/bin/openace-webui-confine ]; then
+        confine_rule="$run_user ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-confine launch *"
+    fi
+    # When confinement is configured, the plain launch rule would let the
+    # service account start an UNCONFINED WebUI as any account; omit it.
+    # (Re-run the installer after changing workspace.isolation.backend.)
+    # A legacy os_user_confinement still counts (fail closed if a config
+    # escaped conversion). Issue #3446: backend "opensandbox" never launches
+    # an OS-account WebUI on this host, so it does not get the rule either
+    # (a host confined before conversion must not regain it that way).
+    # confine_configured means "omit the unconfined launch rules".
+    local confine_configured=false
+    local isolation_class=""
+    if [ -f "${config_dir:-}/config.json" ]; then
+        isolation_class=$(python3 -c 'import json,sys; w=json.load(open(sys.argv[1])).get("workspace") or {}; b=(w.get("isolation") or {}).get("backend",""); c=w.get("os_user_confinement"); print("confined" if b in ("bwrap","local-gvisor","local-kata") or (c is not None and str(c).strip().lower() not in ("","off")) else "remote" if b == "opensandbox" else "local")' \
+            "${config_dir}/config.json" 2>/dev/null || echo "unreadable")
+    fi
+    # An unreadable config (the server refuses it too) fails closed.
+    if { [ -n "$confine_rule" ] && [ "$isolation_class" = confined ]; } || \
+       [ "$isolation_class" = remote ] || [ "$isolation_class" = unreadable ]; then
+        confine_configured=true
+    fi
+
     local security_wrapper_rules=""
     for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
         local wrapper_bin="/usr/local/bin/${wrapper}"
@@ -2846,11 +2923,25 @@ $run_user ALL=(root) NOPASSWD: $wrapper_bin *"
 # 安全性：wrapper 内部使用 exec /usr/bin/env，只设置环境变量并执行后续命令；
 # 第二个 * 限制 webui_path 之后只能是合法的 WebUI 参数，防止权限提升。
 $run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *"
+    if [ "$confine_configured" = true ]; then
+        # Issue #3431: drop the unconfined launch rule (kept above verbatim
+        # for the non-confined case) and leave a marker instead.
+        current_user_rules=$(printf '%s\n' "$current_user_rules" | grep -v "NOPASSWD: /usr/local/bin/openace-webui-launch ")
+        current_user_rules="${current_user_rules}
+# openace-webui-launch rule omitted: workspace.isolation.backend is confined or opensandbox (Issues #3431, #3446)"
+    fi
 
-    # Only add webui_local_rule if not empty
-    if [ -n "$webui_local_rule" ]; then
+    # Only add webui_local_rule if not empty (and never under confinement:
+    # it starts a WebUI as any account WITHOUT the sandbox — Issue #3431)
+    if [ -n "$webui_local_rule" ] && [ "$confine_configured" != true ]; then
         current_user_rules="${current_user_rules}
 ${webui_local_rule}"
+    fi
+
+    # Issue #3431: confined WebUI launch (only when the wrapper is installed)
+    if [ -n "$confine_rule" ]; then
+        current_user_rules="${current_user_rules}
+${confine_rule}"
     fi
 
     # Add utility rule (references Cmnd_Alias)
@@ -3002,10 +3093,28 @@ ${line}"
         # leaving the new run_user without sudo permission (#1197 review).
         # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
         # so we grep for lines starting with "$run_user " that also contain the path.
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
+        if [ "$confine_configured" != true ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
+            need_update=true
+        fi
+
+        # Issue #3431: under confinement, an existing unconfined launch rule
+        # (openace-webui-launch or a direct webui rule) must be REMOVED —
+        # every probe above only looks for missing rules, so check presence.
+        if [ "$confine_configured" = true ] && \
+           grep -qE "^${run_user} .*NOPASSWD: (/usr/local/bin/openace-webui-launch|${webui_path}|/usr/local/bin/qwen-code-webui)( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers still grants an unconfined WebUI launch to '$run_user' while confinement is configured"
+            need_update=true
+        fi
+
+        # Issue #3431: an installed confine wrapper without its rule means the
+        # confined launch would fail at sudo; regenerate.
+        if [ -n "$confine_rule" ] && \
+           ! grep -qE "^${run_user} .*NOPASSWD: /usr/local/bin/openace-webui-confine launch \*" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing webui-confine rule for user '$run_user'"
             need_update=true
         fi
 
@@ -3942,9 +4051,9 @@ detect_and_load_local_upgrade() {
             print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
         fi
 
-        # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
-        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
-        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'false'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        # Read the multi-user setting from the existing config (upgrades respect it):
+        # any isolation backend but "shared" (#3446), or the pre-#3446 multi_user_mode.
+        local multi_user=$(python3 -c "import json; w=json.load(open('$config_file')).get('workspace', {}); i=w.get('isolation'); print(str(i.get('backend', 'shared') != 'shared' if isinstance(i, dict) else w.get('multi_user_mode', False)).lower())" 2>/dev/null)
         if [ -n "$multi_user" ]; then
             WORKSPACE_MULTI_USER_MODE="$multi_user"
             print_info "Read WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE from existing config"
@@ -4527,6 +4636,11 @@ install_local() {
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
 
+    # Issue #3446: upgrades too (update_config_workspace runs on fresh
+    # installs only), before configure_sudoers reads isolation.backend and
+    # before the upgraded server refuses the replaced keys.
+    convert_workspace_isolation_config "$config_dir/config.json" || exit 1
+
     # Install systemd service if requested
     if [ "$INSTALL_SERVICE" = "yes" ]; then
         print_header "Installing Systemd Service"
@@ -4585,6 +4699,13 @@ install_local() {
                 print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
                 sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
                 print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308, #2290)"
+            fi
+
+            # Issue #3446: the app validates workspace.isolation against how it
+            # was installed (the confined backends need the package install).
+            if ! grep -q "^Environment=OPENACE_INSTALL_METHOD=" "$service_file" 2>/dev/null; then
+                sed -i "/^Environment=WORKSPACE_BASE_DIR=/a Environment=OPENACE_INSTALL_METHOD=package" "$service_file"
+                print_info "Set OPENACE_INSTALL_METHOD=package (Issue #3446)"
             fi
 
             # Check if OPENACE_ENCRYPTION_KEY is missing (PR #2275 follow-up, Issue #2359)
@@ -4786,17 +4907,15 @@ install_local() {
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
         install_webui_launch_wrapper "$sudoers_install_dir"
 
-        # Issue #3374 (PR review round 5): pin the isolation floor only when
-        # the launch wrapper actually landed — same executable check the
-        # sudoers rule uses. Without the wrapper the runtime probe reports
-        # launch_path_degraded and a pinned 'os_user' floor would reject
-        # every launch, so leave the floor derived (plus a runtime WARNING)
-        # instead of installing a bricked deployment.
-        if [ -x /usr/local/bin/openace-webui-launch ]; then
-            pin_workspace_isolation_floor "$config_dir/config.json"
-        else
-            print_warning "openace-webui-launch wrapper not installed; NOT pinning required_isolation_level."
-            print_warning "Multi-user workspaces will serve WITHOUT per-user OS isolation until the wrapper is installed (re-run this installer as root)."
+        # Issue #3431: confined-launch wrapper + policy, also BEFORE
+        # configure_sudoers (its rule keys off -x on the wrapper).
+        install_webui_confine_wrapper "$sudoers_install_dir"
+
+        # Issue #3446: workspace.isolation.level is the floor. Without the
+        # launch wrapper an os_user deployment refuses every workspace launch
+        # (launch_path_degraded) rather than serving on the shared account.
+        if [ ! -x /usr/local/bin/openace-webui-launch ]; then
+            print_warning "openace-webui-launch wrapper not installed: per-user workspaces will be REFUSED until it is (re-run this installer as root)."
         fi
 
         # Install security wrappers BEFORE configure_sudoers (Issue #2349):
@@ -6003,6 +6122,9 @@ do_fresh_install_remote() {
 
     # Create config directory
     ssh "$remote" "mkdir -p '~/.open-ace'"
+    # Issue #3446: a config.json left by an earlier install (e.g. another
+    # target path) still carries the replaced keys.
+    convert_workspace_isolation_config_remote "$remote" "$target_path"
 
     # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
     check_build_dependencies_remote "$remote" || exit 1
@@ -6260,6 +6382,10 @@ do_upgrade_remote() {
     fi
     scp -r "$SOURCE_DIR"/* "$remote:$target_path/"
 
+    # Issue #3446: convert the remote config.json to workspace.isolation
+    # before the upgraded server (which refuses the replaced keys) restarts.
+    convert_workspace_isolation_config_remote "$remote" "$target_path"
+
     # Upgrade did not historically run the remote dependency probe. The
     # credentialless launcher requires these runtime tools as well as the
     # existing native Python build dependencies.
@@ -6430,6 +6556,12 @@ do_upgrade_remote() {
     if ssh "$remote" "command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1"; then
         print_info "Checking systemd service on remote..."
         local service_file="/etc/systemd/system/open-ace.service"
+        # Issue #3446: the app checks the isolation backend against the install
+        # method at startup; set it before the restart below.
+        if ! ssh "$remote" "grep -q '^Environment=OPENACE_INSTALL_METHOD=' $service_file 2>/dev/null"; then
+            ssh "$remote" "sudo sed -i '/^Environment=HOME=/a Environment=OPENACE_INSTALL_METHOD=package' $service_file" && \
+                print_info "Set OPENACE_INSTALL_METHOD=package on remote (Issue #3446)"
+        fi
         local current_secret=$(ssh "$remote" "grep '^Environment=SECRET_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
         if [ -z "$current_secret" ]; then
             print_warning "Adding missing SECRET_KEY to systemd service on remote..."

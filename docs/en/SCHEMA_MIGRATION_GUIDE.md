@@ -136,18 +136,25 @@ def upgrade():
 
 ### Compatibility window
 
-How application versions map to schema versions:
+How application releases map to schema versions:
 
-| App version | Min schema version | Max schema version | Window |
-|-------------|--------------------|--------------------|--------|
-| v2.1        | baseline_2026_06_23 | HEAD              | 10 revisions |
-| v2.0        | baseline_2026_06_23 | 20260717_004      | 5 revisions |
+| App version | Minimum upgrade starting point | Required at runtime |
+|-------------|--------------------------------|---------------------|
+| v2.0.x      | `baseline_2026_06_23`          | Alembic head shipped with the release |
+| v1.2.x      | `baseline_2026_06_23`          | Alembic head shipped with the release |
+
+Databases on a pre-baseline revision (e.g. a historical hash from before
+v1.2.0) cannot be upgraded in place; there is no supported migration path from
+them.
 
 **Decision logic**:
-- On startup the application checks whether the schema version is inside the
-  compatibility window
-- Too old: startup fails with an upgrade prompt
-- Too new: startup fails with an application-upgrade prompt
+- Install / upgrade: `scripts/check_min_revision.py` runs before
+  `alembic upgrade head` and accepts any revision in the baseline lineage, so
+  the upgrade can apply the missing migrations. A pre-baseline revision fails
+  the install with an error.
+- Web and scheduler startup: `check_schema_compatibility()`
+  (`app/repositories/schema_guard.py`) requires the fully migrated head, so
+  services never run on a partially migrated schema.
 
 ## Forbidden Operations
 

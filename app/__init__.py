@@ -895,8 +895,28 @@ def create_app(config=None):
     else:
         logger.info("Background services NOT started (SCHEDULER_MODE=%s)", scheduler_mode)
 
+    # Issue #3446: an isolation configuration that cannot be honoured stops
+    # the server here, with the fix in the message, instead of surfacing as a
+    # disabled workspace later. Test processes build apps against fixtures.
+    if not (app.config.get("TESTING") or "PYTEST_VERSION" in os.environ):
+        _validate_workspace_isolation()
+
     logger.info("Open ACE application initialized")
     return app
+
+
+def _validate_workspace_isolation() -> None:
+    import platform as _platform
+
+    from app.repositories.database import CONFIG_DIR
+    from app.services.workspace_isolation_config import IsolationConfigError, validate_config_file
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+    try:
+        validate_config_file(config_path, _platform.system().lower())
+    except IsolationConfigError as exc:
+        logger.critical("Invalid workspace isolation configuration in %s: %s", config_path, exc)
+        raise RuntimeError(f"Invalid workspace isolation configuration: {exc}") from None
 
 
 def register_error_handlers(app):

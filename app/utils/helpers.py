@@ -5,7 +5,7 @@ Common helper functions for the application.
 """
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 
 def format_tokens(tokens: int) -> str:
@@ -45,6 +45,32 @@ def parse_date(date_str: str) -> str | None:
         return date_str
     except ValueError:
         return None
+
+
+def to_iso_date(value: str | date | datetime | None) -> str | None:
+    """Normalize a date value to a ``YYYY-MM-DD`` string.
+
+    daily_messages.date is a string column, while ``CAST(created_at AS DATE)``
+    on agent_sessions returns ``datetime.date`` on PostgreSQL. Values from both
+    sources are merged and compared, so they must share one type.
+
+    SQLite's ``CAST(... AS DATE)`` yields a bare year integer (``2026``); that
+    is not a date, so it maps to None rather than a string that would sort
+    before every real date.
+
+    Args:
+        value: A date string, ``date``, ``datetime`` or None.
+
+    Returns:
+        str | None: ISO date string, or None when ``value`` is not a date.
+    """
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 def get_today() -> str:

@@ -406,7 +406,7 @@ def dump_stack_logs(recorder: Recorder) -> None:
 # ── config: two-phase generate-then-merge (review round 3, 6725) ─────────
 #
 # The first `up` lets the ENTRYPOINT generate the complete multi-user config
-# (required_isolation_level floor, token_secret, upload_auth_key …); then a
+# (workspace.isolation block, token_secret, upload_auth_key …); then a
 # helper container — the SAME image under test, so nothing extra is pulled —
 # merges ONLY workspace.max_instances=3 into that config, and the second `up`
 # starts the app against it. Pre-seeding a 3-key config before the first up
@@ -460,7 +460,7 @@ def merge_max_instances(max_instances: int = 3) -> None:
     (same-image helper container; read-modify-write preserves every other
     key). Volume name is deterministic under the dedicated project."""
     docker = shutil.which("docker") or "docker"
-    image = os.environ.get("IMAGE_NAME") or "openace/open-ace:latest"
+    image = os.environ.get("IMAGE_NAME") or "ghcr.io/open-ace/open-ace:latest"
     merge_code = (
         "import json\n"
         "p='/config/config.json'\n"
@@ -626,7 +626,7 @@ class Recorder:
             git_sha = run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, timeout=30).stdout.strip()
         except Exception:  # noqa: BLE001 - fingerprint is best effort
             pass
-        image = os.environ.get("IMAGE_NAME", "openace/open-ace:latest")
+        image = os.environ.get("IMAGE_NAME", "ghcr.io/open-ace/open-ace:latest")
         digest = "?"
         try:
             digest = (
@@ -2165,7 +2165,7 @@ def main() -> int:
                 "merge step ran (look for the DECLARED DEVIATION note) and that the "
                 "config volume is acceptance-multi_config-data."
             )
-        recorder.note("pre-seeded config active: multi_user_mode on, max_instances=3")
+        recorder.note("pre-seeded config active: isolation backend plain, max_instances=3")
         sc.build()
         item_a_concurrent_private_workspaces(sc)
         item_b_cross_user_access_matrix(sc)

@@ -75,7 +75,7 @@ assertions. The approved plan of record is
 - On CI, a dedicated `multiuser-acceptance` job (main-push, observation
   period) builds its own image and drives compose with
   `IMAGE_NAME=open-ace:$GITHUB_SHA` — the tested code and the image
-  fingerprint stay strictly coupled; the public `openace/open-ace:latest` is
+  fingerprint stay strictly coupled; the public `ghcr.io/open-ace/open-ace:latest` is
   never pulled by accident.
 
 ## 2. How to run

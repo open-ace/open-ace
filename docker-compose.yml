@@ -47,7 +47,7 @@
 #
 # The docker-compose.multi-user.yml overlay adds:
 #   - user: "0"                        # Run container as root
-#   - WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode
+#   - WORKSPACE_ISOLATION_BACKEND=plain  # One OS account per user (#3446)
 #   - OPENACE_ALLOW_ROOT_MULTI_USER=1  # Explicit root authorization
 #   - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace  # Config persistence
 #
@@ -71,7 +71,7 @@ services:
         # Base image registry. Override for networks where Docker Hub is
         # unreachable (e.g. mainland China): BASE_REGISTRY=docker.m.daocloud.io
         BASE_REGISTRY: ${BASE_REGISTRY:-docker.io}
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:
@@ -98,7 +98,7 @@ services:
       # The entrypoint check_security_baseline() reads DB_PASSWORD directly, not from DATABASE_URL.
       - DB_PASSWORD=${DB_PASSWORD:-}
       # Multi-user Workspace
-      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
+      - WORKSPACE_ISOLATION_BACKEND=${WORKSPACE_ISOLATION_BACKEND:-shared}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -159,7 +159,7 @@ services:
 # Uses leader election to ensure only one active scheduler.
 # For single-instance development, omit this service.
   scheduler:
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace-scheduler
     restart: unless-stopped
     profiles:

@@ -88,7 +88,7 @@ Recommended configuration:
 - Monitor Redis health and circuit breaker state
 - Use `preStop` hook to allow active connections to drain
 
-**Multi-user workspace note:** The Docker image itself defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive, and the default Kubernetes manifest reinforces this with `runAsNonRoot: true` / `runAsUser: 1000`. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root (`runAsUser: 0`) **and** sets `OPENACE_ALLOW_ROOT_MULTI_USER=1`; the entrypoint fail-fasts without both, and you should document that exception in your cluster change process.
+**Multi-user workspace note:** The Docker image itself defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive, and the default Kubernetes manifest reinforces this with `runAsNonRoot: true` / `runAsUser: 1000`. If you use the `plain` isolation backend (`workspace.isolation`) and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root (`runAsUser: 0`) **and** sets `OPENACE_ALLOW_ROOT_MULTI_USER=1`; the entrypoint fail-fasts without both, and you should document that exception in your cluster change process.
 
 ### Service & Ingress
 

@@ -1,5 +1,7 @@
 # Sandbox backends
 
+[中文](../cn/SANDBOX_BACKENDS.md) · Admin guide for interactive workspace isolation: [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)
+
 Open ACE runs autonomous coding agents. Where those agents execute — and what
 stops them from reaching anything they should not — is chosen per tenant and per
 project by the **sandbox backend**.
@@ -319,7 +321,7 @@ The sandboxed interactive WebUI launcher (#3378, §8) adds two runtime codes of
 its own — `sandbox_create_failed` and `sandbox_endpoint_unresolved` — plus a
 zero-pod probe vocabulary (`webui_image_*`, `sandbox_proxy_*`,
 `sandbox_runtime_*`) documented in
-`docs/workspace-isolation-capabilities.md` §3.4.
+[WORKSPACE_ISOLATION_CAPABILITIES](WORKSPACE_ISOLATION_CAPABILITIES.md) §3.4.
 
 ---
 
@@ -533,21 +535,27 @@ per-instance port proxy in the web process; identity is a per-instance token
 secret, not a host uid. The capability contract — probe reason codes, the
 dimension table, the TTL chain, and the honest-declaration list (configuration-
 plane vs per-pod verification, crash-loss windows, snapshot ceiling) — lives in
-`docs/workspace-isolation-capabilities.md` §6. This section covers what touches
+[WORKSPACE_ISOLATION_CAPABILITIES](WORKSPACE_ISOLATION_CAPABILITIES.md) §6. This section covers what touches
 *this* backend file and the web process that drives it.
+
+The sandboxed forms that need no Kubernetes — a local gVisor or Kata container
+(#3431/#3438) — do not use this file; see
+[WORKSPACE_ISOLATION_CAPABILITIES](WORKSPACE_ISOLATION_CAPABILITIES.md) §5.2 and §5.3.
 
 **Configuration.** One key in this file, plus two in config.json:
 
-- `endpoints.<tier>.webui_image` — the pod image; see the §3 bullet. Setting it
-  is what makes the `sandboxed` level probe-able at all, and a passing probe
-  flips the deployment's default launch form to sandboxed.
+- `endpoints.<tier>.webui_image` — the pod image; see the §3 bullet. Pods are
+  launched only when config.json selects this backend (below); the image alone
+  switches nothing (#3446).
 - config.json `workspace.webui_callback_url` — **required**: the static probe
   uses it as the URL the pod reaches the control-plane LLM proxy through. On a
   sidecar tier the control plane's hostname must be in that tier's
   `egress_allow_hosts`; on a CNI tier it must be publicly reachable (loopback,
   private, and cluster-internal addresses are refused at probe time).
-- config.json `workspace.sandbox_tier` — optional; which endpoint tier
-  interactive pods launch on, defaulting to the backend's `default_tier`.
+- config.json `workspace.isolation` — `{"level": "sandboxed", "backend":
+  "opensandbox"}`, plus an optional `"tier"`: which endpoint tier interactive
+  pods launch on, defaulting to the backend's `default_tier`. See the admin
+  guide [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md) §3.6.
 
 **Web-process environment:**
 
@@ -579,7 +587,7 @@ plane vs per-pod verification, crash-loss windows, snapshot ceiling) — lives i
 > The exclusion is implemented in `provider.reconcile_orphans` (metadata filter
 > + client-side re-check) and bound by tests. Anyone wiring that sweep to a new
 > production caller MUST keep the exclusion; WebUI pods are reclaimed by the web
-> process's own generation-keyed reconcile (`app/services/webui_sandbox.py`),
+> process's own generation-keyed reconcile (`app/services/webui_sandbox_opensandbox.py`),
 > not by the workflow live-set.
 
 **Single web process assumption.** The webui-pod reconcile destroys WebUI pods
@@ -660,10 +668,13 @@ against real infrastructure:
   applied, both legs read blocked and the run proceeds. Creating a sandbox with
   no `networkPolicy` against a gVisor-configured server is likewise confirmed
   accepted.
-- **Kata has never been exercised at all**: it needs `/dev/kvm`, and the
-  attempt to stand one up reached nested VT-x and `kata-deploy` before failing
-  on a guest kernel with no `vhost_net` module. Every Kata statement in this
-  document is therefore design intent, not measurement.
+- **The OpenSandbox Kata tier has never been exercised at all**: it needs
+  `/dev/kvm`, and the attempt to stand one up reached nested VT-x and
+  `kata-deploy` before failing on a guest kernel with no `vhost_net` module.
+  Every statement about the Kata *tier* in this document is therefore design
+  intent, not measurement. (The local Kata container form for interactive
+  workspaces, #3438, which needs no Kubernetes, has passed a real acceptance run
+  with Kata 3.32 on a nested-KVM host; that is not this backend.)
 - One piece of the `dubious ownership` fix — the global `safe.directory` that
   covers git commands **the agent itself** runs, as opposed to the repo
   synthesis — was verified locally with git's `GIT_TEST_ASSUME_DIFFERENT_OWNER`

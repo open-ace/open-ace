@@ -188,10 +188,13 @@ class TestDockerEntrypointDefaults:
     def test_generated_config_does_not_force_root_only_multi_user_mode(self):
         entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
 
-        assert '"multi_user_mode": ${DEFAULT_WORKSPACE_MULTI_USER_MODE}' in entrypoint
+        # Issue #3446: the generated config carries workspace.isolation; the
+        # default backend is "shared" (no root, no per-user accounts).
         assert (
-            'DEFAULT_WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-false}"' in entrypoint
+            '"isolation": {"level": "${DEFAULT_ISOLATION_LEVEL}", '
+            '"backend": "${DEFAULT_ISOLATION_BACKEND}"}' in entrypoint
         )
+        assert 'DEFAULT_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-shared}"' in entrypoint
 
 
 # ============================================================================

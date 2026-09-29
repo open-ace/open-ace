@@ -69,6 +69,28 @@ class TestDailyStats:
         rows = pg_db.fetch_all("SELECT * FROM daily_stats WHERE date = %s", ("2025-06-15",))
         assert len(rows) >= 1
 
+    @pytest.mark.regression
+    @pytest.mark.issue(3424)
+    def test_refresh_stats_keeps_one_null_sender_row(self, pg_db):
+        """NULLs are distinct in the (date, tool, host, sender) unique index, so
+        ON CONFLICT never matched NULL-sender groups and each refresh appended a
+        copy (603k copies on a real install, doubling trend totals)."""
+        repo = DailyStatsRepository(db=pg_db)
+        _insert_daily_message(pg_db, "2025-06-15", tokens=100)
+        _insert_daily_message(pg_db, "2025-06-15", tokens=200)
+
+        for _ in range(3):
+            assert repo.refresh_stats() is True
+        assert repo.refresh_stats(date="2025-06-15") is True
+        assert repo.refresh_stats(since="2025-06-01") is True
+
+        rows = pg_db.fetch_all(
+            "SELECT sender_name, total_tokens FROM daily_stats WHERE date = %s",
+            ("2025-06-15",),
+        )
+        assert [(r["sender_name"], r["total_tokens"]) for r in rows] == [(None, 300)]
+        assert repo.needs_refresh() is False
+
     def test_get_daily_totals(self, pg_db):
         repo = DailyStatsRepository(db=pg_db)
         _insert_daily_message(pg_db, "2025-06-15", tokens=100)

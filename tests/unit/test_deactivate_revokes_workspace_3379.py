@@ -50,6 +50,7 @@ from app.services.webui_manager import (
     WorkspaceConfig,
     _tokens_valid_after_epoch,
 )
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.issue(3379), pytest.mark.regression]
 
@@ -69,7 +70,9 @@ class _ManagerStub:
 
     def __init__(self, multi_user=True):
         self.stopped = []
-        self.config = WorkspaceConfig(enabled=True, multi_user_mode=multi_user)
+        self.config = WorkspaceConfig(
+            enabled=True, isolation=iso("plain" if multi_user else "shared")
+        )
 
     def stop_user_webui(self, user_id):
         self.stopped.append(user_id)

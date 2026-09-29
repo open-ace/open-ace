@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(3379)]
 
@@ -41,7 +42,7 @@ def _manager(**config_kwargs) -> WebUIManager:
     config = WorkspaceConfig(
         enabled=True,
         url="http://localhost:8080",
-        multi_user_mode=False,
+        isolation=iso("shared"),
         **config_kwargs,
     )
     manager = WebUIManager(config)

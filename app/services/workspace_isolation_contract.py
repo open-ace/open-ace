@@ -6,7 +6,7 @@ runtime state only (webui manager config, environment, euid, platform).
 It deliberately never upgrades the reported isolation level: ``os_user``
 means per-user OS accounts on a shared host kernel, not strong runtime
 isolation (no namespaces, no egress policy). Reason messages stay free of
-deployment specifics; see docs/WORKSPACE_ISOLATION_CAPABILITIES.md for
+deployment specifics; see docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md for
 deployment requirements. Bump POLICY_REVISION whenever derivation semantics
 or the entry-point matrix change.
 
@@ -26,6 +26,60 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.workspace_isolation_config import (
+    ALL_BACKENDS,
+    BACKEND_BWRAP,
+    BACKEND_OPENSANDBOX,
+    BACKEND_PLAIN,
+    BACKEND_SHARED,
+    CONTAINER_BACKENDS,
+    IsolationConfig,
+    backend_unavailability,
+    install_method,
+)
+
+# Revision 9 (2026-09-26.3, Issue #3446): the configuration is one
+# ``workspace.isolation`` block (level + backend), and the snapshot reports the
+# same backend names: ``shared`` / ``plain`` / ``bwrap`` / ``local-gvisor`` /
+# ``local-kata`` / ``opensandbox:<tier>`` (previously
+# ``qwen-code-webui-shared`` / ``-per-user`` / ``-per-user-confined`` /
+# ``local-container:runsc|kata``). The backend is explicit: a configured backend
+# that is not ready is reported unsupported with its reason (no fallback from
+# the pod form to os_user, no pod form inferred from ``webui_image``). The
+# declared level is the floor. ``multi_user_mode_disabled`` became
+# ``isolation_backend_shared``. The snapshot adds ``install_method`` and
+# ``available_backends``.
+#
+# Revision 8 (2026-09-26.2, Issue #3438): ``os_user_confinement = "kata"`` is
+# the same local-container form on a Kata Containers runtime. The root probe
+# verifies it from the HOST (docker's State.Pid is a hypervisor whose parent
+# is the Kata shim for that container id, and the guest kernel differs from
+# the host's), so the snapshot reports SANDBOXED with backend
+# ``local-container:kata`` and every dimension enforced, exactly like runsc.
+#
+# Revision 7 (2026-09-26.1, Issue #3431 Option 2): ``os_user_confinement =
+# "runsc"`` runs each OS-account WebUI in a Docker container on a gVisor
+# runtime; when the root probe verified the runtime (gVisor guest kernel read
+# from inside a container, host UNIX-socket access, pinned image present) the
+# snapshot reports the SANDBOXED level with backend ``local-container:runsc``
+# and every dimension enforced. Unlike the OpenSandbox backend its identity is
+# the OS account and the home is the host directory, so: the entry-point
+# matrix is the os_user one (filesystem_api stays enforced), the /user-url
+# gate keeps the identity-mapping chain, and the launch form stays the local
+# (per-user process) form — the pod form is chosen by the opensandbox BACKEND,
+# never by the level alone.
+#
+# Revision 6 (2026-09-25.1, Issue #3431 Option 1): an os_user deployment with
+# ``workspace.os_user_confinement = "bwrap"`` whose launch-path probe passed
+# (which now includes the confine wrapper's host check) reports backend
+# ``qwen-code-webui-per-user-confined`` and adds ``resources`` (systemd scope
+# MemoryMax/CPUQuota/TasksMax) and ``network_egress`` (private network
+# namespace, reachable only through a host:port allowlist proxy) to
+# ``enforced``. ``kernel`` stays unsupported (shared host kernel). A host that
+# cannot confine degrades through the existing launch_path_degraded reason with
+# a ``confinement_*`` probe code — never a silent unconfined os_user. A cold
+# worker (no manager, probe not run) keeps the plain os_user dimensions.
+#
 # Revision 5 (2026-09-16.1, Issue #3410): entry-point matrix RECALIBRATED and
 # made machine-readable.
 #  - filesystem_api: partial -> enforced. The /fs per-file paths no longer act
@@ -66,7 +120,7 @@ from typing import Any
 # kernel/network_egress unverified-until-probed; evaluate_isolation_requirement
 # gates sandboxed requests on the probe reasons instead of the OS-account
 # chain.
-POLICY_REVISION = "2026-09-16.1"
+POLICY_REVISION = "2026-09-26.3"
 
 ISOLATION_LEVEL_NONE = "none"
 ISOLATION_LEVEL_OS_USER = "os_user"
@@ -107,6 +161,11 @@ _OS_USER_ENFORCED = (
 # so the kernel dimension is honestly reported as unsupported.
 _OS_USER_UNSUPPORTED = (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS, DIMENSION_KERNEL)
 
+# Issue #3431 (Option 1): confined os_user adds cgroup limits and a structural
+# egress boundary; the kernel is still the host's.
+_OS_USER_CONFINED_ENFORCED = _OS_USER_ENFORCED + (DIMENSION_RESOURCES, DIMENSION_NETWORK_EGRESS)
+_OS_USER_CONFINED_UNSUPPORTED = (DIMENSION_KERNEL,)
+
 # Config-derived facts for sandboxed WebUI pods: one pod per instance with a
 # per-instance token secret, an image_allowlisted digest-pinned image, and
 # resource limits that build_create_request always attaches (defaults are
@@ -120,9 +179,16 @@ _SANDBOXED_ENFORCED = (
 )
 _SANDBOXED_UNSUPPORTED = (DIMENSION_KERNEL, DIMENSION_NETWORK_EGRESS)
 
-BACKEND_PER_USER = "qwen-code-webui-per-user"
-BACKEND_SHARED = "qwen-code-webui-shared"
-BACKEND_OPENSANDBOX = "opensandbox"
+# Issue #3446: the snapshot reports the same backend names the admin writes in
+# workspace.isolation.backend (opensandbox adds ":<tier>").
+BACKEND_PER_USER = BACKEND_PLAIN
+BACKEND_PER_USER_CONFINED = BACKEND_BWRAP
+
+
+def is_opensandbox_backend(backend: str) -> bool:
+    """Whether a snapshot's backend is the OpenSandbox pod form (#3378)."""
+    return backend == BACKEND_OPENSANDBOX or backend.startswith(f"{BACKEND_OPENSANDBOX}:")
+
 
 # Reason codes produced by the sandboxed readiness probe; the user-url gate
 # surfaces one of these when a sandboxed request outruns the snapshot level.
@@ -168,7 +234,7 @@ def register_sandbox_runtime_verified(
 ) -> None:
     """Record that a sandbox pod's boot probes passed on ``tier`` (launcher hook).
 
-    Called by ``SandboxedWebuiLauncher`` after the runtime-class and egress
+    Called by ``OpenSandboxWebuiLauncher`` after the runtime-class and egress
     probes confirm the pod on the tier the pod was launched against.
     ``kernel_enforced`` distinguishes the two probe directions (provider
     ``_run_probes``): gVisor identifies itself positively in the kernel probe,
@@ -467,7 +533,7 @@ ENTRY_POINT_DETAILS: dict[str, dict[str, Any]] = {
         "covered_by_isolation_level": False,
         "operations": [{"name": "task-execution", "roots": [], "symlink_policy": _SYMLINK_NA}],
         "access_control": ["sandbox_effective_policy"],
-        "boundary": "Governed by the #2022 sandbox contract; see docs/SANDBOX_BACKENDS.md.",
+        "boundary": "Governed by the #2022 sandbox contract; see docs/en/SANDBOX_BACKENDS.md.",
         "limitations": [
             {
                 "code": "separate_contract",
@@ -592,13 +658,31 @@ class IsolationCapabilitySnapshot:
             "reasons": [r.public_dict() for r in self.reasons],
             "policy_revision": self.policy_revision,
         }
+        # Issue #3446: what this deployment could switch to at all (install
+        # method + platform); readiness of the configured backend is above.
+        method = install_method()
+        unavailable = backend_unavailability(method, _current_platform())
+        data["install_method"] = method or "unknown"
+        data["available_backends"] = {
+            name: (
+                {"available": False, "reason": unavailable[name][0]}
+                if name in unavailable
+                else {"available": True}
+            )
+            for name in ALL_BACKENDS
+        }
         # Issue #3374 review #11: the entry-point matrix describes multi-user
         # enforcement; emitting it on an unsupported snapshot would claim
         # "webui: enforced" next to "no isolation at all". T-K: the matrix is
         # level-aware — a sandboxed snapshot reports its own wiring truth.
         if self.supported:
-            sandboxed = self.isolation_level == ISOLATION_LEVEL_SANDBOXED
-            details = ENTRY_POINT_DETAILS_SANDBOXED if sandboxed else ENTRY_POINT_DETAILS
+            # Issue #3431: the pod-specific matrix follows the BACKEND. A
+            # local-container sandboxed snapshot keeps the os_user matrix: its
+            # home is the host directory the /fs entry points already govern.
+            pod = self.isolation_level == ISOLATION_LEVEL_SANDBOXED and is_opensandbox_backend(
+                self.backend
+            )
+            details = ENTRY_POINT_DETAILS_SANDBOXED if pod else ENTRY_POINT_DETAILS
             data["entry_points"] = {name: d["status"] for name, d in details.items()}
             # Issue #3410: the string map alone could not tell an integrator
             # "covered by the declared level" from "governed by a different
@@ -611,10 +695,12 @@ class IsolationCapabilitySnapshot:
         return data
 
 
-def _unsupported(reason_code: str, message: str) -> IsolationCapabilitySnapshot:
+def _unsupported(
+    reason_code: str, message: str, *, backend: str = BACKEND_SHARED
+) -> IsolationCapabilitySnapshot:
     return IsolationCapabilitySnapshot(
         supported=False,
-        backend=BACKEND_SHARED,
+        backend=backend,
         isolation_level=ISOLATION_LEVEL_NONE,
         enforced=(),
         unsupported=ALL_DIMENSIONS,
@@ -687,7 +773,8 @@ def _sandboxed_readiness(config: Any) -> tuple[bool, str, IsolationReason | None
             ),
         )
 
-    tier = (getattr(config, "sandbox_tier", "") or "").strip() or backend_cfg.default_tier
+    isolation = getattr(config, "isolation", None) or IsolationConfig()
+    tier = isolation.tier or backend_cfg.default_tier
     endpoint = backend_cfg.endpoints.get(tier)
     if endpoint is None:
         return (
@@ -819,14 +906,12 @@ def build_workspace_isolation_snapshot(
     derived from disk config only and cannot verify the launch path — that
     limitation is documented in the capability docs.
 
-    Issue #3378: the sandboxed probe runs first and independently — it does
-    not check platform or multi_user_mode (the pods live on a remote
-    cluster; single-user + sandboxed is a legitimate hardening). When it
-    passes the snapshot reports the sandboxed level with kernel/egress
-    unverified-until-probed. When it fails the os_user chain below runs
-    exactly as before, with the sandbox failure reason attached whenever a
-    sandbox backend is actually configured (an unconfigured backend adds no
-    noise — that is every default deployment).
+    Issue #3446: the snapshot follows ``workspace.isolation.backend``. For
+    ``opensandbox`` the pod probe decides (it does not check the platform:
+    the pods live on a remote cluster), with kernel/egress
+    unverified-until-probed (#3378). For the OS-account backends the
+    launch-path probe decides. A backend that is not ready is reported
+    unsupported with its reason; nothing falls back to another backend.
     """
     readiness_probe = None
     config: Any = None
@@ -848,150 +933,167 @@ def build_workspace_isolation_snapshot(
             "WebUI manager is disabled; no interactive workspace runtime is available.",
         )
 
-    sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
-    if sandbox_ok:
-        # T-K (review round 1): a cold worker (no manager singleton yet) has
-        # not exercised the sandbox launch path — mark the level provisional
-        # exactly like the os_user chain's launch_path_unverified (#3375
-        # precedent): the manager appearing (first workspace activity)
-        # removes the marker.
-        cold_reasons: tuple[IsolationReason, ...] = ()
-        if readiness_probe is None:
-            cold_reasons = (
-                IsolationReason(
-                    "sandbox_launch_unverified",
-                    "The sandboxed launch path has not been exercised on this "
-                    "worker yet; treat this level as provisional until the "
-                    "WebUI manager is initialized.",
-                ),
-            )
-        # D3 two-state mapping: the static view reports kernel/egress
-        # unverified; once the launcher's first pod boot probe succeeded the
-        # in-process memo upgrades them. Kernel only upgrades on a positive
-        # gVisor identification (T-M: Kata is negative-only); network_egress
-        # only on a sidecar-attestation tier whose /policy was read live
-        # (T-M: a gVisor/CNI tier's cluster-egress probe is a negative
-        # control — deny-path evidence, never proof an allow flows — same
-        # treatment as the kata kernel direction). The memo is keyed per tier
-        # (review Q1): a pod verified on another tier never upgrades THIS
-        # tier's snapshot.
-        verified, kernel_enforced, egress_enforced = sandbox_runtime_verification(sandbox_tier)
-        if verified:
-            enforced: tuple[str, ...] = _SANDBOXED_ENFORCED
-            reasons = list(cold_reasons)
-            if egress_enforced:
-                enforced = enforced + (DIMENSION_NETWORK_EGRESS,)
-            else:
-                reasons.append(
+    isolation = getattr(config, "isolation", None) or IsolationConfig()
+    backend = isolation.backend
+
+    # Issue #3446: the backend is explicit. The OpenSandbox pod form is
+    # probed only when it IS the backend; a backend that is not ready makes
+    # the snapshot unsupported with its reason — never a fallback to another
+    # backend's level.
+    if backend == BACKEND_OPENSANDBOX:
+        sandbox_ok, sandbox_tier, sandbox_reason = _sandboxed_readiness(config)
+        if sandbox_ok:
+            # T-K (review round 1): a cold worker (no manager singleton yet) has
+            # not exercised the sandbox launch path — mark the level provisional
+            # exactly like the os_user chain's launch_path_unverified (#3375
+            # precedent): the manager appearing (first workspace activity)
+            # removes the marker.
+            cold_reasons: tuple[IsolationReason, ...] = ()
+            if readiness_probe is None:
+                cold_reasons = (
                     IsolationReason(
-                        "sandbox_runtime_egress_negative_only",
-                        "The tier's egress enforcement was verified in the "
-                        "negative direction only (the cluster deny-default "
-                        "control proves a deny path exists, not that an allow "
-                        "actually flows); only an egress sidecar whose /policy "
-                        "was read live upgrades network_egress, so the "
-                        "dimension stays unverified on gVisor/CNI tiers.",
-                    )
+                        "sandbox_launch_unverified",
+                        "The sandboxed launch path has not been exercised on this "
+                        "worker yet; treat this level as provisional until the "
+                        "WebUI manager is initialized.",
+                    ),
                 )
-            if kernel_enforced:
-                enforced = enforced + (DIMENSION_KERNEL,)
-            else:
-                reasons.append(
-                    IsolationReason(
-                        "sandbox_runtime_kata_negative_only",
-                        "The runtime boot probe passed in the negative "
-                        "direction only (Kata rules out gVisor but no "
-                        "hypervisor signal is observable), so the kernel "
-                        "dimension stays unverified.",
+            # D3 two-state mapping: the static view reports kernel/egress
+            # unverified; once the launcher's first pod boot probe succeeded the
+            # in-process memo upgrades them. Kernel only upgrades on a positive
+            # gVisor identification (T-M: Kata is negative-only); network_egress
+            # only on a sidecar-attestation tier whose /policy was read live
+            # (T-M: a gVisor/CNI tier's cluster-egress probe is a negative
+            # control — deny-path evidence, never proof an allow flows — same
+            # treatment as the kata kernel direction). The memo is keyed per tier
+            # (review Q1): a pod verified on another tier never upgrades THIS
+            # tier's snapshot.
+            verified, kernel_enforced, egress_enforced = sandbox_runtime_verification(sandbox_tier)
+            if verified:
+                enforced: tuple[str, ...] = _SANDBOXED_ENFORCED
+                reasons = list(cold_reasons)
+                if egress_enforced:
+                    enforced = enforced + (DIMENSION_NETWORK_EGRESS,)
+                else:
+                    reasons.append(
+                        IsolationReason(
+                            "sandbox_runtime_egress_negative_only",
+                            "The tier's egress enforcement was verified in the "
+                            "negative direction only (the cluster deny-default "
+                            "control proves a deny path exists, not that an allow "
+                            "actually flows); only an egress sidecar whose /policy "
+                            "was read live upgrades network_egress, so the "
+                            "dimension stays unverified on gVisor/CNI tiers.",
+                        )
                     )
+                if kernel_enforced:
+                    enforced = enforced + (DIMENSION_KERNEL,)
+                else:
+                    reasons.append(
+                        IsolationReason(
+                            "sandbox_runtime_kata_negative_only",
+                            "The runtime boot probe passed in the negative "
+                            "direction only (Kata rules out gVisor but no "
+                            "hypervisor signal is observable), so the kernel "
+                            "dimension stays unverified.",
+                        )
+                    )
+                return IsolationCapabilitySnapshot(
+                    supported=True,
+                    backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
+                    isolation_level=ISOLATION_LEVEL_SANDBOXED,
+                    enforced=enforced,
+                    unsupported=tuple(d for d in ALL_DIMENSIONS if d not in enforced),
+                    reasons=tuple(reasons),
                 )
             return IsolationCapabilitySnapshot(
                 supported=True,
                 backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
                 isolation_level=ISOLATION_LEVEL_SANDBOXED,
-                enforced=enforced,
-                unsupported=tuple(d for d in ALL_DIMENSIONS if d not in enforced),
-                reasons=tuple(reasons),
-            )
-        return IsolationCapabilitySnapshot(
-            supported=True,
-            backend=f"{BACKEND_OPENSANDBOX}:{sandbox_tier}",
-            isolation_level=ISOLATION_LEVEL_SANDBOXED,
-            enforced=_SANDBOXED_ENFORCED,
-            unsupported=_SANDBOXED_UNSUPPORTED,
-            reasons=cold_reasons
-            + (
-                IsolationReason(
-                    "sandbox_runtime_unverified",
-                    "The sandboxed level is verified on the configuration "
-                    "plane only; kernel and egress enforcement are confirmed "
-                    "per-pod by boot probes after the first launch (the memo "
-                    "resets on control-plane restart, when a probe on the "
-                    "tier fails, or after its 1h TTL).",
+                enforced=_SANDBOXED_ENFORCED,
+                unsupported=_SANDBOXED_UNSUPPORTED,
+                reasons=cold_reasons
+                + (
+                    IsolationReason(
+                        "sandbox_runtime_unverified",
+                        "The sandboxed level is verified on the configuration "
+                        "plane only; kernel and egress enforcement are confirmed "
+                        "per-pod by boot probes after the first launch (the memo "
+                        "resets on control-plane restart, when a probe on the "
+                        "tier fails, or after its 1h TTL).",
+                    ),
                 ),
-            ),
+            )
+        assert sandbox_reason is not None
+        return _unsupported(sandbox_reason.code, sandbox_reason.message, backend=backend)
+
+    if backend == BACKEND_SHARED:
+        return _unsupported(
+            "isolation_backend_shared",
+            'workspace.isolation.backend is "shared": the interactive workspace '
+            "intentionally runs one shared instance (level none).",
         )
-    # A configured-but-failing sandbox backend is observable on the os_user
-    # snapshot so the gate can surface the exact reason for sandboxed
-    # requests; an absent backend (every default deployment) stays silent.
-    sandbox_reasons: tuple[IsolationReason, ...] = ()
-    if sandbox_reason is not None and sandbox_reason.code != "sandbox_backend_unconfigured":
-        sandbox_reasons = (sandbox_reason,)
 
     # Linux only: macOS skips system-user creation (utils/workspace.py), so
     # Open ACE cannot establish or verify the identity mapping there; Windows
     # forces a single shared instance.
     if _current_platform() != "linux":
-        return _with_extra_reasons(
-            _unsupported(
-                "platform_unsupported",
-                "Per-user workspace isolation is supported on Linux deployments "
-                "only; this platform runs a single shared WebUI instance.",
-            ),
-            sandbox_reasons,
-        )
-
-    if not getattr(config, "multi_user_mode", False):
-        return _with_extra_reasons(
-            _unsupported(
-                "multi_user_mode_disabled",
-                "Multi-user workspace mode is disabled; the interactive workspace "
-                "intentionally runs one shared instance.",
-            ),
-            sandbox_reasons,
+        return _unsupported(
+            "platform_unsupported",
+            "Per-user workspace isolation is supported on Linux deployments "
+            "only; this platform runs a single shared WebUI instance.",
+            backend=backend,
         )
 
     # The launch-path readiness probe is the verification: it checks the
     # actual per-user launch mechanism (WebUI resolution, dev-directory mode,
-    # launch wrapper, sudo) regardless of Docker vs package installation —
-    # a package-method host that really runs `sudo -u` reports os_user.
-    # Without a manager (read-only capability GET on a cold worker) the
-    # probe cannot run; the snapshot is reported as provisional via an
-    # explicit reason instead of silently claiming a verified level.
+    # launch wrapper, sudo — and, for a confined backend, the confinement
+    # host check or the container probe) regardless of Docker vs package
+    # installation. Without a manager (read-only capability GET on a cold
+    # worker) the probe cannot run; the snapshot is reported as provisional
+    # via an explicit reason instead of silently claiming a verified level.
     if readiness_probe is not None:
         degradation = readiness_probe()
         if degradation:
-            return _with_extra_reasons(
-                _unsupported(
-                    "launch_path_degraded",
-                    "This deployment's WebUI launch path cannot host per-user "
-                    f"instances ({degradation}); see the workspace isolation "
-                    "documentation.",
-                ),
-                sandbox_reasons,
+            return _unsupported(
+                "launch_path_degraded",
+                "This deployment's WebUI launch path cannot host per-user "
+                f"instances ({degradation}); see the workspace isolation "
+                "documentation.",
+                backend=backend,
+            )
+        if backend in CONTAINER_BACKENDS:
+            return IsolationCapabilitySnapshot(
+                supported=True,
+                backend=backend,
+                isolation_level=ISOLATION_LEVEL_SANDBOXED,
+                enforced=ALL_DIMENSIONS,
+                unsupported=(),
+                reasons=(),
+            )
+        if backend == BACKEND_BWRAP:
+            return IsolationCapabilitySnapshot(
+                supported=True,
+                backend=backend,
+                isolation_level=ISOLATION_LEVEL_OS_USER,
+                enforced=_OS_USER_CONFINED_ENFORCED,
+                unsupported=_OS_USER_CONFINED_UNSUPPORTED,
+                reasons=(),
             )
         return IsolationCapabilitySnapshot(
             supported=True,
-            backend=BACKEND_PER_USER,
+            backend=backend,
             isolation_level=ISOLATION_LEVEL_OS_USER,
             enforced=_OS_USER_ENFORCED,
             unsupported=_OS_USER_UNSUPPORTED,
-            reasons=sandbox_reasons,
+            reasons=(),
         )
 
+    # Cold worker: only the OS-account chain's guarantees are claimed, as
+    # provisional, whatever the configured backend adds on top of them.
     return IsolationCapabilitySnapshot(
         supported=True,
-        backend=BACKEND_PER_USER,
+        backend=backend,
         isolation_level=ISOLATION_LEVEL_OS_USER,
         enforced=_OS_USER_ENFORCED,
         unsupported=_OS_USER_UNSUPPORTED,
@@ -1002,88 +1104,32 @@ def build_workspace_isolation_snapshot(
                 "yet; treat this level as provisional until the manager is "
                 "initialized.",
             ),
-        )
-        + sandbox_reasons,
-    )
-
-
-def _with_extra_reasons(
-    snapshot: IsolationCapabilitySnapshot, extra: tuple[IsolationReason, ...]
-) -> IsolationCapabilitySnapshot:
-    if not extra:
-        return snapshot
-    return IsolationCapabilitySnapshot(
-        supported=snapshot.supported,
-        backend=snapshot.backend,
-        isolation_level=snapshot.isolation_level,
-        enforced=snapshot.enforced,
-        unsupported=snapshot.unsupported,
-        reasons=snapshot.reasons + extra,
+        ),
     )
 
 
 def resolve_required_floor(config: Any, snapshot: IsolationCapabilitySnapshot) -> str:
-    """Resolve the server-side isolation floor (Issue #3374 PR review round 2).
+    """The server-side isolation floor: ``workspace.isolation.level`` (#3446).
 
-    An explicitly configured ``workspace.required_isolation_level`` wins when
-    valid; unset — or a hand-edited invalid value (warned) — derives from what
-    the deployment actually verifies (``snapshot.isolation_level``), NOT from
-    a flat mode default: a package-method or launch-degraded host must not
-    have every default workspace request rejected by an unreachable floor.
-    The request parameter can only raise above this floor, never lower it.
+    The declared level IS the floor — a deployment configured for ``os_user``
+    refuses every launch it cannot isolate at ``os_user`` instead of serving
+    on a shared account. The request parameter can only raise above it.
+    A floor the host cannot currently meet is logged so the refusals are
+    never silent.
     """
-    explicit = (getattr(config, "required_isolation_level", "") or "").strip()
-    degraded = snapshot.isolation_level == ISOLATION_LEVEL_NONE and _reason_is_degraded(snapshot)
-    if degraded:
-        # The floor follows verified capability — it can only mirror a
-        # degradation downward, never detect one. Make BOTH directions
-        # audible (PR review round 5): a pinned floor above a degraded
-        # probe rejects every launch and must not fail silently, while a
-        # derived multi-user floor keeps serving on the shared account.
-        # Late import avoids a logging dependency at module import time.
-        import logging
-
-        # PR review round 6: only a VALID pin above the degraded probe
-        # actually rejects; an invalid value falls through to the derived
-        # floor below and must not claim rejections that are not happening.
-        if explicit and is_valid_isolation_level(explicit) and explicit != ISOLATION_LEVEL_NONE:
-            logging.getLogger(__name__).warning(
-                "Workspace launch path is degraded (%s); the pinned "
-                "required_isolation_level '%s' is above what this host can "
-                "verify and will REJECT all launches until the launch path "
-                "is repaired",
-                _first_degradation(snapshot),
-                explicit,
-            )
-        elif getattr(config, "multi_user_mode", False):
-            logging.getLogger(__name__).warning(
-                "Multi-user workspace isolation floor derived as 'none' "
-                "(launch path degraded: %s); default launches will NOT be "
-                "per-user isolated — set workspace.required_isolation_level "
-                "to pin a hard floor",
-                _first_degradation(snapshot),
-            )
-    if explicit:
-        if is_valid_isolation_level(explicit):
-            return explicit
+    isolation = getattr(config, "isolation", None) or IsolationConfig()
+    floor = isolation.level
+    if not isolation_level_at_least(snapshot.isolation_level, floor):
         import logging
 
         logging.getLogger(__name__).warning(
-            "Invalid workspace.required_isolation_level %r; using derived default",
-            explicit,
+            "workspace.isolation.level is '%s' but this deployment currently verifies "
+            "'%s' (%s); workspace launches are REFUSED until that is repaired",
+            floor,
+            snapshot.isolation_level,
+            snapshot.reasons[0].code if snapshot.reasons else "no reason reported",
         )
-    return snapshot.isolation_level
-
-
-def _reason_is_degraded(snapshot: IsolationCapabilitySnapshot) -> bool:
-    return any(r.code in ("launch_path_degraded",) for r in snapshot.reasons)
-
-
-def _first_degradation(snapshot: IsolationCapabilitySnapshot) -> str:
-    for r in snapshot.reasons:
-        if r.code == "launch_path_degraded":
-            return r.message
-    return "unknown"
+    return floor
 
 
 def evaluate_isolation_requirement(
@@ -1108,7 +1154,9 @@ def evaluate_isolation_requirement(
         )
     if required_level == ISOLATION_LEVEL_NONE:
         return None
-    if isolation_level_at_least(snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED):
+    if isolation_level_at_least(
+        snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED
+    ) and is_opensandbox_backend(snapshot.backend):
         # Review round 1 (T-B, pin=floor): a sandboxed-capable deployment
         # satisfies every requirement at or below sandboxed with the pod
         # form — the strongest VERIFIED form, which is what launches. The
@@ -1119,7 +1167,11 @@ def evaluate_isolation_requirement(
         # request from a mapping-less user a silent 400 even though the
         # launch itself would have been a sandboxed pod.
         return None
-    if required_level == ISOLATION_LEVEL_SANDBOXED:
+    if required_level == ISOLATION_LEVEL_SANDBOXED and not isolation_level_at_least(
+        snapshot.isolation_level, ISOLATION_LEVEL_SANDBOXED
+    ):
+        # (A local-container sandboxed snapshot falls through to the OS-account
+        # chain below: its identity IS the OS account — Issue #3431.)
         # Issue #3378: identity for sandboxed pods is the per-instance webui
         # token, not an OS account — the identity_mapping / per-user-launch
         # chain below is os_user-specific and does not apply. The gate is the

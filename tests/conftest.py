@@ -133,6 +133,17 @@ def _clear_cache():
     except ImportError:
         pass
 
+    # Reset the process-wide ContentFilter singleton: it holds custom patterns
+    # added via add_custom_pattern() and a cached copy of the filter rules, so a
+    # test that mutates it would redact content in every later test on the same
+    # xdist worker (e.g. pattern "p" turning "response" into "res*onse").
+    try:
+        from app.modules.governance.content_filter_singleton import _reset_content_filter
+
+        _reset_content_filter()
+    except ImportError:
+        pass
+
     # Issue #2738: Reset date limits config cache to prevent cross-test pollution
     try:
         from flask import g

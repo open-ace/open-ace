@@ -37,6 +37,11 @@ from app.modules.workspace.session_manager import (
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.routes.fs import is_valid_path
+from app.services.workspace_isolation_config import (
+    BACKEND_SHARED,
+    IsolationConfigError,
+    parse_isolation,
+)
 from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
@@ -2310,7 +2315,14 @@ def get_workspace_config():
                 workspace = config.get("workspace", {})
                 workspace_config["enabled"] = workspace.get("enabled", False)
                 workspace_config["url"] = workspace.get("url", "")
-                workspace_config["multi_user_mode"] = workspace.get("multi_user_mode", False)
+                # One WebUI per user: every isolation backend but "shared" (#3446).
+                try:
+                    isolation = parse_isolation(workspace)
+                except IsolationConfigError:
+                    isolation = None
+                workspace_config["multi_user_mode"] = bool(
+                    isolation and isolation.backend != BACKEND_SHARED
+                )
                 workspace_config["port_range_start"] = workspace.get("port_range_start", 3100)
                 workspace_config["port_range_end"] = workspace.get("port_range_end", 3200)
                 workspace_config["max_instances"] = workspace.get("max_instances", 30)

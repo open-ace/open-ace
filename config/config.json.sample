@@ -17,7 +17,7 @@
   "workspace": {
     "enabled": false,
     "url": "http://localhost",
-    "multi_user_mode": false,
+    "isolation": {"level": "none", "backend": "shared"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,

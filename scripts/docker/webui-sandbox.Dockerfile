@@ -34,8 +34,8 @@
 # listed in `image_allowlist` - build this, push it to YOUR registry, pin the
 # digest, and add it to the allowlist before pointing a tier at it. A tag-only
 # reference is refused (`webui_image_not_pinned`); an unlisted one is refused
-# (`webui_image_not_allowed`). See docs/sandbox-backends.md section 8 and
-# docs/workspace-isolation-capabilities.md section 6.
+# (`webui_image_not_allowed`). See docs/en/SANDBOX_BACKENDS.md section 8 and
+# docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md section 6.
 #
 # Build from the repository root:
 #   docker build -f scripts/docker/webui-sandbox.Dockerfile \

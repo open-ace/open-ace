@@ -37,6 +37,7 @@ class MessageService:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get messages with pagination.
@@ -52,6 +53,8 @@ class MessageService:
             search: Optional search term for content.
             limit: Maximum number of results.
             offset: Offset for pagination.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             Dict: Messages and pagination info.
@@ -66,6 +69,7 @@ class MessageService:
                 search=search,
                 limit=limit,
                 offset=offset,
+                tenant_id=tenant_id,
             )
             total = self.message_repo.count_messages(
                 start_date=date,
@@ -75,6 +79,7 @@ class MessageService:
                 sender_name=sender_name,
                 role=role,
                 search=search,
+                tenant_id=tenant_id,
             )
         else:
             if not start_date:
@@ -92,6 +97,7 @@ class MessageService:
                 search=search,
                 limit=limit,
                 offset=offset,
+                tenant_id=tenant_id,
             )
             total = self.message_repo.count_messages(
                 start_date=start_date,
@@ -101,6 +107,7 @@ class MessageService:
                 sender_name=sender_name,
                 role=role,
                 search=search,
+                tenant_id=tenant_id,
             )
 
         return {
@@ -121,6 +128,7 @@ class MessageService:
         sender_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get conversation history.
@@ -134,6 +142,8 @@ class MessageService:
             sender_name: Optional sender name filter.
             limit: Maximum number of results.
             offset: Offset for pagination.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             List[Dict]: List of conversations.
@@ -147,6 +157,7 @@ class MessageService:
             sender_name=sender_name,
             limit=limit,
             offset=offset,
+            tenant_id=tenant_id,
         )
 
     def count_conversations(
@@ -157,8 +168,9 @@ class MessageService:
         tool_name: str | None = None,
         host_name: str | None = None,
         sender_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
-        """Count total conversations matching filters."""
+        """Count total conversations matching filters (``tenant_id`` as above)."""
         return self.message_repo.count_conversations(
             date=date,
             start_date=start_date,
@@ -166,6 +178,7 @@ class MessageService:
             tool_name=tool_name,
             host_name=host_name,
             sender_name=sender_name,
+            tenant_id=tenant_id,
         )
 
     def get_conversation_timeline(
@@ -173,6 +186,7 @@ class MessageService:
         session_id: str,
         limit: int | None = None,
         offset: int = 0,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get timeline of messages for a conversation.
@@ -181,38 +195,53 @@ class MessageService:
             session_id: Conversation/session ID.
             limit: Optional cap on number of messages.
             offset: Offset for pagination.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             List[Dict]: List of messages in the conversation (without
             ``full_entry``, which is capped to keep responses small —
             Issue #241 #22).
         """
-        return self.message_repo.get_conversation_timeline(session_id, limit=limit, offset=offset)
+        return self.message_repo.get_conversation_timeline(
+            session_id, limit=limit, offset=offset, tenant_id=tenant_id
+        )
 
-    def get_conversation_details(self, session_id: str) -> dict | None:
+    def get_conversation_details(
+        self, session_id: str, tenant_id: int | None = None
+    ) -> dict | None:
         """
         Get details of a conversation.
 
         Args:
             session_id: Conversation/session ID.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             Optional[Dict]: Conversation details or None.
         """
-        return self.message_repo.get_conversation_details(session_id)
+        return self.message_repo.get_conversation_details(session_id, tenant_id=tenant_id)
 
     @cached(ttl=300, key_prefix="message", skip_args=[0])
-    def get_all_senders(self, host_name: str | None = None) -> list[str]:
+    def get_all_senders(
+        self, host_name: str | None = None, *, tenant_id: int | None = None
+    ) -> list[str]:
         """
         Get list of all senders.
 
+        ``tenant_id`` is part of the ``@cached`` key, so each tenant (and the
+        global admin view) gets its own cache entry.
+
         Args:
             host_name: Optional host name filter.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             List[str]: List of sender names.
         """
-        return self.message_repo.get_all_senders(host_name)
+        return self.message_repo.get_all_senders(host_name, tenant_id=tenant_id)
 
     def count_messages(
         self,
@@ -224,6 +253,7 @@ class MessageService:
         sender_name: str | None = None,
         role: str | None = None,
         search: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """
         Count messages with filters.
@@ -237,6 +267,8 @@ class MessageService:
             sender_name: Optional sender name filter.
             role: Optional role filter.
             search: Optional search term for content.
+            tenant_id: Tenant to scope to; ``None`` means global (platform
+                admin) scope. Issue #3440.
 
         Returns:
             int: Total count of messages.
@@ -249,7 +281,9 @@ class MessageService:
             tool_name=tool_name,
             host_name=host_name,
             sender_name=sender_name,
+            role=role,
             search=search,
+            tenant_id=tenant_id,
         )
 
     def save_message(

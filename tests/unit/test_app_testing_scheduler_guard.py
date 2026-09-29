@@ -32,6 +32,9 @@ def test_scheduler_mode_still_starts_services_when_not_testing(monkeypatch):
     with (
         patch.dict("os.environ", {"SCHEDULER_MODE": "scheduler"}),
         patch("app.start_background_services") as mock_sbs,
+        # a non-testing app validates the HOST's config.json at startup
+        # (#3446); this test is about the scheduler guard, not that file
+        patch("app._validate_workspace_isolation"),
     ):
         create_app({"TESTING": False})
 

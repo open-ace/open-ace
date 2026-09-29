@@ -53,14 +53,18 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 是稳定的，并与镜像中内置的文件属主、K8s 的 `runAsUser`/`runAsGroup: 1000`
 保持一致。
 
-多用户工作区模式（`WORKSPACE_MULTI_USER_MODE=true` 或配置中的
-`workspace.multi_user_mode: true`）确实需要 root——它会创建系统用户
+使用每用户 OS 账户的多用户工作区模式（`WORKSPACE_ISOLATION_BACKEND=plain` 或配置中的
+`workspace.isolation.backend: "plain"`）确实需要 root——它会创建系统用户
 （`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
 （`sudo -u <user>`）。
 
 ---
 
 ### 多用户工作区部署
+
+> **隔离与 Docker 安装。** Docker 安装支持 `none` 与每用户 `os_user` 等级,以及通过 Kubernetes 上的 OpenSandbox pod
+> 实现的 `sandboxed`。受约束的 `os_user` 与本机 gVisor/Kata 沙箱需要 Linux 主机上的包安装。选择安装方式前请先看
+> [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-安装方式决定了哪些可用)。
 
 #### 方式一：一键启动脚本（推荐）
 
@@ -91,7 +95,7 @@ docker-compose.multi-user.yml 会自动配置：
 #### 方式三：手动配置
 
 ```bash
-docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+docker run --user 0 -e WORKSPACE_ISOLATION_BACKEND=plain \
   -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
   -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
@@ -154,10 +158,10 @@ docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
 
 #### 从 config.json 迁移
 
-如果您之前在 config.json 中设置了 `"multi_user_mode": true`：
-
-1. 推荐使用 docker-compose.multi-user.yml（见上方）
-2. 或在 config.json 中将 `"multi_user_mode"` 设置为 `false`，改用环境变量控制
+`multi_user_mode`、`required_isolation_level` 以及 #3446 之前的其他隔离配置键已不再被接受:服务器会拒绝启动并
+给出替代写法。请改用 `workspace.isolation`(见 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)),例如每用户 OS
+账户为 `"isolation": {"level": "os_user", "backend": "plain"}`,并用 `WORKSPACE_ISOLATION_BACKEND=plain`(多用户
+叠加配置已设置)代替 `WORKSPACE_MULTI_USER_MODE`。
 
 **注意**：多用户模式需要容器以 root 运行，仅适用于受控环境。生产环境请确保
 设置强密码和安全密钥。
@@ -176,7 +180,7 @@ cd open-ace
 # 2. 生成 .env（SECRET_KEY、OPENACE_ENCRYPTION_KEY、UPLOAD_AUTH_KEY 等）
 ./scripts/bootstrap-compose-env.sh
 
-# 3. 启动（默认拉取 openace/open-ace:latest 预构建镜像）
+# 3. 启动（默认拉取 ghcr.io/open-ace/open-ace:latest 预构建镜像）
 docker compose up -d --wait
 
 # 4. 验证
@@ -184,9 +188,11 @@ docker compose ps
 docker compose logs -f open-ace
 ```
 
-离线环境可在有网络的机器上先 `docker pull openace/open-ace:latest`，再
-`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz` 传到服务器，
+离线环境可在有网络的机器上先 `docker pull ghcr.io/open-ace/open-ace:latest`，再
+`docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz` 传到服务器，
 用 `gunzip -c open-ace-images.tar.gz | docker load` 导入后启动。
+
+每个版本的预构建镜像都发布到 GitHub Container Registry（`ghcr.io/open-ace/open-ace:latest`、`:vX.Y.Z`、`:X.Y.Z`、`:X.Y`、`:X`），仅提供 `linux/amd64`，Apple Silicon 主机以模拟方式运行。若无法访问 `ghcr.io`，可改为从当前代码本地构建：`docker compose up -d --build --wait`。
 
 ### 部署配置
 
@@ -195,7 +201,7 @@ docker compose logs -f open-ace
 | 设置 | 环境变量 | 默认值 |
 |------|----------|--------|
 | Web 端口 | `PORT` | `19888` |
-| 镜像 | `IMAGE_NAME` | `openace/open-ace:latest` |
+| 镜像 | `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` |
 | 数据库用户 | `DB_USER` | `ace` |
 | 数据库名称 | `DB_NAME` | `ace` |
 | 数据库密码 | `DB_PASSWORD` | `dev-password-change-in-production`（生产必须修改） |
@@ -300,7 +306,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. 指定版本（在 .env 中设置）
-echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.1.0" >> .env
 
 # 2. 拉取并重建容器
 docker compose pull
@@ -333,7 +339,7 @@ docker compose restart open-ace
 docker compose down
 
 # 删除镜像
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # 删除数据卷（彻底清理）
 docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
@@ -612,6 +618,16 @@ python3 scripts/manage.py remote sync     # 同步文件到远程
 
 ## 升级
 
+> **升级到 v2.1**：工作区隔离改为单一的 `workspace.isolation {"level", "backend"}` 配置块（Issue #3446），旧配置键（`multi_user_mode`、`required_isolation_level`、`os_user_confinement` 等）会使服务器拒绝启动。包安装与 Docker 安装会自动转换配置；源码安装和只读挂载的配置须先运行 `python3 scripts/convert_workspace_isolation.py <config.json 路径>`。Docker 请用 `WORKSPACE_ISOLATION_BACKEND` 代替 `WORKSPACE_MULTI_USER_MODE`。详见[工作区隔离](./WORKSPACE_ISOLATION.md)。执行 `alembic upgrade head`（v2.1 新增两个索引，在 PostgreSQL 上构建时不阻塞写入）。
+
+> **从 v1.x 升级到 v2.0**：以 v2.0 重启前请先确认：
+> 1. 源码 / 离线包安装需要 Python 3.10+。
+> 2. 首次重启前把 `OPENACE_ENCRYPTION_KEY` 设为原 `SECRET_KEY` 的值（见 [升级注意：已加密敏感数据](#升级注意已加密敏感数据)）。
+> 3. Docker 镜像以 uid 1000 运行；挂载卷须对其可写，多用户工作区模式请使用 `docker-compose.multi-user.yml`。
+> 4. 数据库须已处于 `baseline_2026_06_23` 或之后；执行 `alembic upgrade head`。
+>
+> 完整列表见 [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md) 的 `v2.0.0` 段落。
+
 ```bash
 # 备份数据
 cp ~/.open-ace/usage.db ~/.open-ace/usage.db.backup
@@ -730,7 +746,11 @@ Docker Compose 现在要求显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY` 
 
 ## 多用户工作区部署
 
-启用 `workspace.multi_user_mode` 时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
+使用 OS 账户类隔离 backend(`workspace.isolation.backend` 为 `plain`、`bwrap`、`local-gvisor` 或 `local-kata`)时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
+
+> 如何在几种隔离方式(每用户 OS 账户、受约束、本机 gVisor/Kata 容器、OpenSandbox pod)之间选择、如何配置并验证
+> 实际生效的隔离,见管理员指南 [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)。包安装脚本会为你配置 sudoers
+> 规则与 wrapper;下面的手工配置适用于不使用安装脚本的安装。
 
 ### 前提条件
 

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
+from app.utils.helpers import to_iso_date
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
 
@@ -206,6 +207,15 @@ class SummaryService:
     def _merge_aggregates(self, rows: list[dict]) -> list[dict]:
         merged: dict[tuple, dict] = {}
         for row in rows:
+            # Issue #3424: agent_sessions dates come back as datetime.date on
+            # PostgreSQL while daily_messages dates are strings; comparing them
+            # raised TypeError, so every refresh failed, usage_summary went
+            # permanently stale and each request re-ran the aggregation.
+            row = {
+                **row,
+                "first_date": to_iso_date(row["first_date"]),
+                "last_date": to_iso_date(row["last_date"]),
+            }
             tool = normalize_tool_name(row["tool_name"])
             host = row.get("host_name")
             key = (tool, host)

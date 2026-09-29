@@ -54,14 +54,20 @@ relying solely on a manifest `securityContext`. The uid/gid 1000 is stable and
 matches the filesystem ownership baked into the image and the K8s
 `runAsUser`/`runAsGroup: 1000`.
 
-Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
-`workspace.multi_user_mode: true` in config) genuinely needs root — it creates
+Multi-user workspace mode with per-user OS accounts (`WORKSPACE_ISOLATION_BACKEND=plain`, or
+`workspace.isolation.backend: "plain"` in config) genuinely needs root — it creates
 system users (`useradd`), fixes ownership (`chown`), and switches identity
 (`sudo -u <user>`) across `/home`.
 
 ---
 
 ### Multi-User Workspace Deployment
+
+> **Isolation and the Docker install.** The Docker install supports the `none` and per-user
+> `os_user` levels, plus `sandboxed` through OpenSandbox pods on Kubernetes. The confined `os_user`
+> mode and the local gVisor/Kata sandboxes need the package install on a Linux host. Choose your
+> install method with [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md#2-what-your-install-method-allows)
+> in mind.
 
 #### Option 1: One-click startup script (recommended)
 
@@ -92,7 +98,7 @@ docker-compose.multi-user.yml automatically configures:
 #### Option 3: Manual configuration
 
 ```bash
-docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+docker run --user 0 -e WORKSPACE_ISOLATION_BACKEND=plain \
   -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
   -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
@@ -156,10 +162,11 @@ If you already run a single-user deployment, migrate as follows:
 
 #### Migrating from config.json
 
-If you previously set `"multi_user_mode": true` in config.json:
-
-1. Recommended: Use docker-compose.multi-user.yml (see above)
-2. Or set `"multi_user_mode": false` in config.json and use environment variables
+`multi_user_mode`, `required_isolation_level` and the other pre-#3446 isolation keys are no longer
+accepted: the server refuses to start and names the replacement. Replace them with
+`workspace.isolation` (see [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md)), e.g.
+`"isolation": {"level": "os_user", "backend": "plain"}` for per-user OS accounts, and set
+`WORKSPACE_ISOLATION_BACKEND=plain` (the multi-user overlay does) instead of `WORKSPACE_MULTI_USER_MODE`.
 
 **Note**: Multi-user mode requires root and is suitable for controlled environments
 only. For production, ensure strong passwords and security keys are set.
@@ -176,7 +183,7 @@ cd open-ace
 # 2. Generate .env (SECRET_KEY, OPENACE_ENCRYPTION_KEY, UPLOAD_AUTH_KEY, ...)
 ./scripts/bootstrap-compose-env.sh
 
-# 3. Start (pulls the pre-built openace/open-ace:latest image by default)
+# 3. Start (pulls the pre-built ghcr.io/open-ace/open-ace:latest image by default)
 docker compose up -d --wait
 
 # 4. Verify
@@ -185,9 +192,15 @@ docker compose logs -f open-ace
 ```
 
 For offline servers, pull the image on a connected machine with
-`docker pull openace/open-ace:latest`, transfer it via
-`docker save openace/open-ace:latest | gzip > open-ace-images.tar.gz`, load it
+`docker pull ghcr.io/open-ace/open-ace:latest`, transfer it via
+`docker save ghcr.io/open-ace/open-ace:latest | gzip > open-ace-images.tar.gz`, load it
 with `gunzip -c open-ace-images.tar.gz | docker load`, then start the stack.
+
+Pre-built images are published to GitHub Container Registry for every release
+(`ghcr.io/open-ace/open-ace:latest`, `:vX.Y.Z`, `:X.Y.Z`, `:X.Y`, `:X`) and are
+`linux/amd64` only; Apple Silicon hosts run them under emulation. To build the
+image from your checkout instead (e.g. when `ghcr.io` is unreachable), run
+`docker compose up -d --build --wait`.
 
 ### Deployment Configuration
 
@@ -197,7 +210,7 @@ repository root:
 | Setting | Environment variable | Default |
 |---------|----------------------|---------|
 | Web port | `PORT` | `19888` |
-| Image | `IMAGE_NAME` | `openace/open-ace:latest` |
+| Image | `IMAGE_NAME` | `ghcr.io/open-ace/open-ace:latest` |
 | Database user | `DB_USER` | `ace` |
 | Database name | `DB_NAME` | `ace` |
 | Database password | `DB_PASSWORD` | `dev-password-change-in-production` (must change in production) |
@@ -302,7 +315,7 @@ docker compose logs -f open-ace
 
 ```bash
 # 1. Pin a specific version (in .env)
-echo "IMAGE_NAME=openace/open-ace:v1.2.0" >> .env
+echo "IMAGE_NAME=ghcr.io/open-ace/open-ace:v2.1.0" >> .env
 
 # 2. Pull and recreate the container
 docker compose pull
@@ -335,7 +348,7 @@ docker compose restart open-ace
 docker compose down
 
 # Remove images
-docker rmi openace/open-ace:latest postgres:15-alpine
+docker rmi ghcr.io/open-ace/open-ace:latest postgres:15-alpine
 
 # Remove data volumes (complete cleanup)
 docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
@@ -615,6 +628,24 @@ python3 scripts/manage.py remote sync     # Sync files to remote
 
 ## Upgrading
 
+> **Upgrading to v2.1**: workspace isolation moved to one `workspace.isolation {"level", "backend"}`
+> block (Issue #3446), and the server refuses to start on the old keys (`multi_user_mode`,
+> `required_isolation_level`, `os_user_confinement`, ...). Package and Docker installs convert
+> the config automatically; source installs and read-only mounted configs must run
+> `python3 scripts/convert_workspace_isolation.py <path/to/config.json>` first. Docker: use `WORKSPACE_ISOLATION_BACKEND`
+> instead of `WORKSPACE_MULTI_USER_MODE`. See [Workspace isolation](./WORKSPACE_ISOLATION.md).
+> Run `alembic upgrade head` (v2.1 adds two indexes, built without blocking writes on PostgreSQL).
+
+> **Upgrading from v1.x to v2.0**: check these before restarting on v2.0.
+> 1. Python 3.10+ is required for source and package installs.
+> 2. Set `OPENACE_ENCRYPTION_KEY` to your previous `SECRET_KEY` value before the first restart
+>    (see [Upgrade Note: Encrypted Secrets](#upgrade-note-encrypted-secrets)).
+> 3. The Docker image runs as uid 1000; make mounted volumes writable by it, and use
+>    `docker-compose.multi-user.yml` for multi-user workspace mode.
+> 4. The database must already be on `baseline_2026_06_23` or later; run `alembic upgrade head`.
+>
+> Full list: the `v2.0.0` section of [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md).
+
 ```bash
 # Backup data
 cp ~/.open-ace/usage.db ~/.open-ace/usage.db.backup
@@ -731,7 +762,12 @@ Docker Compose now requires `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_
 
 ## Multi-User Workspace Deployment
 
-When enabling `workspace.multi_user_mode`, Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
+With an OS-account isolation backend (`workspace.isolation.backend` `plain`, `bwrap`, `local-gvisor` or `local-kata`), Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
+
+> To choose between the isolation modes (per-user OS account, confined, local gVisor/Kata container,
+> OpenSandbox pod), configure one and verify what is in force, see the admin guide
+> [WORKSPACE_ISOLATION](WORKSPACE_ISOLATION.md). The package installer sets up the sudoers rules
+> and wrappers for you; the manual configuration below is for installs without it.
 
 ### Prerequisites
 
