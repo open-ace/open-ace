@@ -214,6 +214,15 @@ def api_create_project():
     from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
     if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # Shared-project topology (#3376) is defined over host workspace base
+        # dirs and cannot admit /workspace paths; reject explicitly instead
+        # of letting the host-flavoured check produce a misleading message.
+        if is_shared:
+            return (
+                jsonify({"error": "Shared projects are not supported in sandboxed isolation mode"}),
+                400,
+            )
+
         # Validate against the SAME isolation-aware home roots fs browsing
         # uses (#3420: /workspace/<account>, account = system_account or
         # username). A literal startswith("/workspace/<username>") both

@@ -123,6 +123,23 @@ def test_sandboxed_rejects_host_base_dir_path(sandbox_client):
     assert "/workspace/qlfan" in resp.get_json()["error"]
 
 
+def test_sandboxed_rejects_shared_projects(sandbox_client):
+    """#3376 shared-project topology is host-defined; sandbox mode rejects
+    shared registration explicitly instead of a host-flavoured error."""
+    client, _ = sandbox_client
+    resp = client.post(
+        "/api/projects",
+        json={
+            "path": "/workspace/qlfan/team",
+            "name": "team",
+            "is_shared": True,
+            "create_dir": True,
+        },
+    )
+    assert resp.status_code == 400
+    assert "not supported in sandboxed" in resp.get_json()["error"]
+
+
 def test_sandboxed_rejects_identity_less_user():
     """No system_account/username → no home roots → clean 400."""
     app = _make_app("sandboxed")

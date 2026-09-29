@@ -971,7 +971,7 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
 
 
 def _resolve_file_in_home(
-    raw_path: str, user, isolation_level: str | None = None
+    raw_path: str, user
 ) -> tuple[str, str | None, str] | tuple[None, None, None]:
     """Validate that *raw_path* resolves to a file inside the user's home subtree.
 
@@ -984,14 +984,14 @@ def _resolve_file_in_home(
     That check only VALIDATES: the direct branch then reaches the resolved
     path from the returned home root without following symlinks (#3410).
 
-    Issue #3427: In sandboxed mode, use /workspace path instead of host paths.
-    This allows the main service to validate paths that exist only in the
-    sandbox container.
+    Issue #3427: sandboxed callers are gated at the ENDPOINT level with a
+    clear error instead — the host cannot read or write files that live only
+    inside the sandbox container, so admitting /workspace paths here would
+    pass validation and then fail the actual IO with a misleading error.
 
     Args:
         raw_path: The path to validate.
         user: User dict with system_account/username.
-        isolation_level: Current isolation level from session (optional).
 
     Returns (resolved_abs_path, system_account, matched_home_root), or
     (None, None, None) if rejected.
@@ -999,26 +999,13 @@ def _resolve_file_in_home(
     if not raw_path:
         return None, None, None
 
-    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
-    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
-
-    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
-        # In sandboxed mode, the path should be under /workspace
-        if not raw_path.startswith("/workspace"):
-            return None, None, None
-        base_dirs = ["/workspace"]
-    else:
-        base_dirs = get_workspace_base_dirs()
+    base_dirs = get_workspace_base_dirs()
 
     if not is_valid_path(raw_path, allowed_prefixes=base_dirs):
         return None, None, None
     target = os.path.realpath(raw_path)
     home_root = next(
-        (
-            root
-            for root in _home_roots_for_write(user, isolation_level)
-            if _is_within_any_root(target, [root])
-        ),
+        (root for root in _home_roots_for_write(user) if _is_within_any_root(target, [root])),
         None,
     )
     if home_root is None:
@@ -1231,7 +1218,16 @@ def api_browse_directory():
         path = home_roots[0]
     else:
         # Validate and resolve path — restrict to workspace base dirs
-        base_dirs = get_workspace_base_dirs()
+        # Issue #3427: sandboxed isolation validates against the sandbox
+        # /workspace base (mirrors check-path); listing then degrades through
+        # the existing not-exists fallback below, since the host cannot see
+        # inside the sandbox container.
+        from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+        if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+            base_dirs = ["/workspace"]
+        else:
+            base_dirs = get_workspace_base_dirs()
         if not is_valid_path(path, allowed_prefixes=base_dirs):
             allowed_paths = ", ".join(base_dirs)
             return (
@@ -1243,7 +1239,8 @@ def api_browse_directory():
 
         # Issue #3376: home subtree lock; explicitly shared project roots
         # stay reachable (read-side parity with the #1813 write lock).
-        if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+        # Issue #3427: pass isolation_level.
+        if not _is_within_any_root(path, _allowed_roots_for_user(user, isolation_level)):
             return (
                 jsonify({"error": "Path must be inside your home directory or a shared project"}),
                 400,
@@ -1594,6 +1591,21 @@ def api_check_path():
             400,
         )
 
+    # Issue #3427: In sandboxed mode the path lives inside the user's sandbox
+    # container — the host cannot see it (no /workspace on the host), so the
+    # host-side existence/permission probes below are skipped per the issue's
+    # proposal. Path-shape validation above is the whole contract; the
+    # project-creation flow proceeds on canCreate semantics.
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        return jsonify(
+            {
+                "valid": True,
+                "exists": False,
+                "canCreate": True,
+                "sandboxed": True,
+            }
+        )
+
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None
 
@@ -1695,9 +1707,26 @@ def api_create_directory():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
+
+    # Issue #3427: directory creation for sandbox users happens inside the
+    # sandbox container; the main service cannot mkdir a path it cannot see
+    # on the host. Fail with a clear error instead of a host-side failure.
+    if is_sandboxed(isolation_level):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "This path lives inside your sandbox container; "
+                        "manage it from the sandbox WebUI"
+                    ),
+                }
+            ),
+            400,
+        )
 
     data = request.get_json() or {}
     dir_path = data.get("path", "")
@@ -1858,9 +1887,26 @@ def api_upload_file():
     user = g.user
 
     # Issue #3420/#3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
+
+    # Issue #3427: uploads target the user's sandbox container; the main
+    # service cannot write into /workspace from the host. Fail early with a
+    # clear error instead of buffering the body and failing the write.
+    if is_sandboxed(isolation_level):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "This path lives inside your sandbox container; "
+                        "manage it from the sandbox WebUI"
+                    ),
+                }
+            ),
+            400,
+        )
 
     # Cheap pre-filter: reject declared-oversized requests before the body is
     # fully buffered to disk. The Content-Length header can be spoofed, so the
@@ -2186,12 +2232,28 @@ def api_download_file():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
 
+    # Issue #3427: sandbox-container files cannot be read by the main service
+    # (the host cannot see /workspace). Gate BEFORE validation: admitting the
+    # path and failing the host read would surface a misleading "Not a file".
+    if is_sandboxed(isolation_level):
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "This file lives inside your sandbox container; "
+                        "manage it from the sandbox WebUI"
+                    )
+                }
+            ),
+            400,
+        )
+
     raw_path = request.args.get("path", "")
-    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user, isolation_level)
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
     if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
@@ -2267,13 +2329,30 @@ def api_delete_file():
     user = g.user
 
     # Issue #3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
 
+    # Issue #3427: sandbox-container files cannot be deleted by the main
+    # service (the host cannot see /workspace); fail with a clear error
+    # instead of an unlink that can never succeed.
+    if is_sandboxed(isolation_level):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "This file lives inside your sandbox container; "
+                        "manage it from the sandbox WebUI"
+                    ),
+                }
+            ),
+            400,
+        )
+
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user, isolation_level)
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
     if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
@@ -2632,9 +2711,25 @@ def api_search_files():
     user = g.user
 
     # Issue #3420/#3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
+
+    # Issue #3427: file search walks the filesystem on the host; a sandboxed
+    # user's files live only inside the sandbox container. Fail with a clear
+    # error instead of walking a /workspace root that does not exist.
+    if is_sandboxed(isolation_level):
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Your files live inside your sandbox container; "
+                        "search them from the sandbox WebUI"
+                    )
+                }
+            ),
+            400,
+        )
 
     query = (request.args.get("q", "") or "").strip()
     matcher = _build_name_matcher(query)

@@ -2,6 +2,11 @@
 
 Tests that path validation functions correctly handle isolation_level parameter
 and use /workspace paths in sandboxed mode.
+
+file IO endpoints (upload/download/delete/search/create-directory) are gated
+at the endpoint level with a clear sandbox error — see
+test_fs_sandboxed_endpoints_3427.py; _resolve_file_in_home deliberately stays
+host-only.
 """
 
 import pytest
@@ -32,7 +37,7 @@ class TestAllowedRootsForUserSandboxed:
         assert any("testuser" in root for root in roots)
 
     def test_sandboxed_mode_without_system_account(self):
-        """User without system_account should get empty roots."""
+        """Without system_account the username is used as the account."""
         user = {"username": "testuser", "id": 1}
         roots = _allowed_roots_for_user(user, ISOLATION_LEVEL_SANDBOXED)
         # Falls back to username if system_account is missing
@@ -78,53 +83,6 @@ class TestCheckPathRejectionReasonSandboxed:
         user = {"system_account": "user1", "username": "user1", "id": 1}
         result = _check_path_rejection_reason("/workspace/user2", user, ISOLATION_LEVEL_SANDBOXED)
         assert result is not None
-
-
-class TestResolveFileInHomeSandboxed:
-    """Test _resolve_file_in_home with isolation_level parameter."""
-
-    def test_sandboxed_mode_accepts_workspace_file(self):
-        """In sandboxed mode, files under /workspace/{username} should be accepted."""
-        user = {"system_account": "testuser", "username": "testuser", "id": 1}
-        # Note: This test validates the path resolution logic
-        # The function returns the resolved path even if file doesn't exist
-        # This is correct behavior - it validates the path is in the right location
-        result = _resolve_file_in_home(
-            "/workspace/testuser/file.txt", user, ISOLATION_LEVEL_SANDBOXED
-        )
-        # Path should be resolved successfully
-        resolved_path, system_account, home_root = result
-        assert resolved_path == "/workspace/testuser/file.txt"
-        assert system_account == "testuser"
-        assert home_root == "/workspace/testuser"
-
-    def test_sandboxed_mode_rejects_non_workspace_path(self):
-        """Paths outside /workspace should be rejected in sandboxed mode."""
-        user = {"system_account": "testuser", "username": "testuser", "id": 1}
-        result = _resolve_file_in_home("/home/testuser/file.txt", user, ISOLATION_LEVEL_SANDBOXED)
-        assert result == (None, None, None)
-
-    def test_non_sandboxed_mode_uses_env_base_dir(self, monkeypatch):
-        """In non-sandboxed mode, should validate against WORKSPACE_BASE_DIR."""
-        monkeypatch.setenv("WORKSPACE_BASE_DIR", "/home")
-        user = {"system_account": "testuser", "username": "testuser", "id": 1}
-        result = _resolve_file_in_home("/opt/testuser/file.txt", user, None)
-        assert result == (None, None, None)
-
-    def test_empty_path_returns_none(self):
-        """Empty path should return None."""
-        user = {"system_account": "testuser", "username": "testuser", "id": 1}
-        result = _resolve_file_in_home("", user, ISOLATION_LEVEL_SANDBOXED)
-        assert result == (None, None, None)
-
-    def test_none_isolation_level_uses_default(self, monkeypatch):
-        """None isolation_level should use default behavior."""
-        monkeypatch.setenv("WORKSPACE_BASE_DIR", "/home")
-        user = {"system_account": "testuser", "username": "testuser", "id": 1}
-        # Should use /home as base dir, not /workspace
-        result = _resolve_file_in_home("/workspace/testuser/file.txt", user, None)
-        # Path not under /home, should be rejected
-        assert result == (None, None, None)
 
 
 class TestBackwardCompatibility:

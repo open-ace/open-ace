@@ -38,9 +38,28 @@ def get_isolation_level_from_webui(user_id: int | None) -> str | None:
 
         return instance.isolation_level
     except Exception as e:
-        # Log exception instead of silently swallowing it
-        logger.debug("Failed to get isolation_level for user %s: %s", user_id, e)
+        # A real failure (import error, DB error) silently downgrades the
+        # caller to host-side path semantics — the exact class of bug #3427
+        # reports — so it must be visible at default log level.
+        logger.warning("Failed to get isolation_level for user %s: %s", user_id, e)
         return None
+
+
+def is_sandboxed(isolation_level: str | None) -> bool:
+    """Whether an isolation level denotes the sandboxed form.
+
+    Single comparison point for the ISOLATION_LEVEL_SANDBOXED constant so
+    route code does not each import the contract module (Issue #3427).
+
+    Args:
+        isolation_level: Isolation level string or None.
+
+    Returns:
+        True only for the exact sandboxed level.
+    """
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+    return isolation_level == ISOLATION_LEVEL_SANDBOXED
 
 
 def get_user_isolation_level(user: dict[str, Any] | None) -> str | None:
