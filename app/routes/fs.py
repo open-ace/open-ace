@@ -1251,9 +1251,14 @@ def api_browse_directory():
     # that DO have a /workspace (e.g. Docker default WORKSPACE_BASE_DIR), it
     # would list the HOST copy, not the container's. Skip host IO entirely.
     if is_sandboxed(isolation_level):
-        home = _primary_home_root(user, isolation_level)
-        if home is None:
+        # #3459 review M1: _primary_home_root goes through
+        # _home_roots_for_write's legacy get_home_directory() append, which
+        # forks a host sudo probe — the exact residue this branch removes.
+        # _home_roots_for_user is pure path computation.
+        sandbox_home_roots = _home_roots_for_user(user, isolation_level)
+        if not sandbox_home_roots:
             return jsonify({"error": "No home directory available for this user"}), 400
+        sandbox_home = sandbox_home_roots[0]
         sandbox_parent: str | None = str(Path(path).parent)
         if sandbox_parent == path:
             sandbox_parent = None
@@ -1263,7 +1268,7 @@ def api_browse_directory():
                 "parentPath": sandbox_parent,
                 "directories": [],
                 "files": [],
-                "homePath": home,
+                "homePath": sandbox_home,
                 "canCreate": False,
                 "sandboxed": True,
                 "fallback_note": (

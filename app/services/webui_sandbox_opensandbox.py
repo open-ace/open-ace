@@ -799,9 +799,12 @@ class OpenSandboxWebuiLauncher:
         creation). Same wire semantics as ``_run_background_command`` but with
         a CALLER-bounded poll deadline — the 90s restore budget must never be
         inherited by an HTTP request whose sandbox may be wedged.
+
+        Uses ``_current_api`` so the endpoint (and the uid/gid credential
+        switch keyed on it) is resolved even on a launcher instance that never
+        ran ``launch()`` itself.
         """
-        cfg, endpoint = self._resolve_endpoint()
-        api = self._api_for(cfg, endpoint)
+        api = self._current_api()
         return self._run_background_command(
             api, sandbox_id, command, timeout_seconds=timeout_seconds
         )

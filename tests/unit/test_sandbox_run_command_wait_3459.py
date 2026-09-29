@@ -79,3 +79,19 @@ def test_no_command_id_fails():
 def test_unknown_exit_code_fails():
     api = _FakeApi(lambda: {"running": False})
     assert _launcher(api).run_command_wait("sbx", "x") is False
+
+
+def test_unconfigured_backend_raises_for_caller_to_catch(monkeypatch):
+    """No backend config → SandboxWebuiError (a RuntimeError subclass), the
+    contract api_create_project's broad except relies on."""
+    from app.modules.workspace.autonomous.sandbox import opensandbox as cfg_pkg
+    from app.services.webui_sandbox_opensandbox import SandboxWebuiError
+
+    monkeypatch.setattr(
+        "app.services.webui_sandbox_opensandbox.sandbox_config_mod.load_backend_config",
+        lambda: None,
+    )
+    assert cfg_pkg  # keep the package importable reference
+    launcher = OpenSandboxWebuiLauncher()
+    with pytest.raises(SandboxWebuiError):
+        launcher.run_command_wait("sbx", "x")

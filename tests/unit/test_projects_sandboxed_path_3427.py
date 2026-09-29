@@ -217,6 +217,59 @@ def test_non_string_path_returns_400_not_500():
     assert resp.get_json()["error"] == "Path must be a string"
 
 
+def test_sandboxed_create_dir_false_skips_container_mkdir():
+    """create_dir=False registers without creating — container mkdir must
+    not run and sandbox_dir_created must stay absent (review m2)."""
+    manager = _mkdir_manager(run_command_wait_return=True)
+    for client in _client_with_manager(manager):
+        resp = client.post(
+            "/api/projects",
+            json={"path": "/workspace/qlfan/proj", "name": "p", "create_dir": False},
+        )
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert "sandbox_dir_created" not in body
+    manager.get_user_instance(11).launcher.run_command_wait.assert_not_called()
+
+
+def test_non_sandboxed_response_has_no_sandbox_field():
+    """Non-sandboxed create never consults the sandbox channel."""
+    launcher = MagicMock()
+    app = _make_app("os_user")
+    with (
+        patch("app.routes.projects.get_current_tenant_id", return_value=1),
+        patch(
+            "app.services.webui_manager.get_webui_manager",
+            return_value=_FakeManager("os_user", launcher=launcher, sandbox_id="sbx-1"),
+        ),
+        patch("app.routes.projects.project_repo.get_project_by_path", return_value=None),
+        patch("app.routes.projects.project_repo.get_all_projects", return_value=[]),
+        patch("app.routes.projects.project_repo.create_project", return_value=42),
+        patch("app.routes.projects.project_repo.get_project_by_id", return_value=_FakeProject()),
+        patch("app.routes.projects.get_effective_system_account", return_value=None),
+        patch("app.routes.projects.os.makedirs"),
+    ):
+        client = app.test_client()
+        resp = client.post(
+            "/api/projects",
+            json={"path": "/home/qlfan/proj", "name": "p", "create_dir": True},
+        )
+    assert resp.status_code == 201
+    assert "sandbox_dir_created" not in resp.get_json()
+    launcher.run_command_wait.assert_not_called()
+
+
+def test_non_string_name_returns_400_not_500():
+    """#3459: list/dict names previously 500'd inside validate_project_name."""
+    for client in _client_with_manager(_mkdir_manager()):
+        resp = client.post(
+            "/api/projects",
+            json={"path": "/workspace/qlfan/proj", "name": ["evil"], "create_dir": False},
+        )
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "Project name must be a string"
+
+
 def test_sandboxed_rejects_identity_less_user():
     """No system_account/username → no home roots → clean 400."""
     app = _make_app("sandboxed")

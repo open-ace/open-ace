@@ -137,14 +137,19 @@ class TestBrowseSandboxed:
         assert body["sandboxed"] is True
 
     def test_zero_host_probes(self, sandbox_client, monkeypatch):
-        """#3459: sandboxed browse must not touch the host filesystem."""
+        """#3459: sandboxed browse must not touch the host filesystem —
+        including the legacy get_home_directory sudo probe that
+        _primary_home_root used to trigger (round-1 review M1)."""
 
         def _explode(*args, **kwargs):
             raise AssertionError("host probe reached")
 
         monkeypatch.setattr("app.routes.fs.get_directory_info", _explode)
         monkeypatch.setattr("app.routes.fs.list_subdirectories", _explode)
+        monkeypatch.setattr("app.routes.fs.run_as_user", _explode)
         resp = sandbox_client.get("/api/fs/browse?path=/workspace/qlfan")
+        assert resp.status_code == 200
+        resp = sandbox_client.get("/api/fs/browse?path=home")
         assert resp.status_code == 200
 
     def test_other_users_home_rejected(self, sandbox_client):
