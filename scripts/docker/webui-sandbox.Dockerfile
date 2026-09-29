@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # /usr/lib/node_modules and the bin at /usr/bin/qwen-code-webui - the layout
 # the entrypoint/launch paths are hard-coded against.
 RUN npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g --prefix /usr qwen-code-webui@0.2.43 @qwen-code/qwen-code@0.23.3 \
+    && npm install -g --prefix /usr qwen-code-webui@0.3.0 @qwen-code/qwen-code@0.23.3 \
     && test -x /usr/bin/qwen-code-webui \
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js
 

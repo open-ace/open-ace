@@ -140,7 +140,7 @@ docker compose up -d
 
 多用户模式为每个用户启动独立的 `qwen-code-webui` 进程，确保用户数据隔离。
 
-**Docker 容器已内置全部所需依赖**（Node.js 22、qwen-code-webui@0.2.43、@qwen-code/qwen-code@0.23.3），无需在宿主机安装或配置任何 qwen 栈组件：多用户 workspace 的 webui/CLI 进程与 sudoers 均在容器内运行（镜像固定版本 + `docker-entrypoint.sh` 启动时生成容器内 sudoers，见下文"自动配置"）。安装脚本不会在宿主机安装 Node/webui/CLI，也不会写宿主机 sudoers。
+**Docker 容器已内置全部所需依赖**（Node.js 22、qwen-code-webui@0.3.0、@qwen-code/qwen-code@0.23.3），无需在宿主机安装或配置任何 qwen 栈组件：多用户 workspace 的 webui/CLI 进程与 sudoers 均在容器内运行（镜像固定版本 + `docker-entrypoint.sh` 启动时生成容器内 sudoers，见下文"自动配置"）。安装脚本不会在宿主机安装 Node/webui/CLI，也不会写宿主机 sudoers。
 
 **相关环境变量：**
 

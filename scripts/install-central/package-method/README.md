@@ -335,7 +335,7 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 2. **安装 qwen-code-webui 和 qwen-code CLI**：
    ```bash
-   npm install -g qwen-code-webui@0.2.43
+   npm install -g qwen-code-webui@0.3.0
    npm install -g @qwen-code/qwen-code@0.23.3
    ```
 
