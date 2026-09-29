@@ -1,0 +1,159 @@
+name: WebUI Upgrade
+
+# Weekly: if a newer qwen-code-webui exists on npm, open (or refresh) a PR
+# bumping the pinned qwen stack (webui + the @qwen-code/qwen-code CLI it
+# drives) everywhere the pair is pinned.
+#
+# The CLI pin follows the webui's own compatibility metadata:
+#   npm view qwen-code-webui@<version> qwenCode.recommendedCli
+# When that metadata is unavailable (webui releases that predate the field),
+# the CLI pin is left unchanged and the PR says so — the pair is then
+# "newest webui + previously pinned CLI", which stays inside the webui's
+# tested range.
+#
+# One-time setup: Settings → Actions → General → Workflow permissions →
+# enable "Allow GitHub Actions to create and approve pull requests"
+# (otherwise GITHUB_TOKEN cannot open the upgrade PR).
+
+on:
+  schedule:
+    # Mondays 02:00 UTC
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Target qwen-code-webui version (empty = npm latest)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: webui-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade-pr:
+    name: Open qwen-stack upgrade PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve target versions
+        id: versions
+        run: |
+          set -euo pipefail
+
+          CURRENT_WEBUI=$(grep -rhoE 'qwen-code-webui@[0-9]+\.[0-9]+\.[0-9]+' \
+            Dockerfile scripts/ docs/ 2>/dev/null | head -1 | cut -d@ -f2)
+          if [ -z "$CURRENT_WEBUI" ]; then
+            echo "::error::no qwen-code-webui@X.Y.Z pin found under Dockerfile/, scripts/, docs/"
+            exit 1
+          fi
+
+          if [ -n "${{ inputs.version }}" ]; then
+            TARGET_WEBUI="${{ inputs.version }}"
+          else
+            TARGET_WEBUI=$(npm view qwen-code-webui version)
+          fi
+
+          if [ "$CURRENT_WEBUI" = "$TARGET_WEBUI" ]; then
+            echo "up-to-date=true" >> "$GITHUB_OUTPUT"
+            echo "Pins already at qwen-code-webui@$CURRENT_WEBUI; nothing to do."
+            exit 0
+          fi
+
+          # Preferred CLI: the version the webui itself declares as tested.
+          # Field selection on nested JSON works with npm view; missing
+          # metadata yields an empty string (pre-metadata releases).
+          RECOMMENDED_CLI=$(npm view "qwen-code-webui@$TARGET_WEBUI" \
+            qwenCode.recommendedCli 2>/dev/null | tr -d '[:space:]' || true)
+          if [ -z "$RECOMMENDED_CLI" ]; then
+            RECOMMENDED_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
+              Dockerfile scripts/ docs/ 2>/dev/null | head -1 | cut -d@ -f3)
+            CLI_SOURCE="unchanged (webui metadata unavailable; keeping the pinned CLI)"
+          else
+            CLI_SOURCE="from qwen-code-webui@$TARGET_WEBUI qwenCode metadata"
+          fi
+
+          {
+            echo "current-webui=$CURRENT_WEBUI"
+            echo "target-webui=$TARGET_WEBUI"
+            echo "target-cli=$RECOMMENDED_CLI"
+            echo "cli-source=$CLI_SOURCE"
+          } >> "$GITHUB_OUTPUT"
+          echo "up-to-date=false" >> "$GITHUB_OUTPUT"
+
+      - name: Bump the pins
+        if: steps.versions.outputs.up-to-date == 'false'
+        run: |
+          set -euo pipefail
+          CURRENT="${{ steps.versions.outputs.current-webui }}"
+          TARGET="${{ steps.versions.outputs.target-webui }}"
+          TARGET_CLI="${{ steps.versions.outputs.target-cli }}"
+
+          # Replace the exact current pin (webui) everywhere it appears.
+          for f in $(grep -rl "qwen-code-webui@$CURRENT" Dockerfile scripts/ docs/); do
+            sed -i "s/qwen-code-webui@$CURRENT/qwen-code-webui@$TARGET/g" "$f"
+          done
+
+          # Replace any @qwen-code/qwen-code@X.Y.Z with the target CLI.
+          CURRENT_CLI=$(grep -rhoE '@qwen-code/qwen-code@[0-9]+\.[0-9]+\.[0-9]+' \
+            Dockerfile scripts/ docs/ | head -1 | cut -d@ -f3)
+          if [ -n "$CURRENT_CLI" ] && [ -n "$TARGET_CLI" ] && [ "$CURRENT_CLI" != "$TARGET_CLI" ]; then
+            for f in $(grep -rl "@qwen-code/qwen-code@$CURRENT_CLI" Dockerfile scripts/ docs/); do
+              sed -i "s|@qwen-code/qwen-code@$CURRENT_CLI|@qwen-code/qwen-code@$TARGET_CLI|g" "$f"
+            done
+          fi
+
+          git diff --stat
+
+      - name: Open or refresh the PR
+        if: steps.versions.outputs.up-to-date == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARGET="${{ steps.versions.outputs.target-webui }}"
+          CURRENT="${{ steps.versions.outputs.current-webui }}"
+          TARGET_CLI="${{ steps.versions.outputs.target-cli }}"
+          CLI_SOURCE="${{ steps.versions.outputs.cli-source }}"
+          BRANCH="chore/webui-$TARGET"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add -A
+          git commit -m "chore: upgrade qwen-code-webui $CURRENT -> $TARGET"
+          git push --force origin "$BRANCH"
+
+          BODY="Automated qwen-stack upgrade.
+
+          - qwen-code-webui: \`$CURRENT\` -> \`$TARGET\`
+          - @qwen-code/qwen-code: \`$TARGET_CLI\` ($CLI_SOURCE)
+
+          Webui changelog: https://github.com/ivycomputing/qwen-code-webui/releases
+          (release v$TARGET notes list what changed since v$CURRENT.)
+
+          Checklist before merge:
+          - [ ] Sandbox and control-plane images rebuild cleanly
+          - [ ] Interactive workspace smoke test against the new pair"
+
+          if gh pr view "$BRANCH" >/dev/null 2>&1; then
+            echo "PR for $BRANCH already exists; branch force-pushed with the latest pins"
+            gh pr edit "$BRANCH" --body "$BODY" || true
+          else
+            gh pr create \
+              --title "chore: upgrade qwen-code-webui $CURRENT -> $TARGET" \
+              --body "$BODY" \
+              --base main \
+              --head "$BRANCH" \
+              --label dependencies || \
+            echo "::warning::PR creation failed — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General"
+          fi
