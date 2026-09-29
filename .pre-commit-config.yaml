@@ -155,6 +155,15 @@ repos:
         language: system
         files: ^[^/]+\.md$
 
+      # Docs governance (2026-09-29 restructure): bilingual anchors, index
+      # coverage, endpoint/env reference drift. Mirrored in CI by
+      # tests/unit/test_docs_governance.py.
+      - id: check-docs-bilingual
+        name: Docs governance (bilingual/index/coverage)
+        entry: python scripts/lint/check_docs_bilingual.py
+        language: system
+        files: ^(docs/|app/routes/|app/__init__\.py|\.env\.example|scripts/lint/check_docs_bilingual\.py)
+
   # =============================================================================
   # General Checks
   # =============================================================================

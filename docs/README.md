@@ -1,4 +1,4 @@
-# Open ACE Documentation
+# Open ACE Documentation — Open ACE 文档
 
 [English](#english) | [中文](#中文)
 
@@ -6,139 +6,258 @@
 
 ## English
 
-User-facing guides live in [en/](en/). Engineering reference docs sit at the top
-level of `docs/` and under [security/](security/), [api/](api/) and
-[architecture/](architecture/).
+Every curated document under `docs/` is a **single bilingual file**: an
+`## English` section followed by a `## 中文` section. There are no per-language
+directories; the published docs site splits the two sections apart at build
+time (see [Docs site sync](#docs-site-sync)).
 
-### Guides (en/)
+### Directory structure
+
+```
+docs/
+├── README.md            ← you are here (index + placement rules)
+├── guide/               # Usage & operations — for people who do not change code
+├── dev/                 # Contributor docs — for people who change code
+├── contracts/           # Versioned contracts parsed or pinned by guards/APIs
+├── security/            # Security baselines, boundaries, exception registry
+├── images/              # Documentation images
+└── dev-notes/           # English-only process archive (fix retros, runbooks)
+```
+
+### Placement rules
+
+1. **Who reads it?** Deployers, operators, integrators → `guide/`.
+   Contributors and maintainers → `dev/`.
+2. **Special form?** A versioned contract (`policy_revision`, guarded by tests
+   or referenced from API fields) → `contracts/`. A security baseline or
+   exception registry → `security/`. A generated matrix → `dev/` (regenerate,
+   never hand-edit).
+3. **Process write-up** (fix retrospective, incident analysis, per-issue
+   design draft) → `dev-notes/` — English only, never the repo root.
+
+New documents must follow the bilingual template (one `## English` and one
+`## 中文` section); `scripts/lint/check_docs_bilingual.py` enforces it
+together with index consistency and endpoint/env coverage.
+
+### guide/ — usage & operations
 
 | Document | Description |
 |----------|-------------|
-| [**INTRO**](en/INTRO.md) | Product introduction, core capabilities, and quick start guide |
-| [**ARCHITECTURE**](en/ARCHITECTURE.md) | System architecture overview — backend, frontend, and remote agent layers |
-| [**AUTONOMOUS_DEVELOPMENT**](en/AUTONOMOUS_DEVELOPMENT.md) | AI autonomous development — lifecycle, three-session design, CI repair, isolation, and maintenance |
-| [**API**](en/API.md) | Complete REST API reference for all endpoints |
-| [**DATABASE_SCHEMA**](en/DATABASE_SCHEMA.md) | Database tables, columns, foreign keys, and indexes |
-| [**DATABASE_CONVENTIONS**](en/DATABASE_CONVENTIONS.md) | Naming conventions for database fields and migrations |
-| [**SCHEMA_MIGRATION_GUIDE**](en/SCHEMA_MIGRATION_GUIDE.md) | Alembic migration strategy, workflow, and troubleshooting |
-| [**PERMISSION_MODEL**](en/PERMISSION_MODEL.md) | Role-based access control, authentication, and authorization |
-| [**FRONTEND_GUIDE**](en/FRONTEND_GUIDE.md) | React/TypeScript frontend development guide |
-| [**REMOTE_AGENT**](en/REMOTE_AGENT.md) | Remote agent client — installation, configuration, CLI tools |
-| [**REMOTE_WORKSPACE**](en/REMOTE_WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API |
-| [**DEPLOYMENT**](en/DEPLOYMENT.md) | Docker deployment and multi-user workspace setup |
-| [**KUBERNETES**](en/KUBERNETES.md) | Single-instance Kubernetes deployment guide with manifests reference |
-| [**NGINX**](en/NGINX.md) | Nginx reverse proxy configuration for HTTPS and WebSocket |
-| [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
-| [**FEISHU_CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
-| [**DINGTALK_CONFIG**](en/DINGTALK_CONFIG.md) | DingTalk integration configuration guide |
-| [**SAML_CONFIG**](en/SAML_CONFIG.md) | SAML 2.0 SSO provider configuration guide |
-| [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
-| [**TOKEN_ACCOUNTING**](en/TOKEN_ACCOUNTING.md) | Deep dive into Claude / Codex / ZCode / Qwen token collection, computation, storage, and downstream usage |
-| [**WORKSPACE_SESSION_DATA_CONTRACT**](en/WORKSPACE_SESSION_DATA_CONTRACT.md) | Data boundary of the workspace session tables and the product semantics of `request_count` |
+| [INTRO](guide/INTRO.md) | Product introduction, core capabilities, quick start |
+| [DEPLOYMENT](guide/DEPLOYMENT.md) | Docker deployment (production-first) and local trial |
+| [MULTI_USER_WORKSPACE](guide/MULTI_USER_WORKSPACE.md) | Multi-user workspace: launch modes, sudoers, port ranges |
+| [UPGRADING](guide/UPGRADING.md) | Upgrade & rollback runbook, `baseline_2026_06_23` minimum |
+| [KUBERNETES](guide/KUBERNETES.md) | Kubernetes deployment (3 replicas, sticky routing) |
+| [NGINX](guide/NGINX.md) | Nginx reverse proxy for HTTPS and WebSocket |
+| [REMOTE_WORKSPACE](guide/REMOTE_WORKSPACE.md) | Remote workspace from the server perspective |
+| [REMOTE_AGENT](guide/REMOTE_AGENT.md) | Remote agent client — install, config, CLI adapters |
+| [SSO_CONFIG](guide/SSO_CONFIG.md) | SSO: SAML 2.0, OIDC, OAuth2, SLO, redirect allowlist |
+| [FEISHU_CONFIG](guide/FEISHU_CONFIG.md) | Feishu/Lark integration |
+| [DINGTALK_CONFIG](guide/DINGTALK_CONFIG.md) | DingTalk integration |
+| [KEY_MANAGEMENT](guide/KEY_MANAGEMENT.md) | Secret matrix, Fernet stores, atomic rotation |
+| [DATABASE_BACKUP](guide/DATABASE_BACKUP.md) | Backup & recovery (Kubernetes and Docker Compose) |
+| [CONFIG_REFERENCE](guide/CONFIG_REFERENCE.md) | `config.json` field reference |
+| [ENV_REFERENCE](guide/ENV_REFERENCE.md) | Authoritative environment-variable table |
+| [OPERATIONS](guide/OPERATIONS.md) | Health endpoints, scheduler, collectors, TLS, retention |
+| [TROUBLESHOOTING](guide/TROUBLESHOOTING.md) | Cross-component troubleshooting index |
 
-### Engineering reference (top level)
+### dev/ — contributors
 
-| Document | Description | Language |
-|----------|-------------|----------|
-| [**TEST_LAYERS**](TEST_LAYERS.md) | Test taxonomy, placement, and CI execution semantics — the authoritative spec | 中文 |
-| [**MODEL_GATEWAY**](MODEL_GATEWAY.md) | LiteLLM-compatible model gateway — routing, config, failover | English |
-| [**SANDBOX_BACKENDS**](SANDBOX_BACKENDS.md) | Where autonomous agents execute — sandbox backends, capabilities, and trade-offs | English |
-| [**TRANSCRIPT_CONTRACT**](TRANSCRIPT_CONTRACT.md) | Pinned contract for remote session transcripts, `content_blocks`, and replay | English |
-| [**WORKSPACE_ISOLATION_CAPABILITIES**](WORKSPACE_ISOLATION_CAPABILITIES.md) | Versioned capability contract for local multi-user workspace isolation | 中文 |
-| [**GH_CLI_VERSION_COMPATIBILITY**](GH_CLI_VERSION_COMPATIBILITY.md) | gh CLI version matrix, pinning policy, and audit notes | 中文 |
-| [**TENANT_ADMIN_PERMISSIONS**](TENANT_ADMIN_PERMISSIONS.md) | Tenant-admin permission model (issue #2179) | 中文 |
-| [**REPOSITORY_SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist | English |
+| Document | Description |
+|----------|-------------|
+| [DEVELOPMENT](dev/DEVELOPMENT.md) | Dev environment setup and first run |
+| [ARCHITECTURE](dev/ARCHITECTURE.md) | System architecture — backend, frontend, agent layers |
+| [MODULES](dev/MODULES.md) | The six `app/modules/` packages: duties and invariants |
+| [API](dev/API.md) | REST reference — all 419 endpoints, generated inventory |
+| [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | Generated elevated-permission matrix (do not hand-edit) |
+| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | Six-role RBAC, nine auth decorators, strict mode |
+| [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token collection pipeline + Request/Message/Session concepts |
+| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | Autonomous development lifecycle and three-session design |
+| [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM-compatible model gateway |
+| [SANDBOX_BACKENDS](dev/SANDBOX_BACKENDS.md) | Where autonomous agents execute — backends and trade-offs |
+| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | Domain map of all 103 tables (column authority: schema SQL) |
+| [DATABASE_CONVENTIONS](dev/DATABASE_CONVENTIONS.md) | Field naming conventions, `adapt_boolean` helpers |
+| [SCHEMA_MIGRATION_GUIDE](dev/SCHEMA_MIGRATION_GUIDE.md) | Alembic strategy + authoring rules MIG001–MIG003 |
+| [FRONTEND_GUIDE](dev/FRONTEND_GUIDE.md) | React/TypeScript frontend guide |
+| [TEST_LAYERS](dev/TEST_LAYERS.md) | Test taxonomy, placement, CI execution semantics |
+| [CLI_REFERENCE](dev/CLI_REFERENCE.md) | The 9 `cli.py` subcommands |
+| [REPOSITORY_SETUP](dev/REPOSITORY_SETUP.md) | GitHub topics, labels, release checklist |
 
-Also see [security/](security/) (SSH boundaries, API exception registry,
-Bandit baseline), [api/](api/) (generated API permission matrix, filter
-pattern migrations), and [architecture/](architecture/) (autonomous phase
-contracts). Process write-ups — fix retrospectives, runbooks, audits, and
-agent handoffs — are archived in [dev-notes/](dev-notes/README.md).
+### contracts/ — versioned contracts
 
-### Reading Guide by Role
+| Document | Description |
+|----------|-------------|
+| [AUTONOMOUS_PHASE_CONTRACTS](contracts/AUTONOMOUS_PHASE_CONTRACTS.md) | Eight-field contract per orchestrator phase (guard-tested) |
+| [WORKSPACE_SESSION_DATA_CONTRACT](contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) | Data boundary of the workspace session tables |
+| [WORKSPACE_ISOLATION_CAPABILITIES](contracts/WORKSPACE_ISOLATION_CAPABILITIES.md) | Versioned multi-user isolation capability contract |
+| [TRANSCRIPT_CONTRACT](contracts/TRANSCRIPT_CONTRACT.md) | Pinned contract for remote session transcripts and replay |
+| [FILTER_PATTERNS_V2](contracts/FILTER_PATTERNS_V2.md) | Caller migration guide for the filter-rules API switch |
 
-| Role | Recommended Reading |
-|------|---------------------|
-| New to Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
-| Autonomous development maintainer | AUTONOMOUS_DEVELOPMENT → ARCHITECTURE → SANDBOX_BACKENDS |
+### security/
+
+| Document | Description |
+|----------|-------------|
+| [API_EXCEPTIONS](security/API_EXCEPTIONS.md) | API security baseline exception registry and lifecycle |
+| [BANDIT_BASELINE](security/BANDIT_BASELINE.md) | Bandit baseline maintenance guide |
+| [SSH_KEY_BOUNDARY](security/SSH_KEY_BOUNDARY.md) | SSH key sync security boundary |
+| [SSH_SYNC_CONFIGURATION](security/SSH_SYNC_CONFIGURATION.md) | SSH sync allowlist and review process |
+
+### Reading paths by role
+
+| Role | Path |
+|------|------|
+| Evaluating Open ACE | INTRO → ARCHITECTURE → DEPLOYMENT |
+| Deployer / operator | DEPLOYMENT → ENV_REFERENCE → OPERATIONS → UPGRADING |
+| Something is broken | TROUBLESHOOTING → the linked component guide |
+| API integrator | API → PERMISSION_MODEL → SSO_CONFIG |
 | Frontend developer | FRONTEND_GUIDE → DEVELOPMENT |
-| DevOps / Deployment | DEPLOYMENT → KUBERNETES → NGINX |
-| API integrator | API → PERMISSION_MODEL → CONCEPTS |
+| Autonomous-dev maintainer | AUTONOMOUS_DEVELOPMENT → SANDBOX_BACKENDS → contracts/ |
 | Managing remote machines | REMOTE_WORKSPACE → REMOTE_AGENT |
-| Growing the project | REPOSITORY_SETUP |
+| Maintainer | REPOSITORY_SETUP → TEST_LAYERS |
+
+### Generated documents
+
+- `dev/API_PERMISSION_MATRIX.md` — regenerate with
+  `python3 scripts/generate_permission_matrix.py` after changing permission
+  decorators.
+- `dev/API.md` tables were generated from a route inventory; when you add or
+  move an endpoint, `check_docs_bilingual.py` fails until the doc catches up.
+
+### Docs site sync
+
+The published Docusaurus site lives in the separate repository
+`open-ace/open-ace-docs`. Its `scripts/sync-docs.js` runs at build time with
+`OPEN_ACE_SOURCE_DIR` pointing at this repository and **splits each bilingual
+file by its `## English` / `## 中文` anchors**: the English half is published
+under `docs/<section>/`, the Chinese half under
+`i18n/zh-Hans/docusaurus-plugin-content-docs/current/<section>/`, preserving
+the site's language switcher. `dev-notes/` is not published. Because the
+anchors are the split points, they are reserved: a curated document must
+contain each anchor exactly once.
 
 ---
 
 ## 中文
 
-面向使用者的指南在 [cn/](cn/) 目录。工程参考文档位于 `docs/` 顶层以及
-[security/](security/)、[api/](api/)、[architecture/](architecture/) 下。
+`docs/` 下所有正式文档都是**单文件双语**：`## English` 节在前，`## 中文`
+节在后。没有按语言划分的目录；文档站在构建时把两节拆开（见
+[文档站同步](#文档站同步)）。
 
-### 指南（cn/）
-
-| 文档 | 说明 |
-|------|------|
-| [**INTRO**](cn/INTRO.md) | 产品介绍、核心功能和快速入门指南 |
-| [**ARCHITECTURE**](cn/ARCHITECTURE.md) | 系统架构总览 — 后端、前端和远程代理层 |
-| [**AUTONOMOUS_DEVELOPMENT**](cn/AUTONOMOUS_DEVELOPMENT.md) | AI 自主开发 — 生命周期、三会话设计、CI 修复、隔离执行和维护指南 |
-| [**API**](cn/API.md) | 完整的 REST API 端点参考文档 |
-| [**DATABASE_SCHEMA**](cn/DATABASE_SCHEMA.md) | 数据库表、列、外键和索引 |
-| [**DATABASE_CONVENTIONS**](cn/DATABASE_CONVENTIONS.md) | 数据库字段和迁移的命名规范 |
-| [**SCHEMA_MIGRATION_GUIDE**](cn/SCHEMA_MIGRATION_GUIDE.md) | Alembic 迁移策略、工作流和故障排查 |
-| [**PERMISSION_MODEL**](cn/PERMISSION_MODEL.md) | 基于角色的访问控制、认证和授权 |
-| [**FRONTEND_GUIDE**](cn/FRONTEND_GUIDE.md) | React/TypeScript 前端开发指南 |
-| [**REMOTE_AGENT**](cn/REMOTE_AGENT.md) | 远程代理客户端 — 安装、配置、CLI 工具 |
-| [**REMOTE_WORKSPACE**](cn/REMOTE_WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API |
-| [**DEPLOYMENT**](cn/DEPLOYMENT.md) | Docker 部署和多用户工作空间配置 |
-| [**KUBERNETES**](cn/KUBERNETES.md) | 单实例 Kubernetes 部署指南及 manifests 参考 |
-| [**NGINX**](cn/NGINX.md) | Nginx 反向代理配置（HTTPS 和 WebSocket） |
-| [**DEVELOPMENT**](cn/DEVELOPMENT.md) | 开发环境搭建、项目结构和测试 |
-| [**FEISHU_CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |
-| [**DINGTALK_CONFIG**](cn/DINGTALK_CONFIG.md) | 钉钉集成配置指南 |
-| [**SAML_CONFIG**](cn/SAML_CONFIG.md) | SAML 2.0 SSO Provider 配置指南 |
-| [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
-| [**TOKEN_ACCOUNTING**](cn/TOKEN_ACCOUNTING.md) | Claude / Codex / ZCode / Qwen token 抓取、计算、落库和下游消费链路说明 |
-| [**WORKSPACE_SESSION_DATA_CONTRACT**](cn/WORKSPACE_SESSION_DATA_CONTRACT.md) | Workspace 会话三表的数据边界与 `request_count` 产品语义 |
-
-### 工程参考（顶层）
-
-见上方英文区 "Engineering reference" 表格（TEST_LAYERS、MODEL_GATEWAY、
-SANDBOX_BACKENDS、TRANSCRIPT_CONTRACT、WORKSPACE_ISOLATION_CAPABILITIES、
-GH_CLI_VERSION_COMPATIBILITY、TENANT_ADMIN_PERMISSIONS、REPOSITORY_SETUP）。
-安全规范在 [security/](security/)，API 参考在 [api/](api/)，自主开发阶段契约在
-[architecture/](architecture/)。过程性文档（修复复盘、runbook、审计、agent 交接）
-归档于 [dev-notes/](dev-notes/README.md)。
-
-### 按角色阅读指南
-
-| 角色 | 推荐阅读顺序 |
-|------|--------------|
-| 初次了解 Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
-| 自主开发维护者 | AUTONOMOUS_DEVELOPMENT → ARCHITECTURE → SANDBOX_BACKENDS |
-| 前端开发者 | FRONTEND_GUIDE → DEVELOPMENT |
-| 运维 / 部署 | DEPLOYMENT → KUBERNETES → NGINX |
-| API 集成 | API → PERMISSION_MODEL → CONCEPTS |
-| 管理远程机器 | REMOTE_WORKSPACE → REMOTE_AGENT |
-| 推广项目 | REPOSITORY_SETUP |
-
----
-
-## Directory Structure / 目录结构
+### 目录结构
 
 ```
 docs/
-├── README.md            ← You are here / 你在这里
-├── en/                  # English guides / 英文指南
-├── cn/                  # 中文指南
-├── security/            # Security baselines and boundaries / 安全规范
-├── api/                 # API reference artifacts (generated matrix, migrations) / API 参考
-├── architecture/        # Cross-cutting architecture contracts / 架构契约
-├── images/              # Documentation images / 文档图片
-└── dev-notes/           # Process write-up archive (fix retros, audits, runbooks) / 过程文档归档
+├── README.md            ← 你在这里（索引 + 归位规则）
+├── guide/               # 使用与运维 —— 不改代码的人读
+├── dev/                 # 开发者文档 —— 改代码的人读
+├── contracts/           # 版本化契约 —— 被守护测试或 API 字段钉住
+├── security/            # 安全基线、边界、例外登记
+├── images/              # 文档图片
+└── dev-notes/           # 英语-only 过程归档（修复复盘、runbook）
 ```
 
-Naming: curated documents use `UPPER_SNAKE_CASE.md`. The `dev-notes/` archive
-keeps its own `<issue>-<slug>.md` convention (see its README).
+### 归位规则
 
-命名约定：正式文档统一 `大写蛇形.md`；`dev-notes/` 归档区沿用其
-`<issue 编号>-<短描述>.md` 约定（见其 README）。
+1. **谁读？** 部署、运维、集成方 → `guide/`；贡献者与维护者 → `dev/`。
+2. **特殊形态？** 带版本号的契约（`policy_revision`、被测试解析或被 API
+   字段引用）→ `contracts/`；安全基线/例外登记 → `security/`；生成矩阵 →
+   `dev/`（重新生成，不要手改）。
+3. **过程文档**（修复复盘、事故分析、按 issue 的方案稿）→ `dev-notes/`，
+   只用英语，绝不放仓库根目录。
+
+新文档必须遵循双语模板（`## English` 与 `## 中文` 各一节）；
+`scripts/lint/check_docs_bilingual.py` 会强制检查双语完整性、索引一致性
+以及端点/环境变量覆盖率。
+
+### guide/ —— 使用与运维
+
+| 文档 | 说明 |
+|------|------|
+| [INTRO](guide/INTRO.md) | 产品介绍、核心能力、快速上手 |
+| [DEPLOYMENT](guide/DEPLOYMENT.md) | Docker 部署（生产路径优先）与本地试用 |
+| [MULTI_USER_WORKSPACE](guide/MULTI_USER_WORKSPACE.md) | 多用户工作区：启动方式、sudoers、端口段 |
+| [UPGRADING](guide/UPGRADING.md) | 升级与回滚 runbook、`baseline_2026_06_23` 最低基线 |
+| [KUBERNETES](guide/KUBERNETES.md) | Kubernetes 部署（3 副本、粘性路由） |
+| [NGINX](guide/NGINX.md) | Nginx 反向代理（HTTPS 与 WebSocket） |
+| [REMOTE_WORKSPACE](guide/REMOTE_WORKSPACE.md) | 服务端视角的远程工作区 |
+| [REMOTE_AGENT](guide/REMOTE_AGENT.md) | 远程 Agent 客户端——安装、配置、CLI 适配器 |
+| [SSO_CONFIG](guide/SSO_CONFIG.md) | SSO：SAML 2.0、OIDC、OAuth2、SLO、重定向白名单 |
+| [FEISHU_CONFIG](guide/FEISHU_CONFIG.md) | 飞书集成 |
+| [DINGTALK_CONFIG](guide/DINGTALK_CONFIG.md) | 钉钉集成 |
+| [KEY_MANAGEMENT](guide/KEY_MANAGEMENT.md) | 密钥矩阵、Fernet store、原子轮换 |
+| [DATABASE_BACKUP](guide/DATABASE_BACKUP.md) | 备份与恢复（Kubernetes 与 Docker Compose） |
+| [CONFIG_REFERENCE](guide/CONFIG_REFERENCE.md) | `config.json` 字段参考 |
+| [ENV_REFERENCE](guide/ENV_REFERENCE.md) | 权威环境变量总表 |
+| [OPERATIONS](guide/OPERATIONS.md) | 健康端点、调度器、采集、TLS、数据保留 |
+| [TROUBLESHOOTING](guide/TROUBLESHOOTING.md) | 跨组件排障索引 |
+
+### dev/ —— 开发者
+
+| 文档 | 说明 |
+|------|------|
+| [DEVELOPMENT](dev/DEVELOPMENT.md) | 开发环境搭建与首次运行 |
+| [ARCHITECTURE](dev/ARCHITECTURE.md) | 系统架构——后端、前端、Agent 层 |
+| [MODULES](dev/MODULES.md) | `app/modules/` 六个模块：职责与不变量 |
+| [API](dev/API.md) | REST 参考——全部 419 个端点（清单生成） |
+| [API_PERMISSION_MATRIX](dev/API_PERMISSION_MATRIX.md) | 生成的提权端点矩阵（勿手改） |
+| [PERMISSION_MODEL](dev/PERMISSION_MODEL.md) | 六角色 RBAC、九个认证装饰器、严格模式 |
+| [TOKEN_ACCOUNTING](dev/TOKEN_ACCOUNTING.md) | Token 采集链路 + Request/Message/Session 概念 |
+| [AUTONOMOUS_DEVELOPMENT](dev/AUTONOMOUS_DEVELOPMENT.md) | 自主开发生命周期与三会话设计 |
+| [MODEL_GATEWAY](dev/MODEL_GATEWAY.md) | LiteLLM 兼容模型网关 |
+| [SANDBOX_BACKENDS](dev/SANDBOX_BACKENDS.md) | 自主 Agent 的执行地——后端与权衡 |
+| [DATABASE_SCHEMA](dev/DATABASE_SCHEMA.md) | 103 张表领域地图（逐列权威：schema SQL） |
+| [DATABASE_CONVENTIONS](dev/DATABASE_CONVENTIONS.md) | 字段命名约定、`adapt_boolean` 助手 |
+| [SCHEMA_MIGRATION_GUIDE](dev/SCHEMA_MIGRATION_GUIDE.md) | Alembic 策略 + 编写铁律 MIG001–MIG003 |
+| [FRONTEND_GUIDE](dev/FRONTEND_GUIDE.md) | React/TypeScript 前端指南 |
+| [TEST_LAYERS](dev/TEST_LAYERS.md) | 测试分类、归置与 CI 执行语义 |
+| [CLI_REFERENCE](dev/CLI_REFERENCE.md) | `cli.py` 九个子命令 |
+| [REPOSITORY_SETUP](dev/REPOSITORY_SETUP.md) | GitHub topics、labels、发布清单 |
+
+### contracts/ —— 版本化契约
+
+| 文档 | 说明 |
+|------|------|
+| [AUTONOMOUS_PHASE_CONTRACTS](contracts/AUTONOMOUS_PHASE_CONTRACTS.md) | 每个 orchestrator phase 的八字段契约（守护测试钉住） |
+| [WORKSPACE_SESSION_DATA_CONTRACT](contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) | 工作区会话三表的数据边界 |
+| [WORKSPACE_ISOLATION_CAPABILITIES](contracts/WORKSPACE_ISOLATION_CAPABILITIES.md) | 版本化多用户隔离能力契约 |
+| [TRANSCRIPT_CONTRACT](contracts/TRANSCRIPT_CONTRACT.md) | 远程会话记录与重放的钉死契约 |
+| [FILTER_PATTERNS_V2](contracts/FILTER_PATTERNS_V2.md) | 过滤规则 API 切换的调用方迁移指南 |
+
+### security/
+
+| 文档 | 说明 |
+|------|------|
+| [API_EXCEPTIONS](security/API_EXCEPTIONS.md) | API 安全基线例外登记与生命周期 |
+| [BANDIT_BASELINE](security/BANDIT_BASELINE.md) | Bandit 基线维护指南 |
+| [SSH_KEY_BOUNDARY](security/SSH_KEY_BOUNDARY.md) | SSH 密钥同步安全边界 |
+| [SSH_SYNC_CONFIGURATION](security/SSH_SYNC_CONFIGURATION.md) | SSH 同步白名单与评审流程 |
+
+### 按角色阅读路径
+
+| 角色 | 路径 |
+|------|------|
+| 评估 Open ACE | INTRO → ARCHITECTURE → DEPLOYMENT |
+| 部署 / 运维 | DEPLOYMENT → ENV_REFERENCE → OPERATIONS → UPGRADING |
+| 出了问题 | TROUBLESHOOTING → 链接到的组件指南 |
+| API 集成 | API → PERMISSION_MODEL → SSO_CONFIG |
+| 前端开发 | FRONTEND_GUIDE → DEVELOPMENT |
+| 自主开发维护 | AUTONOMOUS_DEVELOPMENT → SANDBOX_BACKENDS → contracts/ |
+| 管理远程机器 | REMOTE_WORKSPACE → REMOTE_AGENT |
+| 维护者 | REPOSITORY_SETUP → TEST_LAYERS |
+
+### 生成文档
+
+- `dev/API_PERMISSION_MATRIX.md`——修改权限装饰器后运行
+  `python3 scripts/generate_permission_matrix.py` 重新生成。
+- `dev/API.md` 的表格由路由清单生成；新增或移动端点后，在文档跟上之前
+  `check_docs_bilingual.py` 会失败。
+
+### 文档站同步
+
+对外发布的 Docusaurus 站点在独立仓库 `open-ace/open-ace-docs`。其
+`scripts/sync-docs.js` 在构建时以 `OPEN_ACE_SOURCE_DIR` 指向本仓库，**按
+`## English` / `## 中文` 锚点拆分每个双语文件**：英文半边发布在
+`docs/<section>/`，中文半边发布在
+`i18n/zh-Hans/docusaurus-plugin-content-docs/current/<section>/`，保留站点
+的语言切换体验。`dev-notes/` 不上站。因为锚点就是切分点，它们是保留标题：
+正式文档中每个锚点必须恰好出现一次。

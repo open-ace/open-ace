@@ -42,7 +42,7 @@ instead of (or on top of) the session token:
 `platform_admin`, `tenant_admin`). The authoritative per-endpoint listing is
 [API_PERMISSION_MATRIX.md](API_PERMISSION_MATRIX.md); the role model is
 described in [PERMISSION_MODEL.md](PERMISSION_MODEL.md) and
-[../TENANT_ADMIN_PERMISSIONS.md](../TENANT_ADMIN_PERMISSIONS.md).
+[PERMISSION_MODEL.md](PERMISSION_MODEL.md).
 
 **Auth column legend.** The `Auth` column reproduces the route's permission
 decorators verbatim from the source; `-` means no permission decorator:
@@ -121,7 +121,7 @@ Register and manage remote machines, drive remote AI sessions, web terminals and
 | GET | `/api/remote/agent/uninstall.sh` | - | Serve the agent uninstallation shell script (Linux/macOS). |
 | GET | `/api/remote/agent/ws` | - | Deprecated WebSocket channel for agent communication (WebSocket); use HTTP polling via /api/remote/agent/message instead. |
 | GET | `/api/remote/heartbeat-status` | `admin_required` | Get heartbeat monitor status for diagnostics. |
-| POST/HEAD | `/api/remote/llm-proxy` | - | Transparent LLM API proxy for remote workspaces; forwards provider requests using stored encrypted API keys. |
+| POST/HEAD | `/api/remote/llm-proxy/<path:path>` | - | Transparent LLM API proxy for remote workspaces; forwards provider requests using stored encrypted API keys. |
 | GET | `/api/remote/machines` | - | List machines with tenant isolation. |
 | DELETE | `/api/remote/machines/<machine_id>` | `admin_required` | Deregister a remote machine. Admin only. |
 | GET | `/api/remote/machines/<machine_id>` | `machine_access_required` | Get details and status of a specific machine. |
@@ -163,6 +163,8 @@ Register and manage remote machines, drive remote AI sessions, web terminals and
 | POST | `/api/remote/vscode/<vscode_id>/attach` | - | Re-attach to an existing code-server instance. |
 | GET | `/api/remote/vscode/<vscode_id>/status` | - | Get the status of a code-server instance. |
 | GET | `/api/remote/vscode/<vscode_id>/ws` | - | Fallback for non-WebSocket requests to the VS Code WebSocket endpoint (WebSocket). |
+| GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD | `/api/remote/vscode/<vscode_id>/proxy/<path:path>` | - | HTTP reverse proxy to the remote code-server. |
+| GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD | `/api/remote/vscode/<vscode_id>/proxy/` | - | Proxy base path (`path` empty). |
 | POST | `/api/remote/vscode/start` | `machine_access_required` | Start a code-server instance on a remote machine. |
 | POST | `/api/remote/vscode/stop` | `machine_access_required` | Stop a code-server instance on a remote machine. |
 
@@ -181,7 +183,8 @@ The built-in multi-user AI workspace: agent sessions, prompt templates, knowledg
 | GET | `/api/workspace/isolation-capabilities` | `auth_required` | Get the workspace isolation capability contract. |
 | GET | `/api/workspace/knowledge` | - | List knowledge base entries. |
 | POST | `/api/workspace/knowledge` | - | Create a knowledge base entry. |
-| POST/HEAD | `/api/workspace/llm-proxy` | - | Transparent LLM proxy for local multi-user qwen-code-webui sessions. |
+| GET | `/api/workspace/knowledge/<entry_id>` | - | Fetch one knowledge base entry (ownership-checked). |
+| POST/HEAD | `/api/workspace/llm-proxy/<path:path>` | - | Transparent LLM proxy for local multi-user qwen-code-webui sessions. |
 | GET | `/api/workspace/prompts` | - | List prompt templates. |
 | POST | `/api/workspace/prompts` | - | Create a new prompt template. |
 | DELETE | `/api/workspace/prompts/<int:template_id>` | - | Delete a prompt template. |
@@ -343,6 +346,7 @@ Multi-tenant lifecycle and settings: create/update/suspend tenants, quotas, bill
 | POST | `/api/tenants/<int:tenant_id>/reset-period` | `platform_admin_required,admin_required` | Reset billing period for a tenant (platform admin only). |
 | GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `same_tenant_or_platform_admin` | Get tenant sensitive keywords with pagination. |
 | POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `same_tenant_or_platform_admin` | Create a tenant sensitive keyword. |
+| PUT/DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `same_tenant_or_platform_admin` | Update / delete one tenant sensitive keyword. |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | `same_tenant_or_platform_admin` | Update tenant settings (same tenant or platform admin). |
 | GET | `/api/tenants/<int:tenant_id>/stats` | `same_tenant_or_platform_admin` | Get tenant statistics (same tenant or platform admin). |
 | POST | `/api/tenants/<int:tenant_id>/suspend` | `platform_admin_required,admin_required` | Suspend a tenant (platform admin only). |
@@ -569,6 +573,7 @@ Smaller families without a dedicated section: analytics and insights, audit trai
 | GET | `/api/analytics/efficiency` | `admin_required,any_admin_required` | Get efficiency metrics. |
 | GET | `/api/analytics/export` | `admin_required,any_admin_required` | Export analytics data. |
 | GET | `/api/analytics/forecast` | `admin_required,any_admin_required` | Get usage forecast. |
+| GET | `/api/analysis/forecast` | `admin_required,any_admin_required` | Alias route for the usage forecast. |
 | GET | `/api/analytics/report` | `admin_required,any_admin_required` | Generate a comprehensive usage report. |
 | GET | `/api/api-keys` | `admin_required,api_key_admin_required` | List all encrypted API keys (without revealing actual keys). Admin only. |
 | POST | `/api/api-keys` | `admin_required,api_key_admin_required` | Store a new encrypted API key. Admin only. |
@@ -687,7 +692,7 @@ Application-level health and readiness probes, Prometheus metrics, security base
 - [TOKEN_ACCOUNTING.md](TOKEN_ACCOUNTING.md) — token and request
   accounting semantics behind the usage/quota endpoints.
 - [PERMISSION_MODEL.md](PERMISSION_MODEL.md) and
-  [../TENANT_ADMIN_PERMISSIONS.md](../TENANT_ADMIN_PERMISSIONS.md) — role
+  [PERMISSION_MODEL.md](PERMISSION_MODEL.md) — role
   model and tenant-admin scope.
 - [../security/API_EXCEPTIONS.md](../security/API_EXCEPTIONS.md) — routes
   deliberately exempted from authentication.
@@ -727,7 +732,7 @@ SPA 路由位于应用根路径。
 `tenant_admin`）。逐端点的权威清单见
 [API_PERMISSION_MATRIX.md](API_PERMISSION_MATRIX.md)；角色模型见
 [PERMISSION_MODEL.md](PERMISSION_MODEL.md) 与
-[../TENANT_ADMIN_PERMISSIONS.md](../TENANT_ADMIN_PERMISSIONS.md)。
+[PERMISSION_MODEL.md](PERMISSION_MODEL.md)。
 
 **Auth 列图例。** `Auth` 列按源码原样给出路由的权限装饰器；`-` 表示未声明
 权限装饰器：
@@ -803,7 +808,7 @@ SPA 路由位于应用根路径。
 | GET | `/api/remote/agent/uninstall.sh` | - | 提供 Agent 卸载 Shell 脚本（Linux/macOS）。 |
 | GET | `/api/remote/agent/ws` | - | 已废弃的 Agent WebSocket 通道（WebSocket），请改用 /api/remote/agent/message 轮询。 |
 | GET | `/api/remote/heartbeat-status` | `admin_required` | 获取心跳监控状态（用于诊断）。 |
-| POST/HEAD | `/api/remote/llm-proxy` | - | 面向远程工作区的透明 LLM 代理，使用已存储的加密 API Key 转发模型请求。 |
+| POST/HEAD | `/api/remote/llm-proxy/<path:path>` | - | 面向远程工作区的透明 LLM 代理，使用已存储的加密 API Key 转发模型请求。 |
 | GET | `/api/remote/machines` | - | 列出远程机器（租户隔离）。 |
 | DELETE | `/api/remote/machines/<machine_id>` | `admin_required` | 注销远程机器，仅管理员。 |
 | GET | `/api/remote/machines/<machine_id>` | `machine_access_required` | 获取指定机器的详情与状态。 |
@@ -845,6 +850,8 @@ SPA 路由位于应用根路径。
 | POST | `/api/remote/vscode/<vscode_id>/attach` | - | 重新接入已有的 code-server 实例。 |
 | GET | `/api/remote/vscode/<vscode_id>/status` | - | 获取 code-server 实例状态。 |
 | GET | `/api/remote/vscode/<vscode_id>/ws` | - | VS Code WebSocket 端点的非 WebSocket 请求回退（WebSocket）。 |
+| GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD | `/api/remote/vscode/<vscode_id>/proxy/<path:path>` | - | 远程 code-server 的 HTTP 反向代理。 |
+| GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD | `/api/remote/vscode/<vscode_id>/proxy/` | - | 代理基路径（`path` 为空）。 |
 | POST | `/api/remote/vscode/start` | `machine_access_required` | 在远程机器上启动 code-server 实例。 |
 | POST | `/api/remote/vscode/stop` | `machine_access_required` | 停止远程机器上的 code-server 实例。 |
 
@@ -863,7 +870,8 @@ SPA 路由位于应用根路径。
 | GET | `/api/workspace/isolation-capabilities` | `auth_required` | 获取工作区隔离能力契约。 |
 | GET | `/api/workspace/knowledge` | - | 列出知识库条目。 |
 | POST | `/api/workspace/knowledge` | - | 创建知识库条目。 |
-| POST/HEAD | `/api/workspace/llm-proxy` | - | 面向本地多用户 qwen-code-webui 会话的透明 LLM 代理。 |
+| GET | `/api/workspace/knowledge/<entry_id>` | - | 获取单条知识库条目（所有权校验）。 |
+| POST/HEAD | `/api/workspace/llm-proxy/<path:path>` | - | 面向本地多用户 qwen-code-webui 会话的透明 LLM 代理。 |
 | GET | `/api/workspace/prompts` | - | 列出提示词模板。 |
 | POST | `/api/workspace/prompts` | - | 创建提示词模板。 |
 | DELETE | `/api/workspace/prompts/<int:template_id>` | - | 删除提示词模板。 |
@@ -1025,6 +1033,7 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | POST | `/api/tenants/<int:tenant_id>/reset-period` | `platform_admin_required,admin_required` | 重置租户计费周期（仅平台管理员）。 |
 | GET | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `same_tenant_or_platform_admin` | 分页获取租户敏感词。 |
 | POST | `/api/tenants/<int:tenant_id>/sensitive-keywords` | `same_tenant_or_platform_admin` | 新增租户敏感词。 |
+| PUT/DELETE | `/api/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>` | `same_tenant_or_platform_admin` | 更新 / 删除一条租户敏感词。 |
 | PUT | `/api/tenants/<int:tenant_id>/settings` | `same_tenant_or_platform_admin` | 更新租户设置（同租户或平台管理员）。 |
 | GET | `/api/tenants/<int:tenant_id>/stats` | `same_tenant_or_platform_admin` | 获取租户统计（同租户或平台管理员）。 |
 | POST | `/api/tenants/<int:tenant_id>/suspend` | `platform_admin_required,admin_required` | 暂停租户（仅平台管理员）。 |
@@ -1251,6 +1260,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 | GET | `/api/analytics/efficiency` | `admin_required,any_admin_required` | 获取效率指标。 |
 | GET | `/api/analytics/export` | `admin_required,any_admin_required` | 导出分析数据。 |
 | GET | `/api/analytics/forecast` | `admin_required,any_admin_required` | 获取用量预测。 |
+| GET | `/api/analysis/forecast` | `admin_required,any_admin_required` | 用量预测的别名路由。 |
 | GET | `/api/analytics/report` | `admin_required,any_admin_required` | 生成综合用量报告。 |
 | GET | `/api/api-keys` | `admin_required,api_key_admin_required` | 列出全部加密存储的 API Key（不回显明文），仅管理员。 |
 | POST | `/api/api-keys` | `admin_required,api_key_admin_required` | 新增加密存储的 API Key，仅管理员。 |
@@ -1368,7 +1378,7 @@ AI 请求数（assistant 响应）统计：今日、趋势、按工具、按用�
 - [TOKEN_ACCOUNTING.md](TOKEN_ACCOUNTING.md)——用量/配额端点背后
   的 Token 与请求计量口径。
 - [PERMISSION_MODEL.md](PERMISSION_MODEL.md) 与
-  [../TENANT_ADMIN_PERMISSIONS.md](../TENANT_ADMIN_PERMISSIONS.md)——角色
+  [PERMISSION_MODEL.md](PERMISSION_MODEL.md)——角色
   模型与租户管理员范围。
 - [../security/API_EXCEPTIONS.md](../security/API_EXCEPTIONS.md)——刻意豁免
   认证的路由。
