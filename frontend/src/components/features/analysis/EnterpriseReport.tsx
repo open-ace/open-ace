@@ -605,6 +605,11 @@ const CostRoiPlaceholder: React.FC<{ language: Language }> = ({ language }) => (
 );
 
 // Main Component
+
+/** Quick-range button values shown in the filters card. */
+const QUICK_RANGE_OPTIONS = ['7', '30', '90'] as const;
+type QuickRange = (typeof QUICK_RANGE_OPTIONS)[number];
+
 export const EnterpriseReport: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
@@ -612,12 +617,26 @@ export const EnterpriseReport: React.FC = () => {
   const userIsAdmin = isAdmin(user);
 
   // Date range state
-  const [quickRange, setQuickRange] = useState<'7' | '30' | '90'>('30');
   // Uses getDefaultDateRange to ensure exactly 30 calendar days with proper local date handling
   const initialDateRange = useMemo(() => getDefaultDateRange(30), []);
 
   const [startDate, setStartDate] = useState(initialDateRange.start);
   const [endDate, setEndDate] = useState(initialDateRange.end);
+
+  // Issue #3255: the highlighted quick-range button is derived from the actual
+  // selected period instead of being tracked in separate state. A button is
+  // active only when (startDate, endDate) exactly matches what
+  // getDefaultDateRange(N) currently returns, so manual date edits keep the
+  // highlight consistent with the queried period (custom range = no highlight).
+  const activeQuickRange = useMemo<QuickRange | null>(() => {
+    for (const option of QUICK_RANGE_OPTIONS) {
+      const range = getDefaultDateRange(parseInt(option));
+      if (range.start === startDate && range.end === endDate) {
+        return option;
+      }
+    }
+    return null;
+  }, [startDate, endDate]);
 
   // Fetch data
   const {
@@ -641,9 +660,10 @@ export const EnterpriseReport: React.FC = () => {
   const [jsonModalOpen, setJsonModalOpen] = useState(false);
   const [jsonData, setJsonData] = useState<object | null>(null);
 
-  // Handle quick range change with exactly N calendar days
-  const handleQuickRangeChange = (range: '7' | '30' | '90') => {
-    setQuickRange(range);
+  // Handle quick range change with exactly N calendar days.
+  // The button highlight follows automatically because activeQuickRange is
+  // derived from (startDate, endDate).
+  const handleQuickRangeChange = (range: QuickRange) => {
     const dateRange = getDefaultDateRange(parseInt(range));
     setStartDate(dateRange.start);
     setEndDate(dateRange.end);
@@ -761,21 +781,33 @@ export const EnterpriseReport: React.FC = () => {
             <div className="btn-group" role="group">
               <button
                 type="button"
-                className={cn('btn', quickRange === '7' ? 'btn-primary' : 'btn-outline-primary')}
+                className={cn(
+                  'btn',
+                  activeQuickRange === '7' ? 'btn-primary' : 'btn-outline-primary'
+                )}
+                aria-pressed={activeQuickRange === '7'}
                 onClick={() => handleQuickRangeChange('7')}
               >
                 7 {t('days', language)}
               </button>
               <button
                 type="button"
-                className={cn('btn', quickRange === '30' ? 'btn-primary' : 'btn-outline-primary')}
+                className={cn(
+                  'btn',
+                  activeQuickRange === '30' ? 'btn-primary' : 'btn-outline-primary'
+                )}
+                aria-pressed={activeQuickRange === '30'}
                 onClick={() => handleQuickRangeChange('30')}
               >
                 30 {t('days', language)}
               </button>
               <button
                 type="button"
-                className={cn('btn', quickRange === '90' ? 'btn-primary' : 'btn-outline-primary')}
+                className={cn(
+                  'btn',
+                  activeQuickRange === '90' ? 'btn-primary' : 'btn-outline-primary'
+                )}
+                aria-pressed={activeQuickRange === '90'}
                 onClick={() => handleQuickRangeChange('90')}
               >
                 90 {t('days', language)}
@@ -785,23 +817,11 @@ export const EnterpriseReport: React.FC = () => {
           {/* Date Range */}
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <DatePicker
-              value={startDate}
-              onChange={(v) => {
-                setStartDate(v);
-                setQuickRange('30');
-              }}
-            />
+            <DatePicker value={startDate} onChange={setStartDate} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <DatePicker
-              value={endDate}
-              onChange={(v) => {
-                setEndDate(v);
-                setQuickRange('30');
-              }}
-            />
+            <DatePicker value={endDate} onChange={setEndDate} />
           </div>
         </div>
       </Card>

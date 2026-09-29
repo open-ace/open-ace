@@ -4,11 +4,17 @@
  * Issue #3078: Management UI for enterprise analytics report
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
+import { registerLocale } from 'react-datepicker';
+import zhCN from 'date-fns/locale/zh-CN';
 import { EnterpriseReport } from './EnterpriseReport';
+
+// The app renders DatePicker with locale="zh-CN"; register it so calendar
+// popups in these tests do not warn "A locale object was not found".
+registerLocale('zh-CN', zhCN);
 
 // Mock API
 vi.mock('@/api/analysis', () => ({
@@ -741,6 +747,210 @@ describe('EnterpriseReport Component', () => {
       expect(deviationSpan).toHaveClass('text-warning');
       expect(deviationSpan.textContent).not.toContain('↑');
       expect(deviationSpan.textContent).not.toContain('↓');
+    });
+  });
+
+  describe('Quick range highlight (Issue #3255)', () => {
+    // Fixed "today" (local): 2026-06-15 noon, so quick ranges are stable:
+    // 7 days -> 2026-06-09..2026-06-15, 30 days -> 2026-05-17..2026-06-15
+    const TODAY = new Date(2026, 5, 15, 12, 0, 0);
+
+    const mockReportData = {
+      period: { start: '2026-05-17', end: '2026-06-15' },
+      summary: {
+        total_tokens: 100000,
+        total_input_tokens: 50000,
+        total_output_tokens: 50000,
+        total_requests: 1000,
+        unique_tools: 10,
+        unique_hosts: 5,
+        daily_average_tokens: 3333,
+        daily_average_requests: 33,
+        peak_day: null,
+        peak_tokens: 0,
+      },
+      trends: [],
+      anomalies: [],
+      breakdown_by_tool: {},
+      breakdown_by_host: {},
+    };
+
+    beforeEach(() => {
+      // Fake timers keep Date-based quick range derivation deterministic.
+      // shouldAdvanceTime lets waitFor/user interactions still resolve.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(TODAY);
+      // react-datepicker's popper (floating-ui) instantiates ResizeObserver,
+      // which the global jsdom mock in test setup is not constructible for.
+      vi.stubGlobal(
+        'ResizeObserver',
+        class ResizeObserverStub {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    const renderLoadedReport = async () => {
+      const { useEnterpriseReport, useEfficiencyMetrics } = await import('@/hooks');
+      vi.mocked(useEnterpriseReport).mockReturnValue({
+        data: mockReportData,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEnterpriseReport>);
+
+      vi.mocked(useEfficiencyMetrics).mockReturnValue({
+        data: { efficiency_available: false },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useEfficiencyMetrics>);
+
+      render(<EnterpriseReport />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(screen.getByText('快速日期范围')).toBeInTheDocument();
+      });
+    };
+
+    const getQuickRangeButton = (days: '7' | '30' | '90') =>
+      screen.getByRole('button', { name: `${days} 天` });
+
+    /** The DatePicker renders its value inside a custom button input. */
+    const getDatePickerInput = (labelText: string) => {
+      const container = screen.getByText(labelText).parentElement;
+      if (!container) {
+        throw new Error(`No container found for label ${labelText}`);
+      }
+      return within(container).getByRole('button');
+    };
+
+    /** Opens the calendar popup and clicks the in-month day with the given number. */
+    const pickDay = (input: HTMLElement, day: number) => {
+      fireEvent.click(input);
+      const dayCell = Array.from(
+        document.querySelectorAll(
+          '.react-datepicker__day:not(.react-datepicker__day--outside-month)'
+        )
+      ).find((el) => el.textContent?.trim() === String(day));
+      if (!dayCell) {
+        throw new Error(`Day ${day} not found in the opened calendar`);
+      }
+      fireEvent.click(dayCell);
+    };
+
+    it('highlights the "30 天" button on initial render (default range)', async () => {
+      await renderLoadedReport();
+
+      const sevenDaysButton = getQuickRangeButton('7');
+      const thirtyDaysButton = getQuickRangeButton('30');
+      const ninetyDaysButton = getQuickRangeButton('90');
+
+      expect(thirtyDaysButton).toHaveAttribute('aria-pressed', 'true');
+      expect(thirtyDaysButton).toHaveClass('btn-primary');
+      expect(sevenDaysButton).toHaveAttribute('aria-pressed', 'false');
+      expect(ninetyDaysButton).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('clears all quick range highlights after manually picking a custom date', async () => {
+      await renderLoadedReport();
+
+      // Initial state: 30 天 highlighted (2026-05-17..2026-06-15)
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'true');
+
+      // Manually change the start date to a non-quick-range value (2026-05-20)
+      const startInput = getDatePickerInput('开始日期');
+      pickDay(startInput, 20);
+
+      // Custom period (2026-05-20..2026-06-15) matches no quick range:
+      // no button should stay highlighted
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('90')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('7')).not.toHaveClass('btn-primary');
+      expect(getQuickRangeButton('30')).not.toHaveClass('btn-primary');
+      expect(getQuickRangeButton('90')).not.toHaveClass('btn-primary');
+    });
+
+    it('switches to the last 7 days and highlights "7 天" when clicked', async () => {
+      await renderLoadedReport();
+
+      fireEvent.click(getQuickRangeButton('7'));
+
+      // Dates become exactly the last 7 days: 2026-06-09..2026-06-15
+      expect(getDatePickerInput('开始日期')).toHaveTextContent('2026/06/09');
+      expect(getDatePickerInput('结束日期')).toHaveTextContent('2026/06/15');
+
+      // Only the 7 天 button is highlighted
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'true');
+      expect(getQuickRangeButton('7')).toHaveClass('btn-primary');
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('90')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('restores the "30 天" highlight when dates are manually set back to exactly the last 30 days', async () => {
+      await renderLoadedReport();
+
+      // First create a custom period (2026-05-20..2026-06-15): no highlight
+      const startInput = getDatePickerInput('开始日期');
+      pickDay(startInput, 20);
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'false');
+
+      // Then set the start date back to exactly the 30-day range start (2026-05-17)
+      pickDay(startInput, 17);
+
+      // The period now equals getDefaultDateRange(30), so 30 天 is active again
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'true');
+      expect(getQuickRangeButton('30')).toHaveClass('btn-primary');
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('90')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('clears all quick range highlights after manually changing only the end date', async () => {
+      await renderLoadedReport();
+
+      // Initial state: 30 天 highlighted (2026-05-17..2026-06-15)
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'true');
+
+      // Manually change the end date to a non-quick-range value (2026-06-10)
+      const endInput = getDatePickerInput('结束日期');
+      pickDay(endInput, 10);
+
+      // Custom period (2026-05-17..2026-06-10) matches no quick range
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('90')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('restores the "7 天" highlight when dates are manually set back to exactly the last 7 days', async () => {
+      await renderLoadedReport();
+
+      // Start from the 7-day quick range (2026-06-09..2026-06-15)
+      fireEvent.click(getQuickRangeButton('7'));
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'true');
+
+      // Break it: start date 2026-06-10 makes a custom 6-day period
+      const startInput = getDatePickerInput('开始日期');
+      pickDay(startInput, 10);
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'false');
+
+      // Set the start date back to exactly the 7-day range start (2026-06-09)
+      pickDay(startInput, 9);
+
+      // The period now equals getDefaultDateRange(7), so 7 天 is active again
+      expect(getQuickRangeButton('7')).toHaveAttribute('aria-pressed', 'true');
+      expect(getQuickRangeButton('7')).toHaveClass('btn-primary');
+      expect(getQuickRangeButton('30')).toHaveAttribute('aria-pressed', 'false');
+      expect(getQuickRangeButton('90')).toHaveAttribute('aria-pressed', 'false');
     });
   });
 });
