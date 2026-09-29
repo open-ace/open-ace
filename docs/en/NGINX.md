@@ -10,6 +10,15 @@ In multi-user mode, Open ACE runs a dedicated qwen-code-webui process for each u
 
 > **Note**: Issue 2, React Router basename handling, is built into qwen-code-webui v0.2.29+. The webui automatically reads `window.__WEBUI_BASENAME__` as the router basename, so nginx no longer needs to inject basename changes into JavaScript files with `sub_filter`.
 
+## qwen-code-webui version requirements
+
+| Feature | Minimum version | Notes |
+|---------|-----------------|-------|
+| React Router basename support | v0.2.29 | reads `window.__WEBUI_BASENAME__` as the router basename automatically |
+| Language-sync postMessage listener | unreleased | listens for `openace-language-change` messages for live language switching |
+
+> **Language sync** (Issue #1425): when the language is switched in the Open ACE management UI, a postMessage with `openace-language-change` is sent to the iframe. If qwen-code-webui does not implement the listener yet, the language switch only takes effect after opening a new tab or reloading the iframe.
+
 ## Overall Architecture
 
 ```text

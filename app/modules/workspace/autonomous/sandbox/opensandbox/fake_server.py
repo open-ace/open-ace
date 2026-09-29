@@ -208,17 +208,51 @@ class FakeOpenSandboxApi:
         self._require_execd(sandbox_id)
         self.uploaded.setdefault(sandbox_id, {})[path] = data
 
-    def download_file(self, sandbox_id: str, path: str) -> bytes:
+    def download_file(self, sandbox_id: str, path: str, *, max_bytes: int = 0) -> bytes:
         self._require_execd(sandbox_id)
         stored = self.uploaded.get(sandbox_id, {})
         if path not in stored:
             raise OpenSandboxApiError(f"no such file {path}", status_code=404, code="NOT_FOUND")
+        # The real client refuses an oversized body rather than returning it, so
+        # a caller passing max_bytes must see the same shape here — otherwise the
+        # cap would look enforced in tests and not be, in production.
+        if 0 < max_bytes < len(stored[path]):
+            raise OpenSandboxApiError(
+                f"{path} is {len(stored[path])} bytes, over the {max_bytes} limit",
+                status_code=0,
+                code="FILE_TOO_LARGE",
+            )
         return stored[path]
 
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:
         self._require_execd(sandbox_id)
         self.command_bodies.append(body)
         command = str(body.get("command") or "")
+        command_id = f"cmd-{next(self._command_ids)}"
+        if body.get("background"):
+            # UPSTREAM background:true semantics (modelled, not invented):
+            # execution_complete fires IMMEDIATELY after launch and no
+            # stdout/stderr SSE events are emitted at all — the evidence
+            # contract cannot work with this shape, which is exactly why
+            # policy.build_command_request (policy.py:652-657) documents
+            # "Foreground, always". The command itself keeps running detached;
+            # its terminal status is observable via /command/status, which the
+            # WebUI launcher's restore/snapshot sequences poll (Issue #3378).
+            exit_code = self._scripted_exit_code
+            self._commands[command_id] = {
+                "id": command_id,
+                "running": self._scripted_timeout,
+                "exit_code": None if self._scripted_timeout else exit_code,
+                "error": "",
+                "started_at": "2026-08-28T00:00:00Z",
+                "finished_at": None if self._scripted_timeout else "2026-08-28T00:00:01Z",
+            }
+            return iter(
+                [
+                    {"type": "init", "text": command_id},
+                    {"type": "execution_complete", "execution_time": 0},
+                ]
+            )
         if "OPENACE_METADATA=" in command:
             return iter(self._cluster_egress_events())
         if "openace-manifest.py" in command:

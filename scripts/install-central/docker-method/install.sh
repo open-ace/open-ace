@@ -26,6 +26,8 @@ RUN_USER="${RUN_USER:-open-ace}"
 RUN_USER_UID="${RUN_USER_UID:-}"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/$RUN_USER/open-ace}"
 IMAGE_NAME="${IMAGE_NAME:-open-ace:latest}"
+# Published image pulled by the "pull" option and retagged as $IMAGE_NAME.
+PULL_IMAGE="${PULL_IMAGE:-ghcr.io/open-ace/open-ace:latest}"
 WEB_PORT="${WEB_PORT:-19888}"
 INTERNAL_WEB_PORT="${INTERNAL_WEB_PORT:-19888}"
 DB_USER="${DB_USER:-$RUN_USER}"
@@ -41,12 +43,36 @@ NON_INTERACTIVE=false
 DOCKER_INSTALL_MIRROR="${DOCKER_INSTALL_MIRROR:-}"
 
 # Config defaults (can be overridden by environment variables)
+docker_isolation_backend() {
+    if [ -n "$WORKSPACE_ISOLATION_BACKEND" ]; then
+        echo "$WORKSPACE_ISOLATION_BACKEND"
+    elif [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        echo plain
+    else
+        echo shared
+    fi
+}
+
 HOST_NAME="${HOST_NAME:-}"
 WORKSPACE_ENABLED="${WORKSPACE_ENABLED:-true}"
 WORKSPACE_URL="${WORKSPACE_URL:-http://localhost:3000}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-}"
 # Multi-user workspace mode defaults
 WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-true}"
+# Issue #3446: workspace.isolation.backend (shared | plain | opensandbox in
+# Docker). Unset: plain when multi-user mode is on, else shared. Only "plain"
+# (per-user OS accounts) needs the container to run as root.
+WORKSPACE_ISOLATION_BACKEND="${WORKSPACE_ISOLATION_BACKEND:-}"
+case "$WORKSPACE_ISOLATION_BACKEND" in
+    ""|shared|plain|opensandbox) ;;
+    *)
+        echo "ERROR: WORKSPACE_ISOLATION_BACKEND must be shared, plain or opensandbox in the Docker install (got '$WORKSPACE_ISOLATION_BACKEND'); bwrap / local-gvisor / local-kata need the package install on a Linux host (docs/en/WORKSPACE_ISOLATION.md)" >&2
+        exit 1
+        ;;
+esac
+if [ -n "$WORKSPACE_ISOLATION_BACKEND" ]; then
+    WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
+fi
 WORKSPACE_PORT_RANGE_START="${WORKSPACE_PORT_RANGE_START:-3100}"
 WORKSPACE_PORT_RANGE_END="${WORKSPACE_PORT_RANGE_END:-3200}"
 WORKSPACE_MAX_INSTANCES="${WORKSPACE_MAX_INSTANCES:-30}"
@@ -491,544 +517,18 @@ check_existing_ssh_config() {
 }
 
 # ============================================================================
-# Multi-User Workspace Sudo Configuration
+# Multi-User Workspace: in-container execution (no host-side setup)
 # ============================================================================
-
-# Stop and disable qwen-code-webui systemd service if it exists
-# Open ACE will manage qwen-code-webui instances in multi-user mode
-stop_webui_systemd_service() {
-    local os_type=$(detect_os)
-
-    # Skip on macOS (no systemd)
-    if [[ "$os_type" == "macos" ]]; then
-        return 0
-    fi
-
-    # Check if systemd is available
-    if ! command -v systemctl &>/dev/null; then
-        return 0
-    fi
-
-    # Check if qwen-code-webui service exists
-    local service_name="qwen-code-webui"
-    # List all service unit files and check if our service exists
-    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${service_name}.service"; then
-        print_warning "检测到已存在的 qwen-code-webui systemd 服务"
-        print_info "多用户模式下，Open ACE 会自动管理 qwen-code-webui 实例"
-        print_info "停止并禁用独立运行的 qwen-code-webui 服务..."
-
-        # Stop the service
-        if systemctl is-active --quiet "${service_name}.service" 2>/dev/null; then
-            systemctl stop "${service_name}.service"
-            if [ $? -eq 0 ]; then
-                print_success "已停止 ${service_name} 服务"
-            else
-                print_warning "停止 ${service_name} 服务失败"
-            fi
-        fi
-
-        # Disable the service
-        if systemctl is-enabled --quiet "${service_name}.service" 2>/dev/null; then
-            systemctl disable "${service_name}.service"
-            if [ $? -eq 0 ]; then
-                print_success "已禁用 ${service_name} 服务"
-            else
-                print_warning "禁用 ${service_name} 服务失败"
-            fi
-        fi
-
-        print_info "Open ACE 将在需要时自动启动 qwen-code-webui 实例"
-    fi
-
-    return 0
-}
-
-# Find qwen-code-webui executable
-find_webui_executable() {
-    local candidates=(
-        "/usr/local/bin/qwen-code-webui"
-        "/usr/bin/qwen-code-webui"
-        "/opt/qwen-code-webui/bin/qwen-code-webui"
-    )
-
-    for candidate in "${candidates[@]}"; do
-        if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-
-    # Try to find in PATH
-    if command -v qwen-code-webui &>/dev/null; then
-        which qwen-code-webui
-        return 0
-    fi
-
-    return 1
-}
-
-# Install qwen-code-webui via npm
-install_qwen_code_webui() {
-    print_header "安装 qwen-code-webui"
-
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_error "npm 未安装"
-        print_info "请先安装 Node.js (包含 npm)"
-        return 1
-    fi
-
-    print_info "检测到 npm 版本: $(npm --version)"
-    print_info "正在安装 qwen-code-webui..."
-
-    # Install qwen-code-webui
-    if npm install -g qwen-code-webui 2>&1; then
-        print_success "qwen-code-webui 安装完成"
-
-        # Verify installation
-        if command -v qwen-code-webui &>/dev/null; then
-            local webui_path=$(which qwen-code-webui)
-            print_success "安装路径: $webui_path"
-            return 0
-        else
-            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
-            return 1
-        fi
-    else
-        print_error "qwen-code-webui 安装失败"
-        print_info "请手动安装: npm install -g qwen-code-webui"
-        return 1
-    fi
-}
-
-# Find qwen-code executable (note: npm package @qwen-code/qwen-code installs as 'qwen')
-find_qwen_code_executable() {
-    local candidates=(
-        "/usr/local/bin/qwen"
-        "/usr/bin/qwen"
-        "/opt/qwen-code/bin/qwen"
-    )
-
-    for candidate in "${candidates[@]}"; do
-        if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-
-    # Try to find in PATH
-    if command -v qwen &>/dev/null; then
-        which qwen
-        return 0
-    fi
-
-    return 1
-}
-
-# Install qwen-code via npm
-install_qwen_code() {
-    print_header "安装 qwen-code"
-
-    # Check if npm is available
-    if ! command -v npm &>/dev/null; then
-        print_error "npm 未安装"
-        print_info "请先安装 Node.js (包含 npm)"
-        return 1
-    fi
-
-    print_info "检测到 npm 版本: $(npm --version)"
-    print_info "正在安装 @qwen-code/qwen-code..."
-
-    # Install qwen-code (the official package name is @qwen-code/qwen-code, installs as 'qwen')
-    if npm install -g @qwen-code/qwen-code 2>&1; then
-        print_success "@qwen-code/qwen-code 安装完成"
-
-        # Verify installation (note: the executable is named 'qwen', not 'qwen-code')
-        if command -v qwen &>/dev/null; then
-            local qwen_path=$(which qwen)
-            print_success "安装路径: $qwen_path"
-            return 0
-        else
-            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
-            return 1
-        fi
-    else
-        print_error "@qwen-code/qwen-code 安装失败"
-        print_info "请手动安装: npm install -g @qwen-code/qwen-code"
-        return 1
-    fi
-}
-
-# Check and prompt for qwen-code installation
-check_qwen_code() {
-    local qwen_path=$(find_qwen_code_executable)
-    if [ -n "$qwen_path" ]; then
-        print_success "找到 qwen-code (qwen): $qwen_path"
-        return 0
-    fi
-
-    print_warning "未找到 qwen-code 可执行文件"
-    echo ""
-    echo "请选择:"
-    echo "  1) 协助安装 (通过 npm 自动安装)"
-    echo "  2) 手动安装 (稍后自行安装)"
-    echo ""
-
-    prompt_input "请选择" "1" qwen_choice
-
-    case "$qwen_choice" in
-        1)
-            install_qwen_code
-            if [ $? -eq 0 ]; then
-                return 0
-            else
-                print_info "安装失败，请手动安装后重新运行此脚本"
-                return 1
-            fi
-            ;;
-        2)
-            print_info "请手动安装 qwen-code:"
-            print_info "  npm install -g @qwen-code/qwen-code"
-            print_info ""
-            prompt_yesno "是否继续安装 Open ACE（稍后手动安装 qwen-code）?" "y" continue_without_qwen
-            if [ "$continue_without_qwen" != "yes" ]; then
-                return 1
-            fi
-            return 0
-            ;;
-        *)
-            print_error "无效选择"
-            return 1
-            ;;
-    esac
-}
-
-# Install the cross-user agent launcher wrapper (Issue #1395).
-# Docker 部署：宿主机执行 install.sh 期间把 scripts/openace-run-as.sh 拷贝到
-# /usr/local/bin/openace-run-as（容器内 bind-mount 或镜像 COPY 都依赖它存在）。
-# 必须在 configure_sudoers 之前调用，sudoers wrapper 规则按 `-x` 探测。
-install_run_as_wrapper() {
-    local src="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}/scripts/openace-run-as.sh"
-    local dst="/usr/local/bin/openace-run-as"
-
-    # Resolve repo-relative source (install.sh lives in scripts/install-central/docker-method/)
-    if [ ! -f "$src" ]; then
-        local alt_src="$(dirname "$(dirname "$(readlink -f "$0")")")/../../scripts/openace-run-as.sh"
-        alt_src="$(readlink -f "$alt_src" 2>/dev/null || echo "$alt_src")"
-        if [ -f "$alt_src" ]; then
-            src="$alt_src"
-        fi
-    fi
-    if [ ! -f "$src" ]; then
-        print_warning "未找到 openace-run-as.sh（搜索 $src），跳过 wrapper 安装"
-        return 1
-    fi
-    if ! cp "$src" "$dst" 2>/dev/null; then
-        print_warning "拷贝 openace-run-as.sh 到 $dst 失败（需要 root？）"
-        return 1
-    fi
-    chown root:root "$dst" 2>/dev/null || true
-    chmod 755 "$dst"
-
-    # Issue #2018: install the launch validator (account pin + path confinement)
-    # consumed by openace-run-as --isolated, plus the root:root 0644 constraint
-    # conf. The wrapper fail-closes without them, so a host that bind-mounts
-    # /usr/local/bin (or /etc/openace) into the container must provision both
-    # alongside the wrapper. Validator source lives next to the wrapper.
-    local validate_src
-    validate_src="$(dirname "$src")/openace-validate-launch"
-    local validate_dst="/usr/local/libexec/openace-validate-launch"
-    if [ -f "$validate_src" ]; then
-        install -d -o root -g root -m 755 "$(dirname "$validate_dst")" 2>/dev/null || true
-        install -o root -g root -m 755 "$validate_src" "$validate_dst" 2>/dev/null \
-            || print_warning "安装 openace-validate-launch 到 $validate_dst 失败"
-    else
-        print_warning "未找到 openace-validate-launch（与 $src 同目录），跳过 validator 安装"
-    fi
-    local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
-    install -d -o root -g root -m 755 /etc/openace 2>/dev/null || true
-    cat > /etc/openace/agent-launcher.conf 2>/dev/null <<CONF_EOF || print_warning "写入 agent-launcher.conf 失败"
-# Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0644 — the openace service account can read but not edit this file.
-OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
-ALLOWED_WORKSPACE_ROOTS="/home /workspace"
-CONF_EOF
-    chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
-    chmod 0644 /etc/openace/agent-launcher.conf 2>/dev/null || true
-    print_success "已安装 run-as wrapper 到 $dst"
-    return 0
-}
-
-# Install the privileged data fetch wrapper (Issue #3145).
-# This wrapper is required when FETCH_USE_SUDO=true in multi-user systemd deployments.
-# It allows the scheduler to run fetch scripts with root privileges to read
-# user home directories, then drops privileges to write to the database.
-install_fetch_wrapper() {
-    local src="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}/scripts/openace-fetch-wrapper"
-    local dst="/usr/local/bin/openace-fetch-wrapper"
-
-    # Resolve repo-relative source (install.sh lives in scripts/install-central/docker-method/)
-    if [ ! -f "$src" ]; then
-        local alt_src="$(dirname "$(dirname "$(readlink -f "$0")")")/../../scripts/openace-fetch-wrapper"
-        alt_src="$(readlink -f "$alt_src" 2>/dev/null || echo "$alt_src")"
-        if [ -f "$alt_src" ]; then
-            src="$alt_src"
-        fi
-    fi
-    if [ ! -f "$src" ]; then
-        print_warning "未找到 openace-fetch-wrapper（搜索 $src），跳过 wrapper 安装"
-        return 1
-    fi
-    if ! cp "$src" "$dst" 2>/dev/null; then
-        print_warning "拷贝 openace-fetch-wrapper 到 $dst 失败（需要 root？）"
-        return 1
-    fi
-    chown root:root "$dst" 2>/dev/null || true
-    chmod 755 "$dst"
-
-    # Create audit log directory
-    install -d -o root -g root -m 755 /var/log/openace 2>/dev/null || true
-
-    print_success "已安装 fetch wrapper 到 $dst"
-    return 0
-}
-
-install_git_gh_wrappers() {
-    local script_dir
-    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local source_dir
-    source_dir=$(cd "$script_dir/../../.." && pwd)
-    local config_src_dir="$source_dir/config/openace"
-
-    if [ ! -f "$source_dir/scripts/openace-git.py" ] || [ ! -f "$source_dir/scripts/openace-gh.py" ]; then
-        print_warning "未找到 openace git/gh wrappers（搜索 $source_dir/scripts），跳过安装"
-        return 1
-    fi
-    if [ ! -f "$config_src_dir/git-wrapper.json" ] || [ ! -f "$config_src_dir/gh-wrapper.json" ]; then
-        print_warning "未找到 openace git/gh wrapper 配置（搜索 $config_src_dir），跳过安装"
-        return 1
-    fi
-
-    install -o root -g root -m 0755 "$source_dir/scripts/openace-git.py" /usr/local/bin/openace-git || return 1
-    install -o root -g root -m 0755 "$source_dir/scripts/openace-gh.py" /usr/local/bin/openace-gh || return 1
-    install -d -o root -g root -m 0755 /etc/openace || return 1
-    install -o root -g root -m 0644 "$config_src_dir/git-wrapper.json" /etc/openace/git-wrapper.json || return 1
-    install -o root -g root -m 0644 "$config_src_dir/gh-wrapper.json" /etc/openace/gh-wrapper.json || return 1
-
-    print_success "已安装 openace git/gh wrappers 和配置"
-    return 0
-}
-
-# Configure sudoers for multi-user workspace mode
-configure_sudoers() {
-    print_header "配置 Sudo 权限"
-
-    # Check if running as root
-    if [ "$(id -u)" -ne 0 ]; then
-        print_error "需要 root 权限来配置 sudoers"
-        print_info "请使用 sudo 运行安装脚本"
-        return 1
-    fi
-
-    # Find webui executable
-    local webui_path=$(find_webui_executable)
-    if [ -z "$webui_path" ]; then
-        print_warning "未找到 qwen-code-webui 可执行文件"
-        echo ""
-        echo "请选择:"
-        echo "  1) 协助安装 (通过 npm 自动安装)"
-        echo "  2) 手动安装 (稍后自行安装)"
-        echo ""
-
-        prompt_input "请选择" "1" webui_choice
-
-        case "$webui_choice" in
-            1)
-                install_qwen_code_webui
-                if [ $? -eq 0 ]; then
-                    # Re-check for webui path after installation
-                    webui_path=$(find_webui_executable)
-                    if [ -z "$webui_path" ]; then
-                        print_error "安装成功但仍未找到可执行文件"
-                        print_info "请检查 npm 全局路径是否在 PATH 中"
-                        return 1
-                    fi
-                    # Continue with sudoers configuration
-                else
-                    print_info "安装失败，请手动安装后重新运行此脚本"
-                    print_info "  npm install -g qwen-code-webui"
-                    return 1
-                fi
-                ;;
-            2)
-                print_info "请手动安装 qwen-code-webui:"
-                print_info "  npm install -g qwen-code-webui"
-                print_info ""
-                print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
-                print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-                print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
-
-                if [ "$NON_INTERACTIVE" = false ]; then
-                    prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
-                    if [ "$continue_without_sudoers" != "yes" ]; then
-                        return 1
-                    fi
-                fi
-                return 0
-                ;;
-            *)
-                print_error "无效选择"
-                return 1
-                ;;
-        esac
-    fi
-
-    print_success "找到 qwen-code-webui: $webui_path"
-
-    # Create sudoers file
-    local sudoers_file="/etc/sudoers.d/open-ace-webui"
-    # NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
-    # 【安全加固 Issue #2181】删除高风险通配规则，改用安全 wrapper
-
-    # Run-as wrapper for cross-user agent launch (Issue #1395, PR #1467)
-    local wrapper_path="/usr/local/bin/openace-run-as"
-    local wrapper_rule=""
-    if [ -x "$wrapper_path" ]; then
-        wrapper_rule="$RUN_USER ALL=(root) NOPASSWD: $wrapper_path --isolated *"
-    fi
-
-    # Security wrappers (Issue #2181)
-    local security_wrapper_rules=""
-    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm; do
-        local wrapper_bin="/usr/local/bin/${wrapper}"
-        if [ -x "$wrapper_bin" ]; then
-            security_wrapper_rules="${security_wrapper_rules}
-$RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
-        fi
-    done
-
-    local sudoers_content="# Open ACE WebUI - Multi-user mode sudo configuration
-# Generated by install.sh on $(date '+%Y-%m-%d %H:%M:%S')
-# Allows the service account to run qwen-code-webui as other users
-# 【安全加固 Issue #2181】删除高风险通配规则
-
-# git/gh cross-user operations are validated by root-owned wrappers (#2650).
-Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
-Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
-
-# Fetch wrapper for privileged data collection (Issue #3145).
-# Required for multi-user systemd deployments with FETCH_USE_SUDO=true.
-Cmnd_Alias FETCH_WRAPPER = /usr/local/bin/openace-fetch-wrapper *
-
-# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
-
-# 跨用户 mkdir：github_ops 创建 verifier worktree 时执行 sudo -u <account> mkdir ...
-Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
-
-# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
-# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
-# Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
-$RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *
-
-# 低风险工具和 autonomous git/gh wrappers
-$RUN_USER ALL=(ALL) NOPASSWD: OPENACE_UTILS
-$RUN_USER ALL=(ALL) NOPASSWD: GIT_SAFE
-$RUN_USER ALL=(ALL) NOPASSWD: GH_SAFE
-$RUN_USER ALL=(ALL) NOPASSWD: FETCH_WRAPPER
-$RUN_USER ALL=(ALL) NOPASSWD: MKDIR_SAFE
-
-# 【Issue #2181】安全 wrapper 规则（替代原 cat/chown/useradd/rm 通配）
-${security_wrapper_rules}
-
-# Run-as wrapper for cross-user agent launch (Issue #1395, PR #1467)
-# 【Issue #2181】所有 AI CLI 必须通过此 wrapper 启动
-${wrapper_rule}
-
-# Preserve environment variables for sudo env_keep passing
-# 【安全加固 Issue #2181】清理敏感变量
-# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
-# env_keep 主要用于 WebUI 启动，移除敏感凭据
-# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不通过 env_keep，
-# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-# PATH 移除（Issue #2650）：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
-Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
-Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
-Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-"
-
-    # Check if sudoers file already exists
-    if [ -f "$sudoers_file" ]; then
-        # 【修复 PR #1467 评论】旧逻辑只看 webui_path 命中就 return，导致已有部署
-        # 升级时不会补齐本 PR 新增的 CLI / run-as wrapper 规则。改为校验关键
-        # 标记是否齐备。任一缺失即重写。
-        local needs_update=false
-        if ! grep -E '^Cmnd_Alias[[:space:]]+GIT_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-git[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
-           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GIT_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if ! grep -E '^Cmnd_Alias[[:space:]]+GH_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-gh[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
-           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GH_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if [ -n "$wrapper_rule" ] && ! grep -qF 'openace-run-as --isolated *' "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if ! grep -q "secure_path.*usr/local/bin" "$sudoers_file" 2>/dev/null; then
-            needs_update=true
-        fi
-        if [ "$needs_update" = false ]; then
-            print_success "Sudoers 规则已是最新"
-            return 0
-        fi
-        print_info "更新现有 sudoers 文件（补齐 git/gh wrappers/CLI/wrapper 规则）..."
-    fi
-
-    # Back up the existing sudoers file before overwriting so a visudo
-    # failure restores the last-known-good state rather than deleting the
-    # file and leaving the service with no sudoers at all.
-    local sudoers_backup=""
-    if [ -f "$sudoers_file" ]; then
-        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
-        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
-            print_info "已备份现有 sudoers 到 $sudoers_backup"
-        else
-            sudoers_backup=""
-        fi
-    fi
-
-    # Write sudoers file
-    echo "$sudoers_content" > "$sudoers_file"
-    chmod 440 "$sudoers_file"
-
-    # Validate sudoers syntax
-    if visudo -c -f "$sudoers_file" &>/dev/null; then
-        local legacy_sudoers_file="/etc/sudoers.d/openace-run-as"
-        if [ -f "$legacy_sudoers_file" ] && grep -qF "$wrapper_path" "$legacy_sudoers_file"; then
-            mv "$legacy_sudoers_file" "${legacy_sudoers_file}.disabled.$(date +%s)"
-            print_warning "已禁用旧版宽泛 autonomous-agent sudoers 规则"
-        fi
-        print_success "Sudoers 配置成功: $sudoers_file"
-        print_info "服务账号 '$RUN_USER' 可以执行:"
-        print_info "  sudo -u <username> $webui_path --port <port>"
-    else
-        print_error "Sudoers 语法错误，回滚..."
-        # Restore the pre-write backup if we have one (keeps the service
-        # functional on a botched rewrite). Only rm if there was no prior
-        # file (fresh install where a bad file is worse than none).
-        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
-            cp -p "$sudoers_backup" "$sudoers_file"
-            chmod 440 "$sudoers_file"
-            print_warning "已从 $sudoers_backup 恢复上一个 sudoers（服务继续可用）"
-        else
-            rm -f "$sudoers_file"
-        fi
-        return 1
-    fi
-
-    return 0
-}
+# The container runs the whole qwen stack itself: Dockerfile installs the
+# pinned qwen-code-webui/@qwen-code/qwen-code pair inside the image, and
+# docker-entrypoint.sh generates the IN-CONTAINER sudoers against the
+# image-bundled wrappers (/usr/local/bin/openace-*) at startup. The compose
+# file generated by this script mounts only config/logs/home — never any
+# host-side executables or host sudo rules — so a host-side stack install
+# or host sudoers would be dead weight (PR #3386 R15 review: it could even
+# root-upgrade host Node or abort an upgrade after the old containers were
+# already torn down). Host-side stack/sudoers helpers were removed; package
+# deployments (systemd) keep their own copies in package-method/install.sh.
 
 show_help() {
     echo "Open ACE - Quick Install Script"
@@ -1047,6 +547,7 @@ show_help() {
     echo "  RUN_USER_UID         UID for the run user (default: auto, for NFS/Docker bind mount set explicit UID)"
     echo "  DEPLOY_DIR           Deployment directory (default: /home/\$RUN_USER/open-ace)"
     echo "  IMAGE_NAME           Docker image name"
+    echo "  PULL_IMAGE           Published image to pull (default: ghcr.io/open-ace/open-ace:latest)"
     echo "  WEB_PORT             Web server port"
     echo "  DB_USER              PostgreSQL username (default: \$RUN_USER)"
     echo "  DB_PASSWORD          PostgreSQL password"
@@ -1525,7 +1026,11 @@ install_docker() {
 # Node.js Installation Functions
 # ============================================================================
 
-NODEJS_VERSION="${NODEJS_VERSION:-20}"
+# Version offered when the local image-build path auto-installs Node for the
+# frontend build (frontend/package.json has no engines constraint; Node 20 is
+# EOL since 2026-04, so offer 22). The qwen stack runs inside the image at
+# its own pinned Node 22 — no host-side stack gate exists in this script.
+NODEJS_VERSION="${NODEJS_VERSION:-22}"
 MIN_NODE_VERSION="${MIN_NODE_VERSION:-18}"
 
 # Check if Node.js and npm are installed with required version
@@ -2120,28 +1625,13 @@ check_prerequisites() {
     fi
     print_success "Docker daemon 运行中"
 
-    # Check Node.js (optional but recommended for multi-user mode and local build)
-    if ! check_nodejs; then
-        print_warning "Node.js 未安装"
-        print_info "Node.js 用于:"
-        print_info "  - 多用户模式: 安装 qwen-code-webui"
-        print_info "  - 本地构建镜像: 构建前端"
-        prompt_yesno "是否自动安装 Node.js?" "y" install_nodejs_confirm
-        if [ "$install_nodejs_confirm" = "yes" ]; then
-            install_nodejs
-        else
-            print_info "可稍后手动安装: https://nodejs.org/"
-        fi
-    fi
-
-    # Check qwen-code (optional, for workspace functionality)
-    # Only check if workspace is enabled or user wants to use it
-    print_info "检查 qwen-code..."
-    if ! check_qwen_code; then
-        print_warning "qwen-code 检查失败，但不影响基本部署"
-        print_info "如需使用 Workspace 功能，请确保安装 qwen-code"
-    fi
-
+    # Host Node.js / qwen stack: deliberately NOT checked or installed here.
+    # Pre-config checks used to offer an unpinned host install (default "1",
+    # so --non-interactive took it too) before the workspace mode and the
+    # deploy/upgrade decision were even known (PR #3386 review). The host
+    # stack is only consumed by multi-user workspace mode and is installed
+    # pinned AFTER confirmation in the multi-user sections below; local
+    # image builds check Node at their own point of use.
     # Check/load Docker image
     build_docker_image
 }
@@ -2160,7 +1650,7 @@ build_docker_image() {
     echo ""
     echo "请选择:"
     echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
-    echo "  2) 从 Docker Hub 拉取镜像"
+    echo "  2) 拉取已发布镜像 ($PULL_IMAGE)"
     echo "  3) 本地构建镜像 (自动构建前端)"
     echo "  4) 跳过 (稍后手动处理)"
     echo ""
@@ -2211,16 +1701,14 @@ build_docker_image() {
             fi
             ;;
         2)
-            print_info "从 Docker Hub 拉取镜像..."
-
-            # Pull application image
-            print_info "拉取镜像: $IMAGE_NAME"
-            if docker pull "$IMAGE_NAME"; then
-                print_success "应用镜像拉取完成: $IMAGE_NAME"
+            # Pull the published application image and retag it as $IMAGE_NAME
+            print_info "拉取镜像: $PULL_IMAGE"
+            if docker pull "$PULL_IMAGE" && docker tag "$PULL_IMAGE" "$IMAGE_NAME"; then
+                print_success "应用镜像拉取完成: $PULL_IMAGE -> $IMAGE_NAME"
             else
                 print_error "镜像拉取失败"
                 print_info "请检查:"
-                print_info "  1. Docker Hub 镜像加速器是否已配置"
+                print_info "  1. 网络能否访问 ghcr.io（或用 PULL_IMAGE 指向可访问的镜像）"
                 print_info "  2. 网络连接是否正常"
                 print_info "  3. 镜像名称是否正确"
                 return 1
@@ -2508,7 +1996,29 @@ read_existing_config() {
         WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "19888")
         WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
         WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
-        WORKSPACE_MULTI_USER_MODE=$(jq -r '.workspace.multi_user_mode' "$config_file" 2>/dev/null || echo "false")
+        # Issue #3446: workspace.isolation.backend. A pre-#3446 config is
+        # read with the rules the entrypoint's converter applies on start
+        # (scripts/convert_workspace_isolation.py), so compose and config agree.
+        WORKSPACE_ISOLATION_BACKEND=$(jq -r 'def truthy: . != null and . != false and . != 0 and . != "" and . != [] and . != {}; def text: if truthy then tostring | ascii_downcase | ltrimstr(" ") | rtrimstr(" ") else "" end; .workspace as $w | ($w.required_isolation_level | text) as $req | ($w.os_user_confinement | text) as $c | if ($w.isolation | type) == "object" then ($w.isolation.backend // "shared") elif $c != "" and $c != "off" then "unsupported" elif $req == "sandboxed" then "opensandbox" elif ($w.multi_user_mode | truthy) or $req == "os_user" then "plain" else "shared" end' "$config_file" 2>/dev/null || echo "shared")
+        # A tier with a usable (digest-pinned, allowlisted) webui_image in
+        # sandbox-backends.json ran pods; only a config still carrying the
+        # old keys is read that way (converter rule).
+        local sandbox_backends_file legacy_keys
+        sandbox_backends_file="$(dirname "$config_file")/sandbox-backends.json"
+        legacy_keys=$(jq -r '(.workspace // {}) | ((.isolation | type) != "object") and (has("multi_user_mode") or has("required_isolation_level") or has("os_user_confinement") or has("sandbox_tier") or (keys | any(startswith("confinement_"))))' "$config_file" 2>/dev/null || echo false)
+        if [ "$WORKSPACE_ISOLATION_BACKEND" != "unsupported" ] && [ "$legacy_keys" = "true" ] && [ -f "$sandbox_backends_file" ] && \
+           [ "$(jq -r --arg t "$(jq -r '.workspace.sandbox_tier // "" | tostring' "$config_file" 2>/dev/null)" '(if $t != "" then $t else .default_tier end) as $tier | (.endpoints[$tier].webui_image // "" | tostring) as $img | (.image_allowlist // []) as $allow | ($img | test("@sha256:[0-9a-f]{64}$")) and (($allow | length) == 0 or ($allow | index($img)) != null)' "$sandbox_backends_file" 2>/dev/null)" = "true" ]; then
+            WORKSPACE_ISOLATION_BACKEND="opensandbox"
+        fi
+        case "$WORKSPACE_ISOLATION_BACKEND" in
+            shared|plain|opensandbox) ;;
+            *)
+                print_error "$config_file: workspace isolation backend '$WORKSPACE_ISOLATION_BACKEND' cannot run in the Docker install (os_user_confinement / bwrap / local-* need the package install); set workspace.isolation.backend to shared, plain or opensandbox"
+                return 1
+                ;;
+        esac
+        # Multi-user mode here means per-user OS accounts: root in the container.
+        WORKSPACE_MULTI_USER_MODE=$([ "$WORKSPACE_ISOLATION_BACKEND" = "plain" ] && echo true || echo false)
         WORKSPACE_PORT_RANGE_START=$(jq -r '.workspace.port_range_start' "$config_file" 2>/dev/null || echo "3100")
         WORKSPACE_PORT_RANGE_END=$(jq -r '.workspace.port_range_end' "$config_file" 2>/dev/null || echo "3200")
         WORKSPACE_MAX_INSTANCES=$(jq -r '.workspace.max_instances' "$config_file" 2>/dev/null || echo "30")
@@ -2800,21 +2310,10 @@ upgrade_deployment() {
     fi
     print_success "持久化目录创建完成"
 
-    # Update sudoers if multi-user mode is enabled
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        print_info "更新 sudoers 配置..."
-        stop_webui_systemd_service
-        install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
-        install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
-        if ! install_git_gh_wrappers; then
-            print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
-        else
-            configure_sudoers
-            if [ $? -ne 0 ]; then
-                print_warning "Sudoers 配置失败，但继续升级"
-            fi
-        fi
-    fi
+    # Multi-user workspace execution is entirely in-container (image-pinned
+    # stack + entrypoint-generated sudoers); the upgrade needs no host-side
+    # stack/sudoers step and therefore no failure exit after teardown
+    # (PR #3386 R15 review).
 
     # Grant sequence permissions to DB_USER if needed
     # PostgreSQL sequences have independent owners (pg_class.relowner).
@@ -3180,19 +2679,25 @@ create_config() {
 
     # Generate token secret if not provided and multi-user mode is enabled
     local workspace_token_secret="$WORKSPACE_TOKEN_SECRET"
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] && [ -z "$workspace_token_secret" ]; then
+    if [ "$(docker_isolation_backend)" != "shared" ] && [ -z "$workspace_token_secret" ]; then
         workspace_token_secret=$(openssl rand -hex 32)
         print_info "  - 生成 Workspace Token Secret: $workspace_token_secret"
     fi
 
     # Build workspace config
     local workspace_config=""
+    local isolation_backend isolation_level
+    isolation_backend=$(docker_isolation_backend)
+    case "$isolation_backend" in
+        opensandbox) isolation_level="sandboxed" ;;
+        *) isolation_backend="shared"; isolation_level="none" ;;
+    esac
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         workspace_config=$(cat << EOF
   "workspace": {
     "enabled": $WORKSPACE_ENABLED,
     "url": "$workspace_url_config",
-    "multi_user_mode": true,
+    "isolation": {"level": "os_user", "backend": "plain"},
     "port_range_start": $WORKSPACE_PORT_RANGE_START,
     "port_range_end": $WORKSPACE_PORT_RANGE_END,
     "max_instances": $WORKSPACE_MAX_INSTANCES,
@@ -3205,7 +2710,9 @@ EOF
         workspace_config=$(cat << EOF
   "workspace": {
     "enabled": $WORKSPACE_ENABLED,
-    "url": "$workspace_url_config"
+    "url": "$workspace_url_config",
+    "isolation": {"level": "$isolation_level", "backend": "$isolation_backend"},
+    "token_secret": "$workspace_token_secret"
   }
 EOF
 )
@@ -3230,21 +2737,14 @@ $workspace_config,
     "openclaw": {
       "enabled": $OPENCLAW_ENABLED,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "$openclaw_url_config",
-      "hostname": "$HOST_NAME"
+      "gateway_url": "$openclaw_url_config"
     },
     "claude": {
-      "enabled": $CLAUDE_ENABLED,
-      "hostname": "$HOST_NAME"
+      "enabled": $CLAUDE_ENABLED
     },
     "qwen": {
-      "enabled": $QWEN_ENABLED,
-      "hostname": "$HOST_NAME"
+      "enabled": $QWEN_ENABLED
     }
-  },
-  "cron": {
-    "enabled": true,
-    "run_time": "00:30"
   },
   "insights": {
     "model": "glm-5",
@@ -3365,7 +2865,7 @@ $ports_section
       - SECRET_KEY=$SECRET_KEY
       - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
-      - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+      - WORKSPACE_ISOLATION_BACKEND=$(docker_isolation_backend)
       - WORKSPACE_BASE_DIR=/workspace
       - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -3476,7 +2976,7 @@ UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
 WORKSPACE_ENABLED=$WORKSPACE_ENABLED
 WORKSPACE_URL=$WORKSPACE_URL
 WORKSPACE_PORT=$WORKSPACE_PORT
-WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+WORKSPACE_ISOLATION_BACKEND=$(docker_isolation_backend)
 WORKSPACE_PORT_RANGE_START=$WORKSPACE_PORT_RANGE_START
 WORKSPACE_PORT_RANGE_END=$WORKSPACE_PORT_RANGE_END
 WORKSPACE_MAX_INSTANCES=$WORKSPACE_MAX_INSTANCES
@@ -4161,6 +3661,11 @@ if [ "$NON_INTERACTIVE" = false ]; then
         echo -e "${YELLOW}需要配置 sudo 和安装 qwen-code-webui，详见部署文档${NC}"
         prompt_yesno "启用多用户模式?" "y" enable_multi_user
         WORKSPACE_MULTI_USER_MODE=$([ "$enable_multi_user" = "yes" ] && echo "true" || echo "false")
+        # The answer decides plain vs shared; an opensandbox choice from the
+        # environment stays unless the admin asked for OS-account mode.
+        if [ "$WORKSPACE_ISOLATION_BACKEND" != "opensandbox" ] || [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+            WORKSPACE_ISOLATION_BACKEND=""
+        fi
         if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
             prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
             prompt_input "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
@@ -4217,22 +3722,12 @@ if [ "$NON_INTERACTIVE" = false ]; then
     fi
 fi
 
-# Configure sudoers for multi-user workspace mode
-if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-    # Stop existing qwen-code-webui systemd service first
-    stop_webui_systemd_service
-    install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
-    install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
-    if ! install_git_gh_wrappers; then
-        print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
-        exit 1
-    fi
-    configure_sudoers
-    if [ $? -ne 0 ]; then
-        print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"
-        print_info "请手动配置后重试，或使用单用户模式"
-    fi
-fi
+# Multi-user workspace execution is entirely in-container: the image carries
+# the pinned qwen stack and docker-entrypoint.sh generates the in-container
+# sudoers at startup. No host-side stack install or host sudoers here — the
+# container cannot use them (nothing host-side is mounted), and a host-side
+# gate could abort after confirmation for no runtime benefit (PR #3386 R15
+# review).
 
 # Execute deployment
 # Check for existing config files and warn user before deployment

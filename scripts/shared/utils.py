@@ -78,14 +78,6 @@ def load_config(config_path: str | None = None) -> dict:
     if not host_name or _is_placeholder(host_name):
         config["host_name"] = platform.node()
 
-    # Also clean up placeholder hostnames in tools config
-    tools = config.get("tools", {})
-    for tool_name, tool_cfg in tools.items():
-        if isinstance(tool_cfg, dict):
-            hostname = tool_cfg.get("hostname")
-            if hostname and _is_placeholder(hostname):
-                tool_cfg["hostname"] = platform.node()
-
     return config
 
 

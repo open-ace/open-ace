@@ -183,7 +183,7 @@ def test_restart_reenters_from_persisted_phase_state():
 # ── 3. test_each_phase_declares_preconditions_and_postconditions ──────────────
 #
 # Acceptance: every phase documents all 8 contract fields. Guard-style: parses
-# docs/architecture/autonomous-phase-contracts.md and asserts each of the 7
+# docs/architecture/AUTONOMOUS_PHASE_CONTRACTS.md and asserts each of the 7
 # phases has a section with all 8 field headers. Pass-on-arrival; fails loudly
 # if a phase section is added/edited without documenting the contract.
 
@@ -207,7 +207,7 @@ _CONTRACT_PHASES = (
     "merge",
 )
 _CONTRACT_DOC = (
-    Path(__file__).resolve().parents[2] / "docs" / "architecture" / "autonomous-phase-contracts.md"
+    Path(__file__).resolve().parents[2] / "docs" / "architecture" / "AUTONOMOUS_PHASE_CONTRACTS.md"
 )
 
 

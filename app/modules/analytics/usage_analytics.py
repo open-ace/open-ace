@@ -3,30 +3,87 @@ Open ACE - Usage Analytics Module
 
 Provides comprehensive usage analytics for enterprise insights.
 Analyzes trends, detects anomalies, and generates reports.
+
+Issue #3244: Forecast algorithm now uses continuous calendar days,
+excludes incomplete current day, and returns history window metadata.
 """
 
 import logging
-import statistics
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, NamedTuple
 
 from app.repositories.database import Database
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
+from app.utils.datetime_utils import (
+    ForecastWindow,
+    generate_date_spine,
+    get_business_date,
+    get_forecast_window,
+)
 
 logger = logging.getLogger(__name__)
 
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
 
+# Issue #3244: Algorithm version for forward compatibility
+FORECAST_ALGORITHM_VERSION = "v2"
+
+# Issue #3244: Missing days threshold for forecast quality
+MISSING_DAYS_THRESHOLD_DEGRADED = 2  # 2-3 missing days -> degraded
+MISSING_DAYS_THRESHOLD_UNAVAILABLE = 4  # 4+ missing days -> unavailable
+
 # Forecast quality constants
 FORECAST_WINDOW_DAYS = 7  # Moving average window
 FORECAST_DECAY_RATE = 0.02  # Horizon decay rate per day
 FORECAST_MIN_SAMPLE_DAYS = 7  # Minimum days for forecast
 FORECAST_BACKTEST_DAYS = 7  # Days to use for backtesting
+
+
+class ContinuousDailyTotals(NamedTuple):
+    """Result from _get_continuous_daily_totals for Issue #3244.
+
+    Attributes:
+        data: List of (date, tokens, requests) tuples.
+        start_date: Actual start date used.
+        end_date: Actual end date used.
+        total_days: Number of days in the window.
+        missing_days: Number of days with no data (filled with zeros).
+        first_activity_date: First activity date if found.
+    """
+
+    data: list[tuple[str, int, int]]
+    start_date: str
+    end_date: str
+    total_days: int
+    missing_days: int
+    first_activity_date: str | None
+
+
+def calculate_moving_average(values: Sequence[int | float], window: int = 7) -> float | None:
+    """Calculate moving average for Issue #3244.
+
+    Args:
+        values: Sequence of numerical values (int or float).
+        window: Window size for averaging.
+
+    Returns:
+        Moving average, or None if values length is less than window.
+
+    Examples:
+        >>> calculate_moving_average([100, 200, 150, 180, 220, 190, 210], 7)
+        178.57...
+        >>> calculate_moving_average([100, 200], 7) is None
+        True
+    """
+    if len(values) < window:
+        return None
+    return sum(values[-window:]) / window
 
 
 class TrendDirection(Enum):
@@ -485,6 +542,145 @@ class UsageAnalytics:
             """
             return self.db.fetch_all(query, (start_date, end_date))
 
+    def _get_first_activity_date(self, tenant_id: int | None = None) -> str | None:
+        """Get the first activity date for a tenant or globally.
+
+        Issue #3244: Used to bound forecast window start for new users.
+
+        Args:
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            First activity date as YYYY-MM-DD string, or None if no data.
+        """
+        if tenant_id is not None:
+            query = """
+                SELECT MIN(date) as first_date
+                FROM daily_usage
+                WHERE tenant_id = ?
+            """
+            result = self.db.fetch_one(query, (tenant_id,))
+        else:
+            query = """
+                SELECT MIN(date) as first_date
+                FROM daily_usage
+            """
+            result = self.db.fetch_one(query)
+
+        if result and result.get("first_date"):
+            return str(result["first_date"])
+        return None
+
+    def _get_continuous_daily_totals(
+        self,
+        window: ForecastWindow,
+        tenant_id: int | None = None,
+    ) -> ContinuousDailyTotals:
+        """Get continuous daily totals with missing days filled as zeros.
+
+        Issue #3244: Ensures the forecast window contains exactly the specified
+        number of consecutive calendar days, filling missing days with zeros.
+
+        Args:
+            window: ForecastWindow with start_date, end_date, and days.
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            ContinuousDailyTotals with data and metadata.
+        """
+        # Get first activity date for new user boundary
+        first_activity_date = self._get_first_activity_date(tenant_id)
+
+        # Adjust window if first activity date is after window start
+        actual_start = window.start_date
+        actual_end = window.end_date
+        actual_days = window.days
+
+        # Only apply first activity date boundary if it's a valid date string
+        if first_activity_date and isinstance(first_activity_date, str):
+            try:
+                first_activity_dt = datetime.strptime(first_activity_date, "%Y-%m-%d")
+                start_dt = datetime.strptime(actual_start, "%Y-%m-%d")
+                if first_activity_dt > start_dt:
+                    actual_start = first_activity_date
+                    # Recalculate actual days
+                    end_dt = datetime.strptime(actual_end, "%Y-%m-%d")
+                    actual_days = (end_dt - first_activity_dt).days + 1
+            except (ValueError, TypeError):
+                # Invalid date format, ignore first activity date
+                pass
+
+        # Query database for existing records
+        try:
+            if tenant_id is not None:
+                query = """
+                    SELECT
+                        date,
+                        SUM(tokens_used) as tokens,
+                        SUM(request_count) as requests
+                    FROM daily_usage
+                    WHERE date >= ? AND date <= ? AND tenant_id = ?
+                    GROUP BY date
+                    ORDER BY date
+                """
+                rows = self.db.fetch_all(query, (actual_start, actual_end, tenant_id))
+            else:
+                query = """
+                    SELECT
+                        date,
+                        SUM(tokens_used) as tokens,
+                        SUM(request_count) as requests
+                    FROM daily_usage
+                    WHERE date >= ? AND date <= ?
+                    GROUP BY date
+                    ORDER BY date
+                """
+                rows = self.db.fetch_all(query, (actual_start, actual_end))
+        except Exception:
+            # Database error - return degraded result with all days as missing
+            return ContinuousDailyTotals(
+                data=[],
+                start_date=actual_start,
+                end_date=actual_end,
+                total_days=actual_days,
+                missing_days=actual_days,
+                first_activity_date=first_activity_date,
+            )
+
+        # Build lookup from existing data
+        data_by_date = {}
+        for row in rows:
+            date_str = str(row.get("date", ""))
+            if date_str:
+                data_by_date[date_str] = (
+                    row.get("tokens", 0) or 0,
+                    row.get("requests", 0) or 0,
+                )
+
+        # Generate continuous date spine
+        date_spine = generate_date_spine(actual_start, actual_end)
+
+        # Fill missing days with zeros
+        continuous_data: list[tuple[str, int, int]] = []
+        missing_count = 0
+
+        for date_str in date_spine:
+            if date_str in data_by_date:
+                tokens, requests = data_by_date[date_str]
+                continuous_data.append((date_str, tokens, requests))
+            else:
+                continuous_data.append((date_str, 0, 0))
+                missing_count += 1
+
+        return ContinuousDailyTotals(
+            data=continuous_data,
+            start_date=actual_start,
+            end_date=actual_end,
+            total_days=actual_days,
+            missing_days=missing_count,
+            first_activity_date=first_activity_date,
+        )
+
     def _detect_anomalies(
         self, start_date: str, end_date: str, tenant_id: int | None = None
     ) -> list[Anomaly]:
@@ -689,245 +885,29 @@ class UsageAnalytics:
             if row.get("host_name")
         }
 
-    def _get_historical_data_for_backtest(
-        self, start_date: str, end_date: str, tenant_id: int | None = None
-    ) -> tuple[list[dict], int]:
-        """
-        Get historical data for backtest, excluding today, with optional tenant isolation.
-
-        Issue #3245: Added tenant_id parameter for data isolation.
-
-        Args:
-            start_date: Start date (YYYY-MM-DD).
-            end_date: End date (YYYY-MM-DD).
-            tenant_id: Tenant ID for filtering. None means global (no filter).
-
-        Returns:
-            Tuple of (historical_data list, sample_days count).
-            Today's data is excluded since it may be incomplete.
-        """
-        daily_data = self._get_daily_totals(start_date, end_date, tenant_id=tenant_id)
-
-        # Exclude today's data (not yet complete)
-        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-        historical_data = [d for d in daily_data if d.get("date") and d["date"] < today]
-
-        return historical_data, len(historical_data)
-
-    def _count_missing_days(self, daily_data: list[dict], expected_days: int) -> int:
-        """
-        Count missing days in the historical data.
-
-        Args:
-            daily_data: List of daily data records.
-            expected_days: Expected number of days in the window.
-
-        Returns:
-            Number of missing days.
-        """
-        if not daily_data:
-            return expected_days
-
-        actual_dates = {d.get("date") for d in daily_data if d.get("date")}
-        return max(0, expected_days - len(actual_dates))
-
-    def _calculate_backtest_wape(self, historical_data: list[dict]) -> float | None:
-        """
-        Calculate WAPE (Weighted Absolute Percentage Error) via rolling backtest.
-
-        Uses last 7 days of historical data as test set.
-        For each test point, predicts using mean of previous 7 days.
-
-        Args:
-            historical_data: Historical daily data (excluding today).
-
-        Returns:
-            WAPE value (0.0-1.0) or None if insufficient data or zero actuals.
-        """
-        if len(historical_data) < FORECAST_MIN_SAMPLE_DAYS + FORECAST_BACKTEST_DAYS:
-            # Need at least 14 days: 7 for initial training + 7 for testing
-            return None
-
-        tokens = [d.get("tokens", 0) for d in historical_data]
-
-        # Rolling backtest on last 7 days
-        abs_errors: list[float] = []
-        actuals: list[float] = []
-
-        test_start = len(tokens) - FORECAST_BACKTEST_DAYS
-
-        for i in range(test_start, len(tokens)):
-            # Predict using mean of previous 7 days
-            train_start = i - FORECAST_WINDOW_DAYS
-            if train_start < 0:
-                continue
-
-            prediction = sum(tokens[train_start:i]) / FORECAST_WINDOW_DAYS
-            actual = tokens[i]
-
-            abs_errors.append(abs(actual - prediction))
-            actuals.append(actual)
-
-        if not actuals:
-            return None
-
-        total_actual = sum(actuals)
-        total_abs_error = sum(abs_errors)
-
-        # Handle division by zero (all actuals are 0)
-        if total_actual == 0:
-            return None
-
-        return total_abs_error / total_actual
-
-    def _apply_horizon_decay(self, base_wape: float, horizon_days: int) -> float:
-        """
-        Apply horizon decay to adjust forecast error for longer prediction periods.
-
-        Forecast accuracy decreases as we predict further into the future.
-        Decay factor increases WAPE by 2% per day beyond the 7-day window.
-
-        Args:
-            base_wape: Base WAPE from backtest.
-            horizon_days: Number of days to forecast.
-
-        Returns:
-            Horizon-adjusted WAPE.
-        """
-        if horizon_days <= FORECAST_WINDOW_DAYS:
-            return base_wape
-
-        decay_factor = 1 + FORECAST_DECAY_RATE * (horizon_days - FORECAST_WINDOW_DAYS)
-        return base_wape * decay_factor
-
-    def _detect_outliers(self, daily_data: list[dict]) -> tuple[int, float]:
-        """
-        Detect outliers using MAD (Median Absolute Deviation) method.
-
-        An outlier is defined as: value > median + 3 * MAD
-
-        Args:
-            daily_data: Historical daily data.
-
-        Returns:
-            Tuple of (outlier_count, outlier_ratio).
-        """
-        values = [d.get("tokens", 0) for d in daily_data]
-
-        if not values:
-            return 0, 0.0
-
-        median = statistics.median(values)
-        mad = statistics.median([abs(v - median) for v in values])
-
-        # MAD = 0 means all values are identical, no outliers exist
-        # This is theoretically correct: no variation = no anomalies
-        if mad == 0:
-            return 0, 0.0
-
-        outlier_threshold = median + 3 * mad
-        outliers = [v for v in values if v > outlier_threshold]
-
-        count = len(outliers)
-        ratio = count / len(values)
-
-        return count, ratio
-
-    def _assess_forecast_quality(
+    @cached(ttl=120, key_prefix="analytics", skip_args=[0])
+    def get_forecast(
         self,
-        adjusted_wape: float | None,
-        sample_days: int,
-        missing_days: int,
-        outlier_ratio: float,
-    ) -> tuple[str, str, float | None]:
+        days: int = 7,
+        tenant_id: int | None = None,
+        business_date: str | None = None,
+    ) -> dict[str, Any]:
         """
-        Assess forecast quality based on multiple metrics.
+        Get usage forecast based on continuous calendar days.
 
-        Quality levels:
-        - quality: adjusted_wape < 10% AND missing <= 1
-        - satisfactory: adjusted_wape < 20% AND missing <= 3
-        - fair: adjusted_wape < 35% AND missing <= 5
-        - poor: adjusted_wape >= 35% OR missing > 5 OR sample < 14
-        - unavailable: sample < 7 OR wape is None
-
-        Args:
-            adjusted_wape: Horizon-adjusted WAPE (or None if unavailable).
-            sample_days: Number of historical sample days.
-            missing_days: Number of missing days in data.
-            outlier_ratio: Ratio of outlier days.
-
-        Returns:
-            Tuple of (quality_level, quality_description, confidence).
-        """
-        # Unavailable cases
-        if sample_days < FORECAST_MIN_SAMPLE_DAYS:
-            return (
-                "unavailable",
-                "样本不足，无法提供质量评估",
-                None,
-            )
-
-        if adjusted_wape is None:
-            return (
-                "unavailable",
-                "数据无效或全为零，无法计算回测误差",
-                None,
-            )
-
-        # Determine base quality level
-        quality_level: str
-        quality_desc: str
-
-        if adjusted_wape < 0.10 and missing_days <= 1:
-            quality_level = "quality"
-            quality_desc = "数据完整，波动小，预测质量高"
-        elif adjusted_wape < 0.20 and missing_days <= 3:
-            quality_level = "satisfactory"
-            quality_desc = "预测质量良好，可供参考"
-        elif adjusted_wape < 0.35 and missing_days <= 5:
-            quality_level = "fair"
-            quality_desc = "预测质量一般，建议谨慎参考"
-        else:
-            quality_level = "poor"
-            quality_desc = "预测质量较低，仅作趋势参考"
-
-        # Downgrade if too many outliers
-        if outlier_ratio > 0.10:
-            if quality_level == "quality":
-                quality_level = "satisfactory"
-                quality_desc = "预测质量良好（检测到异常峰值）"
-            elif quality_level == "satisfactory":
-                quality_level = "fair"
-                quality_desc = "预测质量一般（检测到异常峰值）"
-            elif quality_level == "fair":
-                quality_level = "poor"
-                quality_desc = "预测质量较低（检测到异常峰值）"
-
-        # Map quality level to confidence for backward compatibility
-        confidence_mapping = {
-            "quality": 0.9,
-            "satisfactory": 0.7,
-            "fair": 0.5,
-            "poor": 0.3,
-            "unavailable": None,
-        }
-        confidence = confidence_mapping.get(quality_level)
-
-        return quality_level, quality_desc, confidence
-
-    @cached(ttl=60, key_prefix="analytics", skip_args=[0])
-    def get_forecast(self, days: int = 7, tenant_id: int | None = None) -> dict[str, Any]:
-        """
-        Get usage forecast based on historical data with optional tenant isolation.
-
+        Issue #3244: Uses continuous calendar days, excludes incomplete current day,
+        and returns history window metadata.
         Issue #3245: Added tenant_id parameter for data isolation.
 
         Args:
             days: Number of days to forecast (must be 1-90).
             tenant_id: Tenant ID for filtering. None means global (no filter).
+            business_date: Optional business date in UTC (YYYY-MM-DD).
+                If not provided, uses current UTC date. Included in cache key
+                to prevent cross-date cache issues.
 
         Returns:
-            Dict with forecast data including quality metrics.
+            Dict with forecast data including quality metrics and history_window.
 
         Raises:
             ValueError: If days is not in valid range 1-90.
@@ -935,79 +915,76 @@ class UsageAnalytics:
         if not isinstance(days, int) or days < 1 or days > 90:
             raise ValueError(f"days must be an integer between 1 and 90, got {days}")
 
-        # Get last 30 days of data with tenant isolation
-        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-        start_date = (
-            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
-        ).strftime("%Y-%m-%d")
+        # Get business date (current UTC date if not provided)
+        if business_date is None:
+            business_date = get_business_date()
 
-        # Get historical data for backtest (excludes today) with tenant isolation
-        historical_data, sample_days = self._get_historical_data_for_backtest(
-            start_date, end_date, tenant_id=tenant_id
-        )
+        # Get forecast window (excludes current incomplete day)
+        window = get_forecast_window(business_date, days)
 
-        # Check minimum sample requirement
-        if sample_days < FORECAST_MIN_SAMPLE_DAYS:
+        # Get continuous daily totals with tenant isolation
+        continuous_data = self._get_continuous_daily_totals(window, tenant_id)
+
+        # Calculate actual sample days (days with data, not zeros)
+        sample_days = continuous_data.total_days - continuous_data.missing_days
+
+        # Check minimum sample requirement - need at least some real data
+        # Even with missing days, we can still provide a forecast (with degraded quality)
+        if sample_days == 0:
             return {
                 "forecast_available": False,
-                "reason": "Insufficient historical data",
+                "reason": "No historical data available",
                 "quality_level": "unavailable",
-                "quality_description": "样本不足，无法提供预测",
+                "quality_description": "无历史数据，无法提供预测",
                 "quality_metrics": {
                     "sample_days": sample_days,
-                    "missing_days": 30 - sample_days,
-                    "window_days": FORECAST_WINDOW_DAYS,
+                    "missing_days": continuous_data.missing_days,
+                    "window_days": window.days,
                 },
                 "horizon_days": days,
+                "history_window": {
+                    "start_date": continuous_data.start_date,
+                    "end_date": continuous_data.end_date,
+                    "total_days": continuous_data.total_days,
+                    "missing_days": continuous_data.missing_days,
+                    "first_activity_date": continuous_data.first_activity_date,
+                },
                 # Backward compatibility
                 "confidence": None,
                 "_deprecated_note": "confidence 字段将废弃，请迁移至 quality_level 和 quality_metrics",
             }
 
-        # Calculate quality metrics
-        missing_days = self._count_missing_days(historical_data, 30)
-        base_wape = self._calculate_backtest_wape(historical_data)
-        adjusted_wape = self._apply_horizon_decay(base_wape, days) if base_wape else None
-        outlier_count, outlier_ratio = self._detect_outliers(historical_data)
-
-        # Calculate coefficient of variation
-        tokens = [d.get("tokens", 0) for d in historical_data]
-        if tokens and sum(tokens) > 0:
-            mean_tokens = sum(tokens) / len(tokens)
-            std_tokens = (sum((t - mean_tokens) ** 2 for t in tokens) / len(tokens)) ** 0.5
-            cv = std_tokens / mean_tokens if mean_tokens > 0 else 0.0
+        # Calculate quality based on missing days ratio
+        missing_ratio = continuous_data.missing_days / continuous_data.total_days
+        if continuous_data.missing_days >= MISSING_DAYS_THRESHOLD_UNAVAILABLE:
+            quality_level = "unavailable"
+            quality_desc = "缺失天数过多，无法提供可靠预测"
+        elif continuous_data.missing_days >= MISSING_DAYS_THRESHOLD_DEGRADED:
+            quality_level = "fair"
+            quality_desc = (
+                f"数据部分缺失（{continuous_data.missing_days}天无记录），预测精度可能降低"
+            )
         else:
-            cv = 0.0
+            quality_level = "quality"
+            quality_desc = "基于连续日历日的移动平均预测"
 
-        # Assess quality
-        quality_level, quality_desc, confidence = self._assess_forecast_quality(
-            adjusted_wape, sample_days, missing_days, outlier_ratio
-        )
+        # Extract tokens and requests for moving average
+        tokens = [d[1] for d in continuous_data.data]
+        requests = [d[2] for d in continuous_data.data]
 
-        # Simple moving average forecast using last 7 days
-        forecast_tokens = [d.get("tokens", 0) for d in historical_data[-7:]]
-        forecast_requests = [d.get("requests", 0) for d in historical_data[-7:]]
-
-        avg_tokens = sum(forecast_tokens) / len(forecast_tokens) if forecast_tokens else 0
-        avg_requests = sum(forecast_requests) / len(forecast_requests) if forecast_requests else 0
+        # Calculate moving average
+        avg_tokens = calculate_moving_average(tokens, window.days) or 0
+        avg_requests = calculate_moving_average(requests, window.days) or 0
 
         # Generate forecast dates
+        business_dt = datetime.strptime(business_date, "%Y-%m-%d")
         forecast_dates = []
         for i in range(1, days + 1):
-            forecast_dates.append(
-                (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=i)).strftime(
-                    "%Y-%m-%d"
-                )
-            )
-
-        # Build quality description with horizon info
-        if adjusted_wape is not None and days > FORECAST_WINDOW_DAYS:
-            quality_desc = f"{quality_desc}，{days}天预测回测误差约{adjusted_wape*100:.0f}%"
-        elif base_wape is not None:
-            quality_desc = f"{quality_desc}，历史回测误差约{base_wape*100:.0f}%"
+            forecast_dates.append((business_dt + timedelta(days=i)).strftime("%Y-%m-%d"))
 
         result = {
             "forecast_available": True,
+            "algorithm_version": FORECAST_ALGORITHM_VERSION,
             "method": "moving_average",
             "period_days": days,
             "horizon_days": days,
@@ -1023,24 +1000,22 @@ class UsageAnalytics:
             "quality_level": quality_level,
             "quality_description": quality_desc,
             "quality_metrics": {
-                "backtest_wape": round(base_wape, 4) if base_wape else None,
-                "horizon_adjusted_wape": round(adjusted_wape, 4) if adjusted_wape else None,
                 "sample_days": sample_days,
-                "window_days": FORECAST_WINDOW_DAYS,
-                "missing_days": missing_days,
-                "coefficient_of_variation": round(cv, 4),
-                "outlier_count": outlier_count,
-                "outlier_ratio": round(outlier_ratio, 4),
+                "window_days": window.days,
+                "missing_days": continuous_data.missing_days,
+                "missing_ratio": round(missing_ratio, 4),
+            },
+            "history_window": {
+                "start_date": continuous_data.start_date,
+                "end_date": continuous_data.end_date,
+                "total_days": continuous_data.total_days,
+                "missing_days": continuous_data.missing_days,
+                "first_activity_date": continuous_data.first_activity_date,
             },
             # Backward compatibility (deprecated)
-            "confidence": confidence,
-            "_confidence_mapping": {
-                "quality": 0.9,
-                "satisfactory": 0.7,
-                "fair": 0.5,
-                "poor": 0.3,
-                "unavailable": None,
-            },
+            "confidence": (
+                0.9 if quality_level == "quality" else 0.7 if quality_level == "fair" else None
+            ),
             "_deprecated_note": "confidence 字段将废弃，请迁移至 quality_level 和 quality_metrics",
         }
 

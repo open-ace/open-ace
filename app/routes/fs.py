@@ -10,17 +10,17 @@ Used by project selector UI to browse directories.
 import logging
 import mimetypes
 import os
-import platform
 import pwd
 import re
+import stat
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import IO, Any, cast
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
+from app.utils.path_guard import SHARED_NAMESPACE_DIRNAME, is_valid_path, shared_project_path_error
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
     OPENACE_RM_WRAPPER,
@@ -45,39 +45,8 @@ MAX_UPLOAD_SIZE_MB = int(os.environ.get("OPENACE_MAX_UPLOAD_SIZE_MB", "100"))
 
 # Filename sanitization: strip control chars and path separators. We use
 # basename() upstream too, but this defends in depth against embedded
-# separators / NULs that could slip past naive handling.
+# separators / NULs that can slip past naive handling.
 _UNSAFE_FILENAME_CHARS = re.compile(r"[\x00-\x1f\\/:]")
-
-# System-sensitive directories blacklist (Linux/Mac)
-# These directories should never be writable by users to prevent system damage
-BLACKLISTED_PATHS = [
-    "/etc",  # System configuration
-    "/bin",  # Binary executables
-    "/sbin",  # System binaries
-    "/usr",  # All user system files (covers /usr/bin, /usr/sbin, /usr/lib, etc.)
-    "/usr/local",  # User-installed software
-    "/usr/share",  # Shared data files
-    "/root",  # Root user home
-    "/boot",  # Boot files
-    "/dev",  # Device files
-    "/proc",  # Process information
-    "/sys",  # System information
-    "/var",  # System variable data (covers /var/log, /var/lib, etc.)
-    "/opt",  # Optional software packages
-    "/tmp",  # Temporary files (security risk for arbitrary creation)
-    "/lib",  # Shared libraries
-    "/lib64",  # 64-bit libraries
-]
-
-# Resolved blacklist used for matching: each literal is canonicalized through
-# realpath so symlinked entries still match. On macOS /etc → /private/etc,
-# /var → /private/var, /tmp → /private/tmp; without this, a path like /etc
-# (realpath /private/etc) would slip past the literal /etc check. Keep both the
-# literal (for readability/docs above) and its realpath here.
-_BLACKLISTED_RESOLVED = {
-    *BLACKLISTED_PATHS,
-    *(os.path.realpath(p) for p in BLACKLISTED_PATHS),
-}
 
 
 @fs_bp.before_request
@@ -118,17 +87,17 @@ def _authenticate_user():
 
         manager = get_webui_manager()
         if manager:
-            valid, user_id, error = manager.validate_token(url_token)
-            if valid and user_id:
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    g.user = user
-                    g.user_id = user_id
-                    g.user_role = user.get("role")
-                    password_change_response = enforce_password_change_requirement(user)
-                    if password_change_response is not None:
-                        return password_change_response
-                    return None
+            # R-12 (#3379 review): the validating lookup returns the user row
+            # — no second get_user_by_id on this path.
+            valid, user_id, error, user = manager.validate_token_with_user(url_token)
+            if valid and user_id and user:
+                g.user = user
+                g.user_id = user_id
+                g.user_role = user.get("role")
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
+                return None
 
     return jsonify({"error": "Authentication required"}), 401
 
@@ -194,11 +163,12 @@ def get_webui_user():
     if not manager:
         return None, {"error": "WebUI manager not available"}, 500
 
-    valid, user_id, error = manager.validate_token(token)
-    if not valid or user_id is None:
+    # R-12 (#3379 review): the validating lookup returns the user row — no
+    # second get_user_by_id on this path.
+    valid, user_id, error, user = manager.validate_token_with_user(token)
+    if not valid or user_id is None or user is None:
         return None, {"error": error}, 401
 
-    user = user_repo.get_user_by_id(user_id)
     return user, None, 200
 
 
@@ -234,58 +204,6 @@ def get_home_directory(user=None):
     return str(Path.home())
 
 
-def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
-    """Check if path is valid for browsing.
-
-    Optionally restricts the resolved path to a list of allowed prefix
-    directories (e.g. workspace base dir). If allowed_prefixes is None,
-    no prefix restriction is applied (backward compatible).
-
-    Also checks against system-sensitive directory blacklist to prevent
-    users from writing to /etc, /bin, /root, etc.
-    """
-    if not path:
-        return False
-
-    # Check for path traversal in the original input
-    if ".." in path:
-        return False
-
-    # Platform-specific validation for original path
-    system = platform.system()
-    if system == "Windows":
-        # Windows: must be a valid drive path
-        if not (len(path) >= 2 and path[1] == ":"):
-            return False
-    else:
-        # Mac/Linux: must start with / (absolute path required)
-        if not path.startswith("/"):
-            return False
-
-    # Resolve to absolute path, following symlinks to detect traversal
-    try:
-        abs_path = os.path.realpath(path)
-    except Exception:
-        return False
-
-    # Blacklist check for Linux/Mac - protect system directories
-    if system != "Windows":
-        for blocked in _BLACKLISTED_RESOLVED:
-            if abs_path == blocked or abs_path.startswith(blocked + os.sep):
-                return False
-
-    # Restrict resolved path to allowed prefixes if provided.
-    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
-    if allowed_prefixes:
-        if not any(
-            abs_path == prefix or abs_path.startswith(prefix + os.sep)
-            for prefix in allowed_prefixes
-        ):
-            return False
-
-    return True
-
-
 def _sanitize_filename(name: str) -> str | None:
     """Return a safe basename, or None if the name is unusable.
 
@@ -302,18 +220,339 @@ def _sanitize_filename(name: str) -> str | None:
     return base
 
 
-def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None]:
+# --- Symlink-safe file primitives (Issue #3410) ----------------------------
+# The upload target must never be derived with realpath(): realpath follows a
+# symlink at the FINAL component, so a user who plants <own home>/x -> <other
+# user>/x and uploads "x" made the root branch (which bypasses DAC) overwrite
+# another user's file. The fix is structural, not another string check: descend
+# from the user's home root one component at a time with O_NOFOLLOW|O_DIRECTORY
+# (no symlink below the home root is ever traversed), then create + rename
+# RELATIVE TO THAT DIRECTORY FD. renameat(2) replaces the directory ENTRY,
+# never a symlink's target, which also closes the TOCTOU window between
+# "validate the path" and "write the path".
+#
+# The read side uses the same descent (#3410 review round 1). download,
+# delete-file and search validated a realpath'd path and then acted on it BY
+# PATH, so on the root branch a directory swapped for a symlink between the
+# check and the open/unlink/walk made root read, delete or list anything on the
+# host. They now open, unlink and walk relative to descended directory fds.
+#
+# Trust anchor: the descent starts at realpath(<home root>). The workspace base
+# dir is root-owned 0755 (docker-entrypoint.sh) and /home is chmod 755, so an
+# unprivileged user cannot replace <base>/<account> itself; the root branch
+# additionally asserts the anchor's ownership at runtime. The account component
+# is resolved, but that does NOT let an operator move a home onto an arbitrary
+# volume: request paths are realpath'd and then prefix-checked against the base
+# dirs AS CONFIGURED, so a home that resolves outside every configured base is
+# rejected before this code runs. Point <base>/<account> only at a location
+# inside a configured base (or list the volume in WORKSPACE_BASE_DIR). See
+# docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4 "Deployment preconditions".
+
+_UPLOAD_TMP_PREFIX = ".openace-upload-"
+
+# Machine-readable capability markers emitted by scripts/openace-write-as.sh and
+# scripts/openace-rm.sh. Keep each literal in sync with its wrapper (a test
+# asserts the files agree).
+_WRITE_AS_CAPABILITY_SENTINEL = "openace-write-as-capability: symlink-refusal=1"
+_RM_CAPABILITY_SENTINEL = "openace-rm-capability: account-scoped=1"
+_WRAPPER_CAPABILITY_CACHE: dict[tuple[str, str], tuple[tuple[int, int, int, int], bool]] = {}
+
+
+class _UploadOwnershipError(Exception):
+    """Raised when the post-write fchown to the target account fails.
+
+    A distinct type so the route can answer 500 "cannot set ownership" without
+    swallowing a genuine EACCES from open()/write() (which must stay a 403).
+    """
+
+
+def _open_dir_under_home(resolved_dir: str, home: str, expect_uid: int | None = None) -> int:
+    """Return an O_DIRECTORY fd for *resolved_dir*, reached without following symlinks.
+
+    Descends from ``realpath(home)`` component by component with O_NOFOLLOW.
+    Raises ValueError when *resolved_dir* is not inside *home*, or OSError when
+    a component is a symlink or missing (ELOOP on Linux, ENOTDIR on macOS —
+    both mean "refused").
+
+    *expect_uid* (root branch only) turns the trust anchor into a runtime
+    assertion: the HOME ROOT the descent starts from must belong to the target
+    account. It is checked on the FIRST fd, before any descent — asserting on
+    the returned (leaf) fd would reject a perfectly normal root-owned
+    SUBdirectory inside a correctly-owned home.
+    """
+    home_real = os.path.realpath(home)
+    if resolved_dir != home_real and not resolved_dir.startswith(home_real + os.sep):
+        raise ValueError("Path must be inside your home directory")
+    rel = os.path.relpath(resolved_dir, home_real)
+    fd = os.open(home_real, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        if expect_uid is not None and os.fstat(fd).st_uid != expect_uid:
+            raise _RootAnchorError(f"Home root {home_real} is not owned by the target account")
+        if rel != os.curdir:
+            for part in rel.split(os.sep):
+                if not part or part in (os.curdir, os.pardir):
+                    raise ValueError("Path must be inside your home directory")
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _entry_kind(dir_fd: int, name: str) -> str:
+    """Classify *name* inside *dir_fd* without following it: link|dir|other|absent.
+
+    ``os.lstat`` accepts ``dir_fd`` even though it is absent from
+    ``os.supports_dir_fd`` (it is ``stat(..., follow_symlinks=False)``). The
+    DIRECTORY case matters: ``renameat`` onto a directory fails with
+    EISDIR/ENOTEMPTY and would surface as a generic 500, while the wrapper
+    branch's ``mv`` would move the temp file INTO it. Both branches answer the
+    same 400 instead.
+    """
+    try:
+        st = os.lstat(name, dir_fd=dir_fd)
+    except OSError:
+        return "absent"
+    if stat.S_ISLNK(st.st_mode):
+        return "link"
+    if stat.S_ISDIR(st.st_mode):
+        return "dir"
+    return "other"
+
+
+class _NotARegularFile(Exception):
+    """The entry a per-file operation names is not a regular file."""
+
+
+class _RootAnchorError(ValueError):
+    """The root branch cannot assert who owns the home root; refuse the operation."""
+
+
+def _root_anchor_uid(system_account: str | None) -> int | None:
+    """The uid the home root must belong to before a ROOT process acts below it.
+
+    None when no assertion applies: a non-root process is bounded by DAC
+    already, and a user without a system_account has no per-account uid to
+    compare (``_home_roots_for_user`` refuses the one unsafe case, a username
+    that is another user's system_account). Raises ``_RootAnchorError`` when
+    the account cannot be resolved.
+    """
+    if os.geteuid() != 0 or not system_account:
+        return None
+    ids = _resolve_uid_gid(system_account)
+    if ids is None:
+        raise _RootAnchorError(f"cannot resolve uid for {system_account}")
+    return ids[0]
+
+
+def _open_parent_under_home(target_path: str, home: str, expect_uid: int | None) -> tuple[int, str]:
+    """``(parent dir fd, basename)`` for a file strictly below *home*.
+
+    *target_path* is already realpath'd and home-locked; the parent is reached
+    with ``_open_dir_under_home`` so no symlink below the home root is
+    followed. The home root itself is never a file.
+    """
+    if target_path == os.path.realpath(home):
+        raise _NotARegularFile(target_path)
+    name = os.path.basename(target_path)
+    if not name or name in (os.curdir, os.pardir):
+        raise ValueError("Path must be inside your home directory")
+    parent_fd = _open_dir_under_home(os.path.dirname(target_path), home, expect_uid=expect_uid)
+    return parent_fd, name
+
+
+def _open_file_under_home(target_path: str, home: str, expect_uid: int | None = None) -> int:
+    """Read-only fd for the REGULAR file *target_path*, reached without symlinks.
+
+    ``O_NOFOLLOW`` refuses a symlink at the final component (ELOOP) and
+    ``O_NONBLOCK`` keeps a FIFO planted under the name from hanging the
+    request in ``open()``; the fd is switched back to blocking once
+    ``fstat`` proves it is a regular file. Raises ``_NotARegularFile``,
+    ``ValueError`` or ``OSError``.
+    """
+    parent_fd, name = _open_parent_under_home(target_path, home, expect_uid)
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise _NotARegularFile(target_path)
+        os.set_blocking(fd, True)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _unlink_file_under_home(target_path: str, home: str, expect_uid: int | None = None) -> None:
+    """Remove the REGULAR file *target_path* via ``unlinkat`` on a descended parent fd.
+
+    If the entry is swapped for a symlink after the ``lstat``, ``unlinkat``
+    removes the link itself (it never follows the final component); a swap to
+    a directory fails with EISDIR/EPERM. Raises ``_NotARegularFile``,
+    ``ValueError`` or ``OSError``.
+    """
+    parent_fd, name = _open_parent_under_home(target_path, home, expect_uid)
+    try:
+        if not stat.S_ISREG(os.lstat(name, dir_fd=parent_fd).st_mode):
+            raise _NotARegularFile(target_path)
+        os.unlink(name, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _iter_file_chunks(fh: IO[bytes]):
+    """Yield 64KB chunks of an already-open file and close it at the end."""
+    try:
+        while True:
+            chunk = fh.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        fh.close()
+
+
+def _fchown_to_user(fd: int, system_account: str | None) -> bool:
+    """Change *fd*'s owner to *system_account*; True when done or not needed.
+
+    The fd form of ``_chown_to_user`` (fchown): it cannot be redirected by a
+    path swap.
+    Non-root callers reach this only on the direct-access branch, where the
+    process IS the target user and the file is already owned correctly.
+    """
+    if not system_account or os.geteuid() != 0:
+        return True
+    ids = _resolve_uid_gid(system_account)
+    if ids is None:
+        return False
+    try:
+        os.fchown(fd, ids[0], ids[1])
+        return True
+    except OSError as e:
+        logger.warning(f"fchown to {system_account} failed: {e}")
+        return False
+
+
+def _write_file_in_dir(dir_fd: int, name: str, upload, system_account: str | None) -> None:
+    """Write *upload* to *name* inside *dir_fd*: temp file -> fchown -> renameat.
+
+    Every step is relative to *dir_fd* with O_NOFOLLOW, so nothing outside the
+    already-proven directory can be touched. ``os.rename`` (POSIX ``renameat``)
+    atomically replaces the directory entry — including an entry that is a
+    symlink, whose target is left untouched. ``os.replace`` is NOT used: it is
+    absent from ``os.supports_dir_fd`` on macOS, and POSIX ``rename`` already
+    has replace semantics.
+
+    Raises _UploadOwnershipError on chown failure, OSError otherwise; the temp
+    entry is always removed.
+    """
+    tmp_name = f"{_UPLOAD_TMP_PREFIX}{os.urandom(8).hex()}.tmp"
+    fd = os.open(
+        tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd
+    )
+    try:
+        with os.fdopen(fd, "wb") as out:
+            fd = -1  # ownership transferred to the file object
+            upload.save(out)
+            out.flush()
+            os.fsync(out.fileno())
+            if not _fchown_to_user(out.fileno(), system_account):
+                raise _UploadOwnershipError(name)
+        os.rename(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+
+
+def _wrapper_has_capability(wrapper: str, sentinel: str) -> bool:
+    """Whether the INSTALLED *wrapper* carries the #3410 marker *sentinel*.
+
+    The wrappers are root-owned 0755, so this is a plain read — no sudo, no
+    fork. Memoized per (wrapper, sentinel) on (mtime, size, inode, device) so a
+    re-install — including an ``install``/hardlink swap that preserved the
+    mtime — is picked up without a restart.
+    """
+    try:
+        st = os.stat(wrapper)
+        key = (st.st_mtime_ns, st.st_size, st.st_ino, st.st_dev)
+    except OSError:
+        return False
+    cached = _WRAPPER_CAPABILITY_CACHE.get((wrapper, sentinel))
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    try:
+        with open(wrapper, encoding="utf-8", errors="replace") as fh:
+            ok = sentinel in fh.read()
+    except OSError as e:
+        logger.warning(f"Cannot read {wrapper} for capability check: {e}")
+        ok = False
+    _WRAPPER_CAPABILITY_CACHE[(wrapper, sentinel)] = (key, ok)
+    return ok
+
+
+def _write_as_wrapper_enforces_symlink_refusal() -> bool:
+    """Whether the INSTALLED openace-write-as carries the #3410 hardening.
+
+    On package non-root multi-user deployments the web process cannot traverse
+    the target user's 0700 home, so the wrapper — not this process — is the
+    symlink enforcement point. A host still running a pre-#3410 wrapper
+    (``readlink -f`` on the target, then ``tee`` through it) would otherwise
+    keep the escalation while the capability contract reports
+    ``filesystem_api: enforced``. The route refuses the upload instead, so the
+    contract's claim holds for every deployment: either the wrapper enforces,
+    or uploads do not happen.
+    """
+    return _wrapper_has_capability(OPENACE_WRITE_AS_WRAPPER, _WRITE_AS_CAPABILITY_SENTINEL)
+
+
+def _rm_wrapper_is_account_scoped() -> bool:
+    """Whether the INSTALLED openace-rm probes and deletes AS the target user.
+
+    The delete-file counterpart of the write-as gate (#3410 review): a
+    pre-#3410 openace-rm validated the path and then ran ``rm`` as root, so a
+    parent swapped for a symlink in between made root delete another user's
+    file. Deletes are refused unless the installed copy says otherwise.
+    """
+    return _wrapper_has_capability(OPENACE_RM_WRAPPER, _RM_CAPABILITY_SENTINEL)
+
+
+def _reset_write_as_capability_cache() -> None:
+    """Clear the wrapper-capability memo (test isolation only).
+
+    A module-level cache would otherwise persist across tests in the same
+    xdist worker — same pattern as
+    ``workspace_isolation_contract._reset_sandbox_runtime_verification``.
+    """
+    _WRAPPER_CAPABILITY_CACHE.clear()
+
+
+def _resolve_user_owned_path(
+    target_dir: str, user, isolation_level: str | None = None
+) -> tuple[str, str | None, str]:
     """Validate and resolve a directory the user wants to operate on.
 
     Combines two guards:
     1. is_valid_path — base_dirs prefix + system blacklist (existing reuse).
     2. Home subtree lock (Issue #1813) — target must be inside the current
        user's home directory, so users cannot touch each other's files in
-       multi-user deployments.
+       multi-user deployments. Issue #3410: the lock is now the SAME per-base
+       root set browse uses (``_home_roots_for_write``), not the single-base
+       ``get_home_directory()``.
 
-    Returns (resolved_abs_dir, system_account). system_account is None when
-    the process already runs as the target user (no chown needed) — see
-    get_effective_system_account.
+    Returns (resolved_abs_dir, system_account, matched_home_root).
+    system_account is None when the process already runs as the target user
+    (no chown needed) — see get_effective_system_account. The matched home
+    root is returned so callers do not re-derive it (in Docker multi-user
+    ``get_home_directory`` forks a ``sudo -u <user> test -e`` per call).
     """
     if not target_dir:
         raise ValueError("Path is required")
@@ -325,13 +564,345 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None]:
 
     resolved = os.path.realpath(target_dir)
 
-    # Home subtree lock: must equal home or live directly beneath it.
-    home = get_home_directory(user)
-    if resolved != home and not resolved.startswith(home + os.sep):
+    # Home subtree lock: must equal one of the user's per-base home roots or
+    # live beneath it.
+    home_root = next(
+        (
+            root
+            for root in _home_roots_for_write(user, isolation_level)
+            if resolved == root or resolved.startswith(root + os.sep)
+        ),
+        None,
+    )
+    if home_root is None:
         raise ValueError("Path must be inside your home directory")
 
     system_account = (user.get("system_account") if user else None) or None
-    return resolved, system_account
+    return resolved, system_account, home_root
+
+
+def _is_within_any_root(resolved: str, roots: list[str]) -> bool:
+    """Boundary-safe containment: equal or beneath (path-separator aware)."""
+    return any(root and (resolved == root or resolved.startswith(root + os.sep)) for root in roots)
+
+
+def _home_roots_for_user(user, isolation_level: str | None = None) -> list[str]:
+    """Per-base home roots for the user (review round 1, #3376).
+
+    One root per configured workspace base dir: ``<base>/<account>`` where
+    account = system_account or username. WORKSPACE_BASE_DIR may be a
+    comma-separated list (``/a,/b``); the previous single-base resolution
+    produced the literal path ``/a,/b/<account>`` and locked browse out
+    entirely on multi-root deployments. Users with neither system_account
+    nor username get NO root (empty list) instead of the process home: an
+    identity-less user has no home subtree to browse.
+
+    Issue #3410 review: two more accounts get no root.
+    - An account named ``shared`` (system_account or username): ``<base>/shared``
+      is the shared-project NAMESPACE ROOT, holding every tenant's shared
+      projects, not a home. Usernames come from SSO and org sync too, and
+      nothing reserves this one.
+    - On a ROOT process, a user WITHOUT a system_account whose username is
+      another user's system_account. Their username-derived
+      ``<base>/<username>`` IS that user's home, and root would act inside it
+      on their behalf. No ownership check can tell the two apart: both names
+      resolve to the same OS account.
+
+    Issue #3420: isolation-aware home roots.
+    When isolation_level is 'sandboxed', force base dir to /workspace (OpenSandbox
+    security policy requires all mounts under /workspace). Otherwise, use
+    WORKSPACE_BASE_DIR environment variable.
+
+    Args:
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
+            If None or not 'sandboxed', uses WORKSPACE_BASE_DIR (backward compatible).
+
+    Returns:
+        List of home root paths for the user.
+    """
+    user = user or {}
+    account = user.get("system_account") or user.get("username")
+    if not account:
+        return []
+    if account == SHARED_NAMESPACE_DIRNAME:
+        logger.warning(
+            "No /fs home for user %s: '%s' is the shared-project namespace root; "
+            "rename the account",
+            user.get("id"),
+            account,
+        )
+        return []
+    if (
+        not user.get("system_account")
+        and os.geteuid() == 0
+        and _username_is_another_users_account(user)
+    ):
+        return []
+
+    # Issue #3420: Choose base dirs based on isolation level
+    # Lazy import to avoid breaking E2E test isolation
+    from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+    if isolation_level == ISOLATION_LEVEL_SANDBOXED:
+        # sandboxed mode: force /workspace (OpenSandbox security policy)
+        base_dirs = ["/workspace"]
+    else:
+        # os_user or None: use environment variable configuration
+        base_dirs = get_workspace_base_dirs()
+
+    return [os.path.realpath(f"{base.rstrip('/')}/{account}") for base in base_dirs]
+
+
+def _username_is_another_users_account(user: dict) -> bool:
+    """Whether some OTHER user's system_account equals this user's username.
+
+    Inactive rows count: a deactivated user's home and files still exist.
+    Enumeration failures are logged and read as "no collision", the same
+    fail-open posture as ``_all_user_home_dirs``.
+    """
+    username = user.get("username")
+    try:
+        rows = user_repo.get_all_users(include_inactive=True) or []
+    except Exception as e:
+        logger.warning("Failed to enumerate users for the unmapped-account check: %s", e)
+        return False
+    for row in rows:
+        if (
+            isinstance(row, dict)
+            and row.get("system_account") == username
+            and row.get("id") != user.get("id")
+        ):
+            logger.warning(
+                "No /fs home for user %s: the username is user %s's system_account",
+                user.get("id"),
+                row.get("id"),
+            )
+            return True
+    return False
+
+
+def _home_roots_for_write(user, isolation_level: str | None = None) -> list[str]:
+    """Home roots the /fs per-file paths lock to (Issue #3410).
+
+    upload / download / delete-file / search used ``get_home_directory()`` —
+    the pre-#3376 single-base helper, which yields the literal
+    ``"/a,/b/<account>"`` on a comma-separated WORKSPACE_BASE_DIR and locks
+    those endpoints out entirely (the exact bug #3376 fixed for browse). They
+    now use the same per-base roots browse does. ``get_home_directory()``
+    stays IN the set so a deployment or test that overrides it keeps working;
+    on a single-base deployment the two are the same path. An identity-less
+    user gets NO root — the process-home fallback #3376 removed from browse is
+    NOT resurrected here.
+
+    NOTE: shared project roots are deliberately NOT included — browse and
+    check-path can reach a shared project, but per-file writes and downloads
+    stay home-only. Widening that is a feature, not part of #3410.
+
+    Issue #3420: Pass isolation_level to _home_roots_for_user.
+
+    Args:
+        user: User dict with system_account/username.
+        isolation_level: Current isolation level from session (optional).
+    """
+    roots = _home_roots_for_user(user, isolation_level)
+    if not roots:
+        return []
+    legacy = get_home_directory(user)
+    if legacy:
+        legacy = os.path.realpath(legacy)
+        if legacy not in roots:
+            roots.append(legacy)
+    return roots
+
+
+def _primary_home_root(user, isolation_level: str | None = None) -> str | None:
+    """The single home path the /fs endpoints REPORT (not the lock set).
+
+    ``/api/fs/home``, ``/api/fs/browse``'s ``homePath`` + not-found fallback,
+    and ``/api/fs/search``'s default root all used ``get_home_directory()``
+    directly, so on a comma-separated WORKSPACE_BASE_DIR they returned or
+    consumed the literal ``"/a,/b/<account>"`` — a path the lock then rejects.
+    ``api_browse_directory`` already does exactly this for its default path;
+    these three now share it.
+
+    None for an identity-less user, so callers answer the same 400 browse
+    already gives ("No home directory available for this user") instead of
+    handing the UI a path every other endpoint rejects.
+
+    Issue #3420: Pass isolation_level to _home_roots_for_write.
+
+    Args:
+        user: User dict
+        isolation_level: Current isolation level from session (optional).
+    """
+    roots = _home_roots_for_write(user, isolation_level)
+    return roots[0] if roots else None
+
+
+def _all_user_home_dirs(base_dirs: list[str]) -> list[str]:
+    """Every user's per-base home path (``<base>/<account>``), review round 2 (#3376).
+
+    Shared by the shared-root read filter and the check-path first-level
+    home determination. Enumeration failures are logged and yield an empty
+    list (fail open — same posture as round 1): with no homes known the
+    equal/ancestor rule still applies, only the subtree rule goes vacuous.
+    """
+    try:
+        rows = user_repo.get_all_users(include_inactive=True) or []
+    except Exception as e:
+        logger.warning("Failed to enumerate users for shared root filter: %s", e)
+        return []
+    home_dirs: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        account = row.get("system_account") or row.get("username")
+        if account:
+            home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
+    return home_dirs
+
+
+def _shared_root_rejection_reason(path, home_dirs: list[str] | None = None) -> str | None:
+    """Filter one shared-project root against the topology rule; None = accept.
+
+    Review round 1 (#3376): defense in depth for historical rows — a shared
+    project whose path is a workspace base dir or an ancestor of any user's
+    home would re-open other users' homes to the whole tenant even though
+    ``api_create_project`` now rejects creating such rows.
+
+    Review round 2 (#3376, 3994613216): the round-1 ``needs_home_check``
+    fast path only enumerated users when the candidate was a base dir or a
+    FIRST-LEVEL child of one, so ``<base>/<account>/.ssh``-style rows (home
+    descendants, any depth) slipped through and stayed tenant-browsable.
+    The home-subtree rule now applies at ANY depth, so users are enumerated
+    for every candidate that sits inside a workspace base dir; callers
+    filtering several candidates pass a pre-computed *home_dirs* so the
+    user enumeration happens once instead of once per candidate.
+
+    Rejections are logged as WARNING so operators can clean the projects
+    table.
+
+    Review round 3 (#3376, PR #3380): rule unchanged — the first-class
+    shared namespace ``<base>/shared/<name>`` (new registrations, see
+    ``shared_project_path_error``) lies OUTSIDE every user home subtree,
+    so it passes this filter without special-casing. Only a namespace
+    that collides with a real user home (an account literally named
+    ``shared``) is dropped here — the creation side already rejects it,
+    this covers rows written by other means.
+    """
+    if not isinstance(path, str) or not path:
+        return "shared project path must be a non-empty string"
+    base_dirs = get_workspace_base_dirs()
+    resolved = os.path.realpath(path)
+    under_any_base = any(
+        resolved == os.path.realpath(base) or resolved.startswith(os.path.realpath(base) + os.sep)
+        for base in base_dirs
+    )
+    if home_dirs is None:
+        # Only candidates inside a base dir can pass the prefix check inside
+        # shared_project_path_error; everything else is rejected before the
+        # home rules run, so skip the user query for it.
+        home_dirs = _all_user_home_dirs(base_dirs) if under_any_base else []
+    reason = shared_project_path_error(path, base_dirs, home_dirs)
+    if reason:
+        logger.warning(
+            "Shared project root rejected by home lock (legacy/dirty row?): %s (%s)",
+            path,
+            reason,
+        )
+    return reason
+
+
+def _allowed_roots_for_user(user) -> list[str]:
+    """Roots a user may browse (Issue #3376; review rounds 1+2).
+
+    Own home roots (one per workspace base dir — see ``_home_roots_for_user``)
+    plus the tenant's explicitly shared project paths, both realpath'd so
+    they compare equal against already-resolved request paths. Shared paths
+    are re-filtered against the shared-project topology rule
+    (``_shared_root_rejection_reason``) so historical rows cannot widen the
+    lock. User homes are enumerated at most once per call, and only when
+    the tenant actually has shared project rows.
+
+    check-path does NOT use this set directly: its exists/canCreate probes
+    are one-at-a-time enumeration and are narrowed further by
+    ``_check_path_rejection_reason`` (review round 2).
+    """
+    roots = _home_roots_for_user(user)
+    try:
+        from app.repositories.project_repo import ProjectRepository
+
+        tenant_id = (user or {}).get("tenant_id")
+        if tenant_id is not None:
+            home_dirs: list[str] | None = None
+            for candidate in ProjectRepository().get_shared_project_paths(tenant_id):
+                if home_dirs is None:
+                    # Lazy: no shared rows → no user enumeration at all.
+                    home_dirs = _all_user_home_dirs(get_workspace_base_dirs())
+                if (
+                    _shared_root_rejection_reason(candidate, home_dirs) is None
+                    and candidate not in roots
+                ):
+                    roots.append(candidate)
+    except Exception as e:
+        logger.warning("Failed to load shared project roots: %s", e)
+    return roots
+
+
+def _check_path_rejection_reason(resolved: str, user) -> str | None:
+    """check-path admissibility predicate; None = admissible (round 2, #3376).
+
+    Review round 2 (#3376, 3994613308): admitting the whole workspace base
+    dirs (round 1's ``include_base_dirs``) let any user probe exists/
+    canCreate under OTHER users' homes one path at a time — existence
+    disclosure is enumeration. The #2317 flow only needs to validate the
+    one path the user is about to create, so the admissible set is:
+
+    1. inside the user's own home roots or shared project roots — any
+       depth (same set as browse);
+    2. a workspace base dir itself — the single point backing "create a
+       project directly under the workspace root";
+    3. a FIRST-LEVEL child of a base dir that is not any user's home
+       (e.g. ``<workspace>/new-project`` admissible, ``<workspace>/alice``
+       not) — first-level user-home detection reuses the shared-root
+       user enumeration.
+
+    Anything deeper under a base dir (``<base>/x/y``, ``<base>/<account>/...``)
+    is rejected.
+    """
+    if _is_within_any_root(resolved, _allowed_roots_for_user(user)):
+        return None
+    base_dirs = get_workspace_base_dirs()
+    for base in base_dirs:
+        resolved_base = os.path.realpath(base)
+        if resolved == resolved_base:
+            return None
+        if os.path.dirname(resolved) == resolved_base:
+            home_roots = {os.path.realpath(h) for h in _all_user_home_dirs(base_dirs)}
+            if resolved not in home_roots:
+                return None
+            return "first-level workspace paths that are a user home directory are not validatable"
+    return (
+        "Path must be inside your home directory or a shared project, the workspace "
+        "root itself, or a first-level directory under the workspace root"
+    )
+
+
+def _resolve_uid_gid(system_account: str) -> tuple[int, int] | None:
+    """Resolve ``(uid, gid)`` for *system_account*, or None when unresolvable.
+
+    One ``getpwnam`` lookup (#3410 review). The previous ``id -u``/``id -g``
+    pair forked twice per call and passed the account as argv, so a name
+    starting with ``-`` (which ``validate_username`` admits) was parsed as an
+    option and resolved to the CALLER's ids.
+    """
+    try:
+        entry = pwd.getpwnam(system_account)
+    except (KeyError, TypeError, ValueError) as e:
+        logger.warning(f"Cannot resolve uid/gid for {system_account}: {e}")
+        return None
+    return entry.pw_uid, entry.pw_gid
 
 
 def _chown_to_user(path: str, system_account: str | None) -> bool:
@@ -352,21 +923,10 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
     """
     if not system_account:
         return True
-    try:
-        uid_out = subprocess.run(
-            ["id", "-u", system_account], capture_output=True, text=True, timeout=5
-        )
-        gid_out = subprocess.run(
-            ["id", "-g", system_account], capture_output=True, text=True, timeout=5
-        )
-        if uid_out.returncode != 0 or gid_out.returncode != 0:
-            logger.warning(f"Cannot resolve uid/gid for {system_account}")
-            return False
-        uid = int(uid_out.stdout.strip())
-        gid = int(gid_out.stdout.strip())
-    except Exception as e:
-        logger.warning(f"Cannot resolve uid/gid for {system_account}: {e}")
+    ids = _resolve_uid_gid(system_account)
+    if ids is None:
         return False
+    uid, gid = ids
 
     try:
         if os.geteuid() == 0:
@@ -395,7 +955,9 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
         return False
 
 
-def _resolve_file_in_home(raw_path: str, user) -> tuple[str, str | None] | tuple[None, None]:
+def _resolve_file_in_home(
+    raw_path: str, user
+) -> tuple[str, str | None, str] | tuple[None, None, None]:
     """Validate that *raw_path* resolves to a file inside the user's home subtree.
 
     Single source of truth for download/delete file-path validation. Combines:
@@ -404,22 +966,26 @@ def _resolve_file_in_home(raw_path: str, user) -> tuple[str, str | None] | tuple
 
     realpath() collapses ``..`` and follows symlinks, so a single check on the
     resolved target is sufficient — no need to validate dirname separately.
+    That check only VALIDATES: the direct branch then reaches the resolved
+    path from the returned home root without following symlinks (#3410).
 
-    Returns (resolved_abs_path, system_account), or (None, None) if rejected
-    (caller should return 400 with the reason in the optional second element —
-    kept simple here to match the common case).
+    Returns (resolved_abs_path, system_account, matched_home_root), or
+    (None, None, None) if rejected.
     """
     if not raw_path:
-        return None, None
+        return None, None, None
     base_dirs = get_workspace_base_dirs()
     if not is_valid_path(raw_path, allowed_prefixes=base_dirs):
-        return None, None
+        return None, None, None
     target = os.path.realpath(raw_path)
-    home = get_home_directory(user)
-    if target != home and not target.startswith(home + os.sep):
-        return None, None
+    home_root = next(
+        (root for root in _home_roots_for_write(user) if _is_within_any_root(target, [root])),
+        None,
+    )
+    if home_root is None:
+        return None, None, None
     system_account = (user.get("system_account") if user else None) or None
-    return target, system_account
+    return target, system_account, home_root
 
 
 def _content_disposition_filename(filename: str) -> str:
@@ -585,11 +1151,28 @@ def find_writable_ancestor(
 
 @fs_bp.route("/fs/browse", methods=["GET"])
 def api_browse_directory():
-    """Browse a directory and list subdirectories (and optionally files)."""
+    """Browse a directory and list subdirectories (and optionally files).
+
+    Issue #3420: Return isolation-aware home path.
+    """
     user = g.user
 
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
+
+    # Issue #3420: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
@@ -604,7 +1187,18 @@ def api_browse_directory():
 
     # Handle special path values
     if not path or path.lower() == "home":
-        path = get_home_directory(user)
+        # Review round 1 (#3376, item 8): default to the first per-base home
+        # root instead of get_home_directory()'s single-base (or process-home
+        # fallback) value. An identity-less user has no home root at all and
+        # must be rejected rather than dropped into the process home.
+        # Issue #3420: pass isolation_level
+        home_roots = _home_roots_for_user(user, isolation_level)
+        if not home_roots:
+            return (
+                jsonify({"error": "No home directory available for this user"}),
+                400,
+            )
+        path = home_roots[0]
     else:
         # Validate and resolve path — restrict to workspace base dirs
         base_dirs = get_workspace_base_dirs()
@@ -617,11 +1211,24 @@ def api_browse_directory():
 
         path = os.path.realpath(path)
 
+        # Issue #3376: home subtree lock; explicitly shared project roots
+        # stay reachable (read-side parity with the #1813 write lock).
+        if not _is_within_any_root(path, _allowed_roots_for_user(user)):
+            return (
+                jsonify({"error": "Path must be inside your home directory or a shared project"}),
+                400,
+            )
+
     # Check if path exists and is readable
     dir_info = get_directory_info(path, system_account)
     if not dir_info["exists"]:
-        # Return home directory as fallback
-        home = get_home_directory(user)
+        # Return home directory as fallback. Issue #3410: the per-base root,
+        # not the single-base get_home_directory() (which yields the literal
+        # "/a,/b/<account>" on a comma-separated WORKSPACE_BASE_DIR).
+        # Issue #3420: pass isolation_level
+        home = _primary_home_root(user, isolation_level)
+        if home is None:
+            return jsonify({"error": "No home directory available for this user"}), 400
         # Provide helpful note: directory will be created when project is set up
         fallback_note = f"Directory '{path}' does not exist. It will be created automatically when you create a project here."
         listing = list_subdirectories(home, system_account, include_files=include_files)
@@ -655,13 +1262,19 @@ def api_browse_directory():
     if parent == path:  # Root directory
         parent = None
 
+    # Issue #3410: report the per-base root the lock actually accepts.
+    # Issue #3420: pass isolation_level
+    home_path = _primary_home_root(user, isolation_level)
+    if home_path is None:
+        return jsonify({"error": "No home directory available for this user"}), 400
+
     return jsonify(
         {
             "currentPath": path,
             "parentPath": parent,
             "directories": listing["directories"],
             "files": listing["files"],
-            "homePath": get_home_directory(user),
+            "homePath": home_path,
             "canCreate": dir_info["is_writable"],
         }
     )
@@ -906,6 +1519,27 @@ def api_check_path():
 
     path = os.path.realpath(path)
 
+    # Issue #3376: home subtree lock; explicitly shared project roots stay
+    # reachable (read-side parity with the #1813 write lock). Review round 2
+    # (#3376, 3994613308): round 1 admitted the whole workspace base dirs
+    # here, which re-opened existence probing (exists/canCreate) under other
+    # users' homes one path at a time. The admissible set is now narrowed to
+    # own home/shared roots (any depth), the base dir itself, and first-level
+    # non-home children of a base dir (#2317: creating a project directly
+    # under the workspace root stays validatable). browse keeps the stricter
+    # home-roots-only set ("validatable but not enumerable").
+    reason = _check_path_rejection_reason(path, user)
+    if reason is not None:
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": f"{reason}. Provided path: {path}",
+                }
+            ),
+            400,
+        )
+
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None
 
@@ -954,11 +1588,36 @@ def api_check_path():
 
 @fs_bp.route("/fs/home", methods=["GET"])
 def api_get_home():
-    """Get user's home directory."""
-    user = g.user
+    """Get user's home directory.
 
+    Issue #3420: Return isolation-aware home path.
+    Gets isolation level from WebUIInstance (not session) to match sandbox lifecycle.
+    Falls back to _primary_home_root() if no instance exists.
+    """
+    from app.services.webui_manager import get_webui_manager
+
+    user = g.user
+    user_id = user.get("id")
     system_account = user.get("system_account") if user else None
-    home = get_home_directory(user)
+
+    # Issue #3420: Try to get home path from WebUI instance
+    home = None
+    try:
+        manager = get_webui_manager()
+        instance = manager.get_user_instance(user_id)
+        if instance and instance.isolation_level == "sandboxed":
+            # sandboxed mode: use instance's path
+            home = instance.user_home_path
+    except Exception:
+        # Instance not available, fall back to default
+        pass
+
+    # Fall back to default path calculation
+    if home is None:
+        home = _primary_home_root(user)
+
+    if home is None:
+        return jsonify({"error": "No home directory available for this user"}), 400
     dir_info = get_directory_info(home, system_account)
 
     return jsonify(
@@ -1006,6 +1665,16 @@ def api_create_directory():
         )
 
     dir_path = os.path.realpath(dir_path)
+
+    # Issue #3410: create-directory is a WRITE entry and was the one /fs write
+    # path with no app-layer boundary — it checked only the workspace base
+    # prefix, so a mapped user could target any depth under the base dir and
+    # relied on OS DAC alone. Reuse check-path's admissible set (NOT browse's):
+    # the two are halves of the #2317 flow — validate a path, then create it —
+    # so a path check-path reports creatable must stay creatable here.
+    reason = _check_path_rejection_reason(dir_path, user)
+    if reason is not None:
+        return jsonify({"success": False, "error": f"{reason}. Provided path: {dir_path}"}), 400
 
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
@@ -1111,6 +1780,20 @@ def api_upload_file():
     """
     user = g.user
 
+    # Issue #3420: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     # Cheap pre-filter: reject declared-oversized requests before the body is
     # fully buffered to disk. The Content-Length header can be spoofed, so the
     # authoritative check below still uses the real byte count from seek().
@@ -1139,49 +1822,74 @@ def api_upload_file():
     # Path + home subtree lock
     target_dir = request.form.get("path", "")
     try:
-        resolved_dir, system_account = _resolve_user_owned_path(target_dir, user)
+        resolved_dir, system_account, home_root = _resolve_user_owned_path(
+            target_dir, user, isolation_level
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # Filename + final path re-validation (defends against basename tricks)
+    # Filename + final target (Issue #3410). The target is built by JOINING the
+    # already-home-locked directory with a separator-free sanitized basename —
+    # never by realpath()ing the final component, which would follow a symlink
+    # the user planted in their own home and escape the home lock.
     safe_name = _sanitize_filename(file.filename)
     if not safe_name:
         return jsonify({"error": "Invalid filename"}), 400
-    target_path = os.path.realpath(os.path.join(resolved_dir, safe_name))
-    base_dirs = get_workspace_base_dirs()
-    if not is_valid_path(target_path, allowed_prefixes=base_dirs):
-        return jsonify({"error": "Invalid target path"}), 400
+    target_path = os.path.join(resolved_dir, safe_name)
 
     # Ensure target directory is writable by the process
     dir_info = get_directory_info(resolved_dir, system_account)
     if not dir_info.get("is_writable"):
         return jsonify({"error": "Target directory is not writable"}), 403
 
+    symlink_error = "Target name is a symbolic link; refusing to overwrite it"
+    directory_error = "Target name is an existing directory"
     try:
-        if os.geteuid() == 0 and system_account:
-            # Docker multi-user (root): temp file → chown → atomic rename.
-            # Temp file lives in the same dir so os.replace stays on one
-            # filesystem (rename across mounts is not atomic).
-            fd, tmp_path = tempfile.mkstemp(
-                dir=resolved_dir, prefix=".openace-upload-", suffix=".tmp"
-            )
-            os.close(fd)
+        if _is_direct_access(system_account):
+            # Root (Docker multi-user) or "the process already IS the target
+            # user" (single-user). Both write through a directory fd reached
+            # without following a single symlink below the home root.
+            #
+            # Issue #3410: turn the trust anchor from a documented deployment
+            # assumption into a runtime assertion — in the ONE branch where it
+            # matters (root writes bypass DAC), the HOME ROOT the descent
+            # starts from must really belong to the target account.
+            # <base>/<account> is 0700, so an owner mismatch means the user
+            # cannot traverse their own home: a root-written file there would
+            # be unreachable, and a 400 is more honest than a 200 they cannot
+            # act on. The check lives INSIDE _open_dir_under_home, on the
+            # anchor fd — asserting on the returned leaf fd would reject an
+            # ordinary root-owned SUBdirectory inside a correctly-owned home.
             try:
-                file.save(tmp_path)
-                if not _chown_to_user(tmp_path, system_account):
-                    # chown failed: without it the file would be owned by the
-                    # web (root) process and the target user could not read
-                    # or delete their own upload. Roll back and fail hard.
-                    _safe_remove(tmp_path)
-                    return (
-                        jsonify({"error": "Failed to set file ownership for target user"}),
-                        500,
-                    )
-                os.replace(tmp_path, target_path)
-            except Exception:
-                _safe_remove(tmp_path)
-                raise
-        elif not _is_direct_access(system_account):
+                dir_fd = _open_dir_under_home(
+                    resolved_dir, home_root, expect_uid=_root_anchor_uid(system_account)
+                )
+            except PermissionError as e:
+                # EACCES on a component: the caller may not enter it (#3410 review).
+                logger.warning("Upload refused for %s: %s", resolved_dir, e)
+                return jsonify({"error": "Permission denied"}), 403
+            except (OSError, ValueError) as e:
+                logger.warning("Upload refused for %s: %s", resolved_dir, e)
+                return jsonify({"error": "Invalid target path"}), 400
+            try:
+                kind = _entry_kind(dir_fd, safe_name)
+                if kind == "link":
+                    # The renameat below would be safe anyway (it replaces the
+                    # ENTRY, not the target), but silently destroying a user's
+                    # symlink is a surprise; an explicit refusal is also the
+                    # auditable behaviour the capability contract claims.
+                    return jsonify({"error": symlink_error}), 400
+                if kind == "dir":
+                    return jsonify({"error": directory_error}), 400
+                _write_file_in_dir(dir_fd, safe_name, file, system_account)
+            except _UploadOwnershipError:
+                # Without the chown the file would be owned by the web (root)
+                # process and the target user could not read or delete their
+                # own upload. The temp entry is already removed.
+                return jsonify({"error": "Failed to set file ownership for target user"}), 500
+            finally:
+                os.close(dir_fd)
+        else:
             # Package non-root multi-user: the process is a service account
             # (e.g. openace) that cannot write to /home/<system_account>/...
             # (0700). cp/tee/mv are NOT in the sudoers OPENACE_UTILS
@@ -1189,6 +1897,18 @@ def api_upload_file():
             # to the openace-write-as wrapper, which runs as root via its
             # own sudoers rule and drops to the target user via runuser
             # (Issue #1916). Content is streamed to the wrapper's stdin.
+            #
+            # Issue #3410 — WHERE ENFORCEMENT LIVES on this branch: target_path
+            # is the JOINED (never realpath'd) path, so it is inside the home
+            # subtree by construction. The islink() probe below is BEST-EFFORT
+            # only: this process usually cannot traverse the 0700 home at all,
+            # and os.path.islink() returns False on EACCES. The authoritative
+            # symlink refusal is the wrapper's own `[ -L ]` check (exit 5),
+            # which this route maps back to the same 400. A deployment running
+            # a pre-#3410 wrapper is refused outright by the capability gate
+            # below (fail closed), so the contract's `enforced` claim holds
+            # either way; the re-install is documented in
+            # docs/en/WORKSPACE_ISOLATION_CAPABILITIES.md §4.
             if not _is_wrapper_available(OPENACE_WRITE_AS_WRAPPER):
                 return (
                     jsonify(
@@ -1199,6 +1919,26 @@ def api_upload_file():
                     ),
                     500,
                 )
+            if not _write_as_wrapper_enforces_symlink_refusal():
+                return (
+                    jsonify(
+                        {
+                            # Name the file AND the sentinel: an operator running
+                            # a forked wrapper can fix it in one edit instead of
+                            # guessing what "reinstall" means.
+                            "error": (
+                                f"Upload not available: {OPENACE_WRITE_AS_WRAPPER} "
+                                "predates the symlink hardening (Issue #3410). "
+                                "Reinstall it from this release, or add the "
+                                f"capability marker '{_WRITE_AS_CAPABILITY_SENTINEL}' "
+                                "to a fork that implements the same refusal."
+                            )
+                        }
+                    ),
+                    500,
+                )
+            if os.path.islink(target_path):
+                return jsonify({"error": symlink_error}), 400
             effective = get_effective_system_account(system_account)
             assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
             proc = subprocess.Popen(
@@ -1221,15 +1961,33 @@ def api_upload_file():
                         # Wrapper exited early (e.g. path validation failure);
                         # stop writing and let communicate() collect stderr.
                         break
-                stdin.close()
+                # No explicit stdin.close() (#3410 review): after an early
+                # refusal the last buffered chunk is still in the writer, and
+                # close() would flush it into a pipe with no reader and turn
+                # the wrapper's 400 into a 500 (BrokenPipeError). communicate()
+                # flushes and closes stdin itself and ignores BrokenPipeError.
                 _, stderr = proc.communicate(timeout=300)
             except Exception:
-                proc.kill()
-                proc.wait()
+                # Issue #3410: SIGTERM first so the wrapper's EXIT trap runs and
+                # removes its temp file; SIGKILL (the old unconditional call)
+                # is untrappable and also lands on `sudo`, not the wrapper.
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
                 raise
             if proc.returncode != 0:
                 err = (stderr or b"").decode(errors="replace").strip()
                 logger.warning(f"openace-write-as failed for {target_path} as {effective}: {err}")
+                if proc.returncode == 5:
+                    # Wrapper refused a symlinked target (#3410) — same answer
+                    # as the direct branch, not a generic "Permission denied".
+                    return jsonify({"error": symlink_error}), 400
+                if proc.returncode == 6:
+                    # Wrapper refused a directory target (#3410).
+                    return jsonify({"error": directory_error}), 400
                 low = err.lower()
                 if "not allowed" in low or "sudo" in low or "a password is required" in low:
                     return (
@@ -1242,9 +2000,6 @@ def api_upload_file():
                         500,
                     )
                 return jsonify({"error": "Permission denied"}), 403
-        else:
-            # Single-user / non-root: write directly to the final path.
-            file.save(target_path)
 
         logger.info(f"Uploaded file: {target_path} ({size} bytes)")
         return jsonify({"success": True, "path": target_path, "size": size})
@@ -1316,24 +2071,16 @@ def _filesize_as_user(target_path: str, system_account: str | None) -> int | Non
 
 
 def _stream_file_as_user(target_path: str, system_account: str | None):
-    """Yield 64KB chunks of *target_path* read as the correct user.
+    """Yield 64KB chunks of *target_path* read by the target user.
 
-    Root / single-user: direct ``open()``. Non-root multi-user: stream
-    ``sudo -u <user> cat <path>`` stdout via Popen (``cat`` is in the
-    sudoers ``OPENACE_UTILS`` whitelist in package-method; Docker
-    multi-user runs as root so never hits this branch).
+    Non-root multi-user only: streams ``sudo -u <user> cat <path>`` stdout via
+    Popen (``cat`` is in the sudoers ``OPENACE_UTILS`` whitelist in
+    package-method). Root and single-user downloads never come here — they
+    stream from the fd ``_open_file_under_home`` opened (Issue #3410); the
+    old by-path ``open()`` branch was the root read race.
     """
-    if _is_direct_access(system_account):
-        with open(target_path, "rb") as f:
-            while True:
-                chunk = f.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        return
-
     effective = get_effective_system_account(system_account)
-    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    assert effective is not None  # the caller handles direct access
     # Don't use run_as_user() here — it uses subprocess.run with a 10s
     # timeout and capture_output=True, which would buffer the whole file
     # in memory and time out on large downloads. Popen lets us stream.
@@ -1364,16 +2111,54 @@ def api_download_file():
     """Stream a file from the user's home subtree as an attachment.
 
     Uses a 64KB-chunk generator so large files do not load fully into memory.
-    Root reads any path (bypassing DAC); single-user reads its own home;
-    non-root multi-user delegates to ``sudo -u <system_account>`` so the
-    file check and read execute as the file owner (Issue #1902).
+    Root and single-user read directly; non-root multi-user delegates to
+    ``sudo -u <system_account>`` so the file check and read execute as the
+    file owner (Issue #1902).
     """
     user = g.user
 
     raw_path = request.args.get("path", "")
-    target_path, system_account = _resolve_file_in_home(raw_path, user)
-    if target_path is None:
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
+    if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
+
+    filename = os.path.basename(target_path)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    headers = {
+        "Content-Disposition": _content_disposition_filename(filename),
+        "Cache-Control": "no-store",
+    }
+
+    if _is_direct_access(system_account):
+        # Issue #3410 review: open the file HERE, through a descended parent
+        # fd, and stream from that fd. The old code re-opened the path inside
+        # the response generator — after the view had returned — so on the
+        # root branch a component swapped for a symlink in that window made
+        # root read any file on the host.
+        try:
+            fd = _open_file_under_home(target_path, home_root, _root_anchor_uid(system_account))
+        except (_NotARegularFile, FileNotFoundError):
+            return jsonify({"error": "Not a file"}), 400
+        except PermissionError:
+            return jsonify({"error": "Permission denied"}), 403
+        except (OSError, ValueError) as e:
+            logger.warning("Download refused for %s: %s", target_path, e)
+            return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
+        try:
+            file_size = os.fstat(fd).st_size
+            fh = os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
+        headers["Content-Length"] = str(file_size)
+        response = Response(
+            stream_with_context(_iter_file_chunks(fh)), mimetype=mime, headers=headers
+        )
+        # stream_with_context never starts the inner generator when the
+        # response is closed unread, so its finally would not run; close the
+        # file on response close as well (a second close is a no-op).
+        response.call_on_close(fh.close)
+        return response
 
     # Permission checks must run as the file owner: os.path.isfile() /
     # os.access() use the process user's credentials and silently return
@@ -1384,20 +2169,15 @@ def api_download_file():
     if not _check_file_as_user(target_path, system_account, "-r"):
         return jsonify({"error": "Permission denied"}), 403
 
-    filename = os.path.basename(target_path)
-    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     size = _filesize_as_user(target_path, system_account)
     if size is None:
         return jsonify({"error": "Cannot stat file"}), 500
+    headers["Content-Length"] = str(size)
 
     return Response(
         stream_with_context(_stream_file_as_user(target_path, system_account)),
         mimetype=mime,
-        headers={
-            "Content-Disposition": _content_disposition_filename(filename),
-            "Content-Length": str(size),
-            "Cache-Control": "no-store",
-        },
+        headers=headers,
     )
 
 
@@ -1415,23 +2195,54 @@ def api_delete_file():
 
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    target_path, system_account = _resolve_file_in_home(raw_path, user)
-    if target_path is None:
+    target_path, system_account, home_root = _resolve_file_in_home(raw_path, user)
+    if target_path is None or home_root is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
-    if not _check_file_as_user(target_path, system_account, "-f"):
-        return jsonify({"error": "Not a file"}), 400
+    direct = _is_direct_access(system_account)
+    if not direct:
+        if not _rm_wrapper_is_account_scoped():
+            # Fail closed (#3410 review), exactly like the upload wrapper gate.
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"Delete not available: {OPENACE_RM_WRAPPER} is missing or "
+                            "predates the account-scoped delete (Issue #3410). "
+                            "Reinstall it from this release, or add the capability "
+                            f"marker '{_RM_CAPABILITY_SENTINEL}' to a fork that probes "
+                            "and deletes as the target user."
+                        )
+                    }
+                ),
+                500,
+            )
+        if not _check_file_as_user(target_path, system_account, "-f"):
+            return jsonify({"error": "Not a file"}), 400
 
     try:
-        if _is_direct_access(system_account):
-            os.remove(target_path)
+        if direct:
+            # Issue #3410 review: unlinkat on a descended parent fd, not
+            # os.remove(path) — on the root branch a parent swapped for a
+            # symlink after validation made root delete any file on the host.
+            try:
+                _unlink_file_under_home(target_path, home_root, _root_anchor_uid(system_account))
+            except (_NotARegularFile, FileNotFoundError, IsADirectoryError):
+                return jsonify({"error": "Not a file"}), 400
+            except PermissionError:
+                return jsonify({"error": "Permission denied"}), 403
+            except (OSError, ValueError) as e:
+                logger.warning("Delete refused for %s: %s", target_path, e)
+                return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
         else:
             effective = get_effective_system_account(system_account)
             assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
             # 【安全加固 Issue #2181】使用 openace-rm 安全 wrapper 替代 rm 通配
             # openace-rm 验证：目标用户、路径白名单、symlink 逃逸、owner 匹配、危险选项拒绝
+            # -n 与 upload 分支同口径：sudoers 配错时 fail fast，而不是在
+            # 密码提示上挂满 30s 超时。
             result = subprocess.run(
-                ["sudo", OPENACE_RM_WRAPPER, effective, target_path],
+                ["sudo", "-n", OPENACE_RM_WRAPPER, effective, target_path],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -1519,70 +2330,116 @@ def _entry_visible(name: str) -> bool:
     return name == ".qwen" or not name.startswith(".")
 
 
-def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, kind: str):
-    """Recursive search via os.walk (process user can read the tree directly).
+def _search_tree_direct(
+    root: str, matcher, max_depth: int, max_results: int, kind: str, root_fd: int
+):
+    """Recursive search below *root_fd* (the process can read the tree directly).
+
+    *root_fd* is *root* as reached by ``_open_dir_under_home``. Issue #3410
+    review: ``os.walk(root)`` re-resolved every directory BY PATH, so on the
+    root branch a directory swapped for a symlink between the listing and the
+    descent was listed with root's privileges. ``os.fwalk`` descends through
+    directory fds and refuses to enter a symlink (lstat/open/fstat check).
+    Entries are classified without following links when the process is root,
+    and symlinks are then left out entirely: their type, size and readability
+    all live on the target. A non-root process IS the account, so following a
+    link for classification (the pre-#3410 output) grants nothing.
 
     Returns ``(results, truncated, error)`` — *error* is always None here
     (kept in the tuple for parity with _search_tree_sudo).
     """
+    privileged = os.geteuid() == 0
+    want_dirs = kind in ("all", "dir")
+    want_files = kind in ("all", "file")
     results: list[dict[str, Any]] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        rel = os.path.relpath(dirpath, root)
-        depth = 0 if rel == "." else rel.count(os.sep) + 1
-        if depth >= max_depth:
-            # Entries here would be at depth+1 > max_depth; stop descending.
-            dirnames[:] = []
-            continue
-        # Prune hidden dirs (except .qwen) so we never descend into .git etc.
-        dirnames[:] = [d for d in dirnames if _entry_visible(d)]
 
-        want_dirs = kind in ("all", "dir")
-        want_files = kind in ("all", "file")
+    def _entry_stat(name: str, dir_fd: int) -> os.stat_result | None:
+        try:
+            st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            if stat.S_ISLNK(st.st_mode):
+                if privileged:
+                    return None
+                st = os.stat(name, dir_fd=dir_fd)
+            if not privileged and not os.access(name, os.R_OK, dir_fd=dir_fd):
+                return None
+        except OSError:
+            return None
+        return st
 
-        for d in dirnames if want_dirs else []:
+    walker = os.fwalk(os.curdir, dir_fd=root_fd)
+    # Only the early returns below mean "matches were cut off"; a walk that
+    # completes with exactly max_results matches found nothing more to cut.
+    hit_cap = False
+    try:
+        for dirpath, dirnames, filenames, dir_fd in walker:
             if len(results) >= max_results:
-                return results, True, None
-            if not matcher(d):
+                # More of the tree is left unread; stop walking it.
+                hit_cap = True
+                break
+            rel_dir = os.path.normpath(dirpath)
+            depth = 0 if rel_dir == os.curdir else rel_dir.count(os.sep) + 1
+            if depth >= max_depth:
+                # Entries here would be at depth+1 > max_depth; stop descending.
+                dirnames[:] = []
                 continue
-            full = os.path.join(dirpath, d)
-            if not os.access(full, os.R_OK):
-                continue
-            results.append(
-                {
-                    "name": d,
-                    "path": full,
-                    "relative_path": os.path.relpath(full, root),
-                    "type": "dir",
-                    "is_readable": True,
-                }
-            )
+            # Prune hidden dirs (except .qwen) so we never descend into .git etc.
+            dirnames[:] = [d for d in dirnames if _entry_visible(d)]
 
-        for f in filenames if want_files else []:
-            if not _entry_visible(f):
-                continue
-            if len(results) >= max_results:
-                return results, True, None
-            if not matcher(f):
-                continue
-            full = os.path.join(dirpath, f)
-            try:
-                if not os.access(full, os.R_OK):
+            found_dirs: list[str] = []
+            found_files: list[tuple[str, int]] = []
+            for name in dirnames + [f for f in filenames if _entry_visible(f)]:
+                if not matcher(name):
                     continue
-                size = os.path.getsize(full)
-            except OSError:
-                continue
-            results.append(
-                {
-                    "name": f,
-                    "path": full,
-                    "relative_path": os.path.relpath(full, root),
-                    "type": "file",
-                    "size": size,
-                    "is_readable": True,
-                }
-            )
+                st = _entry_stat(name, dir_fd)
+                if st is None:
+                    continue
+                if stat.S_ISDIR(st.st_mode):
+                    found_dirs.append(name)
+                else:
+                    found_files.append((name, st.st_size))
 
-    return results, len(results) >= max_results, None
+            for d in found_dirs if want_dirs else []:
+                if len(results) >= max_results:
+                    hit_cap = True
+                    break
+                rel = os.path.normpath(os.path.join(rel_dir, d))
+                results.append(
+                    {
+                        "name": d,
+                        "path": os.path.join(root, rel),
+                        "relative_path": rel,
+                        "type": "dir",
+                        "is_readable": True,
+                    }
+                )
+            if hit_cap:
+                break
+
+            for f, size in found_files if want_files else []:
+                if len(results) >= max_results:
+                    hit_cap = True
+                    break
+                rel = os.path.normpath(os.path.join(rel_dir, f))
+                results.append(
+                    {
+                        "name": f,
+                        "path": os.path.join(root, rel),
+                        "relative_path": rel,
+                        "type": "file",
+                        "size": size,
+                        "is_readable": True,
+                    }
+                )
+            if hit_cap:
+                break
+    finally:
+        # fwalk is a generator (typeshed calls it an Iterator): closing it now
+        # releases the directory fds it still holds after an early return.
+        close = getattr(walker, "close", None)
+        if close is not None:
+            close()
+
+    return results, hit_cap, None
 
 
 def _search_tree_sudo(
@@ -1660,6 +2517,7 @@ def _search_tree_sudo(
         except ValueError:
             size = 0
         if len(results) >= max_results:
+            # More of the find output is left unread; matches were cut off.
             return results, True, None
         entry: dict[str, Any] = {
             "name": name,
@@ -1672,7 +2530,9 @@ def _search_tree_sudo(
             entry["size"] = size
         results.append(entry)
 
-    return results, len(results) >= max_results, None
+    # The find output was fully consumed: nothing was cut off, even when the
+    # match count lands exactly on max_results (same rule as the direct walk).
+    return results, False, None
 
 
 @fs_bp.route("/fs/search", methods=["GET"])
@@ -1693,6 +2553,20 @@ def api_search_files():
     """
     user = g.user
 
+    # Issue #3420: Get isolation level from WebUIInstance
+    isolation_level = None
+    try:
+        from app.services.webui_manager import get_webui_manager
+
+        user_id = user.get("id") if user else None
+        if user_id:
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(user_id)
+            if instance:
+                isolation_level = instance.isolation_level
+    except Exception:
+        pass
+
     query = (request.args.get("q", "") or "").strip()
     matcher = _build_name_matcher(query)
     if matcher is None:
@@ -1703,9 +2577,14 @@ def api_search_files():
     # validation (is_valid_path rejects the literal "home" as non-absolute).
     raw_root = request.args.get("path", "") or ""
     if not raw_root or raw_root.lower() == "home":
-        raw_root = get_home_directory(user)
+        # Issue #3410: per-base root — the single-base value made the default
+        # (no ``path``) search 400 on a multi-base deployment.
+        default_root = _primary_home_root(user, isolation_level)
+        if default_root is None:
+            return jsonify({"error": "No home directory available for this user"}), 400
+        raw_root = default_root
     try:
-        root, sa = _resolve_user_owned_path(raw_root, user)
+        root, sa, home_root = _resolve_user_owned_path(raw_root, user, isolation_level)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -1733,7 +2612,23 @@ def api_search_files():
         return jsonify({"error": "Permission denied"}), 403
 
     if _is_direct_access(sa):
-        results, truncated, error = _search_tree_direct(root, matcher, max_depth, max_results, kind)
+        # Issue #3410 review: walk below a descended fd, never by path.
+        try:
+            root_fd = _open_dir_under_home(root, home_root, expect_uid=_root_anchor_uid(sa))
+        except PermissionError:
+            return jsonify({"error": "Permission denied"}), 403
+        except _RootAnchorError as e:
+            logger.warning("Search refused for %s: %s", root, e)
+            return jsonify({"error": "Invalid search root"}), 400
+        except (OSError, ValueError) as e:
+            logger.warning("Search refused for %s: %s", root, e)
+            return jsonify({"error": "Search root is not a directory"}), 400
+        try:
+            results, truncated, error = _search_tree_direct(
+                root, matcher, max_depth, max_results, kind, root_fd
+            )
+        finally:
+            os.close(root_fd)
     else:
         effective = get_effective_system_account(sa)
         assert effective is not None  # _is_direct_access False ⇒ effective set
@@ -1753,12 +2648,3 @@ def api_search_files():
             "truncated": truncated,
         }
     )
-
-
-def _safe_remove(path: str) -> None:
-    """Best-effort remove; ignore errors (used for temp file cleanup)."""
-    try:
-        if path and os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass

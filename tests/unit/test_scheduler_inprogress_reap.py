@@ -5,7 +5,7 @@ no live worker froze the workflow (and its batch/workspace/branch conflict
 keys) for ~50 minutes because nothing but a service restart could drop it.
 The DB lease is the liveness authority — a live worker's heartbeat renews it
 every 60s regardless of agent duration — so memory entries are reclaimed
-against it. See docs/superpowers/plans/2026-08-19-scheduler-inprogress-lease-anchor.md.
+against it.
 """
 
 from __future__ import annotations

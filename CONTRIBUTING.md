@@ -51,6 +51,9 @@ What actually happened.
 
 - Python 3.10+
 - pip
+- Bash >= 4 on PATH for `python-core` / `python-min` (macOS's bundled Bash 3.2
+  is insufficient). See [local shell prerequisites](docs/TEST_LAYERS.md#local-shell-prerequisites)
+  for setup and the Linux/macOS validation boundary.
 
 ### Setup
 
@@ -187,7 +190,7 @@ See `docs/TEST_LAYERS.md` for CI execution guarantees and legacy migration.
 - [ ] Commit messages are clear
 - [ ] API security scanner passes (`python scripts/lint/api_security_scanner.py`)
 - [ ] If modifying API routes with ID parameters, ensure ownership checks are in place
-- [ ] If adding baseline suppressions, ensure complete metadata (see `docs/security/api-exceptions.md`)
+- [ ] If adding baseline suppressions, ensure complete metadata (see `docs/security/API_EXCEPTIONS.md`)
 
 ## 📚 Documentation
 

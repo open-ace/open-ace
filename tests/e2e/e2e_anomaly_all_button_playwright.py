@@ -24,28 +24,18 @@ Run:
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.sync_api import sync_playwright
 
-from tests.e2e.sync_helpers import login_as
+from tests.e2e.sync_helpers import expected_default_date_range, login_as
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-anomaly-all")
-
-
-def utc_today(days_offset: int = 0) -> str:
-    """Mirror the frontend's date rendering (``new Date().toISOString().split('T')[0]``).
-
-    AnomalyDetection/TrendAnalysis build date-range values with JS ``Date``
-    objects and serialize them via ``toISOString()``, i.e. the UTC date — not
-    the browser's local date. Expected values must be computed the same way.
-    """
-    return (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%d")
 
 
 passed = 0
@@ -126,12 +116,12 @@ def test_default_date_range(page):  # allow-no-assert: smoke test - visual verif
     check("30" in (button_text or ""), f"Active button shows '30' (text: '{button_text}')")
 
     start_value, end_value = datepicker_values(page)
-    today = utc_today()
-    check(end_value == today, f"End date shows today ({end_value} vs {today})")
-    expected_start = utc_today(days_offset=-30)
+    expected_start, expected_end = expected_default_date_range(30)
+    check(end_value == expected_end, f"End date shows today ({end_value} vs {expected_end})")
     check(
         start_value == expected_start,
-        f"Start date shows 30 days ago ({start_value} vs {expected_start})",
+        f"Start date shows today-29, 30 calendar days inclusive "
+        f"({start_value} vs {expected_start})",
     )
     shot(page, "03-default-30-days")
 
@@ -170,16 +160,16 @@ def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual ve
         )
     else:
         # Empty database: the API returns null min/max_date and the page falls
-        # back to 365 days ago -> today (UTC-rendered, see utc_today()).
-        today = utc_today()
-        fallback_start = utc_today(days_offset=-365)
+        # back to the 365-day default range (local calendar, inclusive).
+        fallback_start, fallback_end = expected_default_date_range(365)
         check(
-            end_value == today,
-            f"Empty DB fallback: end is today ({end_value} vs {today})",
+            end_value == fallback_end,
+            f"Empty DB fallback: end is today ({end_value} vs {fallback_end})",
         )
         check(
             start_value == fallback_start,
-            f"Empty DB fallback: start is 365 days ago ({start_value} vs {fallback_start})",
+            f"Empty DB fallback: start is today-364, 365 calendar days inclusive "
+            f"({start_value} vs {fallback_start})",
         )
 
     start_date_obj = datetime.strptime(start_value, "%Y-%m-%d")

@@ -27,9 +27,14 @@ class TestGetUsageInRangeCountsLocalAutonomous:
     """_get_usage_in_range must sum local (not just remote) agent_sessions."""
 
     def test_local_session_tokens_counted(self):
-        # fast path (user_daily_stats) returns zero → forces legacy path.
+        # Issue #3307: New query priority is:
+        # 1. session_daily_usage
+        # 2. user_daily_stats
+        # 3. agent_sessions (legacy fallback)
+        # 4. daily_messages (unbound local)
         db = MagicMock()
         db.fetch_one.side_effect = [
+            {"tokens": 0, "requests": 0},  # session_daily_usage (empty)
             {"tokens": 0, "requests": 0},  # user_daily_stats fast path (empty)
             {"tokens": 50000, "requests": 3},  # agent_sessions (local autonomous)
             {"tokens": 0, "requests": 0},  # daily_messages unbound (none)
@@ -38,8 +43,8 @@ class TestGetUsageInRangeCountsLocalAutonomous:
 
         usage = qm._get_usage_in_range(1, "2026-06-25", "2026-06-25")
 
-        # The legacy agent_sessions query must be the second fetch_one call.
-        session_query = db.fetch_one.call_args_list[1].args[0]
+        # The legacy agent_sessions query must be the third fetch_one call.
+        session_query = db.fetch_one.call_args_list[2].args[0]
         # Must NOT be restricted to workspace_type='remote'; local autonomous
         # sessions (workspace_type='local') must be included.
         assert "workspace_type = 'remote'" not in session_query
@@ -50,16 +55,17 @@ class TestGetUsageInRangeCountsLocalAutonomous:
     def test_remote_only_filter_regression_guard(self):
         """If someone reverts to workspace_type='remote', local tokens vanish."""
         db = MagicMock()
-        # Simulate the OLD buggy query: remote filter → returns 0 for a local user.
+        # Issue #3307: Simulate the OLD buggy query: remote filter → returns 0 for a local user.
         db.fetch_one.side_effect = [
-            {"tokens": 0, "requests": 0},  # fast path empty
+            {"tokens": 0, "requests": 0},  # session_daily_usage (empty)
+            {"tokens": 0, "requests": 0},  # user_daily_stats fast path (empty)
             {"tokens": 0, "requests": 0},  # remote-only would miss local spend
             {"tokens": 0, "requests": 0},  # daily_messages
         ]
         qm = _make_qm(db)
         qm._get_usage_in_range(1, "2026-06-25", "2026-06-25")
         # The query string itself is the contract — assert it includes local.
-        session_query = db.fetch_one.call_args_list[1].args[0]
+        session_query = db.fetch_one.call_args_list[2].args[0]
         assert "'local'" in session_query
 
 

@@ -4231,7 +4231,14 @@ def _refresh_daily_stats_for_messages(messages: list[dict]) -> None:
                     (now, date),
                 )
             else:
-                # SQLite: use INSERT OR REPLACE
+                # SQLite: use INSERT OR REPLACE. NULL sender_name never matches
+                # the unique key, so drop those rows first or every fetch
+                # appends another copy (Issue #3424).
+                _execute(
+                    cursor,
+                    "DELETE FROM daily_stats WHERE sender_name IS NULL AND date = ?",
+                    (date,),
+                )
                 _execute(
                     cursor,
                     """

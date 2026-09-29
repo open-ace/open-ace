@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Table boundary checker — enforces the #1125 data-contract table boundaries.
 
-Two architectural rules (#1125 / docs/cn/workspace-session-data-contract.md):
+Two architectural rules (#1125 / docs/cn/WORKSPACE_SESSION_DATA_CONTRACT.md):
 
   TBL001 — Work-page routes must NOT read the ``daily_messages`` analysis fact
            table. Work routes serve the Workspace runtime; per the contract the

@@ -6,6 +6,7 @@
   "description": "Open ACE Frontend - Modern React/TypeScript/Vite based frontend",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/prebuild-clean.mjs",
     "build": "tsc --noEmit && vite build && node scripts/retain-release-assets.mjs --dist ../static/js/dist",
     "build:watch": "vite build --watch",
     "preview": "vite preview",

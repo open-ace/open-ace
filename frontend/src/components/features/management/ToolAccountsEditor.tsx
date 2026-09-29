@@ -17,6 +17,7 @@ import {
   type UnmappedAccount,
   type ToolType,
   type MappingStatus,
+  type VerificationStatus,
 } from '@/api/toolAccounts';
 
 interface ToolAccountsEditorProps {
@@ -68,6 +69,53 @@ const getStatusDisplay = (status?: MappingStatus | null, language: string = 'en'
   }
 };
 
+/**
+ * Issue #3273: Get badge variant based on verification status
+ */
+const getVerificationBadgeVariant = (
+  status?: VerificationStatus | null
+): 'success' | 'danger' | 'secondary' => {
+  switch (status) {
+    case 'verified':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'unverified':
+    default:
+      return 'secondary';
+  }
+};
+
+/**
+ * Issue #3273: Get verification status display text
+ */
+const getVerificationStatusDisplay = (
+  status?: VerificationStatus | null,
+  language: string = 'en'
+): string => {
+  switch (status) {
+    case 'verified':
+      return language === 'zh' ? '已验证' : 'Verified';
+    case 'failed':
+      return language === 'zh' ? '验证失败' : 'Failed';
+    case 'unverified':
+      return language === 'zh' ? '未验证' : 'Unverified';
+    default:
+      return '';
+  }
+};
+
+/**
+ * Issue #3273: Check if verification is expired (7 days)
+ */
+const isVerificationExpired = (verifiedAt?: string | null): boolean => {
+  if (!verifiedAt) return false;
+  const verifiedDate = new Date(verifiedAt);
+  const now = new Date();
+  const diffDays = (now.getTime() - verifiedDate.getTime()) / (1000 * 60 * 60 * 24);
+  return diffDays > 7;
+};
+
 export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, onChange }) => {
   const language = useLanguage();
   const [toolAccounts, setToolAccounts] = useState<ToolAccount[]>([]);
@@ -87,6 +135,9 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   const [addError, setAddError] = useState<string | null>(null);
   const [showPredeclaredConfirm, setShowPredeclaredConfirm] = useState(false);
   const toast = useToast();
+
+  // Issue #3273: Verification state
+  const [verifyingId, setVerifyingId] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -211,6 +262,36 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
     );
   };
 
+  // Issue #3273: Handle verification
+  const handleVerify = async (accountId: number) => {
+    setVerifyingId(accountId);
+    try {
+      const result = await toolAccountsApi.verify(accountId);
+
+      if (result.success) {
+        toast.success(
+          language === 'zh'
+            ? `验证成功: ${result.verification_result}`
+            : `Verification successful: ${result.verification_result}`
+        );
+      } else {
+        toast.error(
+          language === 'zh'
+            ? `验证失败: ${result.verification_result}`
+            : `Verification failed: ${result.verification_result}`
+        );
+      }
+
+      // Reload data to show updated verification status
+      loadData();
+    } catch (err) {
+      console.error('Failed to verify account:', err);
+      toast.error(language === 'zh' ? '验证操作失败' : 'Verification failed');
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-muted small">{t('loading', language)}</div>;
   }
@@ -224,39 +305,78 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
             <span className="text-muted small">{t('noToolAccounts', language)}</span>
           ) : (
             toolAccounts.map((account) => (
-              <Badge
-                key={account.id}
-                variant="secondary"
-                className="d-flex align-items-center gap-1"
-              >
-                {/* Issue #2761: Show status badge */}
-                {account.mapping_status && (
-                  <Badge
-                    variant={getStatusBadgeVariant(account.mapping_status)}
-                    className="me-1"
-                    style={{ fontSize: '0.65rem' }}
-                  >
-                    {getStatusDisplay(account.mapping_status, language)}
-                  </Badge>
-                )}
-                {account.tool_type_display ?? account.tool_type ?? ''}
-                {account.tool_type ? ': ' : ''}
-                {account.tool_account}
-                {/* Issue #2761: Show message count */}
-                {account.observed_message_count !== undefined &&
-                  account.observed_message_count > 0 && (
-                    <span className="ms-1 text-muted" style={{ fontSize: '0.65rem' }}>
-                      ({account.observed_message_count})
-                    </span>
+              <div key={account.id} className="d-flex align-items-center gap-2 mb-2">
+                <Badge variant="secondary" className="d-flex align-items-center gap-1">
+                  {/* Issue #2761: Show status badge */}
+                  {account.mapping_status && (
+                    <Badge
+                      variant={getStatusBadgeVariant(account.mapping_status)}
+                      className="me-1"
+                      style={{ fontSize: '0.65rem' }}
+                    >
+                      {getStatusDisplay(account.mapping_status, language)}
+                    </Badge>
                   )}
-                <button
-                  type="button"
-                  className="btn-close btn-close-white ms-1"
-                  style={{ fontSize: '0.6rem' }}
-                  onClick={() => handleDeleteAccount(account.id)}
-                  title={t('delete', language)}
-                />
-              </Badge>
+                  {account.tool_type_display ?? account.tool_type ?? ''}
+                  {account.tool_type ? ': ' : ''}
+                  {account.tool_account}
+                  {/* Issue #2761: Show message count */}
+                  {account.observed_message_count !== undefined &&
+                    account.observed_message_count > 0 && (
+                      <span className="ms-1 text-muted" style={{ fontSize: '0.65rem' }}>
+                        ({account.observed_message_count})
+                      </span>
+                    )}
+                  <button
+                    type="button"
+                    className="btn-close btn-close-white ms-1"
+                    style={{ fontSize: '0.6rem' }}
+                    onClick={() => handleDeleteAccount(account.id)}
+                    title={t('delete', language)}
+                  />
+                </Badge>
+
+                {/* Issue #3273: Verification status badge */}
+                {account.verification_status && (
+                  <div className="d-flex align-items-center gap-1">
+                    <Badge
+                      variant={getVerificationBadgeVariant(account.verification_status)}
+                      style={{ fontSize: '0.65rem' }}
+                    >
+                      {getVerificationStatusDisplay(account.verification_status, language)}
+                    </Badge>
+                    {/* Show verification result as tooltip */}
+                    {account.verification_result && (
+                      <span
+                        title={account.verification_result}
+                        style={{ cursor: 'help' }}
+                        className="text-muted small"
+                      >
+                        <i className="bi bi-info-circle" />
+                      </span>
+                    )}
+                    {/* Show expired warning */}
+                    {account.verification_status === 'verified' &&
+                      isVerificationExpired(account.verified_at) && (
+                        <Badge variant="warning" style={{ fontSize: '0.6rem' }}>
+                          {language === 'zh' ? '验证过期' : 'Expired'}
+                        </Badge>
+                      )}
+                  </div>
+                )}
+
+                {/* Issue #3273: Verify button */}
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={() => handleVerify(account.id)}
+                  loading={verifyingId === account.id}
+                  disabled={verifyingId !== null && verifyingId !== account.id}
+                  style={{ fontSize: '0.7rem' }}
+                >
+                  {language === 'zh' ? '验证' : 'Verify'}
+                </Button>
+              </div>
             ))
           )}
         </div>

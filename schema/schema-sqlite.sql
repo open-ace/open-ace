@@ -565,6 +565,22 @@ CREATE TABLE email_notification_logs (
  next_retry_at TIMESTAMP
 );
 
+CREATE TABLE encryption_keys (
+ key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ key_fingerprint TEXT NOT NULL,
+ status TEXT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ rotated_at TIMESTAMP,
+ config_version INTEGER NOT NULL,
+ last_used_at TIMESTAMP
+);
+
+CREATE TABLE external_identity_nonces (
+ issuer text NOT NULL,
+ nonce text NOT NULL,
+ expires_at INTEGER NOT NULL
+);
+
 CREATE TABLE feishu_settings (
  app_id TEXT NOT NULL,
  app_secret_enc text NOT NULL,
@@ -1136,6 +1152,22 @@ CREATE TABLE security_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE session_daily_usage (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id text NOT NULL,
+ user_id integer,
+ tenant_id integer,
+ date text NOT NULL,
+ tokens integer DEFAULT 0 NOT NULL,
+ requests integer DEFAULT 0 NOT NULL,
+ input_tokens integer DEFAULT 0 NOT NULL,
+ output_tokens integer DEFAULT 0 NOT NULL,
+ cache_read_tokens integer DEFAULT 0,
+ cache_write_tokens integer DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE session_messages (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
@@ -1538,7 +1570,10 @@ CREATE TABLE user_tool_accounts (
  observed_message_count integer,
  created_by integer,
  tenant_id integer,
- version integer
+ version integer,
+ verification_status TEXT,
+ verification_result text,
+ verified_at TIMESTAMP
 );
 
 CREATE TABLE users (
@@ -1562,6 +1597,8 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
+ tokens_valid_after TIMESTAMP,
+ system_uid integer,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
@@ -1672,6 +1709,8 @@ CREATE UNIQUE INDEX autonomous_workflows_workflow_id_key ON autonomous_workflows
 
 CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (report_id);
 
+CREATE UNIQUE INDEX encryption_keys_key_fingerprint_key ON encryption_keys (key_fingerprint);
+
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
@@ -1740,6 +1779,8 @@ CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id,
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
+CREATE UNIQUE INDEX uq_session_daily_usage_session_date ON session_daily_usage (session_id, date);
+
 CREATE UNIQUE INDEX uq_tenant_keyword ON tenant_sensitive_keywords (tenant_id, normalized_keyword);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
@@ -1759,6 +1800,8 @@ CREATE UNIQUE INDEX users_username_key ON users (username);
 CREATE UNIQUE INDEX web_user_auth_sessions_session_token_key ON web_user_auth_sessions (session_token);
 
 CREATE UNIQUE INDEX workflow_milestones_milestone_id_key ON workflow_milestones (milestone_id);
+
+CREATE UNIQUE INDEX external_identity_nonces_key ON external_identity_nonces (issuer, nonce);
 
 CREATE INDEX idx_agent_approvals_run_id ON agent_approvals (run_id);
 
@@ -1904,7 +1947,13 @@ CREATE INDEX idx_email_logs_user_id ON email_notification_logs (user_id);
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs (user_id, sent_at);
 
+CREATE INDEX idx_encryption_keys_fingerprint ON encryption_keys (key_fingerprint);
+
+CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
+
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
+
+CREATE INDEX idx_external_identity_nonces_expires ON external_identity_nonces (expires_at);
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
@@ -1975,6 +2024,10 @@ CREATE INDEX idx_messages_tool_name ON daily_messages (tool_name);
 CREATE INDEX idx_messages_usage_trend_covering ON daily_messages (date, role, sender_name) WHERE ((role) = 'assistant');
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, date, role) WHERE ((user_id IS NOT NULL) AND ((role) = 'assistant'));
+
+CREATE INDEX idx_messages_user_host ON daily_messages (user_id, host_name) WHERE (user_id IS NOT NULL);
+
+CREATE INDEX idx_messages_user_tool ON daily_messages (user_id, tool_name) WHERE (user_id IS NOT NULL);
 
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
@@ -2111,6 +2164,12 @@ CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
+
+CREATE INDEX idx_session_daily_usage_date ON session_daily_usage (date);
+
+CREATE INDEX idx_session_daily_usage_tenant ON session_daily_usage (tenant_id);
+
+CREATE INDEX idx_session_daily_usage_user_date ON session_daily_usage (user_id, date);
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
 

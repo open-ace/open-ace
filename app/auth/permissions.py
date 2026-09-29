@@ -110,7 +110,7 @@ def warn_if_strict_mode_locks_out_legacy_admins() -> int | None:
 
     This flag spent its whole life as dead code: nothing populated the cache,
     so ``OPENACE_PLATFORM_ADMIN_STRICT_MODE=true`` did nothing. Meanwhile
-    ``docs/admin_role_migration_runbook_2332.md`` step 5 told operators to set
+    ``docs/dev-notes/admin_role_migration_runbook_2332.md`` step 5 told operators to set
     exactly that variable. Anyone who followed the runbook has it exported and
     has seen no effect -- so the deploy that finally wires the flag up is the
     deploy where every remaining ``role='admin'`` account silently stops being
@@ -142,7 +142,7 @@ def warn_if_strict_mode_locks_out_legacy_admins() -> int | None:
             "role='admin'. Those accounts are NO LONGER platform admins and will "
             "get 403 on platform-admin endpoints. Migrate them to "
             "role='platform_admin' or unset OPENACE_PLATFORM_ADMIN_STRICT_MODE. "
-            "See docs/admin_role_migration_runbook_2332.md.",
+            "See docs/dev-notes/admin_role_migration_runbook_2332.md.",
             count,
         )
     return count

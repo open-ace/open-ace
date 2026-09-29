@@ -140,9 +140,9 @@ def init_config():
                     "web_host": WEB_HOST,
                 },
                 "tools": {
-                    "openclaw": {"enabled": True, "hostname": "localhost"},
-                    "claude": {"enabled": True, "hostname": "localhost"},
-                    "qwen": {"enabled": True, "hostname": "localhost"},
+                    "openclaw": {"enabled": True},
+                    "claude": {"enabled": True},
+                    "qwen": {"enabled": True},
                 },
             }
             with open(config_file, "w") as f:

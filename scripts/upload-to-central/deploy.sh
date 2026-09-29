@@ -124,7 +124,7 @@ cat > "$INSTALL_DIR/config.json" << EOF
 {
     "server_url": "$SERVER_URL",
     "auth_key": "$AUTH_KEY",
-    "hostname": "$HOSTNAME",
+    "host_name": "$HOSTNAME",
     "interval": $INTERVAL,
     "days": 1
 }
@@ -392,7 +392,7 @@ def run_daemon(server_url=None, auth_key=None, hostname=None, interval=300, days
     config = load_config()
     server_url = server_url or config.get('server_url')
     auth_key = auth_key or config.get('auth_key')
-    hostname = hostname or config.get('hostname', os.uname().nodename)
+    hostname = hostname or config.get('host_name') or config.get('hostname') or os.uname().nodename
     interval = interval or config.get('interval', 300)
     if not server_url or not auth_key:
         print("Error: server_url and auth_key required")
@@ -421,7 +421,7 @@ if __name__ == '__main__':
         config = load_config(args.config)
         server_url = args.server or config.get('server_url')
         auth_key = args.auth_key or config.get('auth_key')
-        hostname = args.hostname or config.get('hostname', os.uname().nodename)
+        hostname = args.hostname or config.get('host_name') or config.get('hostname') or os.uname().nodename
         if not server_url or not auth_key:
             print("Error: --server and --auth-key required")
             sys.exit(1)

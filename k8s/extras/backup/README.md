@@ -190,5 +190,5 @@ kubectl get networkpolicy -n open-ace -o yaml
 
 ## Related Documentation
 
-- [DATABASE-BACKUP.md](../../docs/en/DATABASE-BACKUP.md) - Detailed backup strategy
+- [DATABASE_BACKUP.md](../../docs/en/DATABASE_BACKUP.md) - Detailed backup strategy
 - [KUBERNETES.md](../../docs/en/KUBERNETES.md) - Kubernetes deployment guide

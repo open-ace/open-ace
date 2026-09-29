@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,13 +45,22 @@ DOC_PATTERNS = (
     "CODE_OF_CONDUCT.md",
     "LICENSE",
 )
-FRONTEND_PATTERNS = ("frontend/**", "static/js/**")
+# app/utils/frontend_check.py rides the frontend lane: the lane's last step
+# runs the checker against the REAL npm-run-build output, so checker/vite
+# drift (the #3394 P0 class) fails the lane instead of crash-looping
+# production boots (#3395 review finding 3).
+FRONTEND_PATTERNS = ("frontend/**", "static/js/**", "app/utils/frontend_check.py")
 POSTGRES_PATTERNS = (
     "app/models/**",
     "app/repositories/**",
     "migrations/**",
     "schema/**",
     "tests/integration/*_pg.py",
+    # The integration conftest owns the pg_db fixture (the per-test database
+    # + schema wiring every *_pg.py file consumes) — a conftest-only diff
+    # must select this lane too, or it rides the lane only when some policy
+    # file happens to change (#3287 follow-up review finding).
+    "tests/integration/conftest.py",
 )
 E2E_PATTERNS = (
     "app/auth/**",
@@ -268,8 +278,23 @@ def changed_files(base: str) -> list[str]:
     return sorted(changed)
 
 
-def isolated_environment(home: str, preserve_database_environment: bool = False) -> dict[str, str]:
+def shell_environment() -> dict[str, str]:
+    """Use the same noninteractive startup policy for probes and CI commands."""
     env = os.environ.copy()
+    for name in ("BASH_ENV", "ENV"):
+        env.pop(name, None)
+    # Anchor relative (including empty) entries before commands change cwd.
+    # Do not collapse symlink/..: preserve filesystem traversal and ordering.
+    cwd = os.getcwd()
+    env["PATH"] = os.pathsep.join(
+        os.path.join(cwd, entry) if entry else cwd
+        for entry in env.get("PATH", os.defpath).split(os.pathsep)
+    )
+    return env
+
+
+def isolated_environment(home: str, preserve_database_environment: bool = False) -> dict[str, str]:
+    env = shell_environment()
     env.update(
         {
             "CI": "true",
@@ -655,6 +680,62 @@ def write_github_outputs(selected: list[str]) -> None:
         handle.write(f"selected={','.join(selected)}\n")
 
 
+def check_bash(config: dict[str, Any]) -> None:
+    """Check PATH-selected Bash, including the feature the fetch wrapper uses."""
+    minimum = config["toolchain"]["bash_min_major"]
+    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 4:
+        raise CIError("Invalid bash_min_major: expected an integer >= 4")
+    env = shell_environment()
+    executable = shutil.which("bash", path=env.get("PATH", os.defpath))
+    version = "missing"
+    detail = "not found on PATH"
+    if executable:
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    'set -eu; printf "%s\\n" "$BASH_VERSION"; '
+                    "declare -A openace_probe; openace_probe[check]=assoc-ok; "
+                    'printf "%s\\n" "${openace_probe[check]}"',
+                ],
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            lines = result.stdout.strip().splitlines()
+            version = lines[0] if lines else "unknown"
+            match = re.fullmatch(r"(\d+)\.\d+(?:\.\d+)?(?:\(\d+\)-release)?", version)
+            if (
+                result.returncode == 0
+                and match
+                and int(match[1]) >= minimum
+                and lines[1:] == ["assoc-ok"]
+            ):
+                print(
+                    f"Bash:   {version} ({executable}; required >= {minimum}, associative arrays OK)"
+                )
+                return
+            detail = f"probe exited {result.returncode}; version or associative-array capability unsuitable"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            detail = f"probe failed: {type(exc).__name__}"
+    raise CIError(
+        f"Bash: {version} ({executable or 'missing'}; required >= {minimum}): {detail}. "
+        "Install a supported Bash and put its bin directory first on PATH, then run "
+        "python scripts/ci.py doctor --strict. See docs/TEST_LAYERS.md#local-shell-prerequisites."
+    )
+
+
+def check_suite_prerequisites(names: list[str], config: dict[str, Any]) -> None:
+    """Check the entire plan before an earlier suite can spend its budget."""
+    if any(config["suites"].get(name, {}).get("requires_bash", False) for name in names):
+        check_bash(config)
+
+
 def check_toolchain(config: dict[str, Any], strict: bool = False) -> bool:
     """Report whether local runtimes match the canonical PR toolchain."""
     expected_python = config["toolchain"]["production_python"]
@@ -675,7 +756,13 @@ def check_toolchain(config: dict[str, Any], strict: bool = False) -> bool:
     print(f"Python: {actual_python} (PR runtime {expected_python})")
     print(f"Node:   {actual_node} (PR runtime {expected_node}.x)")
     print(f"Runner: local (GitHub {config['toolchain']['runner']})")
-    matches = python_matches and node_matches
+    bash_matches = True
+    try:
+        check_bash(config)
+    except CIError as exc:
+        bash_matches = False
+        print(str(exc))
+    matches = python_matches and node_matches and bash_matches
     if not matches:
         message = "Local toolchain differs from the canonical PR toolchain"
         if strict:
@@ -733,6 +820,12 @@ def execute_suites(
             )
 
     primary: Exception | None = None
+    preflight_error = None
+    try:
+        check_suite_prerequisites(names, config)
+    except Exception as exc:
+        primary = exc
+        preflight_error = str(exc)
     for name in names:
         if primary is not None:
             outcomes[name] = "not_started_due_to_previous_failure"
@@ -770,6 +863,7 @@ def execute_suites(
             completed_at=utc_now(),
             duration_seconds=round(time.monotonic() - invocation_started, 6),
             outcome=invocation_outcome,
+            **({"preflight_error": preflight_error} if preflight_error else {}),
         )
     metrics.close()
     if primary is not None:

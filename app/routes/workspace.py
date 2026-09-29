@@ -37,6 +37,11 @@ from app.modules.workspace.session_manager import (
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.routes.fs import is_valid_path
+from app.services.workspace_isolation_config import (
+    BACKEND_SHARED,
+    IsolationConfigError,
+    parse_isolation,
+)
 from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
@@ -300,32 +305,35 @@ def load_user():
 
         # Session token failed — try WebUI token validation
         try:
-            from app.services.webui_manager import WebUIManager
+            # Review round 1 (T-G): validate against the manager SINGLETON.
+            # A fresh WebUIManager() carries a random token_secret and empty
+            # instance registries, so every sandboxed-instance token (signed
+            # with the pod's per-instance secret) validated to a constant 401.
+            from app.services.webui_manager import get_webui_manager
 
-            webui_manager = WebUIManager()
-            is_valid, user_id, error = webui_manager.validate_token(token)
-            if is_valid and user_id:
-                from app.repositories.user_repo import UserRepository
-
-                user_repo = UserRepository()
-                user_data = user_repo.get_user_by_id(user_id)
-                if user_data:
-                    g.user = {
-                        "id": user_id,
-                        "username": user_data.get("username"),
-                        "email": user_data.get("email"),
-                        "role": user_data.get("role"),
-                        "tenant_id": user_data.get("tenant_id"),
-                        "must_change_password": bool(user_data.get("must_change_password")),
-                    }
-                    g.user_id = user_id
-                    g.user_role = user_data.get("role")
-                    g.tenant_id = user_data.get("tenant_id")
-                    _refresh_session(token, user_repo=user_repo)
-                    password_change_response = enforce_password_change_requirement(g.user)
-                    if password_change_response is not None:
-                        return password_change_response
-                    return None
+            webui_manager = get_webui_manager()
+            # R-12 (#3379 review): validate_token_with_user returns the user
+            # row from the same single lookup the status check used — the
+            # extra get_user_by_id here was a second identical query on
+            # every webui-token request.
+            is_valid, user_id, error, user_data = webui_manager.validate_token_with_user(token)
+            if is_valid and user_id and user_data:
+                g.user = {
+                    "id": user_id,
+                    "username": user_data.get("username"),
+                    "email": user_data.get("email"),
+                    "role": user_data.get("role"),
+                    "tenant_id": user_data.get("tenant_id"),
+                    "must_change_password": bool(user_data.get("must_change_password")),
+                }
+                g.user_id = user_id
+                g.user_role = user_data.get("role")
+                g.tenant_id = user_data.get("tenant_id")
+                _refresh_session(token)
+                password_change_response = enforce_password_change_requirement(g.user)
+                if password_change_response is not None:
+                    return password_change_response
+                return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")
 
@@ -2307,7 +2315,14 @@ def get_workspace_config():
                 workspace = config.get("workspace", {})
                 workspace_config["enabled"] = workspace.get("enabled", False)
                 workspace_config["url"] = workspace.get("url", "")
-                workspace_config["multi_user_mode"] = workspace.get("multi_user_mode", False)
+                # One WebUI per user: every isolation backend but "shared" (#3446).
+                try:
+                    isolation = parse_isolation(workspace)
+                except IsolationConfigError:
+                    isolation = None
+                workspace_config["multi_user_mode"] = bool(
+                    isolation and isolation.backend != BACKEND_SHARED
+                )
                 workspace_config["port_range_start"] = workspace.get("port_range_start", 3100)
                 workspace_config["port_range_end"] = workspace.get("port_range_end", 3200)
                 workspace_config["max_instances"] = workspace.get("max_instances", 30)
@@ -2346,6 +2361,16 @@ def get_user_webui_url():
     """
     from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.services.webui_sandbox import SandboxWebuiError
+    from app.services.workspace_isolation_contract import (
+        SUPPORTED_ISOLATION_LEVELS,
+        IsolationReason,
+        build_workspace_isolation_snapshot,
+        evaluate_isolation_requirement,
+        is_valid_isolation_level,
+        isolation_level_at_least,
+        resolve_required_floor,
+    )
 
     # Check if user is logged in
     if not hasattr(g, "user") or not g.user:
@@ -2363,7 +2388,53 @@ def get_user_webui_url():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        system_account = user.get("system_account") or user.get("username")
+        from flask import request as flask_request
+
+        raw_system_account = user.get("system_account")
+        system_account = raw_system_account or user.get("username")
+
+        # Issue #3374 (reviews #12/#14 + round-2): the isolation floor is
+        # server-side — explicit config when valid, else derived from what
+        # this deployment actually verifies (snapshot.isolation_level) — and
+        # the request parameter can only RAISE it, never lower it. An
+        # empty/whitespace parameter counts as absent.
+        isolation_snapshot = build_workspace_isolation_snapshot(manager)
+        config_floor = resolve_required_floor(manager.config, isolation_snapshot)
+        requested = (flask_request.args.get("required_isolation") or "").strip()
+        if requested and not is_valid_isolation_level(requested):
+            rejection = IsolationReason(
+                "invalid_isolation_level",
+                f"Unknown isolation level '{requested}'; expected one of "
+                f"{', '.join(SUPPORTED_ISOLATION_LEVELS)}.",
+            )
+        else:
+            effective = config_floor
+            if requested and isolation_level_at_least(requested, config_floor):
+                effective = requested
+            rejection = evaluate_isolation_requirement(
+                effective,
+                snapshot=isolation_snapshot,
+                system_account=raw_system_account,
+                manager=manager,
+            )
+        if rejection is not None:
+            # Two disjoint reason namespaces (reviews #7): deployment-level
+            # snapshot reasons plus the request-level rejection, appended —
+            # consumers keying on reasons[0] still get the deployment story.
+            reasons = [r.public_dict() for r in isolation_snapshot.reasons]
+            reasons.append(rejection.public_dict())
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": rejection.message,
+                        "error_code": rejection.code,
+                        "reasons": reasons,
+                        "isolation": isolation_snapshot.public_dict(),
+                    }
+                ),
+                400,
+            )
 
         # Get or create user's webui instance.
         # Pass host_url so the iframe URL uses the browser-visible host instead
@@ -2371,10 +2442,20 @@ def get_user_webui_url():
         # container-detected IP that the browser cannot reach; webui_manager
         # replaces it with request.host_url. Omitting this argument regresses
         # the workspace into a blank iframe.
-        from flask import request as flask_request
-
         host_url = flask_request.host_url.rstrip("/")
-        url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
+        # Issue #3378: the effective level the gate resolved drives the
+        # manager's form fork (sandboxed → launcher branch; otherwise the
+        # os_user path is unchanged). The gate itself is contract-owned (T1).
+        # F-6.1 (review round 2): the SAME snapshot the gate used is handed
+        # through, so the manager's form fork cannot diverge from the gate's
+        # verdict if the (cached) level flips between the two builds.
+        url, token = manager.get_user_webui_url(
+            int(user_id),
+            str(system_account),
+            host_url,
+            required_isolation=effective,
+            snapshot=isolation_snapshot,
+        )
 
         # Update activity timestamp
         manager.update_user_activity(user_id)
@@ -2402,6 +2483,8 @@ def get_user_webui_url():
                 "system_account": system_account,
                 "multi_user_mode": manager.config.multi_user_mode,
                 "openace_url": openace_url,
+                # Issue #3374: report the policy actually in effect.
+                "isolation": isolation_snapshot.public_dict(),
             }
         )
 
@@ -2416,6 +2499,42 @@ def get_user_webui_url():
             ),
             503,
         )  # Service Unavailable (e.g., max instances reached)
+
+    except SandboxWebuiError as e:
+        # Issue #3378 review (MINOR-5): the launcher's fail-closed refusals
+        # carry a machine-readable reason code (§5 vocabulary) that the generic
+        # handler below collapsed into an opaque 500. Surface them with the
+        # SAME body shape as the gate rejections above (success/error/
+        # error_code/reasons/isolation) so clients keying on error_code keep
+        # working — the snapshot is always computed before the launch can
+        # fail. 502 (not 400): the request already passed the isolation gate;
+        # this is the upstream sandbox runtime refusing (create failed,
+        # endpoint unresolved), which a client cannot fix by reshaping the
+        # request — 502 distinguishes it from both the policy 400s and the
+        # capacity 503, matching this endpoint's pattern of precise 5xx codes.
+        # The message is a fixed per-code wording, never str(e): the upstream
+        # exception chains embed internal lifecycle URLs and execd allowlist
+        # contents, and every other handler on this endpoint sanitizes its
+        # message. Full details stay in the logger.error below.
+        reason_code = getattr(e, "reason_code", "") or "sandbox_create_failed"
+        reason = IsolationReason(
+            reason_code,
+            "The sandboxed WebUI runtime refused this launch "
+            f"({reason_code}); see the server log for details.",
+        )
+        logger.error(f"Sandboxed webui launch failed at /user-url: {e}")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": reason.message,
+                    "error_code": reason_code,
+                    "reasons": [reason.public_dict()],
+                    "isolation": isolation_snapshot.public_dict(),
+                }
+            ),
+            502,
+        )
 
     except Exception as e:
         logger.error(f"Error getting user webui URL: {e}")

@@ -8,9 +8,12 @@ Database operations for the AI autonomous development feature.
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -964,6 +967,28 @@ class AutonomousWorkflowRepository:
             if result:
                 copied.append(result)
         return copied
+
+    def get_live_workflow_ids(self, terminal_statuses: "Sequence[str]") -> set[str]:
+        """Ids of workflows that are NOT known-terminal (#3237).
+
+        The agent-state reaper needs this to avoid deleting the transcript of a
+        workflow that will resume — a ``paused`` one, most obviously. The test
+        is deliberately inverted: anything whose status is not recognisably
+        terminal counts as LIVE, so a status added later is kept rather than
+        reaped. NULL is included for the same reason.
+
+        The caller supplies the terminal set so this layer does not import the
+        orchestrator.
+        """
+        if not terminal_statuses:
+            terminal_statuses = ()
+        placeholders = ",".join(["?"] * len(terminal_statuses)) or "NULL"
+        rows = self.db.fetch_all(
+            f"SELECT workflow_id FROM autonomous_workflows "  # noqa: S608 - placeholders only
+            f"WHERE status IS NULL OR status NOT IN ({placeholders})",
+            tuple(terminal_statuses),
+        )
+        return {str(r["workflow_id"]) for r in rows if r.get("workflow_id")}
 
     def delete_workflow(self, workflow_id: str) -> None:
         """Delete a workflow and its milestones/events in a single transaction."""

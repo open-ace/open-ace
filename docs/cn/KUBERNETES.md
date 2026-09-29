@@ -25,6 +25,8 @@ k8s/
 ├── storage.yaml        # PVC + ServiceAccount + RBAC
 ├── database.yaml       # PostgreSQL + Redis StatefulSets
 ├── deployment.yaml     # 应用 Deployment + HPA
+├── scheduler-deployment.yaml  # 自主开发调度器 Deployment
+├── scheduler-service.yaml     # 调度器 Service
 ├── service.yaml        # Service + Ingress
 ├── policies.yaml       # PDB + NetworkPolicy
 └── kustomization.yaml  # Kustomize 配置
@@ -84,7 +86,7 @@ k8s/
 - 监控 Redis 健康状态和熔断器状态
 - 使用 `preStop` hook 允许活跃连接排空
 
-**多用户工作区说明：** Docker 镜像本身通过 `USER 1000` 指令默认以非 root 用户 `open-ace`（uid 1000）运行，默认 Kubernetes 清单也通过 `runAsNonRoot: true` / `runAsUser: 1000` 予以加强。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行（`runAsUser: 0`）**并** 设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`；入口脚本在缺少两者之一时会直接报错退出，并请在集群变更流程中记录该例外。
+**多用户工作区说明：** Docker 镜像本身通过 `USER 1000` 指令默认以非 root 用户 `open-ace`（uid 1000）运行，默认 Kubernetes 清单也通过 `runAsNonRoot: true` / `runAsUser: 1000` 予以加强。如果使用 `plain` 隔离 backend(`workspace.isolation`)且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行（`runAsUser: 0`）**并** 设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`；入口脚本在缺少两者之一时会直接报错退出，并请在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 
@@ -123,7 +125,7 @@ k8s/
 
 3. **恢复演练：** 建议定期进行恢复测试（至少每月一次）
 
-详细备份/恢复步骤请参见 [DATABASE-BACKUP.md](./DATABASE-BACKUP.md)。
+详细备份/恢复步骤请参见 [DATABASE_BACKUP.md](./DATABASE_BACKUP.md)。
 
 #### 可选备份 CronJob
 
@@ -181,7 +183,7 @@ kubectl get cronjob -n open-ace
 ### RBAC
 
 - ServiceAccount：`open-ace`
-- Role：对 configmaps、secrets、pods 的 get/list/watch 权限
+- Role：对 configmaps 的 get/list/watch；对 pods 的 get/list
 - RoleBinding：将角色绑定到 `open-ace` 命名空间中的服务账户
 
 ### NetworkPolicy

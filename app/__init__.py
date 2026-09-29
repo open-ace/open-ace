@@ -471,6 +471,20 @@ def create_app(config=None):
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
+    # Issue #3277: Check frontend build artifacts integrity
+    # This prevents "Open ACE could not render" errors due to missing build artifacts
+    from app.utils.frontend_check import check_frontend_build_on_startup
+
+    try:
+        check_frontend_build_on_startup(
+            flask_env=app.config.get("ENV"),
+            skip_env_var=os.environ.get("OPENACE_SKIP_FRONTEND_CHECK", ""),
+        )
+    except RuntimeError as e:
+        # Fail fast in production - cannot start without frontend build artifacts
+        logger.error(f"Frontend build check failed: {e}")
+        raise
+
     # Deliberately AFTER the schema check above, which is the first thing that
     # talks to the database. This query is only a diagnostic, and placing it
     # earlier would make a startup diagnostic the first blocking call -- on an
@@ -654,6 +668,7 @@ def create_app(config=None):
             check_config_directory,
             check_database_connection,
             check_encryption_registry,
+            check_frontend_build,
             check_initialization_status,
             check_ssh_sync_failure,
             check_workspace_directory,
@@ -674,6 +689,7 @@ def create_app(config=None):
             "init_status": {"status": "unknown"},
             "security_mode": {"status": "unknown"},
             "ssh_sync": {"status": "unknown"},
+            "frontend_build": {"status": "unknown"},
         }
 
         status_code = 200
@@ -828,6 +844,18 @@ def create_app(config=None):
         if ssh_sync_result.get("status") != "ok":
             status_code = 503
 
+        # Check frontend build artifacts (Issue #3277)
+        # Ensures management platform UI is available
+        frontend_result = check_frontend_build()
+        checks["frontend_build"] = frontend_result
+        if frontend_result.get("status") not in ("ok", "skipped"):
+            # Don't fail readiness for missing frontend in development
+            # But do fail in production
+            from app.utils.security_mode import get_security_mode
+
+            if get_security_mode().value == "production":
+                status_code = 503
+
         # Build response
         if status_code == 503:
             response = {
@@ -867,8 +895,28 @@ def create_app(config=None):
     else:
         logger.info("Background services NOT started (SCHEDULER_MODE=%s)", scheduler_mode)
 
+    # Issue #3446: an isolation configuration that cannot be honoured stops
+    # the server here, with the fix in the message, instead of surfacing as a
+    # disabled workspace later. Test processes build apps against fixtures.
+    if not (app.config.get("TESTING") or "PYTEST_VERSION" in os.environ):
+        _validate_workspace_isolation()
+
     logger.info("Open ACE application initialized")
     return app
+
+
+def _validate_workspace_isolation() -> None:
+    import platform as _platform
+
+    from app.repositories.database import CONFIG_DIR
+    from app.services.workspace_isolation_config import IsolationConfigError, validate_config_file
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+    try:
+        validate_config_file(config_path, _platform.system().lower())
+    except IsolationConfigError as exc:
+        logger.critical("Invalid workspace isolation configuration in %s: %s", config_path, exc)
+        raise RuntimeError(f"Invalid workspace isolation configuration: {exc}") from None
 
 
 def register_error_handlers(app):
@@ -953,6 +1001,8 @@ def register_blueprints(app):
     from app.routes.auth import auth_bp
     from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
+    from app.routes.encryption_keys import encryption_keys_bp
+    from app.routes.external_identity import external_identity_bp
     from app.routes.feishu_config import feishu_config_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
@@ -989,6 +1039,7 @@ def register_blueprints(app):
     app.register_blueprint(governance_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
+    app.register_blueprint(external_identity_bp, url_prefix="/api")
     app.register_blueprint(tenant_bp)
     app.register_blueprint(sso_bp)
     app.register_blueprint(compliance_bp)
@@ -1022,11 +1073,16 @@ def register_blueprints(app):
     from app.routes.feature_flags import feature_flags_bp
 
     app.register_blueprint(feature_flags_bp)
+    # workspace isolation capability contract (Issue #3374)
+    from app.routes.workspace_isolation import workspace_isolation_bp
+
+    app.register_blueprint(workspace_isolation_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
     # Frontend error reporting endpoint
     from app.routes.frontend_errors import frontend_errors_bp
 
     app.register_blueprint(frontend_errors_bp, url_prefix="/api")
+    app.register_blueprint(encryption_keys_bp, url_prefix="/api")
 
     logger.info("All blueprints registered")
 

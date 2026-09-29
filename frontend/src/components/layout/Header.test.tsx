@@ -20,7 +20,7 @@ import { MemoryRouter } from 'react-router-dom';
 // Mutable mock state
 let mockIsAuthenticated = true;
 let mockUserRole: string | null = 'admin';
-const mockGetUnreadCount = vi.fn();
+let mockUnreadCount = 0;
 const mockNavigate = vi.fn();
 
 // Mock hooks
@@ -37,6 +37,12 @@ vi.mock('@/hooks', () => ({
   }),
   useTheme: () => 'light',
   useLanguage: () => 'en',
+  useAlertStream: () => ({
+    unreadCount: mockUnreadCount,
+    connectionStatus: 'connected',
+    alerts: [],
+    reconnect: vi.fn(),
+  }),
 }));
 
 // Mock store
@@ -68,13 +74,6 @@ vi.mock('@/i18n', () => ({
     return translations[key] || key;
   },
   setLanguage: vi.fn(),
-}));
-
-// Mock API
-vi.mock('@/api', () => ({
-  alertsApi: {
-    getUnreadCount: (...args: unknown[]) => mockGetUnreadCount(...args),
-  },
 }));
 
 // Mock common components (pass-through for CountBadge)
@@ -109,9 +108,8 @@ describe('Header - Notification Bell', () => {
   beforeEach(() => {
     mockIsAuthenticated = true;
     mockUserRole = 'admin';
-    mockGetUnreadCount.mockResolvedValue(5);
+    mockUnreadCount = 5;
     mockNavigate.mockClear();
-    mockGetUnreadCount.mockClear();
   });
 
   afterEach(() => {
@@ -140,13 +138,6 @@ describe('Header - Notification Bell', () => {
       await new Promise((r) => setTimeout(r, 100));
     });
     expect(screen.queryByTitle('Unread Alerts')).not.toBeInTheDocument();
-  });
-
-  it('calls getUnreadCount on mount', async () => {
-    renderHeader();
-    await waitFor(() => {
-      expect(mockGetUnreadCount).toHaveBeenCalled();
-    });
   });
 
   // Issue #3223: Admin navigates to /manage/quota?tab=alerts
@@ -193,19 +184,6 @@ describe('Header - Notification Bell', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/work/alerts');
   });
 
-  it('handles API error gracefully without crashing', async () => {
-    mockGetUnreadCount.mockRejectedValue(new Error('Network error'));
-    renderHeader();
-
-    // Wait for the fetch attempt
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 200));
-    });
-
-    // Bell should still be visible
-    expect(screen.getByTitle('Unread Alerts')).toBeInTheDocument();
-  });
-
   it('renders bell in compact mode when authenticated', async () => {
     renderHeader(true);
     await waitFor(() => {
@@ -213,51 +191,5 @@ describe('Header - Notification Bell', () => {
     });
   });
 
-  it('polls every 30 seconds using fake timers', async () => {
-    vi.useFakeTimers();
-    mockGetUnreadCount.mockClear();
-
-    renderHeader();
-
-    // Initial fetch
-    await act(async () => {
-      vi.advanceTimersByTime(0);
-    });
-
-    const initialCallCount = mockGetUnreadCount.mock.calls.length;
-    expect(initialCallCount).toBeGreaterThanOrEqual(1);
-
-    // Advance 30 seconds
-    await act(async () => {
-      vi.advanceTimersByTime(30000);
-    });
-
-    expect(mockGetUnreadCount.mock.calls.length).toBeGreaterThan(initialCallCount);
-
-    vi.useRealTimers();
-  });
-
-  it('cleans up polling on unmount', async () => {
-    vi.useFakeTimers();
-
-    const { unmount } = renderHeader();
-
-    await act(async () => {
-      vi.advanceTimersByTime(0);
-    });
-
-    const callsBeforeUnmount = mockGetUnreadCount.mock.calls.length;
-
-    unmount();
-
-    // Advance time after unmount
-    await act(async () => {
-      vi.advanceTimersByTime(60000);
-    });
-
-    // Should not have been called again after unmount
-    expect(mockGetUnreadCount.mock.calls.length).toBe(callsBeforeUnmount);
-
-    vi.useRealTimers();
-  });
+  // Issue #3332: SSE replaces polling - no longer need polling tests
 });

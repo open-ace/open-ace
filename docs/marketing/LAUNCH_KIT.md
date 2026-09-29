@@ -243,7 +243,7 @@ Show that Open ACE is a real product with a workspace, governance dashboard, rel
    - Voiceover: "Manage Mode is for operators: token usage, cost, quotas, alerts, compliance reports, and ROI."
 
 6. Remote Agent/API Key proxy, 15 seconds
-   - Use a simple architecture slide from the docs or the diagram in `REMOTE-WORKSPACE.md`.
+   - Use a simple architecture slide from the docs or the diagram in `REMOTE_WORKSPACE.md`.
    - Voiceover: "Remote Agent can run AI CLIs on target machines, while real API keys stay encrypted on the Open ACE server. Agents receive short-lived, revocable proxy tokens."
 
 7. Call to action, 5 seconds

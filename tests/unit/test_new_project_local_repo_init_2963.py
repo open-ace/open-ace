@@ -2,11 +2,19 @@
 """
 Issue #2963: AI 自主开发创建新项目时首次创建 Issue 失败，重试后因本地仓库未初始化导致分支创建失败
 
-测试修复点：
-1. create_repo 后同步内存中的 wf 字典
-2. create_issue 优先使用本地 repo_url 变量
-3. 新项目创建后克隆仓库到本地
-4. git 操作前验证目录有效性
+测试点（均为驱动真实 _do_preparation 的 driver）：
+1. create_repo 后同步内存中的 wf 字典 — 由 3075 文件的
+   test_create_issue_called_with_correct_repo 以纯 MagicMock _update_workflow
+   断言产品自身同步行（#3296 B7）。
+2. create_issue 优先使用本地 repo_url 变量 — 由 3075 文件同名真 driver 覆盖。
+3. 新项目创建后克隆仓库到本地 — 本文件 TestCloneAfterCreateRepo 真驱动
+   （gh repo clone 主臂 + git clone 回退臂 + different-repo/not-empty 两条 raise）。
+4. git 操作前验证目录有效性 — 产品侧该无条件验证已被 60045a88 移除
+   （"remove unconditional validation to fix existing tests"），重放它的
+   TestValidateProjectPath 已删除（#3296 B1，60045a88 证据）。
+
+#3296 移除了本文件残余的自演式测试（mock 自测/正则重放/已删产品逻辑重放），
+逐项处置见 issue #3296 处置表。
 """
 
 import os
@@ -37,143 +45,97 @@ def _make_test_workflow():
     }
 
 
-class TestSyncWfAfterCreateRepo:
-    """测试点1：create_repo 后同步内存中的 wf 字典"""
+def _setup_orchestrator(wf, mock_gh):
+    """Create a partially-mocked orchestrator driving the real _do_preparation."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
-    def test_wf_synced_after_create_repo(self, tmp_path):
-        """Verify wf dict is synced immediately after create_repo."""
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    repo = MagicMock()
+    repo.get_workflow.return_value = wf
 
-        wf = _make_test_workflow()
-        wf["project_path"] = str(tmp_path)
-
-        # Mock the orchestrator
-        with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps") as mock_gh_class:
-            mock_gh = MagicMock()
-            mock_gh_class.return_value = mock_gh
-            mock_gh.create_repo.return_value = {
-                "name": "my-new-project",
-                "url": "https://github.com/owner/my-new-project",
-            }
-            mock_gh.create_issue.return_value = {
-                "number": 1,
-                "url": "https://github.com/owner/my-new-project/issues/1",
-            }
-            mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            mock_gh.get_repo_url.return_value = "https://github.com/owner/my-new-project"
-            mock_gh.list_worktrees.return_value = []
-            mock_gh.path_exists_as_user.return_value = False
-
-            # Create a mock repo
-            mock_repo = MagicMock()
-            mock_repo.get_workflow.return_value = wf
-
-            # Track updates to verify wf sync
-            updates_applied = []
-
-            def capture_update(*args, **kwargs):
-                # Accept any arguments to be flexible with mock calls
-                if args and isinstance(args[-1], dict):
-                    updates_applied.append(args[-1])
-                    wf.update(args[-1])
-                return {"success": True}
-
-            mock_repo.update_workflow.side_effect = capture_update
-
-            o = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-            o.repo = mock_repo
-            o._workflow_id = "test-workflow-id-2963"
-            o._gh = None
-            o._emit = MagicMock()
-
-            # Simulate the create_repo block
-            repo_url = "https://github.com/owner/my-new-project"
-            o._update_workflow({"project_repo_url": repo_url})
-
-            # Verify wf was synced (this is what the fix adds)
-            # In the actual code, this is done by: wf["project_repo_url"] = repo_url
-            assert (
-                wf.get("project_repo_url") == repo_url
-            ), "wf should be synced with repo_url after _update_workflow"
-
-
-class TestIssueRepoFromLocalVariable:
-    """测试点2：create_issue 优先使用本地 repo_url 变量"""
-
-    def test_issue_repo_uses_local_repo_url(self):
-        """Verify issue creation uses local repo_url, not stale wf value."""
-        import re
-
-        # Scenario: create_repo succeeded, but wf dict has stale value
-        local_repo_url = "https://github.com/owner/new-project"  # From create_repo
-        wf_stale_value = "my-new-project"  # Input name, not URL
-
-        # The fix: issue_repo_url = repo_url or wf.get("project_repo_url", "")
-        issue_repo_url = local_repo_url or wf_stale_value
-
-        # Extract owner/repo
-        match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url)
-        issue_repo = match.group(1) if match else None
-
-        assert issue_repo == "owner/new-project"
-        assert issue_repo is not None, "Should extract repo from local repo_url"
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch.repo = repo
+    orch._workflow_id = wf.get("workflow_id", "wf-2963-test")
+    orch._gh = None
+    orch._shutdown_requested = threading.Event()
+    orch._session_usage_offsets = {}
+    orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+    orch.emit_phase_change = MagicMock()
+    orch._get_gh = MagicMock(return_value=mock_gh)
+    return orch, repo
 
 
 class TestCloneAfterCreateRepo:
-    """测试点3：新项目创建后克隆仓库到本地"""
+    """测试点3：新项目创建后克隆仓库到本地（真实 _do_preparation driver）"""
 
-    def test_clone_called_for_new_project(self, tmp_path):
-        """Verify git clone is called after create_repo for new projects."""
-        repo_url = "https://github.com/owner/new-project"
-        project_path = str(tmp_path / "new-project")
+    def test_git_clone_fallback_for_non_github_host(self, tmp_path):
+        """Non-github.com repo URLs clone via plain git (the fallback arm).
 
-        # Simulate the clone logic from the fix
-        git_calls = []
+        Drives the real _do_preparation clone decision on a re-entry workflow:
+        the clone regex only matches github.com, so a self-hosted URL must take
+        the ``gh._run_git(["clone", ...])`` arm. (The ``gh repo clone`` arm for
+        github.com URLs is covered by the without-project-path drivers below.
+        #3296 B3: previously this was an inline replay of the clone logic.)
+        """
+        repo_url = "https://git.example.com/owner/new-repo"
+        project_path = str(tmp_path)  # Real (empty) directory
 
-        def mock_run_git(args, **kw):
-            git_calls.append(args)
-            return MagicMock(returncode=0, stdout="", stderr="")
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-git-clone-fallback-2963",
+                "user_id": 1,
+                "project_repo_url": repo_url,  # Resolved URL: re-entry, no create_repo
+                "project_path": project_path,
+                "branch_strategy": "current",
+                "github_issue_number": 123,  # Issue already exists; focus on clone
+            }
+        )
 
-        mock_gh = MagicMock()
-        mock_gh._run_git.side_effect = mock_run_git
-        mock_gh.get_repo_url.return_value = repo_url
+        gh = MagicMock(name="gh")
+        gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._needs_sudo.return_value = False
+        gh.get_current_branch.return_value = "main"
 
-        # Directory doesn't exist → should create parent and clone
-        assert not os.path.exists(project_path)
+        orch, repo = _setup_orchestrator(wf, gh)
 
-        # The fix logic
-        if not os.path.exists(project_path):
-            os.makedirs(os.path.dirname(project_path), exist_ok=True)
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=gh),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
 
-        if not os.path.isdir(os.path.join(project_path, ".git")):
-            mock_gh._run_git(["clone", repo_url, project_path])
+            result = orch._do_preparation(ctx, deps)
 
-        # Verify clone was called
-        assert ["clone", repo_url, project_path] in git_calls
-
-    def test_skip_clone_if_already_cloned(self, tmp_path):
-        """Verify clone is skipped if directory is already the target repo."""
-        repo_url = "https://github.com/owner/new-project"
-        project_path = str(tmp_path / "new-project")
-        os.makedirs(project_path)
-        os.makedirs(os.path.join(project_path, ".git"))
-
-        git_calls = []
-
-        def mock_run_git(args, **kw):
-            git_calls.append(args)
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_gh = MagicMock()
-        mock_gh._run_git.side_effect = mock_run_git
-        mock_gh.get_repo_url.return_value = repo_url
-
-        # The fix logic: already cloned
-        if not os.path.isdir(os.path.join(project_path, ".git")):
-            mock_gh._run_git(["clone", repo_url, project_path])
-
-        # Should NOT call clone
-        assert ["clone", repo_url, project_path] not in git_calls
+        gh.create_repo.assert_not_called()  # Re-entry: URL already checkpointed
+        gh._run_git.assert_any_call(["clone", repo_url, project_path])
+        # The gh-repo-clone arm must NOT fire for a non-github.com host.
+        assert not any(
+            c.args and c.args[0][:2] == ["repo", "clone"] for c in gh._run_gh.call_args_list
+        )
+        orch._update_workflow.assert_any_call({"project_path": project_path})
+        assert result.next_phase == "planning"
 
     def test_preparation_without_project_path_clones_into_user_workspace(self):
         """Route-permitted new projects without a path use the workspace fallback."""
@@ -446,54 +408,144 @@ class TestCloneAfterCreateRepo:
         orch._update_workflow.assert_any_call({"project_path": fallback_path})
         assert result.next_phase == "planning"
 
-    def test_error_if_different_repo(self, tmp_path):
-        """Verify error if directory exists but is a different repo."""
+    def test_error_if_directory_is_a_different_repo(self, tmp_path):
+        """An existing .git directory pointing at another repo raises.
+
+        Drives the real raise in _do_preparation's clone decision block: the
+        target directory already has a .git whose origin URL differs from the
+        workflow's resolved repo_url. (#3296 B5: previously an inline replay;
+        this raise path had no real coverage.)
+        """
         repo_url = "https://github.com/owner/new-project"
-        existing_url = "https://github.com/other/different-project"
-        project_path = str(tmp_path / "new-project")
-        os.makedirs(project_path)
-        os.makedirs(os.path.join(project_path, ".git"))
+        project_path = tmp_path / "new-project"
+        (project_path / ".git").mkdir(parents=True)  # Real .git directory
 
-        mock_gh = MagicMock()
-        mock_gh.get_repo_url.return_value = existing_url
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-different-repo-2963",
+                "user_id": 1,
+                "project_repo_url": repo_url,
+                "project_path": str(project_path),
+                "branch_strategy": "current",
+                "github_issue_number": None,
+            }
+        )
 
-        # The fix logic
-        with pytest.raises(GitHubOpsError, match="different git repo"):
-            if os.path.isdir(os.path.join(project_path, ".git")):
-                if mock_gh.get_repo_url() != repo_url:
-                    raise GitHubOpsError(f"Directory {project_path} is a different git repo")
+        gh = MagicMock(name="gh")
+        gh.get_repo_url.return_value = "https://github.com/other/different-project"
+        gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._needs_sudo.return_value = False
 
+        orch, repo = _setup_orchestrator(wf, gh)
 
-class TestValidateProjectPath:
-    """测试点4：git 操作前验证目录有效性"""
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=gh),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
 
-    def test_error_if_project_path_not_set(self):
-        """Verify error if project_path is None or empty."""
-        project_path = None
+            with pytest.raises(GitHubOpsError, match="different git repo"):
+                orch._do_preparation(ctx, deps)
 
-        with pytest.raises(GitHubOpsError, match="project_path is not set"):
-            if not project_path:
-                raise GitHubOpsError("project_path is not set for branch creation")
+        gh.create_issue.assert_not_called()
+        self._assert_repo_setup_failed(orch, "different git repo")
 
-    def test_error_if_project_path_does_not_exist(self):
-        """Verify error if project_path directory doesn't exist."""
-        project_path = "/nonexistent/path"
+    def test_error_if_directory_exists_but_not_empty(self, tmp_path):
+        """A non-git, non-empty target directory raises instead of clobbered.
 
-        with pytest.raises(GitHubOpsError, match="does not exist"):
-            if not os.path.isdir(project_path):
-                raise GitHubOpsError(f"project_path {project_path} does not exist")
+        Drives the other raise in the clone decision block: the target exists,
+        has no .git, and contains user files — the preparation must abort
+        rather than clone over it. (#3296 B6: this raise path had no real
+        coverage at all.)
+        """
+        repo_url = "https://github.com/owner/new-project"
+        project_path = tmp_path / "new-project"
+        project_path.mkdir()
+        (project_path / "stale.txt").write_text("user data")
 
-    def test_error_if_not_git_repository(self, tmp_path):
-        """Verify error if directory is not a git repository."""
-        project_path = str(tmp_path / "not-a-repo")
-        os.makedirs(project_path)
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-not-empty-2963",
+                "user_id": 1,
+                "project_repo_url": repo_url,
+                "project_path": str(project_path),
+                "branch_strategy": "current",
+                "github_issue_number": None,
+            }
+        )
 
-        with pytest.raises(GitHubOpsError, match="not a valid git repository"):
-            if not os.path.isdir(os.path.join(project_path, ".git")):
-                raise GitHubOpsError(f"{project_path} is not a valid git repository")
+        gh = MagicMock(name="gh")
+        gh.get_repo_url.return_value = repo_url
+        gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        gh._needs_sudo.return_value = False
 
-    # test_pass_if_valid_git_repository was deleted (#3186 batch 5): the
-    # unconditional project_path validation it replayed was deliberately
-    # removed from the product by 60045a88 ("remove unconditional validation
-    # to fix existing tests") — the test re-enacted dead code. The remaining
-    # self-simulating tests in this file are tracked in #3296.
+        orch, repo = _setup_orchestrator(wf, gh)
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=gh),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            with pytest.raises(GitHubOpsError, match="exists but is not empty"):
+                orch._do_preparation(ctx, deps)
+
+        gh.create_issue.assert_not_called()
+        self._assert_repo_setup_failed(orch, "not empty")
+        # The user's file must be untouched.
+        assert (project_path / "stale.txt").read_text() == "user data"
+
+    @staticmethod
+    def _assert_repo_setup_failed(orch, needle):
+        """The failed repo_setup milestone must carry the raise's message."""
+        failed_messages = [
+            c.kwargs.get("error_message", "")
+            for c in orch._create_milestone.call_args_list
+            if c.kwargs.get("milestone_type") == "repo_setup" and c.kwargs.get("status") == "failed"
+        ]
+        assert failed_messages, "expected a failed repo_setup milestone"
+        assert needle in failed_messages[0]

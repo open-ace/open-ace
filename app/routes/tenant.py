@@ -391,6 +391,26 @@ def update_tenant_settings(tenant_id: int):
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
+    # Issue #3271: Validate branding settings if present
+    if any(
+        key in data
+        for key in [
+            "branding_logo_url",
+            "branding_name",
+            "branding_welcome_message",
+        ]
+    ):
+        from app.utils.branding_validator import validate_branding_settings
+
+        is_valid, errors = validate_branding_settings(
+            logo_url=data.get("branding_logo_url"),
+            system_name=data.get("branding_name"),
+            welcome_message=data.get("branding_welcome_message"),
+            copyright_text=None,  # Copyright is system-level only
+        )
+        if not is_valid:
+            return jsonify({"error": "; ".join(errors)}), 400
+
     # Issue #2790: Service 层返回 UpdateSettingsResult
     result = tenant_service.update_settings(tenant_id, data, actor=actor)
 

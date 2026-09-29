@@ -446,41 +446,6 @@ def convert_to_sqlite(postgres_sql):
                         if tbl:
                             pk_map[tbl.group(1)] = pk_match2.group(1)
 
-    # Pre-scan: find FOREIGN KEY constraints from ALTER TABLE statements
-    # SQLite requires FKs to be inline in CREATE TABLE, not ALTER TABLE
-    fk_map: dict[str, list[str]] = {}  # table_name -> list of fk_constraint strings
-    for j, ln in enumerate(lines):
-        if re.match(r"ALTER TABLE", ln):
-            # Extract table name
-            tbl_match = re.search(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", ln)
-            if not tbl_match:
-                continue
-            table_name = tbl_match.group(1)
-
-            # Look ahead for ADD CONSTRAINT FOREIGN KEY
-            lookahead = j + 1
-            while lookahead < len(lines) and lines[lookahead].strip().startswith("--"):
-                lookahead += 1
-            if lookahead < len(lines):
-                fk_match = re.search(
-                    r"ADD CONSTRAINT\s+\w+\s+FOREIGN KEY\s*\((\w+)\)\s*REFERENCES\s+(\w+)\s*\((\w+)\)(\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION))?",
-                    lines[lookahead],
-                )
-                if fk_match:
-                    fk_col = fk_match.group(1)
-                    ref_table = fk_match.group(2)
-                    ref_col = fk_match.group(3)
-                    on_delete = fk_match.group(4) if fk_match.group(4) else ""
-
-                    # Build SQLite FK constraint
-                    fk_constraint = (
-                        f"FOREIGN KEY ({fk_col}) REFERENCES {ref_table}({ref_col}){on_delete}"
-                    )
-
-                    if table_name not in fk_map:
-                        fk_map[table_name] = []
-                    fk_map[table_name].append(fk_constraint)
-
     # Header
     output_lines.append("-- Open-ACE Database Schema for SQLite")
     output_lines.append("-- Converted from schema-postgres.sql")
@@ -590,34 +555,20 @@ def convert_to_sqlite(postgres_sql):
                 for idx_c, col in enumerate(converted_columns):
                     # Match: "    pk_col <type> ..." — add PRIMARY KEY to the column
                     if re.match(rf"^\s+{re.escape(pk_col)}\s+", col):
-                        # Check if this column is also a foreign key
-                        is_fk = any(
-                            fk_constraint.startswith(f"FOREIGN KEY ({pk_col})")
-                            for fk_constraint in fk_map.get(table_name, [])
-                        )
-
                         if "integer" in col.lower():
-                            # For foreign key PKs, just add PRIMARY KEY (no AUTOINCREMENT)
-                            if is_fk:
+                            # integer PK: use AUTOINCREMENT for id-like columns
+                            converted_columns[idx_c] = re.sub(
+                                rf"^(\s+{re.escape(pk_col)})\s+integer\s+NOT\s+NULL",
+                                r"\1 INTEGER PRIMARY KEY AUTOINCREMENT",
+                                col,
+                            )
+                            # If NOT NULL wasn't there (e.g. user_id PK)
+                            if "AUTOINCREMENT" not in converted_columns[idx_c]:
                                 converted_columns[idx_c] = re.sub(
                                     rf"^(\s+{re.escape(pk_col)})\s+integer",
                                     r"\1 INTEGER PRIMARY KEY",
                                     col,
                                 )
-                            else:
-                                # integer PK: use AUTOINCREMENT for id-like columns
-                                converted_columns[idx_c] = re.sub(
-                                    rf"^(\s+{re.escape(pk_col)})\s+integer\s+NOT\s+NULL",
-                                    r"\1 INTEGER PRIMARY KEY AUTOINCREMENT",
-                                    col,
-                                )
-                                # If NOT NULL wasn't there (e.g. user_id PK)
-                                if "AUTOINCREMENT" not in converted_columns[idx_c]:
-                                    converted_columns[idx_c] = re.sub(
-                                        rf"^(\s+{re.escape(pk_col)})\s+integer",
-                                        r"\1 INTEGER PRIMARY KEY",
-                                        col,
-                                    )
                         else:
                             # Non-integer PK (e.g. login_attempts.username): just add PRIMARY KEY
                             converted_columns[idx_c] = re.sub(
@@ -626,11 +577,6 @@ def convert_to_sqlite(postgres_sql):
                                 col,
                             )
                         break
-
-            # Add FOREIGN KEY constraints from fk_map
-            fk_constraints = fk_map.get(table_name, [])
-            for fk_constraint in fk_constraints:
-                converted_columns.append(f" {fk_constraint}")
 
             # Build clean CREATE TABLE statement
             table_lines.append(f"CREATE TABLE {table_name} (")

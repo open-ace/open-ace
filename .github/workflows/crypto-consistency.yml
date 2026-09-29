@@ -6,8 +6,8 @@ on:
       - 'app/modules/workspace/api_key_proxy.py'
       - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
-      - 'docs/cn/REMOTE-WORKSPACE.md'
-      - 'docs/en/REMOTE-WORKSPACE.md'
+      - 'docs/cn/REMOTE_WORKSPACE.md'
+      - 'docs/en/REMOTE_WORKSPACE.md'
       - 'docs/cn/KEY_MANAGEMENT.md'
       - 'docs/en/KEY_MANAGEMENT.md'
       - '.github/workflows/crypto-consistency.yml'
@@ -16,8 +16,8 @@ on:
       - 'app/modules/workspace/api_key_proxy.py'
       - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
-      - 'docs/cn/REMOTE-WORKSPACE.md'
-      - 'docs/en/REMOTE-WORKSPACE.md'
+      - 'docs/cn/REMOTE_WORKSPACE.md'
+      - 'docs/en/REMOTE_WORKSPACE.md'
       - 'docs/cn/KEY_MANAGEMENT.md'
       - 'docs/en/KEY_MANAGEMENT.md'
       - '.github/workflows/crypto-consistency.yml'
@@ -41,8 +41,8 @@ jobs:
             "app/modules/workspace/api_key_proxy.py"
             "app/modules/workspace/model_gateway/repository.py"
             "app/utils/smtp_crypto.py"
-            "docs/cn/REMOTE-WORKSPACE.md"
-            "docs/en/REMOTE-WORKSPACE.md"
+            "docs/cn/REMOTE_WORKSPACE.md"
+            "docs/en/REMOTE_WORKSPACE.md"
             "docs/cn/KEY_MANAGEMENT.md"
             "docs/en/KEY_MANAGEMENT.md"
           )

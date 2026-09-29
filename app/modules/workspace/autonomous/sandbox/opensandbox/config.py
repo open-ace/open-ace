@@ -227,6 +227,12 @@ class EndpointConfig:
     api_key_env: str
     runtime_class: str
     default_image: str
+    # Issue #3378: image for interactive sandboxed WebUI pods. Parsed as a
+    # plain optional string on purpose — validation (digest-pinned + in
+    # image_allowlist) lives in the isolation capability probe, so a bad
+    # webui_image reports as a sandboxed-capability reason instead of
+    # failing the whole shared backend config (which autonomous needs).
+    webui_image: str = ""
     execd_port: int = 44772
     # Egress sidecar is a SEPARATE service on its own port with its own auth
     # header — GET /policy against execd's port is a 404.
@@ -543,6 +549,10 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
     if default_image not in image_allowlist:
         raise SandboxConfigError(f"endpoint {tier!r}: default_image is not in image_allowlist")
 
+    # Issue #3378: optional, validated by the isolation capability probe
+    # (not here) so a bad value degrades only the sandboxed level.
+    webui_image = str(body.get("webui_image") or "").strip()
+
     for uid_key in ("exec_uid", "exec_gid"):
         if _int_or_raise(body.get(uid_key, 1000), f"endpoint {tier!r} {uid_key}") == 0:
             raise SandboxConfigError(
@@ -642,6 +652,7 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
         api_key_env=str(body["api_key_env"]).strip(),
         runtime_class=str(body["runtime_class"]).strip(),
         default_image=default_image,
+        webui_image=webui_image,
         execd_port=_int_or_raise(body.get("execd_port", 44772), f"endpoint {tier!r} execd_port"),
         egress_port=_int_or_raise(body.get("egress_port", 18080), f"endpoint {tier!r} egress_port"),
         execd_token_env=str(body.get("execd_token_env") or "").strip(),

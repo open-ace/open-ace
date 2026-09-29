@@ -41,7 +41,8 @@ describe('ChunkLoadErrorBoundary', () => {
       </ChunkLoadErrorBoundary>
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('A new version of Open ACE is available');
+    // Updated to match new error diagnosis - "Resource Load Failed" for network errors
+    expect(screen.getByRole('alert')).toHaveTextContent('Resource Load Failed');
     expect(screen.getByRole('button', { name: 'Reload page' })).toBeVisible();
   });
 
@@ -69,7 +70,10 @@ describe('ChunkLoadErrorBoundary', () => {
       </ChunkLoadErrorBoundary>
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Open ACE could not render');
+    // Updated to match new error diagnosis - "Page Render Error" for runtime errors
+    expect(screen.getByRole('alert')).toHaveTextContent('Page Render Error');
     expect(screen.getByRole('alert')).not.toHaveTextContent('private implementation detail');
+    // Contact Support button should be visible for runtime errors
+    expect(screen.getByRole('button', { name: /Contact Support/i })).toBeVisible();
   });
 });

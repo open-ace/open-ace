@@ -21,6 +21,7 @@ import pytest
 from flask import Flask, request
 
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1306)]
 
@@ -30,7 +31,7 @@ def test_replace_host_from_request():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",  # Container-detected IP (wrong)
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
@@ -78,22 +79,25 @@ def test_get_user_webui_url_with_host_url():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",  # Container-detected IP (wrong), no port
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
-    # a real WebUI process in test environment (Issue #3129)
+    # a real WebUI process in test environment (Issue #3129). The single-user
+    # port is the configured range's first FREE port (default start 3100), so
+    # the availability probe is stubbed for determinism on busy runners.
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         # Without host_url: uses config.url directly (fallback)
         url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
         assert url1 == "http://172.17.0.1:3100"
 
-        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        # With host_url: uses request IP with the range's port (Issue #1357)
         url2, token2 = manager.get_user_webui_url(
             user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
         )
@@ -105,31 +109,35 @@ def test_get_user_webui_url_with_host_url():
 
 
 def test_get_user_webui_url_preserves_port_single_user():
-    """Test that single-user mode uses fixed port 3100 (Issue #1357).
+    """Test that single-user mode uses the range's first free port (Issue #1357).
 
-    In single-user mode (docker compose), WebUI runs on fixed port 3100.
-    URL should come from request.host_url with port 3100, NOT from config.json.
+    In single-user mode (docker compose) the WebUI runs on the first free
+    port of the configured range — 3100 for the default range. URL should
+    come from request.host_url with that port, NOT from config.json.
     """
     # Config URL with port (but will be ignored in single-user mode with host_url)
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1:3100",  # WebUI port
-        multi_user_mode=False,
+        isolation=iso("shared"),
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
-    # a real WebUI process in test environment (Issue #3129)
+    # a real WebUI process in test environment (Issue #3129); the port
+    # availability probe is stubbed so the default range's start (3100) wins
+    # deterministically.
     with (
         patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         # Without host_url: uses config.url as fallback (with port 3100)
         url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
         assert url1 == "http://172.17.0.1:3100"
 
-        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        # With host_url: uses request IP with the range's port (Issue #1357)
         url2, token2 = manager.get_user_webui_url(
             user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
         )
@@ -154,7 +162,7 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1",
-        multi_user_mode=True,
+        isolation=iso("plain"),
         port_range_start=3100,
         port_range_end=3200,
     )
@@ -170,6 +178,14 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
     instance.port = 3123
     instance.token = "instance-token"
     instance.url = "http://172.17.0.1:3123"  # stale container-IP url
+    # Issue #3374 review #2: the reuse branch compares the instance's launch
+    # account with the requested one — keep them equal so the live instance
+    # is reused (a mismatch would trigger a restart under the new mapping).
+    instance.system_account = "testuser"
+    # Issue #3378: the reuse branch also compares the instance's form; a real
+    # WebUIInstance always carries one ("local" here — MagicMock would
+    # auto-attribute anything else).
+    instance.form = "local"
     manager._instances = {1: instance}
 
     # Fake request context: the browser hits 192.168.1.169:19888 while the

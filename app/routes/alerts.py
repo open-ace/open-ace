@@ -12,9 +12,9 @@ WebSocket endpoint for real-time alerts.
 
 import json
 import logging
-from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
+from gevent.lock import RLock
 
 from app.auth.decorators import (
     _extract_session_token,
@@ -32,6 +32,9 @@ from app.modules.governance.alert_notifier import (
 logger = logging.getLogger(__name__)
 
 alerts_bp = Blueprint("alerts", __name__)
+
+# Issue #3332: Global gevent-safe lock for SSE cache operations
+_sse_cache_lock = RLock()
 
 
 @alerts_bp.before_request
@@ -109,17 +112,42 @@ def get_unread_count():
 def mark_alert_read(alert_id):
     """Mark an alert as read and sync to quota_alerts."""
     try:
+        user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         notifier = get_alert_notifier()
+
+        # Issue #3332: Validate alert ownership
+        alert = notifier.get_alert_by_id(alert_id)
+        if not alert:
+            return jsonify({"success": False, "error": "Alert not found"}), 404
+
+        if alert.user_id != user_id:
+            logger.warning(
+                f"User {user_id} attempted to mark alert {alert_id} owned by {alert.user_id}"
+            )
+            return jsonify({"success": False, "error": "Permission denied"}), 403
+
         success = notifier.mark_as_read(alert_id)
 
         if not success:
-            return jsonify({"success": False, "error": "Alert not found"}), 404
+            return jsonify({"success": False, "error": "Failed to mark alert as read"}), 500
+
+        # Issue #3332: Clean up from cache
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        cache_key = f"sse_pushed:{user_id}"
+
+        cached_value = cache.get(cache_key)
+        if cached_value:
+            with _sse_cache_lock:  # Use global lock
+                pushed_alert_ids = set(cached_value)
+                pushed_alert_ids.discard(alert_id)  # Remove read alert
+                cache.set(cache_key, list(pushed_alert_ids), ttl=86400)
 
         # Sync to quota_alerts table
         try:
             from app.modules.governance.alert_state_synchronizer import sync_acknowledge
 
-            user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
             sync_acknowledge(alert_id, user_id)
         except Exception as e:
             logger.warning(f"Failed to sync acknowledge to quota_alerts: {e}")
@@ -374,42 +402,72 @@ def alert_stream():
     """Server-Sent Events stream for real-time alerts."""
     from flask import Response
 
+    from app.utils.cache import get_cache
+
     user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+
+    # Cache setup for deduplication (Issue #3332)
+    cache = get_cache()
+    cache_key = f"sse_pushed:{user_id}"
+
+    # Read from cache (List -> Set)
+    cached_value = cache.get(cache_key)
+    pushed_alert_ids = set(cached_value) if cached_value else set()
+
+    # Batch update counter
+    pending_saves = 0
 
     def generate():
         """Generate SSE events."""
         import time
 
+        nonlocal pushed_alert_ids, pending_saves
+
         # Send initial connection message
         yield f"data: {json.dumps({'type': 'connected', 'user_id': user_id})}\n\n"
 
         # Keep connection alive and check for new alerts
-        last_check = datetime.now(timezone.utc).replace(tzinfo=None)
         notifier = get_alert_notifier()
 
-        while True:
-            time.sleep(5)  # Check every 5 seconds
+        try:
+            while True:
+                time.sleep(5)  # Check every 5 seconds
 
-            try:
-                # Get new alerts since last check
-                alerts = notifier.get_alerts(
-                    user_id=user_id,
-                    unread_only=True,
-                    limit=10,
-                )
+                try:
+                    # Get new alerts since last check
+                    alerts = notifier.get_alerts(
+                        user_id=user_id,
+                        unread_only=True,
+                        limit=10,
+                    )
 
-                for alert in alerts:
-                    if alert.created_at > last_check:
-                        yield f"data: {json.dumps({'type': 'alert', 'data': alert.to_dict()})}\n\n"
+                    for alert in alerts:
+                        with _sse_cache_lock:  # Use global gevent-safe lock
+                            if alert.alert_id not in pushed_alert_ids:
+                                yield f"data: {json.dumps({'type': 'alert', 'data': alert.to_dict()})}\n\n"
+                                pushed_alert_ids.add(alert.alert_id)
+                                pending_saves += 1
 
-                last_check = datetime.now(timezone.utc).replace(tzinfo=None)
+                                # Memory optimization: limit set size
+                                if len(pushed_alert_ids) > 100:
+                                    # Keep most recent 50
+                                    pushed_alert_ids = set(list(pushed_alert_ids)[-50:])
 
-                # Send heartbeat
-                yield ": heartbeat\n\n"
+                        # Batch update: save every 5 alerts
+                        if pending_saves >= 5:
+                            cache.set(cache_key, list(pushed_alert_ids), ttl=86400)  # 24 hours
+                            pending_saves = 0
 
-            except Exception as e:
-                logger.error(f"Error in SSE stream: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                    # Send heartbeat
+                    yield ": heartbeat\n\n"
+
+                except Exception as e:
+                    logger.error(f"Error in SSE stream: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Save state on connection close
+            with _sse_cache_lock:  # Use global gevent-safe lock
+                cache.set(cache_key, list(pushed_alert_ids), ttl=86400)
 
     return Response(
         generate(),

@@ -187,8 +187,8 @@ Links:
 
 - Repository: https://github.com/open-ace/open-ace
 - Website: https://www.open-ace.com
-- Remote Workspace docs: https://github.com/open-ace/open-ace/blob/main/docs/en/REMOTE-WORKSPACE.md
-- Remote Agent docs: https://github.com/open-ace/open-ace/blob/main/docs/en/REMOTE-AGENT.md
+- Remote Workspace docs: https://github.com/open-ace/open-ace/blob/main/docs/en/REMOTE_WORKSPACE.md
+- Remote Agent docs: https://github.com/open-ace/open-ace/blob/main/docs/en/REMOTE_AGENT.md
 - Release: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
 
 We are looking for feedback from teams already using AI coding tools. The most useful feedback is concrete:

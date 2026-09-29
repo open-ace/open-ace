@@ -356,6 +356,16 @@ class APIKeyProxyService:
             )
         return self.DEFAULT_PROXY_TOKEN_TTL_MINUTES
 
+    def effective_proxy_token_ttl_minutes(self, session_type: str) -> int:
+        """Public accessor for the effective default TTL of a session type.
+
+        Issue #3378: the sandboxed isolation probe must compare the SAME
+        effective value launch-time tokens are minted with (env overrides,
+        clamping, fallback included) instead of re-reading raw environment
+        variables — one definition, no drift.
+        """
+        return self._get_default_proxy_token_ttl_minutes(session_type)
+
     def _get_clock_skew_seconds(self, session_type: str) -> int:
         """Get clock skew tolerance for the given session type.
 
@@ -547,6 +557,33 @@ class APIKeyProxyService:
             return cursor.rowcount > 0
         finally:
             conn.close()
+
+    def revoke_proxy_token_jti(self, jti: str) -> bool:
+        """Revoke one proxy token by its jti.
+
+        Leaves the session's other live tokens untouched: used when a
+        just-minted exchange token must be withdrawn without disturbing the
+        identity's in-flight tokens.
+        """
+        if not isinstance(jti, str) or not jti:
+            return False
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE proxy_token_jtis SET revoked_at = {_param()} WHERE jti = {_param()}",
+                (datetime.now().isoformat(), jti),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("Failed to revoke proxy token jti: %s", e)
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def revoke_proxy_tokens_for_session(
         self, session_id: str, reason: str = "session_revoked"
@@ -1918,6 +1955,7 @@ class APIKeyProxyService:
         tenant_id: int,
         provider: str,
         expires_minutes: int | None = None,
+        expires_seconds: int | None = None,
         session_type: str = "agent",
         extra_payload: dict[str, Any] | None = None,
     ) -> str:
@@ -1948,12 +1986,20 @@ class APIKeyProxyService:
                 "single_use" if raw_payload.pop("single_use", False) else "multi_use",
             )
         )
-        effective_ttl = (
-            expires_minutes
-            if expires_minutes is not None
-            else self._get_default_proxy_token_ttl_minutes(session_type)
-        )
-        expires_at = datetime.now() + timedelta(minutes=effective_ttl)
+        # expires_seconds gives sub-minute precision for callers (the
+        # external token exchange) whose advertised expiry must match the
+        # minted token exactly; minutes remain the default interface.
+        if expires_seconds is not None:
+            if not isinstance(expires_seconds, int) or isinstance(expires_seconds, bool):
+                raise ValueError("expires_seconds must be an integer")
+            expires_at = datetime.now() + timedelta(seconds=expires_seconds)
+        else:
+            effective_ttl = (
+                expires_minutes
+                if expires_minutes is not None
+                else self._get_default_proxy_token_ttl_minutes(session_type)
+            )
+            expires_at = datetime.now() + timedelta(minutes=effective_ttl)
         payload = {
             "user_id": user_id,
             "session_id": session_id,
@@ -2069,7 +2115,10 @@ class APIKeyProxyService:
                 pass
 
         if not row:
-            if session_type in {"agent", "terminal", "workflow"}:
+            # "external" tokens (issued to operator-registered external
+            # issuers) must die with their session: no row means the session
+            # was stopped or never existed, so fail closed like agent tokens.
+            if session_type in {"agent", "terminal", "workflow", "external"}:
                 logger.warning("Proxy token session not found: %s", session_id[:8])
                 return False
             return True
@@ -2171,6 +2220,20 @@ class APIKeyProxyService:
             ):
                 return None
 
+            # External tokens (operator-registered issuers) recheck their
+            # principal on every request: an admin deactivating the mapped
+            # user or tenant must cut off the external server within one
+            # request, not at token-expiry time.
+            if str(session_type) == "external" and not self._external_principal_alive_with_conn(
+                conn, user_id, payload.get("tenant_id")
+            ):
+                logger.warning(
+                    "External proxy token principal no longer active: %s (user_id=%s)",
+                    jti[:8],
+                    user_id,
+                )
+                return None
+
             if reuse_mode == "single_use":
                 if not self._consume_single_use_proxy_token_with_conn(conn, jti, now):
                     logger.warning("Single-use proxy token replay rejected: %s", jti[:8])
@@ -2222,6 +2285,53 @@ class APIKeyProxyService:
                 return dict(row)
             except Exception:
                 return None
+
+    def _external_principal_alive_with_conn(self, conn: Any, user_id: Any, tenant_id: Any) -> bool:
+        """Whether the mapped user and tenant are still active (external tokens).
+
+        Runs on every request for ``session_type == "external"`` so an admin
+        deactivation takes effect immediately instead of at token expiry.
+        Fails closed on any database error, mirroring the session-status check.
+        """
+        if user_id is None or tenant_id is None:
+            return False
+        try:
+            cursor = conn.cursor()
+            # Aliased columns: two plain ``deleted_at`` columns collide on
+            # dict-style rows (RealDictCursor keeps the last, sqlite3.Row the
+            # first), silently dropping one of the two soft-delete checks.
+            cursor.execute(
+                "SELECT u.is_active, u.deleted_at AS user_deleted_at, "
+                "t.status AS tenant_status, t.deleted_at AS tenant_deleted_at "
+                f"FROM users u JOIN tenants t ON t.id = u.tenant_id "
+                f"WHERE u.id = {_param()} AND u.tenant_id = {_param()}",
+                (user_id, tenant_id),
+            )
+            row = cursor.fetchone()
+        except Exception as e:
+            logger.warning(
+                "DB error during external principal check - failing closed: %s (user_id=%s)",
+                type(e).__name__,
+                user_id,
+            )
+            return False
+        if not row:
+            return False
+        if isinstance(row, (list, tuple)):
+            is_active, user_deleted, tenant_status, tenant_deleted = row[:4]
+        else:
+            is_active = self._row_get(row, "is_active")
+            user_deleted = self._row_get(row, "user_deleted_at")
+            tenant_status = self._row_get(row, "tenant_status")
+            tenant_deleted = self._row_get(row, "tenant_deleted_at")
+        # Tenant soft-deletion only sets deleted_at (status stays 'active'),
+        # so it must be checked explicitly; 'trial' is a live platform state.
+        return (
+            bool(is_active)
+            and not user_deleted
+            and not tenant_deleted
+            and tenant_status in ("active", "trial")
+        )
 
     def _session_allows_proxy_token_with_conn(
         self,
@@ -2275,7 +2385,10 @@ class APIKeyProxyService:
             return False
 
         if not row:
-            if session_type in {"agent", "terminal", "workflow"}:
+            # "external" tokens (issued to operator-registered external
+            # issuers) must die with their session: no row means the session
+            # was stopped or never existed, so fail closed like agent tokens.
+            if session_type in {"agent", "terminal", "workflow", "external"}:
                 logger.warning("Proxy token session not found: %s", session_id[:8])
                 return False
             return True

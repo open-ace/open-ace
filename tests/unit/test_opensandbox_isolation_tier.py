@@ -199,16 +199,24 @@ class _StdinAdapter:
         return True
 
 
-def test_zcode_is_refused_for_a_production_required_tenant(monkeypatch, tmp_path):
-    """ZCode returns from the protocol dispatch, above the provider gate.
+@pytest.mark.issue(3323)
+def test_zcode_is_allowed_for_a_production_required_tenant(monkeypatch, tmp_path):
+    """#3323: ZCode now runs INSIDE the sandbox over the PTY transport, so the
+    isolation gate must let it through (``_run_zcode_appserver`` selects the
+    provider) rather than refuse it. The single-shot tools stay refused —
+    that is the next test.
 
-    Acceptance criterion 12 says a required policy must not silently fall back.
-    Before this check the run simply took the app-server path and spawned a
-    local process, with nothing recorded to say the policy had been bypassed.
+    Before #3323 this returned from the dispatch above the provider gate and was
+    refused; asserting the refusal here would encode the very behaviour #3323
+    removes.
     """
     runner = _runner_with_config(monkeypatch, tmp_path, ["42"])
-    with pytest.raises(SandboxError, match="production isolation"):
-        runner._resolve_tenant_for_isolation(7, cli_tool="zcode", adapter=_StdinAdapter())
+    assert runner._resolve_tenant_for_isolation(7, cli_tool="zcode", adapter=_StdinAdapter()) == 42
+    # both aliases
+    assert (
+        runner._resolve_tenant_for_isolation(7, cli_tool="zcode-code", adapter=_NoStdinAdapter())
+        == 42
+    )
 
 
 def test_a_single_shot_tool_is_refused_for_a_production_required_tenant(monkeypatch, tmp_path):

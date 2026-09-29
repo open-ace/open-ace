@@ -8,7 +8,7 @@
 
 ### 1. 请求（Request / API Call）
 
-**定义**：每次对云端 LLM 的 API 调用计为 1 个 Request。在日志中通常通过 `auth_type` 字段标识。
+**定义**：每次独立的 assistant 响应计为 1 个 Request（有稳定消息 ID 时按 ID 去重；计数链路见 `TOKEN_ACCOUNTING.md`）。
 
 **示例**：
 - 用户发送消息 → 1 次 API 调用 → 1 个 Request
@@ -125,4 +125,3 @@ Conversation 2:
 | `agent_session_id` | 工具会话标识符（进程级别） |
 | `conversation_id` | 对话标识符 |
 | `feishu_conversation_id` | 飞书对话标识符 |
-| `auth_type` | API 调用指示符（用于 Request 计数） |

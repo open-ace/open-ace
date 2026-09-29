@@ -44,9 +44,9 @@ open-ace/
 │
 ├── app/                # Flask 应用
 │   ├── __init__.py     # create_app() 工厂函数
-│   ├── routes/         # 24 个 Blueprint 路由模块
-│   ├── services/       # 13 个业务逻辑服务
-│   ├── repositories/   # 11 个数据访问仓储
+│   ├── routes/         # 39 个 Blueprint 路由模块
+│   ├── services/       # 41 个业务逻辑服务
+│   ├── repositories/   # 26 个数据访问仓储
 │   ├── modules/        # 领域逻辑包
 │   │   ├── analytics/  # 使用分析、ROI、成本优化
 │   │   ├── compliance/ # 审计分析、报告、数据保留
@@ -82,11 +82,10 @@ open-ace/
 ├── k8s/                # Kubernetes 清单
 ├── schema/             # 数据库模式文件
 ├── static/             # 构建后的前端资源
-├── templates/          # HTML 模板
 ├── tests/              # 测试文件
 │   ├── unit/           # 单元测试
-│   ├── e2e/            # 端到端测试
-│   └── issues/         # Issue 相关测试
+│   ├── integration/    # 集成测试
+│   └── e2e/            # 端到端测试
 └── docs/               # 文档（en/ + cn/）
 ```
 
@@ -133,7 +132,7 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 python scripts/run_extended_tests.py --category e2e --split-total 4 --split-group 1 --isolated-home
 ```
 
-完整前端参考请参阅 [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)。
+完整前端参考请参阅 [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md)。
 
 ## 代码风格
 
@@ -390,14 +389,22 @@ SELECT * FROM daily_usage LIMIT 10;
 
 ## 发布流程
 
-1. 更新 `VERSION` 文件
-2. 更新 `CHANGELOG.md`
-3. 创建 git tag
-4. 构建发布包
+`no-commit-to-branch` hook 禁止直接 commit 到 `main`，因此发版走 `release/vX.Y.Z` 分支，再用 PR 合回 main。
+
+1. 整理 `CHANGELOG.md` 的 `[Unreleased]` 段落（它就是发布说明）
+2. 切分支：`git checkout -b release/vX.Y.Z origin/main`
+3. 构建部署包：
+   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`
+4. 改版本号、把 `[Unreleased]` 移为 `[vX.Y.Z]`、commit、打 tag 并推送 tag：
+   `./scripts/release.sh --version X.Y.Z`（修改 `pyproject.toml`）
+5. 发布 GitHub Release 并附带 `dist/open-ace-X.Y.Z.tar.gz`；
+   `.github/workflows/release.yml` 随后构建 sdist/wheel 并附到 Release，再通过 Trusted Publishing 以 `open-ace-server` 名称发布到 PyPI（由仓库变量 `PYPI_PUBLISH=true` 开启，无需 API token）；`docker-publish.yml` 推送 GHCR 镜像
+6. 从 `release/vX.Y.Z` 向 `main` 开 PR
+7. 刷新文档站（`open-ace/open-ace-docs`）：更新 `src/pages/project/releases.js` 中的版本摘要，然后重新部署，使其从 `main` 重新同步 `docs/en` 与 `docs/cn`
 
 ```bash
-# 构建发布
-./scripts/release.sh --version 1.1.0
+# 预览发布脚本将做的改动
+./scripts/release.sh --version X.Y.Z --dry-run
 ```
 
 ## 获取帮助

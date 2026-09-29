@@ -5,29 +5,45 @@ Manages per-user qwen-code-webui processes in multi-user mode.
 Each user gets an independent webui process running under their system_account.
 """
 
+import dataclasses
 import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import platform
 import pwd
 import secrets
+import shutil
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import gevent
 from gevent import lock as gevent_lock
 
+from app.services.workspace_isolation_config import (
+    BACKEND_BWRAP,
+    BACKEND_LOCAL_KATA,
+    BACKEND_OPENSANDBOX,
+    BACKEND_SHARED,
+    CONFINED_BACKENDS,
+    CONTAINER_BACKENDS,
+    IsolationConfig,
+    IsolationConfigError,
+    parse_isolation,
+)
 from app.utils.workspace import ensure_system_user as _ensure_user_shared
 from app.utils.workspace import run_as_root_if_needed
+from app.utils.workspace_isolation_aware import get_user_home_for_isolation
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +75,77 @@ _WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
 # in sudoers (Issue #2305 review).
 _WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 
+# Issue #3431 (Option 1): root entry point that confines a per-user WebUI in a
+# systemd scope (cgroup limits) + bubblewrap (read-only host, private network
+# namespace, egress only through a host:port allowlist proxy). See
+# scripts/openace-webui-confine.py for the trust split between its modes.
+_WEBUI_CONFINE_WRAPPER = "/usr/local/bin/openace-webui-confine"
+# The confined backends (#3446 names; the wrapper's --backend takes the same):
+# - "bwrap" (#3431 Option 1): systemd scope + bubblewrap, os_user level;
+# - "local-gvisor" (#3431 Option 2): a Docker container on gVisor, sandboxed;
+# - "local-kata" (#3438): a Docker container on Kata; the guest is a VM, so
+#   the wrapper carries ingress/egress over the container's stdio.
+# `openace-webui-confine launch --probe` token -> readiness reason code.
+_CONTAINER_PROBE_REASONS = {
+    "policy:invalid": "confinement_policy_invalid",
+    "docker:unavailable": "confinement_docker_unavailable",
+    "runtime:missing": "confinement_runtime_missing",
+    "image:missing": "confinement_image_missing",
+    "kernel:unverified": "confinement_kernel_unverified",
+    "runtime:no-host-uds": "confinement_runtime_host_uds_disabled",
+    "kvm:unavailable": "confinement_kvm_unavailable",
+    "channel:failed": "confinement_channel_failed",
+    "symlinks:unprotected": "confinement_symlinks_unprotected",
+    "probe:failed": "confinement_check_failed",
+}
+# The probe starts a container: cache a success for an hour (the runtime and
+# pinned image do not change under a running process), a failure briefly.
+_CONTAINER_PROBE_OK_TTL_SECONDS = 3600.0
+_CONTAINER_PROBE_FAIL_TTL_SECONDS = 30.0
+# One probe at a time: under Kata each probe boots a VM (minutes when nested),
+# so concurrent readiness checks wait for the running probe's result instead.
+_CONTAINER_PROBE_LOCK = threading.Lock()
+# Keys the confine wrapper owns or refuses (it sets HOME/PATH/proxy variables
+# itself; the host's own proxy is not reachable from the sandbox anyway).
+_CONFINE_RESERVED_ENV = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NODE_USE_ENV_PROXY",
+    }
+)
+_CONFINE_DENY_ENV_PREFIXES = ("LD_", "PYTHON", "NODE_OPTIONS", "BASH_ENV", "ENV")
+# `openace-webui-confine check` output token -> readiness reason code.
+_CONFINE_CHECK_REASONS = {
+    "missing:bwrap": "confinement_bwrap_missing",
+    "missing:setpriv": "confinement_setpriv_missing",
+    "missing:systemd-run": "confinement_systemd_unavailable",
+    "systemd:not-running": "confinement_systemd_unavailable",
+    "userns:unavailable": "confinement_userns_unavailable",
+    "bwrap:too-old": "confinement_bwrap_too_old",
+    "policy:invalid": "confinement_policy_invalid",
+}
+
+# Readiness-probe memoization window (both directions) so degraded hosts
+# cannot be loop-polled into repeated probe work (Issue #3374 review #9).
+_PROBE_MEMO_TTL_SECONDS = 30.0
+
+# Issue #3378 (D5): how often the cleanup loop runs sandbox maintenance
+# (snapshot export + renew clamp) for live sandboxed instances. 5 minutes is
+# the documented crash-loss window ("crash 丢 ≤5min 增量").
+SANDBOX_MAINTENANCE_INTERVAL_SECONDS = 300.0
+
+WEBUI_FORM_LOCAL = "local"
+WEBUI_FORM_SANDBOXED = "sandboxed"
+
 
 @dataclass
 class WebUIInstance:
@@ -75,6 +162,31 @@ class WebUIInstance:
     url: str = ""
     session_model_pool: dict[str, Any] = field(default_factory=dict)
 
+    # ── Issue #3378: the sandboxed form ───────────────────────────────
+    # "local" (child process under an OS account) or "sandboxed" (webui pod
+    # behind a per-instance local port proxy). Everything below is only
+    # meaningful for the sandboxed form.
+    form: str = "local"
+    sandbox_id: str = ""
+    sandbox_tier: str = ""
+    # D6 export guard ground truth: set only when the launcher confirmed the
+    # restore-done touch; a degraded instance never exports its empty tree.
+    restore_confirmed: bool = False
+    # Per-instance webui token secret (D2/B1): the pod's webui validates v2
+    # tokens against THIS secret, not the manager's global one.
+    token_secret: str = ""
+    # The LLM proxy token baked into the pod env (renew clamps to its expiry).
+    proxy_token: str = ""
+    launcher: Any = None
+    proxy: Any = None
+
+    # ── Issue #3420: isolation-aware home path ───────────────────────────
+    # Stores the isolation level and computed home path for this instance.
+    # Lifecycle matches the instance (not Flask session), ensuring the path
+    # remains correct even if session expires while the sandbox is alive.
+    isolation_level: str = "os_user"
+    user_home_path: str = ""
+
     _last_health_check: float = 0.0
     _health_check_ttl: float = 30.0  # Cache health check result for 30s
     _consecutive_health_failures: int = 0
@@ -82,6 +194,8 @@ class WebUIInstance:
 
     def is_alive(self) -> bool:
         """Check if the process is still running and responsive."""
+        if self.form == "sandboxed":
+            return self._is_sandbox_alive()
         if self.pid is None:
             return False
         try:
@@ -116,6 +230,42 @@ class WebUIInstance:
             f"{self._max_consecutive_failures}) for pid={self.pid}, port={self.port}"
             f" — still alive, will retry"
         )
+        return True
+
+    def _is_sandbox_alive(self) -> bool:
+        """Sandboxed liveness: the pod has no local pid — probe the webui.
+
+        The probe goes through the local D1 proxy with a freshly minted
+        instance-signed token, so a pass proves the whole chain (proxy →
+        gateway → pod → webui → token validation) end to end. Caching mirrors
+        the local form: one probe per TTL window, dead only after consecutive
+        failures.
+        """
+        if self.launcher is None:
+            return False
+        now = time.time()
+        if (
+            now - self._last_health_check < self._health_check_ttl
+            and self._consecutive_health_failures == 0
+        ):
+            return True
+        from app.services.webui_sandbox import mint_instance_token
+
+        token = mint_instance_token(self.user_id, self.port, self.token_secret)
+        healthy = bool(self.launcher.health_check(proxy_port=self.port, token=token))
+        if healthy:
+            self._consecutive_health_failures = 0
+            self._last_health_check = now
+            return True
+        self._consecutive_health_failures += 1
+        self._last_health_check = now
+        if self._consecutive_health_failures >= self._max_consecutive_failures:
+            logger.warning(
+                f"Sandboxed WebUI instance (sandbox={self.sandbox_id}, port={self.port}) "
+                f"unresponsive for {self._consecutive_health_failures} consecutive checks, "
+                "declaring dead"
+            )
+            return False
         return True
 
     def _check_http_health(self) -> bool:
@@ -163,7 +313,6 @@ class WorkspaceConfig:
 
     enabled: bool = False
     url: str = "http://localhost"
-    multi_user_mode: bool = False
     port_range_start: int = 3100
     port_range_end: int = 3200
     max_instances: int = 30
@@ -176,6 +325,256 @@ class WorkspaceConfig:
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
+    # Issue #3446: the validated ``workspace.isolation`` block — the level (also
+    # the server-side floor for user-url launches), the backend that provides
+    # it, and its tier / limits / egress allowlist / in-image WebUI path.
+    isolation: IsolationConfig = field(default_factory=IsolationConfig)
+
+    @property
+    def multi_user_mode(self) -> bool:
+        """One WebUI instance per user (every backend but ``shared``)."""
+        return self.isolation.backend != BACKEND_SHARED
+
+    @property
+    def isolation_backend(self) -> str:
+        return self.isolation.backend
+
+    @property
+    def isolation_level(self) -> str:
+        return self.isolation.level
+
+
+def read_workspace_config() -> WorkspaceConfig:
+    """Read WorkspaceConfig from disk WITHOUT constructing a manager.
+
+    Issue #3374 review #13: capability reads must not mint token secrets or
+    spawn cleanup greenlets; the snapshot path uses this when no manager
+    singleton exists yet (launch-path readiness is only probed when a
+    manager is available — see the capability docs).
+    """
+    from app.repositories.database import CONFIG_DIR
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+    if not os.path.exists(config_path):
+        logger.warning(f"Config file not found: {config_path}")
+        return WorkspaceConfig()
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+
+        workspace = config.get("workspace", {})
+        try:
+            isolation = parse_isolation(workspace)
+        except IsolationConfigError as exc:
+            # Startup already refused this configuration (validate_isolation_config);
+            # a file edited afterwards disables the workspace rather than running
+            # with an isolation nobody asked for.
+            logger.error("Workspace disabled: %s", exc)
+            return WorkspaceConfig()
+        return WorkspaceConfig(
+            enabled=workspace.get("enabled", False),
+            url=workspace.get("url", "http://localhost"),
+            port_range_start=workspace.get("port_range_start", 3100),
+            port_range_end=workspace.get("port_range_end", 3200),
+            max_instances=workspace.get("max_instances", 30),
+            idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
+            cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
+            token_secret=workspace.get("token_secret", ""),
+            webui_path=workspace.get("webui_path", ""),
+            webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
+            isolation=isolation,
+        )
+    except Exception as e:
+        logger.error(f"Error loading config: {e}")
+        return WorkspaceConfig()
+
+
+_TOKEN_SECRET_FILENAME = "webui_token_secret"
+
+
+def _read_secret_file(secret_path: str) -> tuple[str | None, bool, bool]:
+    """Read the persisted WebUI token secret.
+
+    Returns ``(secret, was_nonempty_invalid, unreadable)``: secret is None
+    when absent, empty, or malformed. was_nonempty_invalid is True only for
+    non-empty content that failed validation (caller may unlink +
+    regenerate); empty content is treated as an in-flight/crashed writer and
+    is left alone (unstaking a live winner would cause diverging secrets).
+    ``unreadable`` means the file exists but this process cannot read it
+    (owner/permission drift — e.g. a management command run as another
+    account left a 0600 file behind); the caller must report that
+    distinctly from "not configured" or the log points operators at the
+    opposite of the truth (Issue #3377 review).
+    """
+    try:
+        with open(secret_path) as f:
+            value = f.read().strip()
+    except UnicodeDecodeError:
+        # Binary garbage is the same failure class as non-hex text: treat as
+        # non-empty invalid so the caller unlinks and regenerates.
+        logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
+        return None, True, False
+    except FileNotFoundError:
+        # Absent is the normal first-boot state, not an access problem —
+        # lumping it into OSError below would log a false alarm on every
+        # healthy first boot and mislabel read-only-filesystem failures as
+        # "exists but cannot be read" (Issue #3377 review round 2).
+        return None, False, False
+    except OSError as e:
+        logger.warning(
+            "Cannot read WebUI token secret file %s (%s); check its owner "
+            "and permissions — persistence stays disabled until it is "
+            "readable by this service user",
+            secret_path,
+            e,
+        )
+        return None, False, True
+    if len(value) >= 64 and all(c in "0123456789abcdef" for c in value):
+        return value, False, False
+    if value:
+        logger.warning("Malformed WebUI token secret file %s; regenerating", secret_path)
+        return None, True, False
+    logger.warning(
+        "Empty WebUI token secret file %s (interrupted writer?); using an "
+        "in-memory secret — delete the file to restore persistence",
+        secret_path,
+    )
+    return None, False, False
+
+
+def _persist_secret_file(secret_path: str, value: str) -> bool:
+    """Atomically create the secret file (0600). False when unavailable.
+
+    O_CREAT|O_EXCL makes concurrent first-boot races safe: exactly one
+    writer wins; losers re-read the winner's value.
+    """
+    try:
+        os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+        fd = os.open(secret_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, value.encode())
+        finally:
+            os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError as e:
+        # Remove the file O_EXCL just created: a 0-byte or partial leftover
+        # makes every later boot take the conservative empty-file path and
+        # permanently disables persistence — the exact bug this issue fixes
+        # (Issue #3377 review). The FileExistsError branch above keeps the
+        # concurrent-winner's file untouched.
+        try:
+            os.unlink(secret_path)
+        except OSError:
+            pass
+        logger.warning(
+            "Cannot persist WebUI token secret to %s (%s); tokens will " "not survive restarts",
+            secret_path,
+            e,
+        )
+        return False
+
+
+def _resolve_token_secret(config: WorkspaceConfig) -> str:
+    """Issue #3377: resolve the WebUI token secret.
+
+    Order: config.json value (entrypoint-managed) → persisted secret file →
+    generate once and persist (0600, O_EXCL race-safe; non-empty malformed
+    files are unlinked and rebuilt, empty ones are conservatively kept).
+    Only called on the self-loaded-config path; injected configs stay
+    in-memory (tests must not touch the host config dir).
+    """
+    if config.token_secret:
+        return config.token_secret
+    from app.repositories.database import CONFIG_DIR
+
+    secret_path = os.path.join(CONFIG_DIR, _TOKEN_SECRET_FILENAME)
+    existing, nonempty_invalid, unreadable = _read_secret_file(secret_path)
+    if existing:
+        return existing
+    if nonempty_invalid:
+        try:
+            os.unlink(secret_path)
+        except OSError as e:
+            logger.warning(
+                "Cannot remove malformed WebUI token secret file %s (%s)",
+                secret_path,
+                e,
+            )
+    generated = secrets.token_hex(32)
+    persisted_ok = _persist_secret_file(secret_path, generated)
+    persisted = _read_secret_file(secret_path)[0]
+    if persisted:
+        if persisted_ok:
+            logger.warning(
+                "WebUI token secret not configured; generated and persisted to %s",
+                secret_path,
+            )
+        else:
+            # O_EXCL lost a concurrent first-boot race: adopt the winner.
+            logger.warning(
+                "WebUI token secret not configured; adopted the secret "
+                "persisted by a concurrent worker at %s",
+                secret_path,
+            )
+        return persisted
+    if unreadable:
+        # The file exists but cannot be read: "not configured" would be the
+        # opposite of the truth and send operators hunting a missing setting
+        # instead of the file's owner/mode (Issue #3377 review).
+        logger.warning(
+            "WebUI token secret file %s exists but cannot be read by this "
+            "service user; generated an in-memory secret (tokens will not "
+            "survive restarts until the file's owner/permissions are fixed)",
+            secret_path,
+        )
+    else:
+        logger.warning(
+            "WebUI token secret not configured; generated an in-memory secret "
+            "(tokens will not survive restarts)"
+        )
+    return generated
+
+
+def _webui_token_user(user_id: int) -> dict | None:
+    """Look up the user a webui token names (Issue #3379 PR-A seam).
+
+    Raises are handled by the caller's fail-closed denial; this seam exists
+    so tests (and any future cache) can substitute the lookup without
+    constructing repository state.
+    """
+    from app.repositories.user_repo import UserRepository
+
+    return UserRepository().get_user_by_id(user_id)
+
+
+def _tokens_valid_after_epoch(value: Any) -> float | None:
+    """Epoch seconds (UTC) of users.tokens_valid_after, or None when unset.
+
+    Issue #3379 review round 2 (R-5): the column is stamped on deactivation
+    and soft delete. SQLite returns it as a string ("2026-09-11 05:00:00"),
+    PostgreSQL as a naive datetime; both store UTC. An unparseable value
+    fails CLOSED (treated as +inf): the stamp exists to kill outstanding
+    tokens, and silently ignoring it would resurrect exactly the tokens the
+    deactivation meant to revoke.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace(" ", "T"))
+        except ValueError:
+            logger.warning("Unparseable users.tokens_valid_after value %r; failing closed", value)
+            return float("inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 
 class WebUIManager:
@@ -203,7 +602,10 @@ class WebUIManager:
         """
         self.config = config or self._load_config()
         self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
-        self._port_allocations: dict[int, int] = {}  # port -> user_id
+        # port -> (user_id, form). Issue #3378 review (m4): the value carries
+        # the form so every holder check can key on (user_id, form) — a
+        # cross-form allocate must never return the other form's port.
+        self._port_allocations: dict[int, tuple[int, str]] = {}
         self._lock = gevent_lock.RLock()  # gevent-safe reentrant lock
         self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
@@ -214,20 +616,43 @@ class WebUIManager:
         self._single_user_instance: WebUIInstance | None = None
         self._single_user_lock = gevent_lock.RLock()  # Lock for single-user instance startup
 
-        # Generate token secret if not configured
-        if not self.config.token_secret:
+        # Issue #3377: resolve the token secret (config.json → persisted
+        # file → generate once). Only the self-loaded-config path persists;
+        # injected configs stay in-memory so tests never touch the host.
+        if config is None:
+            self.config.token_secret = _resolve_token_secret(self.config)
+        elif not self.config.token_secret:
             self.config.token_secret = secrets.token_hex(32)
 
         # Platform detection
         self._platform = platform.system().lower()
 
+        # Issue #3374: memoized successful WebUI executable resolution for the
+        # per-user launch probe (supports_per_user_launch), plus a short-TTL
+        # readiness memo that also caches degraded states.
+        self._resolved_webui: tuple[str, str | None] | None = None
+        self._readiness_memo: tuple[float, str | None] | None = None
+
+        # Issue #3378: last port used per (user_id, form) so a same-form
+        # restart prefers its original port (SEC-Q4 — a user's bookmarked
+        # origin keeps working across idle recycles), plus the sandbox
+        # maintenance clock for the cleanup loop.
+        self._form_last_ports: dict[tuple[int, str], int] = {}
+        self._last_sandbox_maintenance = 0.0
+        # Launcher injection point for tests; None builds the real one lazily.
+        self._sandbox_launcher: Any = None
+
         # Windows doesn't support multi-user mode
         if self._platform == "windows" and self.config.multi_user_mode:
             logger.warning(
-                "Windows does not support multi-user mode for webui. "
-                "Falling back to single-instance mode."
+                "Windows does not support per-user WebUIs. Falling back to a single "
+                "instance; the configured isolation level stays the floor, so launches "
+                "that need it are refused."
             )
-            self.config.multi_user_mode = False
+            # Only the backend changes: the declared level remains the floor.
+            self.config.isolation = dataclasses.replace(
+                self.config.isolation, backend=BACKEND_SHARED
+            )
 
         logger.info(
             f"WebUIManager initialized: multi_user_mode={self.config.multi_user_mode}, "
@@ -236,35 +661,7 @@ class WebUIManager:
 
     def _load_config(self) -> WorkspaceConfig:
         """Load workspace configuration from config.json."""
-        from app.repositories.database import CONFIG_DIR
-
-        config_path = os.path.join(CONFIG_DIR, "config.json")
-
-        if not os.path.exists(config_path):
-            logger.warning(f"Config file not found: {config_path}")
-            return WorkspaceConfig()
-
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            workspace = config.get("workspace", {})
-            return WorkspaceConfig(
-                enabled=workspace.get("enabled", False),
-                url=workspace.get("url", "http://localhost"),
-                multi_user_mode=workspace.get("multi_user_mode", False),
-                port_range_start=workspace.get("port_range_start", 3100),
-                port_range_end=workspace.get("port_range_end", 3200),
-                max_instances=workspace.get("max_instances", 30),
-                idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
-                cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
-                token_secret=workspace.get("token_secret", ""),
-                webui_path=workspace.get("webui_path", ""),
-                webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
-            )
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-            return WorkspaceConfig()
+        return read_workspace_config()
 
     def _remove_port_from_url(self, url: str) -> str:
         """Remove any existing port from URL, keeping only scheme and host.
@@ -369,38 +766,157 @@ class WebUIManager:
         logger.info("Cleanup greenlet stopped")
 
     def _cleanup_loop(self):
-        """Periodically clean up idle instances."""
+        """Periodically clean up idle instances and maintain sandboxed ones."""
         while self._running:
             try:
                 self.cleanup_idle_instances()
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
 
+            # Issue #3378 (D5): every SANDBOX_MAINTENANCE_INTERVAL_SECONDS the
+            # live sandboxed instances get a snapshot export (bounds the crash
+            # loss window at ~5 minutes) and a renew clamped to their baked-in
+            # proxy-token expiry. Best-effort per instance: one failing
+            # sandbox must not starve the others. (F-2③, review round 2: the
+            # process heartbeat is NOT refreshed here anymore — a dedicated
+            # timer greenlet owns that, see webui_sandbox.)
+            try:
+                self._sandbox_maintenance_tick()
+            except Exception as e:
+                logger.error(f"Error in sandbox maintenance: {e}")
+
             # Sleep for cleanup interval
             time.sleep(self.config.cleanup_interval_minutes * 60)
 
+    def _sandbox_maintenance_tick(self) -> None:
+        """One maintenance gate pass: instance snapshot export + renew.
+
+        F-2③ (review round 2): the process heartbeat refresh NO LONGER rides
+        this tick. The old coupling let the refresh period ride the cleanup
+        interval (potentially far past HEARTBEAT_FRESH_WINDOW_SECONDS) and
+        left manager-less replicas heartbeating exactly once; the refresh now
+        lives in webui_sandbox's dedicated fixed-cadence timer greenlet.
+        """
+        now = time.monotonic()
+        if now - self._last_sandbox_maintenance < SANDBOX_MAINTENANCE_INTERVAL_SECONDS:
+            return
+        self._last_sandbox_maintenance = now
+        self._maintain_sandboxed_instances()
+
+    def _live_sandboxed_instances(self) -> list[WebUIInstance]:
+        """Every live sandboxed instance, multi-user and single-user alike."""
+        instances: list[WebUIInstance] = []
+        single = self._single_user_instance
+        if (
+            single is not None
+            and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+            and single.is_alive()
+        ):
+            instances.append(single)
+        with self._lock:
+            for instance in self._instances.values():
+                if getattr(instance, "form", "") == WEBUI_FORM_SANDBOXED and instance.is_alive():
+                    instances.append(instance)
+        return instances
+
+    def _maintain_sandboxed_instances(self) -> None:
+        """Snapshot-export + renew every live sandboxed instance (fail-soft)."""
+        for instance in self._live_sandboxed_instances():
+            try:
+                blob = instance.launcher.export_snapshot(
+                    instance.sandbox_id,
+                    restore_confirmed=instance.restore_confirmed,
+                    user_id=instance.user_id,
+                )
+                if blob is not None:
+                    instance.launcher.persist_snapshot(instance.user_id, blob)
+                instance.launcher.renew_expiration(
+                    instance.sandbox_id, proxy_token=instance.proxy_token
+                )
+            except Exception as e:  # noqa: BLE001 - maintenance is per instance
+                logger.warning(
+                    "Sandbox maintenance failed for user %s (sandbox %s): %s",
+                    instance.user_id,
+                    instance.sandbox_id,
+                    e,
+                )
+
     def cleanup_idle_instances(self):
-        """Clean up instances that have been idle for too long."""
+        """Clean up instances that have been idle for too long.
+
+        T-I (review round 1): the registry scan runs under the lock, but the
+        TEARDOWN runs outside it — a sandboxed teardown reaches the sandbox
+        API (final export + delete, up to ~90s per pod) and used to pin _lock
+        for the whole batch, blocking every concurrent /user-url hit.
+        stop_user_webui takes _lock itself; the single-user branch re-checks
+        idleness under _single_user_lock (a hit in between refreshes the
+        activity timestamp and spares the instance). Lock order stays the
+        established _single_user_lock → _lock (we now hold neither across the
+        teardowns).
+        """
         now = datetime.now()
         timeout = timedelta(minutes=self.config.idle_timeout_minutes)
 
         with self._lock:
-            to_cleanup = []
-            for user_id, instance in self._instances.items():
-                idle_time = now - instance.last_activity
-                if idle_time > timeout:
-                    to_cleanup.append(user_id)
+            to_cleanup = [
+                user_id
+                for user_id, instance in self._instances.items()
+                if now - instance.last_activity > timeout
+            ]
+            # Pop the registry slots NOW (fast, consistent with the scan) so
+            # the slow teardown below runs on already-deregistered instances.
+            stale_instances = {user_id: self._instances.pop(user_id) for user_id in to_cleanup}
+            single = self._single_user_instance
+            stale_single = (
+                single is not None
+                and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+                and now - single.last_activity > timeout
+            )
 
-            for user_id in to_cleanup:
-                logger.info(f"Cleaning up idle instance for user {user_id}")
-                self._stop_instance_internal(user_id)
+        for user_id, instance in stale_instances.items():
+            logger.info(f"Cleaning up idle instance for user {user_id}")
+            self._finish_stop_instance(instance)
 
-    def allocate_port(self, user_id: int) -> int:
+        # Issue #3378 review (m1): the single-user SANDBOXED instance holds a
+        # remote pod plus a proxy port, so it must not be exempt from idle
+        # reaping — its last_activity is fed by the proxy's on_activity
+        # heartbeat and by /user-url hits. The LOCAL single-user instance
+        # keeps its historic never-reaped semantics (shared, fixed port 3100,
+        # no remote resource; restart-on-dead already covers it). The slot is
+        # cleared under _single_user_lock (idleness re-checked — a hit in
+        # between refreshes the activity and spares the instance); the
+        # teardown runs after the lock is released. Lock order stays the
+        # established _single_user_lock → _lock; neither is held across a
+        # teardown.
+        if stale_single:
+            popped_single: WebUIInstance | None = None
+            with self._single_user_lock:
+                single = self._single_user_instance
+                if (
+                    single is not None
+                    and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+                    and now - single.last_activity > timeout
+                ):
+                    popped_single = single
+                    self._single_user_instance = None
+            if popped_single is not None:
+                logger.info(
+                    "Cleaning up idle single-user sandboxed webui instance (sandbox=%s, port=%s)",
+                    popped_single.sandbox_id,
+                    popped_single.port,
+                )
+                self._finish_stop_single_user(popped_single)
+
+    def allocate_port(self, user_id: int, form: str = WEBUI_FORM_LOCAL) -> int:
         """
         Allocate a port for a user.
 
         Args:
             user_id: User ID to allocate port for.
+            form: "local" or "sandboxed" (Issue #3378). The allocation key is
+                (user_id, form) so a cross-form switch cannot silently steal
+                the other form's port, and a same-form restart PREFERS its
+                previous port (SEC-Q4: bookmarked origins survive recycles).
 
         Returns:
             Allocated port number.
@@ -409,18 +925,34 @@ class WebUIManager:
             ValueError: If no ports are available.
         """
         with self._lock:
-            # Check if user already has an allocated port
-            for port, uid in self._port_allocations.items():
-                if uid == user_id:
+            # Still holding a port for this (user_id, form)? Return it — a
+            # repeated allocate must never hand out a second port, and a
+            # CROSS-form allocate must never steal the other form's port
+            # (Issue #3378 review, m4: the key includes the form).
+            for port, (uid, held_form) in self._port_allocations.items():
+                if uid == user_id and held_form == form:
                     return port
+
+            # Same-form restart: prefer the port this (user, form) last held
+            # (SEC-Q4 — bookmarked origins survive idle recycles), if still
+            # free.
+            previous = self._form_last_ports.get((user_id, form))
+            if (
+                previous is not None
+                and previous not in self._port_allocations
+                and self._is_port_available(previous)
+            ):
+                self._port_allocations[previous] = (user_id, form)
+                logger.info(f"Re-allocated port {previous} for user {user_id} ({form} form)")
+                return previous
 
             # Find an available port
             for port in range(self.config.port_range_start, self.config.port_range_end + 1):
                 if port not in self._port_allocations:
                     # Verify port is actually available
                     if self._is_port_available(port):
-                        self._port_allocations[port] = user_id
-                        logger.info(f"Allocated port {port} for user {user_id}")
+                        self._port_allocations[port] = (user_id, form)
+                        logger.info(f"Allocated port {port} for user {user_id} ({form} form)")
                         return port
 
             raise ValueError(
@@ -469,12 +1001,18 @@ class WebUIManager:
         logger.warning(f"WebUI service on port {port} not ready after {timeout}s timeout")
         return False
 
-    def release_port(self, port: int):
-        """Release a port back to the pool."""
+    def release_port(self, port: int, form: str | None = None):
+        """Release a port back to the pool.
+
+        With *form*, the (user, form) → port memo is refreshed so the next
+        same-form start prefers this port (SEC-Q4).
+        """
         with self._lock:
             if port in self._port_allocations:
-                user_id = self._port_allocations.pop(port)
-                logger.info(f"Released port {port} from user {user_id}")
+                user_id, held_form = self._port_allocations.pop(port)
+                if form is not None:
+                    self._form_last_ports[(user_id, form)] = port
+                logger.info(f"Released port {port} from user {user_id} ({held_form} form)")
 
     def generate_token(self, user_id: int, port: int) -> str:
         """
@@ -535,35 +1073,25 @@ class WebUIManager:
         """Refresh a v2 format token.
 
         Validates signature (ignoring TTL), then generates a fresh token.
+        Issue #3378: a token that verifies against a sandboxed instance's
+        per-instance secret is re-minted with that same secret — refreshing
+        must not silently downgrade a sandboxed token onto the global one.
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         """
-        try:
-            parts = old_token.split(":")
-            if len(parts) != 6:
-                return False, None, "Invalid v2 token format"
-
-            _, user_id_str, port_str, timestamp_str, random_part, signature = parts
-            user_id: int = int(user_id_str)
-            port: int = int(port_str)
-            timestamp: int = int(timestamp_str)
-
-            # Verify signature (even if expired)
-            payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
-            expected_signature = hashlib.sha256(
-                f"{payload}:{self.config.token_secret}".encode()
-            ).hexdigest()[:16]
-
-            if not hmac.compare_digest(signature, expected_signature):
-                return False, None, "Invalid signature"
-
-            # Generate new token with fresh timestamp
-            new_token = self.generate_token(user_id, port)
-            logger.info(f"Refreshed token for user {user_id}, port {port}")
+        valid, _user_id, _port = self._verify_v2_signature(old_token, self.config.token_secret)
+        if valid:
+            new_token = self.generate_token(_user_id, _port)
+            logger.info(f"Refreshed token for user {_user_id}, port {_port}")
             return True, new_token, None
-
-        except (ValueError, TypeError) as e:
-            return False, None, f"Token parse error: {e}"
+        instance = self._find_sandboxed_instance_by_token(old_token)
+        if instance is not None:
+            valid, _user_id, _port = self._verify_v2_signature(old_token, instance.token_secret)
+            if valid:
+                new_token = self._mint_sandboxed_token(instance)
+                logger.info("Refreshed sandboxed token for user %s, port %s", _user_id, _port)
+                return True, new_token, None
+        return False, None, "Invalid signature"
 
     def _refresh_token_v1(self, old_token: str) -> tuple[bool, str | None, str | None]:
         """Refresh a v1 format token to v2 format.
@@ -611,8 +1139,32 @@ class WebUIManager:
         Returns:
             Tuple of (is_valid, user_id, error_message).
         """
+        ok, user_id, err, _user = self.validate_token_with_user(token)
+        return ok, user_id, err
+
+    def validate_token_with_user(
+        self, token: str
+    ) -> tuple[bool, int | None, str | None, dict | None]:
+        """
+        Validate an authentication token AND return the named user's row.
+
+        Issue #3379 review round 2 (R-12): the user lookup that the status
+        check already performs is handed back to the caller, so hot paths
+        (workspace before_request, fs, quota, session_access, the admin
+        decorator, projects) no longer issue a SECOND get_user_by_id per
+        request for the same row. ``validate_token`` keeps its 3-tuple
+        signature and delegates here.
+
+        Args:
+            token: Token string to validate.
+
+        Returns:
+            Tuple of (is_valid, user_id, error_message, user_row). user_row
+            is the users-table dict from the SAME single lookup that decided
+            the status check (None whenever validation failed).
+        """
         if not token:
-            return False, None, "Empty token"
+            return False, None, "Empty token", None
 
         # v2 format with TTL
         if token.startswith("v2:"):
@@ -621,60 +1173,193 @@ class WebUIManager:
         # v1 format (legacy, no TTL)
         return self._validate_token_v1(token)
 
-    def _validate_token_v2(self, token: str) -> tuple[bool, int | None, str | None]:
-        """Validate v2 format token with TTL.
+    def _find_sandboxed_instance(self, user_id: int, port: int) -> WebUIInstance | None:
+        """Locate the sandboxed instance a v2 token's (user, port) names.
 
-        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+        Issue #3378 (D2/B1): sandboxed tokens are signed with the instance's
+        per-instance secret, so validation needs the instance. Searched
+        lock-free on purpose: the registries hold dataclass instances and the
+        lookup is advisory (a concurrent stop just makes the answer None).
+
+        Review round 1 (T-C): the SHARED single-user sandboxed instance
+        carries tokens minted for every requester, so it matches on the port
+        alone — the token's user_id is proven by the per-instance-secret
+        signature the caller verifies next, never by this lookup.
+
+        Review round 1 (T-H): a hit must also be ALIVE. A TTL-killed pod
+        leaves its registration behind, and its leaked tokens would keep
+        validating (URL_TOKEN_ALLOWED_PATHS admits /api/admin/ routes) for up
+        to the idle-timeout window. is_alive() is the cached 30s-TTL probe,
+        so this adds no per-request latency in the common case; a dead
+        instance fails CLOSED (None → 401) and its teardown/rebuild
+        bookkeeping is scheduled asynchronously — never run synchronously in
+        the validation path.
         """
-        from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
+        single = self._single_user_instance
+        if (
+            single is not None
+            and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+            and single.port == port
+        ):
+            return self._live_or_reap(single)
+        with self._lock:
+            instance = self._instances.get(user_id)
+        if (
+            instance is not None
+            and getattr(instance, "form", "") == WEBUI_FORM_SANDBOXED
+            and instance.port == port
+        ):
+            return self._live_or_reap(instance)
+        return None
 
+    def _live_or_reap(self, instance: WebUIInstance) -> WebUIInstance | None:
+        """Return *instance* when alive; on death fail closed and reap async."""
+        try:
+            alive = instance.is_alive()
+        except Exception:  # noqa: BLE001 - a broken probe reads as dead
+            logger.exception(
+                "Sandboxed WebUI instance (sandbox=%s) aliveness probe raised; "
+                "treating it as dead",
+                instance.sandbox_id,
+            )
+            alive = False
+        if alive:
+            return instance
+        logger.warning(
+            "Sandboxed WebUI instance (sandbox=%s, port=%s, user=%s) is dead; "
+            "rejecting its tokens and scheduling teardown",
+            instance.sandbox_id,
+            instance.port,
+            instance.user_id,
+        )
+        self._reap_dead_sandboxed_async(instance)
+        return None
+
+    def _reap_dead_sandboxed_async(self, instance: WebUIInstance) -> None:
+        """Tear down a dead sandboxed instance off the validation path (T-H).
+
+        Runs on its own greenlet: teardown reaches the sandbox API (final
+        export + delete, potentially tens of seconds) and must never block a
+        token validation. Identity is re-checked under the registry lock so a
+        concurrently REPLACED instance (user-url already restarted it) is not
+        torn down twice. Lock order is the established _single_user_lock →
+        _lock.
+        """
+
+        def _reap() -> None:
+            try:
+                if instance is self._single_user_instance:
+                    with self._single_user_lock:
+                        if self._single_user_instance is instance:
+                            self._stop_single_user_instance_internal()
+                    return
+                with self._lock:
+                    if self._instances.get(instance.user_id) is instance:
+                        self._stop_instance_internal(instance.user_id)
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                logger.exception(
+                    "Failed to reap dead sandboxed webui %s for user %s",
+                    instance.sandbox_id,
+                    instance.user_id,
+                )
+
+        gevent.spawn(_reap)
+
+    @staticmethod
+    def _verify_v2_signature(token: str, token_secret: str) -> tuple[bool, int, int]:
+        """Verify a v2 token's signature against *token_secret*.
+
+        Returns ``(valid, user_id, port)``; TTL is NOT checked here so both
+        validate (TTL enforced) and refresh (TTL ignored) can reuse it.
+        """
         try:
             parts = token.split(":")
             if len(parts) != 6:
-                return False, None, "Invalid v2 token format"
-
+                return False, 0, 0
             _, user_id_str, port_str, timestamp_str, random_part, signature = parts
-            user_id: int = int(user_id_str)
-            port: int = int(port_str)
-            timestamp: int = int(timestamp_str)
+            user_id = int(user_id_str)
+            port = int(port_str)
+            payload = f"v2:{user_id}:{port}:{timestamp_str}:{random_part}"
+            expected = hashlib.sha256(f"{payload}:{token_secret}".encode()).hexdigest()[:16]
+            if not hmac.compare_digest(signature, expected):
+                return False, 0, 0
+            return True, user_id, port
+        except (ValueError, TypeError):
+            return False, 0, 0
 
-            # Verify signature
-            payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
-            expected_signature = hashlib.sha256(
-                f"{payload}:{self.config.token_secret}".encode()
-            ).hexdigest()[:16]
+    def _validate_token_v2(self, token: str) -> tuple[bool, int | None, str | None, dict | None]:
+        """Validate v2 format token with TTL.
 
-            if not hmac.compare_digest(signature, expected_signature):
-                return False, None, "Invalid signature"
+        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
 
-            # Check TTL
-            current_time = int(time.time())
-            age_seconds = current_time - timestamp
+        Issue #3378: the signature is first checked against the manager's
+        global secret (local instances, unchanged); on mismatch the token is
+        re-verified against the named sandboxed instance's per-instance secret
+        — a stopped sandbox leaves no matching instance, so its tokens fail
+        (N8: 401 semantics after teardown).
 
-            if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
-                return (
-                    False,
-                    None,
-                    f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
-                )
+        Returns (is_valid, user_id, error, user_row) — see
+        validate_token_with_user (R-12) for the fourth element.
+        """
+        from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
 
-            if age_seconds < 0:
-                return False, None, "Token timestamp is in the future"
+        valid, user_id, port = self._verify_v2_signature(token, self.config.token_secret)
+        if not valid:
+            instance = self._find_sandboxed_instance_by_token(token)
+            if instance is None:
+                return False, None, "Invalid signature", None
+            valid, user_id, port = self._verify_v2_signature(token, instance.token_secret)
+            if not valid:
+                return False, None, "Invalid signature", None
+        try:
+            parts = token.split(":")
+            timestamp = int(parts[3])
+        except (IndexError, ValueError) as e:
+            return False, None, f"Token parse error: {e}", None
 
-            return True, user_id, None
+        # Check TTL
+        current_time = int(time.time())
+        age_seconds = current_time - timestamp
 
-        except (ValueError, TypeError) as e:
-            return False, None, f"Token parse error: {e}"
+        if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
+            return (
+                False,
+                None,
+                f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
+                None,
+            )
 
-    def _validate_token_v1(self, token: str) -> tuple[bool, int | None, str | None]:
+        if age_seconds < 0:
+            return False, None, "Token timestamp is in the future", None
+
+        denial, user = self._user_token_denial(user_id, token_timestamp=timestamp)
+        if denial:
+            return False, None, denial, None
+
+        return True, user_id, None, user
+
+    def _find_sandboxed_instance_by_token(self, token: str) -> WebUIInstance | None:
+        """Locate the sandboxed instance whose (user, port) a token carries."""
+        try:
+            parts = token.split(":")
+            if len(parts) != 6:
+                return None
+            return self._find_sandboxed_instance(int(parts[1]), int(parts[2]))
+        except (ValueError, TypeError):
+            return None
+
+    def _validate_token_v1(self, token: str) -> tuple[bool, int | None, str | None, dict | None]:
         """Validate v1 format token (legacy, no TTL).
 
         v1 format: {user_id}:{port}:{random}:{signature}
+
+        Returns (is_valid, user_id, error, user_row) — see
+        validate_token_with_user (R-12) for the fourth element.
         """
         try:
             parts = token.split(":")
             if len(parts) != 4:
-                return False, None, "Invalid token format"
+                return False, None, "Invalid token format", None
 
             user_id_str, port_str, random_part, signature = parts
             user_id: int = int(user_id_str)
@@ -685,19 +1370,87 @@ class WebUIManager:
             ).hexdigest()[:16]
 
             if not hmac.compare_digest(signature, expected_signature):
-                return False, None, "Invalid signature"
+                return False, None, "Invalid signature", None
 
             # Note: We no longer check _port_allocations because each request
             # creates a new WebUIManager instance with empty allocations.
             # Signature validation is sufficient for security.
 
-            return True, user_id, None
+            # R-5: no token_timestamp — a set tokens_valid_after refuses v1
+            # tokens outright (they cannot prove they were minted after the
+            # deactivation).
+            denial, user = self._user_token_denial(user_id)
+            if denial:
+                return False, None, denial, None
+
+            return True, user_id, None, user
 
         except (ValueError, TypeError) as e:
-            return False, None, f"Token parse error: {e}"
+            return False, None, f"Token parse error: {e}", None
+
+    def _user_token_denial(
+        self, user_id: int, token_timestamp: int | None = None
+    ) -> tuple[str | None, dict | None]:
+        """Why a signature-valid webui token must still be refused, plus the row.
+
+        Issue #3379 (PR-A): webui tokens are stateless (signature + TTL), so
+        without this check a deactivated or soft-deleted user's already-issued
+        URL tokens keep authenticating (URL_TOKEN_ALLOWED_PATHS admits admin
+        routes) until their TTL lapses — the exact "停用用户后无法恢复继续
+        执行" acceptance item #3374 demands. Fail-closed on lookup
+        errors: a token that cannot be tied to a live user does not pass.
+
+        Review round 2 (R-5): users.tokens_valid_after is stamped when an
+        account is deactivated (PUT) or soft-deleted (DELETE). A v2 token
+        embeds its mint time and is refused when it predates the stamp; a v1
+        token carries no timestamp and is refused outright while the stamp is
+        set. Reactivation and restore deliberately do NOT clear the stamp —
+        leaked URLs stay dead and a restored user simply mints fresh tokens
+        on their next /user-url (declared residual in the PR description).
+
+        Review round 2 (R-12): the same single lookup that decides the
+        denial is returned as the second element so callers need no second
+        get_user_by_id.
+
+        Returns:
+            (denial_reason, user_row): denial_reason None means the token may
+            pass, and user_row carries the user's DB row.
+        """
+        try:
+            user = _webui_token_user(user_id)
+        except Exception as e:  # noqa: BLE001 - fail closed on lookup failure
+            logger.warning(f"Webui token user lookup failed for user {user_id}: {e}")
+            return "User status unavailable", None
+        if not user:
+            return "User not found", None
+        if not user.get("is_active", True):
+            return "User is deactivated", None
+        if user.get("deleted_at"):
+            return "User is deleted", None
+        valid_after = _tokens_valid_after_epoch(user.get("tokens_valid_after"))
+        if valid_after is not None:
+            # Round 3 (review R-5 gap 2): compare at the token's own
+            # whole-second precision. Token timestamps are int(time.time())
+            # while the stamp carries microseconds, so a strict `<` rejected
+            # tokens minted in the SAME second as the stamp — e.g. an
+            # automated deactivate→reactivate→/user-url sequence (#3379
+            # acceptance) or an instance token minted in that second would
+            # stay dead for the instance's whole lifetime. The cost: a token
+            # minted in the same second BEFORE the deactivation survives —
+            # bounded by one second and negligible next to the stamp's goal.
+            # An unparseable stamp is +inf (fail closed) and has no floor.
+            floor_after = math.floor(valid_after) if math.isfinite(valid_after) else valid_after
+            if token_timestamp is None or token_timestamp < floor_after:
+                return "Token predates account deactivation", None
+        return None, user
 
     def get_user_webui_url(
-        self, user_id: int, system_account: str, host_url: str | None = None
+        self,
+        user_id: int,
+        system_account: str,
+        host_url: str | None = None,
+        required_isolation: str = "",
+        snapshot: Any = None,
     ) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
@@ -711,6 +1464,18 @@ class WebUIManager:
             host_url: Optional host URL from Flask request (e.g., "http://192.168.1.169:19888").
                       Used to replace container-detected IP with user's actual access IP.
                       Required for Docker deployments where container cannot detect host's real IP.
+            required_isolation: The effective isolation level the /user-url gate
+                      resolved (Issue #3378). "sandboxed" launches the sandboxed
+                      form; empty derives it from the capability snapshot's
+                      floor (a passing sandbox probe flips the default).
+            snapshot: Optional capability snapshot the CALLER already built for
+                      its own gate (F-6.1, review round 2). When given,
+                      _resolve_form reuses it instead of building a second one
+                      — the route's gate snapshot and the launch-form fork then
+                      key on ONE view even if a heartbeat flips the (cached)
+                      level between the two builds, so the form can never
+                      disagree with the gate that admitted the request.
+                      Default None keeps the build-it-yourself behavior.
 
         Returns:
             Tuple of (url, token).
@@ -726,17 +1491,40 @@ class WebUIManager:
         else:
             base_url = self.config.url
 
+        form = self._resolve_form(required_isolation, snapshot=snapshot)
+
         if not self.config.multi_user_mode:
+            # Backend "shared" (#3446): one local WebUI for everyone. The pod
+            # form always runs one pod per user (backend "opensandbox"), so a
+            # single shared pod is no longer a configuration that exists.
             # Single-user mode (docker compose): use fixed WebUI port 3100
             # Issue #3129: Start the single-user WebUI instance if not running
             with self._single_user_lock:
                 # Check if instance exists and is alive
                 if self._single_user_instance is not None and self._single_user_instance.is_alive():
-                    self._single_user_instance.update_activity()
-                    logger.debug(
-                        f"Single-user WebUI instance already running: "
-                        f"pid={self._single_user_instance.pid}, port={self._single_user_instance.port}"
-                    )
+                    if (
+                        getattr(self._single_user_instance, "form", WEBUI_FORM_LOCAL)
+                        != WEBUI_FORM_LOCAL
+                    ):
+                        # Issue #3378 review (MINOR-2): a live SANDBOXED instance
+                        # must not keep serving a LOCAL-form request — the old
+                        # path returned the hardcoded 3100 plus a global-secret
+                        # token the remote pod cannot validate. Mirror the
+                        # multi-user form-mismatch stop-and-restart (and the
+                        # sandboxed branch's cross-form handling above): stop
+                        # the old form, then start under the requested one.
+                        logger.warning(
+                            "Restarting single-user webui: running form "
+                            f"'{self._single_user_instance.form}' != requested 'local'"
+                        )
+                        self._stop_single_user_instance_internal()
+                        self._start_single_user_instance(user_id, system_account, base_url)
+                    else:
+                        self._single_user_instance.update_activity()
+                        logger.debug(
+                            f"Single-user WebUI instance already running: "
+                            f"pid={self._single_user_instance.pid}, port={self._single_user_instance.port}"
+                        )
                 else:
                     # Instance not running or dead, start a new one
                     if self._single_user_instance is not None:
@@ -748,25 +1536,69 @@ class WebUIManager:
                         self._stop_single_user_instance_internal()
                     self._start_single_user_instance(user_id, system_account, base_url)
 
-            # Generate token for the request
-            token = self.generate_token(user_id, 3100)
-            # Always add port 3100 in single-user mode
-            # Remove any existing port from base_url first, then add 3100
+            # Generate token for the request. The port follows the INSTANCE's
+            # actual port (range-derived, #3379 §5.8): a deployment that
+            # offsets the published range must not advertise the historical
+            # fixed 3100 its instance never bound.
+            instance = self._single_user_instance
+            if instance is None:  # pragma: no cover - start() raises on failure
+                raise ValueError("Single-user WebUI instance is not running")
+            instance_port = instance.port
+            token = self.generate_token(user_id, instance_port)
+            # Remove any existing port from base_url first, then add the
+            # instance's port.
             base_url_no_port = self._remove_port_from_url(base_url)
-            url = f"{base_url_no_port}:3100"
+            url = f"{base_url_no_port}:{instance_port}"
             return url, token
 
+        # KNOWN LIMITATION (Issue #3378 review, m6 — documented, deliberately
+        # not restructured): the instance-START path below (subprocess launch
+        # with up to ~15s readiness wait, or a sandboxed pod create + snapshot
+        # restore that can take tens of seconds) runs while this manager lock
+        # is held, so concurrent FIRST hits by DIFFERENT users serialize
+        # behind the first start. This is the pre-existing pattern (#3129/#3374
+        # era) and deliberately kept: handing starts off to per-user locks
+        # would add a concurrency regression surface (port allocation, form
+        # switching, and the instance cap all rely on this mutual exclusion).
+        # The hit path (instance exists and is alive) never blocks on a start.
         with self._lock:
             # Check if user already has an instance
             if user_id in self._instances:
                 instance = self._instances[user_id]
-                if instance.is_alive():
-                    instance.update_activity()
-                    # Use dynamic base_url if provided, otherwise use stored instance.url
-                    if host_url:
-                        url = f"{base_url}:{instance.port}"
-                        return url, instance.token
-                    return instance.url, instance.token
+                if getattr(instance, "form", WEBUI_FORM_LOCAL) != form:
+                    # Issue #3378: extend the stale-account stop-and-restart
+                    # precedent (Issue #3374 review #2) to a form mismatch — a
+                    # local instance must not keep serving a sandboxed request.
+                    logger.warning(
+                        f"Restarting webui for user {user_id}: instance form "
+                        f"'{instance.form}' != requested '{form}'"
+                    )
+                    self._stop_instance_internal(user_id)
+                elif instance.is_alive():
+                    if instance.system_account != system_account:
+                        # Issue #3374 review #2: the cached instance was started
+                        # under a different mapping (e.g. the admin changed
+                        # system_account since); restart under the current
+                        # mapping instead of silently serving the stale identity.
+                        logger.warning(
+                            f"Restarting webui for user {user_id}: instance account "
+                            f"'{instance.system_account}' != requested '{system_account}'"
+                        )
+                        self._stop_instance_internal(user_id)
+                    else:
+                        instance.update_activity()
+                        if form == WEBUI_FORM_SANDBOXED:
+                            # D5: token minted per access with the instance
+                            # secret (aligned with the single-user behavior of
+                            # minting a fresh token on every request).
+                            token = self._mint_sandboxed_token(instance)
+                            url = f"{base_url}:{instance.port}" if host_url else instance.url
+                            return url, token
+                        # Use dynamic base_url if provided, otherwise use stored instance.url
+                        if host_url:
+                            url = f"{base_url}:{instance.port}"
+                            return url, instance.token
+                        return instance.url, instance.token
                 else:
                     # Process declared dead after consecutive health check failures
                     logger.warning(
@@ -782,12 +1614,60 @@ class WebUIManager:
                 raise ValueError(f"Maximum instances ({self.config.max_instances}) reached")
 
             # Start new instance
-            instance = self._start_instance_internal(user_id, system_account, base_url)
+            if form == WEBUI_FORM_SANDBOXED:
+                instance = self._start_sandboxed_instance(user_id, system_account, base_url)
+            else:
+                instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
+
+    def _resolve_form(self, required_isolation: str, *, snapshot: Any = None) -> str:
+        """Pick the launch form for this request.
+
+        Issue #3446: the backend is explicit (``workspace.isolation.backend``),
+        so the form follows it and nothing is inferred: the OpenSandbox pod
+        form for ``opensandbox``, the per-user local form for every other
+        backend (the local containers run INSIDE the local form, through the
+        confine wrapper). The /user-url gate has already refused a requirement
+        the deployment cannot meet, and a backend that is not ready makes the
+        snapshot unsupported instead of falling back to another form.
+
+        ``required_isolation`` and ``snapshot`` are accepted for the callers'
+        signature; the decision no longer depends on them.
+        """
+        del required_isolation, snapshot
+        if self.config.isolation.backend == BACKEND_OPENSANDBOX:
+            return WEBUI_FORM_SANDBOXED
+        return WEBUI_FORM_LOCAL
+
+    def _allocate_single_user_port(self) -> int:
+        """Pick the single-user instance's port from the configured range.
+
+        Historically the port was hardcoded 3100 regardless of
+        ``workspace.port_range_start`` (default 3100 — so default deployments
+        are unchanged). Two shapes broke (#3379 acceptance tail, handbook
+        §5.8): a deployment that offsets the published range (the multi-user
+        stack already holds host 3100-3200) got an instance bound on an
+        UNPUBLISHED container port advertising an unreachable ``:3100`` URL;
+        and a busy 3100 (foreign listener) was never detected — the connect
+        based readiness probe happily "succeeded" against the foreign
+        service. The port is now the FIRST FREE port of the configured range
+        (same availability probe as the multi-user ``allocate_port``); the
+        URL and token follow the instance's actual port.
+
+        Raises:
+            ValueError: if no port in the configured range is available.
+        """
+        for port in range(self.config.port_range_start, self.config.port_range_end + 1):
+            if self._is_port_available(port):
+                return port
+        raise ValueError(
+            f"No available ports in range {self.config.port_range_start}-"
+            f"{self.config.port_range_end} for the single-user WebUI instance"
+        )
 
     def _start_single_user_instance(self, user_id: int, system_account: str, base_url: str) -> None:
         """
-        Start the single-user WebUI instance on port 3100.
+        Start the single-user WebUI instance on the range's first free port.
 
         This method is called when the first user requests the WebUI URL
         in single-user mode (Docker compose). It starts a single shared
@@ -801,9 +1681,10 @@ class WebUIManager:
             base_url: Base URL from request (e.g., http://192.168.1.87).
 
         Raises:
-            ValueError: If the WebUI process fails to start.
+            ValueError: If the WebUI process fails to start or no port in the
+                configured range is available.
         """
-        port = 3100  # Fixed port for single-user mode
+        port = self._allocate_single_user_port()
         logger.info(f"Starting single-user WebUI instance on port {port}")
 
         # Generate token
@@ -851,6 +1732,9 @@ class WebUIManager:
             process=process,
             url=url,
             session_model_pool=model_pool,
+            # Issue #3420: single-user local mode uses os_user isolation
+            isolation_level="os_user",
+            user_home_path=get_user_home_for_isolation(system_account, "os_user"),
         )
 
         self._single_user_instance = instance
@@ -864,12 +1748,44 @@ class WebUIManager:
         Stop the single-user WebUI instance (internal, must be called with lock).
 
         This method is called when the instance is dead and needs to be restarted,
-        or during shutdown.
+        or during shutdown. The registry slot is cleared here (fast); the actual
+        teardown runs in :meth:`_finish_stop_single_user`, which is safe to call
+        WITHOUT _single_user_lock (T-I: idle cleanup tears down outside the lock
+        so a slow sandbox destroy cannot pin it).
         """
         if self._single_user_instance is None:
             return
 
         instance = self._single_user_instance
+        self._single_user_instance = None
+        self._finish_stop_single_user(instance)
+
+    def _finish_stop_single_user(self, instance: WebUIInstance) -> None:
+        """Teardown half of the single-user stop (no _single_user_lock held)."""
+        # Issue #3378 review (Q1): revoke the instance's proxy tokens before
+        # teardown — same precedent as _stop_instance_internal for the
+        # multi-user form. Without this, a stopped instance leaves a
+        # still-validatable webui:<user> session behind.
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+            get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                f"webui:{instance.user_id}",
+                reason="webui_stopped",
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to revoke WebUI proxy tokens for user %s: %s", instance.user_id, e
+            )
+        if getattr(instance, "form", WEBUI_FORM_LOCAL) == WEBUI_FORM_SANDBOXED:
+            logger.info(
+                "Stopping single-user sandboxed WebUI instance: sandbox=%s, port=%s",
+                instance.sandbox_id,
+                instance.port,
+            )
+            self._teardown_sandboxed_instance(instance)
+            return
+
         logger.info(
             f"Stopping single-user WebUI instance: pid={instance.pid}, port={instance.port}"
         )
@@ -888,7 +1804,6 @@ class WebUIManager:
             except Exception as e:
                 logger.warning(f"Error stopping single-user WebUI process: {e}")
 
-        self._single_user_instance = None
         logger.info("Single-user WebUI instance stopped")
 
     def _start_instance_internal(
@@ -910,7 +1825,7 @@ class WebUIManager:
             ValueError: If service fails to start within timeout.
         """
         # Allocate port
-        port = self.allocate_port(user_id)
+        port = self.allocate_port(user_id, WEBUI_FORM_LOCAL)
 
         # Generate token
         token = self.generate_token(user_id, port)
@@ -932,7 +1847,7 @@ class WebUIManager:
 
             if process is None:
                 # Failed to launch process
-                self.release_port(port)
+                self.release_port(port, WEBUI_FORM_LOCAL)
                 raise ValueError("Failed to launch webui process")
 
             # Wait for service to be ready
@@ -943,12 +1858,12 @@ class WebUIManager:
                     process.wait(timeout=2)
                 except Exception:
                     pass
-                self.release_port(port)
+                self.release_port(port, WEBUI_FORM_LOCAL)
                 raise ValueError("WebUI service failed to start within timeout")
 
         except Exception as e:
             logger.error(f"Failed to start webui process: {e}")
-            self.release_port(port)
+            self.release_port(port, WEBUI_FORM_LOCAL)
             raise
 
         instance = WebUIInstance(
@@ -960,6 +1875,9 @@ class WebUIManager:
             process=process,
             url=url,
             session_model_pool=model_pool,
+            # Issue #3420: multi-user local mode uses os_user isolation
+            isolation_level="os_user",
+            user_home_path=get_user_home_for_isolation(system_account, "os_user"),
         )
 
         self._instances[user_id] = instance
@@ -968,6 +1886,167 @@ class WebUIManager:
             f"port={port}, pid={pid}, system_account={system_account}"
         )
 
+        return instance
+
+    # ── Issue #3378: the sandboxed form ───────────────────────────────
+
+    def _get_sandbox_launcher(self) -> Any:
+        """Return the sandboxed WebUI launcher (injectable for tests)."""
+        if self._sandbox_launcher is None:
+            from app.services.webui_sandbox_opensandbox import OpenSandboxWebuiLauncher
+
+            self._sandbox_launcher = OpenSandboxWebuiLauncher(tier=self.config.isolation.tier)
+        return self._sandbox_launcher
+
+    def _mint_sandboxed_token(
+        self, instance: WebUIInstance, *, requester_id: int | None = None
+    ) -> str:
+        """Mint a v2 token signed with the instance's per-instance secret.
+
+        ``requester_id`` (review round 1, T-C): on the shared single-user
+        sandboxed instance the token must be minted for the REQUESTING user.
+        The reuse branch used the pod creator's user_id, so every subsequent
+        user's token validated as the creator — including against the admin
+        paths URL_TOKEN_ALLOWED_PATHS admits — a privilege escalation.
+        Default (None) keeps the multi-user behavior of minting for the
+        instance owner, aligned with the local branch's
+        generate_token(user_id, ...) precedent.
+        """
+        from app.services.webui_sandbox import mint_instance_token
+
+        subject = instance.user_id if requester_id is None else int(requester_id)
+        token = mint_instance_token(subject, instance.port, instance.token_secret)
+        instance.token = token
+        return token
+
+    def _launch_sandboxed(self, user_id: int, system_account: str, base_url: str) -> WebUIInstance:
+        """Create the sandboxed instance (pod + restore + local port proxy).
+
+        Shared by the multi-user branch and the single-user sandboxed branch:
+        both end with a :class:`WebUIInstance` whose ``port`` is the LOCAL
+        proxy port (the browser's origin), never the in-pod 3100.
+        """
+        from app.services.webui_sandbox import SandboxWebuiProxy
+        from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
+
+        launcher = self._get_sandbox_launcher()
+        callback_url = (getattr(self.config, "webui_callback_url", "") or "").strip()
+        if not callback_url:
+            # The /user-url gate's sandbox probe already refuses this; the
+            # re-check keeps a config race from creating an unreachable pod.
+            raise ValueError(
+                "workspace.webui_callback_url is not set; sandboxed webui "
+                "pods cannot reach the control-plane LLM proxy"
+            )
+
+        # T-E (review round 1): an existing-but-UNREADABLE snapshot is not a
+        # first launch. Degrade honestly: start with an empty history (the
+        # entrypoint still needs its unblock marker), keep exports suspended
+        # (restore_confirmed=False) so nothing can overwrite the unreadable
+        # file, and leave it on disk for an operator to repair.
+        # F-5a (review round 2): the degrade is passed INTO the launcher as
+        # the restore source — the launcher must never write the CP
+        # confirmation record for a degraded start (a record is what
+        # reconcile trusts to export "the user's history", and this pod's
+        # history is not the user's; the old post-hoc dataclasses.replace
+        # left the record on disk for the next sweep to trust).
+        snapshot = None
+        history_unreadable = False
+        try:
+            snapshot = launcher.load_snapshot(user_id)
+        except Exception as exc:
+            from app.services.webui_sandbox_opensandbox import SnapshotUnreadableError
+
+            if not isinstance(exc, SnapshotUnreadableError):
+                raise
+            logger.warning(
+                "Sandboxed WebUI for user %s: stored snapshot exists but is "
+                "unreadable (%s); starting with empty history and suspending "
+                "snapshot exports until the file is repaired",
+                user_id,
+                exc,
+            )
+            history_unreadable = True
+        from app.services.webui_sandbox_opensandbox import RESTORE_SOURCE_DEGRADED
+
+        result = launcher.launch(
+            user_id=user_id,
+            callback_url=callback_url,
+            snapshot=snapshot,
+            restore_source=RESTORE_SOURCE_DEGRADED if history_unreadable else None,
+        )
+
+        port = self.allocate_port(user_id, WEBUI_FORM_SANDBOXED)
+        # The instance object does not exist until after the proxy starts, so
+        # the activity callback closes over a holder cell filled below. Every
+        # successful proxy forward then refreshes instance.last_activity —
+        # the only heartbeat the single-user sandboxed form gets (m1), and the
+        # signal the idle reaper below keys on.
+        instance_holder: list[WebUIInstance] = []
+        try:
+            proxy = SandboxWebuiProxy(
+                sandbox_id=result.sandbox_id,
+                upstream_resolver=lambda: launcher.resolve_webui_endpoint(result.sandbox_id),
+                on_activity=lambda: (
+                    instance_holder[0].update_activity() if instance_holder else None
+                ),
+            )
+            proxy.start(port)
+        except Exception:
+            logger.exception(
+                "sandboxed webui proxy failed to start for user %s; destroying pod",
+                user_id,
+            )
+            launcher.destroy(
+                result.sandbox_id,
+                user_id,
+                restore_confirmed=result.restore_confirmed,
+                final_export=True,
+            )
+            self.release_port(port, WEBUI_FORM_SANDBOXED)
+            raise
+
+        instance = WebUIInstance(
+            user_id=user_id,
+            system_account=system_account,
+            port=port,
+            form=WEBUI_FORM_SANDBOXED,
+            sandbox_id=result.sandbox_id,
+            sandbox_tier=result.tier,
+            restore_confirmed=result.restore_confirmed,
+            token_secret=result.token_secret,
+            proxy_token=result.proxy_token,
+            launcher=launcher,
+            proxy=proxy,
+            url=f"{self._remove_port_from_url(base_url)}:{port}",
+            isolation_level=ISOLATION_LEVEL_SANDBOXED,
+            user_home_path=get_user_home_for_isolation(system_account, ISOLATION_LEVEL_SANDBOXED),
+        )
+        instance_holder.append(instance)
+        self._mint_sandboxed_token(instance)
+        return instance
+
+    def _start_sandboxed_instance(
+        self, user_id: int, system_account: str, base_url: str
+    ) -> WebUIInstance:
+        """Multi-user sandboxed start (must be called with self._lock held).
+
+        No OS account is created and no sudo wrapper is used (D4): identity
+        for a sandboxed webui is the per-instance token, not a host uid.
+        ``_wait_for_service_ready`` is deliberately NOT used — the webui boots
+        behind a remote restore gate the proxy's health path already probes.
+        """
+        instance = self._launch_sandboxed(user_id, system_account, base_url)
+        self._instances[user_id] = instance
+        logger.info(
+            "Started sandboxed webui instance for user %s: sandbox=%s tier=%s port=%s "
+            "(restore_confirmed=%s)",
+            user_id,
+            instance.sandbox_id,
+            instance.sandbox_tier,
+            instance.port,
+            instance.restore_confirmed,
+        )
         return instance
 
     def _load_server_config(self) -> dict:
@@ -1111,11 +2190,24 @@ class WebUIManager:
                 pwd.getpwnam(system_account)
             except KeyError:
                 logger.info(f"User '{system_account}' not found, creating...")
-                if not self._ensure_system_user(system_account):
+                if not self._ensure_system_user(system_account, user_id=user_id):
                     raise ValueError(f"Failed to create system user: {system_account}")
 
-        # Find webui executable or project path
-        webui_cmd, webui_dir = self._find_webui_executable()
+        # Find webui executable or project path. Shares the successful-
+        # resolution memo with the readiness probe (Issue #3374 review #9
+        # round 2): both call sites see one resolution instead of diverging.
+        resolved = getattr(self, "_resolved_webui", None)
+        webui_cmd: str | None
+        webui_dir: str | None
+        if self._confinement_mode() in CONTAINER_BACKENDS:
+            # Issue #3431 Option 2: the executable is a path inside the image.
+            webui_cmd, webui_dir = self.config.isolation.container_webui, None
+        elif resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable()
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
 
         if not webui_cmd:
             logger.error("qwen-code-webui executable not found")
@@ -1183,6 +2275,24 @@ class WebUIManager:
         # popen_env tracks whether to pass child_env to Popen; for the sudo
         # inline path env vars are already in the command, so skip it.
         popen_env: dict[str, str] | None = child_env
+        # Issue #3431: the confined launch hands the environment to the root
+        # wrapper on stdin, never on a (world-readable) command line.
+        stdin_payload: bytes | None = None
+        if self._confinement_enabled() and (
+            webui_dir
+            or self._platform not in ("linux", "darwin")
+            or pwd.getpwuid(os.getuid()).pw_name == system_account
+        ):
+            # Fail closed: these launch forms cannot be confined (dev-directory
+            # node, no user switch). The readiness probe normally refuses the
+            # first two before we get here; the same-account form is caught
+            # only here.
+            logger.error(
+                "Confinement is configured but this WebUI launch form cannot be "
+                "confined (user %s); refusing to launch unconfined",
+                user_id,
+            )
+            return None, model_pool
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -1218,6 +2328,21 @@ class WebUIManager:
                     openace_api_url,
                 ]
                 cwd = None
+            elif self._confinement_enabled():
+                # Issue #3431 (Option 1): confined launch. The readiness probe
+                # refused hosts that cannot confine and the guard above refused
+                # the unconfinable forms, so this branch is the only one left
+                # when confinement is configured.
+                cmd = self._build_confined_command(
+                    system_account=system_account,
+                    port=port,
+                    webui_cmd=webui_cmd,
+                    webui_log_dir=webui_log_dir,
+                    openace_api_url=openace_api_url,
+                )
+                stdin_payload = json.dumps(self._confined_env(child_env)).encode()
+                cwd = None
+                popen_env = None
             else:
                 # Different user: use sudo -u with openace-webui-launch wrapper
                 # to pass environment variables inline.
@@ -1331,22 +2456,33 @@ class WebUIManager:
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
                 env=popen_env,  # None for sudo-inline path (vars already in cmd)
+                stdin=subprocess.PIPE if stdin_payload is not None else None,
                 stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
                 stderr=subprocess.DEVNULL,
             )
+            if stdin_payload is not None and process.stdin is not None:
+                try:
+                    process.stdin.write(stdin_payload)
+                finally:
+                    process.stdin.close()
             return process, model_pool
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
             return None, model_pool
 
-    def _find_webui_executable(self) -> tuple[str | None, str | None]:
+    def _find_webui_executable(self, probe_only: bool = False) -> tuple[str | None, str | None]:
         """
-        Find the qwen-code-webui executable.
+        Locate the qwen-code-webui executable or project entry.
+
+        Args:
+            probe_only: Skip side effects (npm build) — used by capability
+                probes that must never produce build artifacts or block a
+                worker for the 60s build timeout (Issue #3374 review #9).
 
         Returns:
-            Tuple of (executable_path, working_directory).
-            If running from project directory, executable_path is the node.js entry
-            and working_directory is the backend directory.
+            Tuple of (webui_cmd, webui_dir). If running from a project
+            directory, webui_dir is the backend directory and webui_cmd is
+            the node entry; working_directory is None for global installs.
             If running global executable, working_directory is None.
         """
         # Check webui_path from config
@@ -1371,6 +2507,13 @@ class WebUIManager:
 
             # Check if project needs to be built
             if os.path.isdir(webui_backend):
+                if probe_only:
+                    # Capability probes must not build (60s subprocess). Keep
+                    # the directory so readiness classifies this checkout as
+                    # dev-directory (shared-account) mode rather than
+                    # "executable missing".
+                    logger.info("WebUI project not built; probe-only resolution skips build")
+                    return None, webui_backend
                 logger.warning(f"WebUI project found but not built: {node_entry} not found")
                 # Try to build it
                 try:
@@ -1419,7 +2562,7 @@ class WebUIManager:
 
         return None, None
 
-    def _ensure_system_user(self, system_account: str) -> bool:
+    def _ensure_system_user(self, system_account: str, user_id: int | None = None) -> bool:
         """
         Ensure a system user exists for workspace operations.
         Creates the OS user if it doesn't exist.
@@ -1429,15 +2572,55 @@ class WebUIManager:
 
         Args:
             system_account: Username for the system account.
+            user_id: App user id — used to look up the TENANT for the
+                tenant-scoped shared group (Issue #3396).
 
         Returns:
             True if user exists or was created successfully.
         """
-        return _ensure_user_shared(system_account)
+        # PR #3402 review (Issue #3396): tenant_id=None means "platform
+        # admin" (openace-shared-0), so a FAILED lookup used to fail OPEN —
+        # a tenant user whose row could not be read was enrolled into the
+        # platform admins' content group. A failed/missing lookup (or no
+        # user context at all) now passes TENANT_UNRESOLVED: only the
+        # global namespace group is granted, the tenant group waits for a
+        # call that can resolve the tenant.
+        from app.utils.workspace import TENANT_UNRESOLVED, TenantIdOrUnresolved
+
+        tenant_id: TenantIdOrUnresolved = TENANT_UNRESOLVED
+        if user_id is not None:
+            try:
+                user_row = _webui_token_user(user_id)
+            except Exception as e:  # noqa: BLE001 - enrollment best effort
+                logger.warning(
+                    f"Failed to look up tenant for user {user_id}: {e}; "
+                    f"{system_account} gets the global shared group only"
+                )
+            else:
+                if user_row is None:
+                    logger.warning(
+                        f"User {user_id} not found; cannot resolve tenant for "
+                        f"{system_account} — global shared group only"
+                    )
+                else:
+                    # a row with tenant_id NULL is a genuine platform admin:
+                    # openace-shared-0 is the CORRECT content group
+                    tenant_id = user_row.get("tenant_id")
+        else:
+            logger.warning(
+                f"No user context to resolve a tenant for {system_account} — "
+                "global shared group only"
+            )
+        return _ensure_user_shared(system_account, tenant_id=tenant_id)
 
     def _stop_instance_internal(self, user_id: int):
         """
         Stop a webui instance (internal, must be called with lock).
+
+        The registry pop happens here (fast, under the lock); the teardown runs
+        in :meth:`_finish_stop_instance`, which is safe to call WITHOUT the
+        lock (T-I: idle cleanup deregisters first and tears down outside the
+        lock — a sandbox destroy can take ~90s per pod and must not pin it).
 
         Args:
             user_id: User ID to stop instance for.
@@ -1446,6 +2629,11 @@ class WebUIManager:
             return
 
         instance = self._instances.pop(user_id)
+        self._finish_stop_instance(instance)
+
+    def _finish_stop_instance(self, instance: WebUIInstance) -> None:
+        """Teardown half of _stop_instance_internal (no _lock needed)."""
+        user_id = instance.user_id
 
         try:
             from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -1456,6 +2644,11 @@ class WebUIManager:
             )
         except Exception as e:
             logger.warning("Failed to revoke WebUI proxy tokens for user %s: %s", user_id, e)
+
+        form = getattr(instance, "form", WEBUI_FORM_LOCAL)
+        if form == WEBUI_FORM_SANDBOXED:
+            self._teardown_sandboxed_instance(instance)
+            return
 
         # Stop the process
         if instance.process is not None:
@@ -1475,17 +2668,401 @@ class WebUIManager:
                 logger.error(f"Error stopping process: {e}")
 
         # Release port
-        self.release_port(instance.port)
+        self.release_port(instance.port, WEBUI_FORM_LOCAL)
 
-    def stop_user_webui(self, user_id: int):
+    def _teardown_sandboxed_instance(self, instance: WebUIInstance) -> None:
+        """Tear down a sandboxed instance: final export, destroy, un-proxy.
+
+        The export runs under the D6 guard (launcher-side, keyed on the
+        instance's restore-confirmed state) and is best-effort — destroy is
+        idempotent (404 = success) and never blocked by an export failure.
+        """
+        user_id = instance.user_id
+        if instance.proxy is not None:
+            try:
+                instance.proxy.stop()
+            except Exception as e:  # noqa: BLE001 - teardown must continue
+                logger.warning("Failed to stop sandboxed webui proxy: %s", e)
+        if instance.launcher is not None and instance.sandbox_id:
+            try:
+                instance.launcher.destroy(
+                    instance.sandbox_id,
+                    user_id,
+                    restore_confirmed=instance.restore_confirmed,
+                    final_export=True,
+                )
+            except Exception as e:  # noqa: BLE001 - destroy stays idempotent
+                logger.warning(
+                    "Failed to destroy sandboxed webui %s for user %s: %s",
+                    instance.sandbox_id,
+                    user_id,
+                    e,
+                )
+        self.release_port(instance.port, WEBUI_FORM_SANDBOXED)
+
+    def stop_user_webui(self, user_id: int) -> bool:
         """
         Stop the webui instance for a user.
 
+        Issue #3379 review round 2 (R-1): the registry pop runs under the
+        lock but the TEARDOWN runs OUTSIDE it, aligned with
+        cleanup_idle_instances (T-I). The teardown reaches the sandbox API
+        (final export + delete, up to ~90s per pod) and used to pin _lock
+        for that whole window, freezing every concurrent token validation
+        (_find_sandboxed_instance), LLM-proxy check (get_user_instance),
+        and /user-url hit for ALL users.
+
+        Equivalence with the old ``with self._lock:
+        self._stop_instance_internal(user_id)``: _stop_instance_internal's
+        entire locked section was an atomic check-and-pop of the user's
+        registry slot (absent user → no-op) followed by the teardown; the
+        ``pop(user_id, None)`` below performs the identical atomic
+        check-and-pop under the same lock, and _finish_stop_instance runs
+        the identical teardown — only the lock boundary around the teardown
+        moved. _stop_instance_internal itself is unchanged for its other
+        callers (get_user_webui_url, _reap_dead_sandboxed_async), which hold
+        the lock for their own registry invariants.
+
+        Single-user mode: the SHARED instance (``_single_user_instance``) is
+        deliberately NOT touched — it serves every user, so one user's
+        deactivation must not stop it (review round 2, R-6). The per-user
+        registry is empty in that mode, so this method is a no-op there;
+        callers record the distinction in their audit trail.
+
         Args:
             user_id: User ID to stop instance for.
+
+        Returns:
+            True when a per-user instance was found and its teardown ran;
+            False when the user had no registered instance (including the
+            single-user shared-instance shape).
         """
         with self._lock:
-            self._stop_instance_internal(user_id)
+            instance = self._instances.pop(user_id, None)
+        if instance is None:
+            return False
+        self._finish_stop_instance(instance)
+        return True
+
+    def per_user_launch_readiness(self) -> str | None:
+        """Account-independent per-user launch readiness (Issue #3374 reviews).
+
+        Returns a degradation reason code, or None when the launch PATH can
+        host per-user WebUIs: platform, WebUI resolution (probe-only: never
+        builds), dev-directory mode, the audited launch wrapper, and the
+        sudo binary. The result is memoized for _PROBE_MEMO_TTL_SECONDS in
+        BOTH directions so repeated GETs cannot loop a probe on a degraded
+        host; successful resolution is additionally cached permanently for
+        the real launch path.
+        """
+        now = time.monotonic()
+        cached = self._readiness_memo
+        if cached is not None and now - cached[0] < _PROBE_MEMO_TTL_SECONDS:
+            return cached[1]
+        reason = self._compute_launch_readiness()
+        # Stamped when the check ENDS: a slow check (a Kata probe boots a VM)
+        # must not already be stale when it is stored.
+        self._readiness_memo = (time.monotonic(), reason)
+        return reason
+
+    def _compute_launch_readiness(self) -> str | None:
+        if self._platform not in ("linux", "darwin"):
+            return "platform_unsupported"
+        if self._confinement_mode() in CONTAINER_BACKENDS:
+            # The WebUI runs from the pinned image: no host-side WebUI or
+            # openace-webui-launch is involved; the root probe is the check.
+            if shutil.which("sudo") is None:
+                return "sudo_unavailable"
+            return self._container_readiness()
+        resolved = getattr(self, "_resolved_webui", None)
+        if resolved:
+            webui_cmd, webui_dir = resolved
+        else:
+            webui_cmd, webui_dir = self._find_webui_executable(probe_only=True)
+            if webui_cmd:
+                self._resolved_webui = (webui_cmd, webui_dir)
+        if webui_dir:
+            # Dev-directory mode runs `node` as the service user with no UID
+            # switch — this holds for built and unbuilt checkouts alike.
+            return "dev_directory_mode_shared_account"
+        if not webui_cmd:
+            return "webui_executable_missing"
+        # The sudo path execs the audited launch wrapper; the wrapper being
+        # installed and executable is the real precondition (the sudoers
+        # rule itself cannot be verified cheaply here).
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_LAUNCH_WRAPPER):
+            return "launch_wrapper_missing"
+        if shutil.which("sudo") is None:
+            return "sudo_unavailable"
+        if self._confinement_enabled():
+            return self._confinement_readiness(webui_cmd)
+        return None
+
+    # ── Issue #3431 (Option 1): confined os_user launch ───────────────
+
+    def _confinement_mode(self) -> str:
+        """The isolation backend when it is a confined one (bwrap / local-*), else ""."""
+        isolation = getattr(getattr(self, "config", None), "isolation", None)
+        backend = getattr(isolation, "backend", "")
+        return backend if backend in CONFINED_BACKENDS else ""
+
+    def _confinement_enabled(self) -> bool:
+        """Whether WebUIs must launch through the confine wrapper."""
+        return bool(self._confinement_mode())
+
+    def confinement_mode(self) -> str:
+        """The confined backend ("" for none), for the contract."""
+        return self._confinement_mode()
+
+    def confinement_active(self) -> bool:
+        """Confinement is configured AND this host passed its readiness check."""
+        return self._confinement_enabled() and self.per_user_launch_readiness() is None
+
+    def _confinement_readiness(self, webui_cmd: str) -> str | None:
+        """Degradation reason when this host cannot confine, else None.
+
+        Runs the wrapper's unprivileged ``check`` mode, which verifies the
+        tools, a running systemd, that bubblewrap can create user namespaces
+        (the Ubuntu 24.04+ AppArmor restriction is the usual failure), and that
+        the root-owned policy file lists this WebUI executable.
+        """
+        if self._confinement_mode() != BACKEND_BWRAP:
+            return "confinement_mode_invalid"  # pragma: no cover - caller dispatches by mode
+        if self._platform != "linux":
+            return "confinement_platform_unsupported"
+        # The egress allowlist is derived from server-side configuration
+        # only: without webui_callback_url the API URL would come from the
+        # request's Host header, which the user controls.
+        if not (getattr(self.config, "webui_callback_url", "") or "").strip():
+            return "confinement_callback_url_missing"
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
+            return "confinement_wrapper_missing"
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed wrapper path
+                [_WEBUI_CONFINE_WRAPPER, "check", "--webui", webui_cmd],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("confinement check could not run: %s", exc)
+            return "confinement_check_failed"
+        if result.returncode == 0:
+            return None
+        token = (result.stdout or "").strip().splitlines()[-1:] or [""]
+        return _CONFINE_CHECK_REASONS.get(token[0], "confinement_check_failed")
+
+    def _container_readiness(self) -> str | None:
+        """Option 2 readiness: ``sudo -n openace-webui-confine launch --probe``.
+
+        The probe (root) verifies the docker CLI, the registered runtime, the
+        pinned image, a gVisor guest kernel and host UNIX-socket access from a
+        container — or, for Kata (#3438), /dev/kvm, a hypervisor under the Kata
+        shim for the probe container, a guest kernel other than the host's and
+        the stdio channel. Memoized: a success for an hour, a failure for 30 s;
+        concurrent callers share one running probe.
+        """
+        mode = self._confinement_mode()
+        kata = mode == BACKEND_LOCAL_KATA
+        if self._platform != "linux":
+            return "confinement_platform_unsupported"
+        if not (getattr(self.config, "webui_callback_url", "") or "").strip():
+            return "confinement_callback_url_missing"
+        from app.utils.workspace import _is_wrapper_available
+
+        if not _is_wrapper_available(_WEBUI_CONFINE_WRAPPER):
+            return "confinement_wrapper_missing"
+        hit, cached = self._cached_container_probe(mode)
+        if hit:
+            return cached
+        with _CONTAINER_PROBE_LOCK:
+            hit, cached = self._cached_container_probe(mode)  # a probe that just finished
+            if hit:
+                return cached
+            return self._run_container_probe(mode, kata)
+
+    def _cached_container_probe(self, mode: str) -> tuple[bool, str | None]:
+        """(True, reason) while *mode*'s memoized probe result is fresh."""
+        memo: tuple[str, float, str | None] | None = getattr(self, "_container_probe_memo", None)
+        if memo is None or memo[0] != mode:  # a mode switch re-probes
+            return False, None
+        _, stamp, cached = memo
+        ttl = (
+            _CONTAINER_PROBE_OK_TTL_SECONDS if cached is None else _CONTAINER_PROBE_FAIL_TTL_SECONDS
+        )
+        return time.monotonic() - stamp < ttl, cached
+
+    def _run_container_probe(self, mode: str, kata: bool) -> str | None:
+        reason: str | None
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed wrapper path
+                [
+                    "sudo",
+                    "-n",
+                    _WEBUI_CONFINE_WRAPPER,
+                    "launch",
+                    "--probe",
+                    "--backend",
+                    mode,
+                ],
+                capture_output=True,
+                text=True,
+                # a Kata guest can take minutes to boot under nested
+                # virtualization; the wrapper's own worst case is ~7 minutes
+                timeout=480 if kata else 150,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("confinement container probe could not run: %s", exc)
+            reason = "confinement_check_failed"
+        else:
+            token = (result.stdout or "").strip().splitlines()[-1:] or [""]
+            if result.returncode == 0 and token[0] == "ok":
+                reason = None
+            else:
+                reason = _CONTAINER_PROBE_REASONS.get(token[0], "confinement_check_failed")
+                logger.warning(
+                    "confinement container probe failed (%s): %s",
+                    reason,
+                    (result.stderr or "").strip()[-300:],
+                )
+        # Stamped when the probe ENDS, so waiters on the lock (and the next
+        # callers) see a failed minutes-long probe as fresh, not re-probe.
+        self._container_probe_memo = (mode, time.monotonic(), reason)
+        return reason
+
+    def _confined_env(self, child_env: dict[str, str]) -> dict[str, str]:
+        """The WebUI environment for the confine wrapper (stdin JSON).
+
+        Drops the keys the wrapper owns or refuses — it sets HOME, PATH and
+        the proxy variables itself, and the host's own proxy is unreachable
+        from the sandbox — plus empty values.
+        """
+        return {
+            key: value
+            for key, value in child_env.items()
+            if value
+            and key not in _CONFINE_RESERVED_ENV
+            and not key.startswith(_CONFINE_DENY_ENV_PREFIXES)
+        }
+
+    def _confinement_allowlist(self) -> list[str]:
+        """Return the host:port pairs the sandbox may reach.
+
+        Server-side configuration ONLY — ``webui_callback_url`` (the Open ACE
+        API and its LLM proxy, required by the readiness probe) plus
+        ``workspace.isolation.egress_allow``. Never the request-derived API URL: its
+        host comes from the client's Host header.
+        """
+        from urllib.parse import urlsplit
+
+        entries: list[str] = []
+        callback = (getattr(self.config, "webui_callback_url", "") or "").strip()
+        try:
+            parsed = urlsplit(callback)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError:
+            host = None
+        if host:
+            entries.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
+        entries.extend(self.config.isolation.egress_allow)
+        return list(dict.fromkeys(entries))
+
+    def _build_confined_command(
+        self,
+        *,
+        system_account: str,
+        port: int,
+        webui_cmd: str,
+        webui_log_dir: str,
+        openace_api_url: str,
+    ) -> list[str]:
+        """``sudo -n openace-webui-confine launch ...`` for one user's WebUI.
+
+        The WebUI listens on loopback inside the sandbox; the wrapper's host
+        side listens on ``0.0.0.0:<port>`` (today's exposure) and forwards in.
+        """
+        cmd = [
+            "sudo",
+            "-n",
+            _WEBUI_CONFINE_WRAPPER,
+            "launch",
+            "--account",
+            system_account,
+            "--port",
+            str(port),
+            "--memory-max",
+            str(self.config.isolation.memory),
+            "--cpu-quota",
+            str(self.config.isolation.cpu_percent),
+            "--tasks-max",
+            str(self.config.isolation.tasks),
+            "--log-dir",
+            webui_log_dir,
+        ]
+        for entry in self._confinement_allowlist():
+            cmd += ["--allow", entry]
+        # The wrapper's --backend takes the same names as workspace.isolation.backend.
+        cmd += ["--backend", self._confinement_mode()]
+        cmd += [
+            "--webui",
+            webui_cmd,
+            "--",
+            "--port",
+            str(port),
+            "--host",
+            "127.0.0.1",
+            "--token-secret",
+            self.config.token_secret,
+            "--quota-check-enabled",
+            "--openace-api-url",
+            openace_api_url,
+        ]
+        return cmd
+
+    def supports_per_user_launch(self, system_account: str) -> tuple[bool, str | None]:
+        """Report whether a WebUI for ``system_account`` would run as that OS user.
+
+        Issue #3374 isolation gate: multi-user mode must not silently run user
+        WebUIs under the shared service account (or a privileged/reserved
+        account that merely shares the name). Returns ``(True, None)`` when a
+        per-user launch is possible, else ``(False, reason_code)``.
+        """
+        readiness = self.per_user_launch_readiness()
+        if readiness:
+            return False, readiness
+        try:
+            target_pw = pwd.getpwnam(system_account)
+        except KeyError:
+            # OS account absent. Provisioning only happens in the Docker
+            # multi-user form (ensure_system_user skips creation elsewhere,
+            # #3130) — outside that form an absent account can never be
+            # created, so sudo -u would fail at launch: a probe failure,
+            # not a tolerated pending state (PR review round 3).
+            from app.utils.workspace import _is_docker_multi_user_mode
+
+            if not _is_docker_multi_user_mode():
+                return False, "identity_account_missing"
+            target_pw = None
+        if target_pw is not None:
+            if target_pw.pw_uid == 0:
+                return False, "privileged_system_account"
+            if target_pw.pw_uid < 1000:
+                return False, "reserved_system_account"
+        try:
+            pwd.getpwuid(os.getuid())
+        except (KeyError, OSError):
+            return False, "current_user_unresolved"
+        # current_user == system_account is fine here: the only supported
+        # multi-user form runs the service as root, and root is refused above;
+        # single-user mode does not consult this probe.
+        return True, None
 
     def stop_all_instances(self):
         """Stop all running webui instances."""
@@ -1512,9 +3089,30 @@ class WebUIManager:
         return count
 
     def get_user_instance(self, user_id: int) -> WebUIInstance | None:
-        """Get the instance for a specific user."""
+        """Get the instance for a specific user.
+
+        Issue #3378 review (M1): a single-user SANDBOXED instance lives in
+        ``_single_user_instance``, not ``_instances`` — the LLM-proxy token
+        lifecycle check (``api_key_proxy._webui_instance_alive``) resolves the
+        pod's baked-in token through this method, so without the fallback every
+        proxy-token validation of the single-user sandboxed form would 401.
+        Multi-user semantics are unchanged (``_instances`` stays keyed by
+        user_id); the shared instance only answers for the user whose pod
+        token it carries. Read lock-free like the other advisory single-user
+        reads (a concurrent stop just makes the answer None).
+        """
         with self._lock:
-            return self._instances.get(user_id)
+            instance = self._instances.get(user_id)
+        if instance is not None:
+            return instance
+        single = self._single_user_instance
+        if (
+            single is not None
+            and single.user_id == user_id
+            and getattr(single, "form", "") == WEBUI_FORM_SANDBOXED
+        ):
+            return single
+        return None
 
     def get_all_instances(self) -> list[dict[str, Any]]:
         """Get information about all instances."""
@@ -1578,13 +3176,60 @@ class WebUIManager:
 
         Args:
             user_id: User ID.
-            system_account: User's system account name.
+            system_account: User's system account name. Callers must pass the
+                EXPLICIT DB mapping — prestart never falls back to username
+                (Issue #3374 review #6: it goes through the same isolation
+                gate as /user-url and must not launch what the gate rejects).
             host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:19888").
                       Used to replace container-detected IP with user's actual access IP.
                       Required for Docker deployments where container cannot detect host's real IP.
         """
         if not self.config.multi_user_mode:
             return  # No pre-start needed in single-user mode
+
+        # Issue #3374 review #6 (+ round-2 normalization): evaluate the
+        # server-side isolation floor (same contract as /user-url) before
+        # spawning anything. Floor resolution is shared with the route via
+        # resolve_required_floor — an invalid hand-edited config value must
+        # fall back fail-closed here too, not skip the gate entirely.
+        from app.services.workspace_isolation_contract import (
+            ISOLATION_LEVEL_SANDBOXED,
+            build_workspace_isolation_snapshot,
+            evaluate_isolation_requirement,
+            resolve_required_floor,
+        )
+
+        snapshot = build_workspace_isolation_snapshot(self)
+        required = resolve_required_floor(self.config, snapshot)
+        if required != "none":
+            rejection = evaluate_isolation_requirement(
+                required,
+                snapshot=snapshot,
+                system_account=system_account,
+                manager=self,
+            )
+            if rejection is not None:
+                logger.info("Skipping webui prestart for user %s: %s", user_id, rejection.code)
+                return
+
+        # Review round 1 (T-B): the explicit-mapping requirement belongs to
+        # the os_user chain — key the early exit on the launch FORM the
+        # default request would take (the strongest verified form satisfying
+        # the floor), not on the floor itself. A pinned `os_user` floor on a
+        # sandboxed-capable deployment launches pods, which have no OS
+        # account by design; skipping those prestarts would silently diverge
+        # from what /user-url actually launches.
+        # Issue #3431: only the OpenSandbox pod form has no OS account; a
+        # local-container sandboxed deployment still needs the mapping.
+        from app.services.workspace_isolation_contract import is_opensandbox_backend
+
+        launch_form_is_sandboxed = (
+            snapshot.isolation_level == ISOLATION_LEVEL_SANDBOXED
+            and is_opensandbox_backend(snapshot.backend)
+        )
+        if not system_account and not launch_form_is_sandboxed:
+            logger.info("Skipping webui prestart for user %s: no explicit mapping", user_id)
+            return
 
         # Check if already has an instance
         with self._lock:
@@ -1598,7 +3243,12 @@ class WebUIManager:
         def start_in_background():
             try:
                 logger.info(f"Pre-starting webui instance for user {user_id} ({system_account})")
-                url, token = self.get_user_webui_url(user_id, system_account, host_url)
+                # F-6.1: the gate snapshot built ABOVE is the one this prestart
+                # was admitted on — pass it through so the launch-form fork
+                # cannot disagree with the evaluation that spawned it.
+                url, token = self.get_user_webui_url(
+                    user_id, system_account, host_url, snapshot=snapshot
+                )
                 logger.info(f"Pre-started webui for user {user_id}: {url}")
             except Exception as e:
                 logger.error(f"Failed to pre-start webui for user {user_id}: {e}")
@@ -1612,12 +3262,22 @@ _manager: WebUIManager | None = None
 
 
 def get_webui_manager() -> WebUIManager:
-    """Get the global WebUI manager instance."""
+    """Get the global WebUI manager instance, creating it if needed."""
     global _manager
     if _manager is None:
         _manager = WebUIManager()
         # Start cleanup thread when manager is created
         _manager.start_cleanup_thread()
+    return _manager
+
+
+def peek_webui_manager() -> WebUIManager | None:
+    """Return the existing manager singleton WITHOUT creating one.
+
+    Issue #3374 review #13: read-only capability paths use this —
+    constructing a manager mints a token secret and spawns a resident
+    cleanup greenlet, which a pure capability GET must not do.
+    """
     return _manager
 
 

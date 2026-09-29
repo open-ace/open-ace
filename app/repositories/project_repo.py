@@ -282,6 +282,32 @@ class ProjectRepository:
         result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
+    def get_shared_project_paths(self, tenant_id: int | None = None) -> list[str]:
+        """Get realpath'd paths of active shared projects (Issue #3376).
+
+        Used by the fs browse/check-path home lock to keep explicitly
+        shared projects reachable for tenant members. A None tenant_id
+        yields no shared roots (home only) rather than every tenant's.
+        """
+        import os
+
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None:
+            return []
+        query = (
+            "SELECT path FROM projects "
+            "WHERE is_active IS TRUE AND is_shared IS TRUE AND tenant_id = ?"
+        )
+        rows = self.db.fetch_all(query, (normalized_tenant_id,)) or []
+        paths: list[str] = []
+        for row in rows:
+            raw = (row.get("path") if isinstance(row, dict) else row) or ""
+            if raw:
+                resolved = os.path.realpath(raw)
+                if resolved not in paths:
+                    paths.append(resolved)
+        return paths
+
     def get_all_projects(
         self,
         include_inactive: bool = False,
@@ -784,3 +810,168 @@ class ProjectRepository:
             )
             for r in results
         ]
+
+    def remove_user_project(
+        self, user_id: int, project_id: int, tenant_id: int | None = None
+    ) -> bool:
+        """
+        Remove a user-project relationship.
+
+        Args:
+            user_id: User ID.
+            project_id: Project ID.
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            query = "DELETE FROM user_projects WHERE user_id = ? AND project_id = ?"
+            params: list[Any] = [user_id, project_id]
+
+            # Tenant isolation: verify project belongs to tenant
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+            if normalized_tenant_id is not None:
+                query = """
+                    DELETE FROM user_projects
+                    WHERE user_id = ? AND project_id = ?
+                    AND project_id IN (SELECT id FROM projects WHERE tenant_id = ?)
+                """
+                params.append(normalized_tenant_id)
+
+            self.db.execute(query, tuple(params))
+            return True
+        except Exception as e:
+            logger.error(f"Error removing user project: {e}")
+            return False
+
+    def batch_update_project_users(
+        self, project_id: int, user_ids: list[int], tenant_id: int | None = None
+    ) -> dict:
+        """
+        Batch update users for a project.
+
+        This method adds and removes users to match the target user list.
+        Uses a database transaction for atomicity.
+
+        Args:
+            project_id: Project ID.
+            user_ids: List of target user IDs.
+            tenant_id: Optional tenant ID for isolation.
+
+        Returns:
+            dict: {
+                "added": [user_ids that were added],
+                "removed": [user_ids that were removed],
+                "existing": [user_ids that already existed]
+            }
+        """
+        try:
+            # Execute all database operations in a transaction
+            with self.db.connection() as conn:
+                # Get current users within transaction
+                query = """
+                    SELECT up.user_id
+                    FROM user_projects up
+                    WHERE up.project_id = ?
+                """
+                params: list[Any] = [project_id]
+                normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+                if normalized_tenant_id is not None:
+                    query = """
+                        SELECT up.user_id
+                        FROM user_projects up
+                        INNER JOIN projects p ON p.id = up.project_id
+                        WHERE up.project_id = ? AND p.tenant_id = ?
+                    """
+                    params.append(normalized_tenant_id)
+
+                cursor = conn.cursor()
+                cursor.execute(query, tuple(params))
+                current_user_ids = {row[0] for row in cursor.fetchall()}
+                target_user_ids = set(user_ids)
+
+                # Calculate differences
+                to_add = target_user_ids - current_user_ids
+                to_remove = current_user_ids - target_user_ids
+                existing = target_user_ids & current_user_ids
+
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+                # Remove users
+                for user_id in to_remove:
+                    query = "DELETE FROM user_projects WHERE user_id = ? AND project_id = ?"
+                    params = [user_id, project_id]
+
+                    # Tenant isolation
+                    if normalized_tenant_id is not None:
+                        query = """
+                            DELETE FROM user_projects
+                            WHERE user_id = ? AND project_id = ?
+                            AND project_id IN (SELECT id FROM projects WHERE tenant_id = ?)
+                        """
+                        params.append(normalized_tenant_id)
+
+                    cursor = conn.cursor()
+                    cursor.execute(query, tuple(params))
+
+                # Add users
+                for user_id in to_add:
+                    cursor = conn.cursor()
+                    if self.db.is_postgresql:
+                        cursor.execute(
+                            """
+                            INSERT INTO user_projects (user_id, project_id, first_access_at, last_access_at)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT (user_id, project_id) DO UPDATE SET last_access_at = ?
+                            """,
+                            (user_id, project_id, now, now, now),
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            INSERT OR REPLACE INTO user_projects
+                            (user_id, project_id, first_access_at, last_access_at,
+                             total_sessions, total_tokens, total_requests, total_duration_seconds)
+                            VALUES (?, ?, ?, ?,
+                                    COALESCE((SELECT total_sessions FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_tokens FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_requests FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0),
+                                    COALESCE((SELECT total_duration_seconds FROM user_projects
+                                              WHERE user_id = ? AND project_id = ?), 0))
+                            """,
+                            (
+                                user_id,
+                                project_id,
+                                now,
+                                now,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                                user_id,
+                                project_id,
+                            ),
+                        )
+
+                # Commit transaction
+                conn.commit()
+
+            return {
+                "added": list(to_add),
+                "removed": list(to_remove),
+                "existing": list(existing),
+            }
+        except Exception as e:
+            logger.error(f"Error batch updating project users: {e}")
+            return {
+                "added": [],
+                "removed": [],
+                "existing": [],
+                "error": str(e),
+            }

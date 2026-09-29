@@ -6,7 +6,7 @@
 
 | 参数 | 说明 | 示例值 |
 |------|------|--------|
-| `host_name` | 主机名标识，用于区分不同机器的数据 | `localhost`, `server-01` |
+| `host_name` | 主机名标识，用于区分不同机器的数据。这是**唯一**的主机名字段，所有工具的数据都以它归属；请勿在 `tools.*` 下重复配置主机名。 | `localhost`, `server-01` |
 | `server.upload_auth_key` | 上传认证密钥，用于验证远程机器上传的数据 | 随机字符串 |
 | `server.server_url` | 服务器地址，远程机器需要配置此地址 | `http://192.168.1.100:19888` |
 | `server.web_port` | Web 服务端口 | `19888` |
@@ -47,7 +47,7 @@
 |------|------|--------|
 | `workspace.enabled` | 是否启用 Workspace 功能 | `false` |
 | `workspace.url` | Workspace 服务地址 | `http://localhost:8080` |
-| `workspace.multi_user_mode` | 是否启用多用户模式（为每个用户启动独立进程） | `false` |
+| `workspace.isolation` | 用户之间的隔离:`{"level": ..., "backend": ...}`,见下表与 [docs/cn/WORKSPACE_ISOLATION.md](../docs/cn/WORKSPACE_ISOLATION.md) | `{"level": "none", "backend": "shared"}` |
 | `workspace.port_range_start` | 多用户模式下端口池起始端口 | `3100` |
 | `workspace.port_range_end` | 多用户模式下端口池结束端口 | `3200` |
 | `workspace.max_instances` | 最大同时运行的 webui 实例数 | `30` |
@@ -79,13 +79,29 @@
 - 用户操作会以正确的身份记录到 qwen 日志中
 - 多用户环境下的数据隔离和审计追溯
 
+**`workspace.isolation`:level 与 backend**(每个 backend 只属于一个 level;不匹配的组合、已移除的旧键
+`multi_user_mode` / `required_isolation_level` / `os_user_confinement` / `sandbox_tier` / `confinement_*`
+都会让服务器拒绝启动并给出替代写法):
+
+| level | backend | 需要什么 | Docker 安装可用 |
+|---|---|---|---|
+| `none` | `shared` | 无(默认) | ✅ |
+| `os_user` | `plain` | 每用户系统账户 + `openace-webui-launch` wrapper(安装脚本提供) | ✅(root 叠加配置) |
+| `os_user` | `bwrap` | Linux + systemd + bubblewrap ≥ 0.8 + `webui_callback_url` + 约束 wrapper | ❌ |
+| `sandboxed` | `local-gvisor` | 同 `bwrap` + Docker + gVisor 运行时 + root 策略文件 `local-gvisor` 分节 | ❌ |
+| `sandboxed` | `local-kata` | 同 `bwrap` + Docker + `/dev/kvm` + Kata ≥ 3.32 + root 策略文件 `local-kata` 分节 | ❌ |
+| `sandboxed` | `opensandbox` | Kubernetes 上的 OpenSandbox + `sandbox-backends.json` 中的 `webui_image` + `webui_callback_url` | ✅ |
+
+可选键:`tier`(仅 `opensandbox`)、`limits`(`memory` / `cpu_percent` / `tasks`)与 `egress_allow`(仅
+`bwrap` / `local-gvisor` / `local-kata`)、`container_webui`(仅 `local-gvisor` / `local-kata`)。
+
 **单用户模式配置示例：**
 ```json
 {
   "workspace": {
     "enabled": true,
     "url": "http://localhost:8080",
-    "multi_user_mode": false
+    "isolation": {"level": "none", "backend": "shared"}
   }
 }
 ```
@@ -96,7 +112,7 @@
   "workspace": {
     "enabled": true,
     "url": "http://localhost",
-    "multi_user_mode": true,
+    "isolation": {"level": "os_user", "backend": "plain"},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,
@@ -114,12 +130,6 @@
 | `tools.openclaw.gateway_url` | OpenClaw Gateway 地址 | `http://localhost:18789` |
 | `tools.claude.enabled` | 是否启用 Claude | `true` |
 | `tools.qwen.enabled` | 是否启用 Qwen | `true` |
-
-#### 定时任务
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `cron.enabled` | 是否启用定时任务 | `true` |
-| `cron.run_time` | 每日运行时间（HH:MM 格式） | `00:30` |
 
 #### 飞书集成（可选）
 

@@ -36,7 +36,10 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,
     derive_terminal_reason,
 )
-from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
+from app.modules.workspace.autonomous.sandbox.provider import (
+    AGENT_STATE_PERSISTS,
+    validate_spec_capabilities,
+)
 from app.modules.workspace.autonomous.sandbox.transport import LocalProcessTransport
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
@@ -146,6 +149,11 @@ def classify_isolated_exit_code(
 
 class LegacyPosixProvider:
     """Local POSIX SandboxProvider (spawn/stream/signal/destroy on real procs)."""
+
+    # The agent runs on the host under a HOME that outlives any single turn, and
+    # the isolated launcher preserves `.claude` across task-tree wipes
+    # (scripts/openace-run-as.sh, `.claude-preserve`). Nothing to carry (#3237).
+    agent_state_persistence = AGENT_STATE_PERSISTS
 
     def __init__(self) -> None:
         # sandbox_id -> live status. Unknown ids inspect as DESTROYED so an

@@ -91,6 +91,10 @@ def test_finalize_sso_login_does_not_link_by_email_by_default(app_ctx):
     existing_admin.get.return_value = 1  # would-be victim account id
     user_repo.get_user_by_email.return_value = existing_admin
     user_repo.create_session.return_value = None
+    # Issue #3379 (PR-A): the pre-session status check resolves the user via
+    # the UserRepository class; default it to the freshly provisioned active
+    # user so the flow under test proceeds past the check.
+    user_repo.get_user_by_id.return_value = {"id": 99, "is_active": True}
 
     audit_logger = MagicMock()
 
@@ -103,6 +107,7 @@ def test_finalize_sso_login_does_not_link_by_email_by_default(app_ctx):
         patch.object(sso_module, "get_audit_logger", return_value=audit_logger),
         patch.object(sso_module, "_create_user_from_sso", return_value=99),
         patch.object(sso_module, "_get_session_timeout_hours", return_value=1),
+        patch("app.routes.sso.UserRepository", return_value=user_repo),
     ):
         sso_module._finalize_sso_login("corp-saml", _auth_result(email="admin@example.com"), None)
 
@@ -123,6 +128,11 @@ def test_finalize_sso_login_links_by_email_when_admin_opts_in(app_ctx):
     existing_user = {"id": 7}
     user_repo.get_user_by_email.return_value = existing_user
     user_repo.create_session.return_value = None
+    # Issue #3379 review round 2 (R-2/R-9): the pre-link status check resolves
+    # the linked account through the UserRepository class; an explicit dict
+    # (active, not deleted) keeps the MagicMock-trap out — the check must
+    # exercise a real row shape, not auto-attrs that read as truthy.
+    user_repo.get_user_by_id.return_value = {"id": 7, "is_active": True}
 
     audit_logger = MagicMock()
 
@@ -161,6 +171,9 @@ def _audit_details_for_email_linking(manager, user_repo, *, allow_linking, exist
     manager.get_provider.return_value = provider
     user_repo.get_user_by_email.return_value = existing_email_user
     user_repo.create_session.return_value = None
+    # R-9: explicit active row — an auto-attr MagicMock reads as truthy-
+    # deleted and silently reroutes these assertions onto the denial branch.
+    user_repo.get_user_by_id.return_value = {"id": 7, "is_active": True}
 
     audit_logger = MagicMock()
     with (
@@ -246,6 +259,10 @@ def test_finalize_sso_login_emits_audit_login(app_ctx):
 
     user_repo = MagicMock()
     user_repo.create_session.return_value = None
+    # R-9: explicit active row so this exercises the SUCCESS path (an
+    # auto-attr MagicMock would be denied by the status check and the LOGIN
+    # audit would then come from the denial branch instead).
+    user_repo.get_user_by_id.return_value = {"id": 42, "is_active": True}
 
     audit_logger = MagicMock()
     provider = _make_saml_provider()

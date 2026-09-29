@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from tests.unit._isolation_helpers import iso
 
 
 class TestWorkspaceConfig:
@@ -41,15 +42,18 @@ class TestLoadConfig:
     """Tests for _load_config() parsing."""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_load_config_basic(self, mock_load):
+    def test_load_config_basic(self, mock_load, tmp_path):
         """Test loading basic workspace config."""
         config = WorkspaceConfig(
             enabled=True,
-            multi_user_mode=True,
+            isolation=iso("plain"),
         )
         mock_load.return_value = config
 
-        manager = WebUIManager()
+        # Issue #3377: config without token_secret makes the manager persist
+        # a generated secret under CONFIG_DIR — keep that off the host.
+        with patch("app.repositories.database.CONFIG_DIR", str(tmp_path)):
+            manager = WebUIManager()
         assert manager.config.enabled is True
         assert manager.config.multi_user_mode is True
 
@@ -59,7 +63,7 @@ class TestLoadConfig:
             config_data = {
                 "workspace": {
                     "enabled": True,
-                    "multi_user_mode": True,
+                    "isolation": {"level": "os_user", "backend": "plain"},
                     "port_range_start": 3100,
                     "port_range_end": 3200,
                     "token_secret": "test-secret",
@@ -184,7 +188,7 @@ class TestConfigureLocalOpenAIProxy:
         """Test that _launch_webui_process configures local proxy env."""
         config = WorkspaceConfig(
             enabled=True,
-            multi_user_mode=False,
+            isolation=iso("shared"),
             webui_path="/tmp/webui",
             token_secret="secret",
         )

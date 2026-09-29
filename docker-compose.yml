@@ -47,7 +47,7 @@
 #
 # The docker-compose.multi-user.yml overlay adds:
 #   - user: "0"                        # Run container as root
-#   - WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode
+#   - WORKSPACE_ISOLATION_BACKEND=plain  # One OS account per user (#3446)
 #   - OPENACE_ALLOW_ROOT_MULTI_USER=1  # Explicit root authorization
 #   - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace  # Config persistence
 #
@@ -71,7 +71,7 @@ services:
         # Base image registry. Override for networks where Docker Hub is
         # unreachable (e.g. mainland China): BASE_REGISTRY=docker.m.daocloud.io
         BASE_REGISTRY: ${BASE_REGISTRY:-docker.io}
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:
@@ -98,7 +98,7 @@ services:
       # The entrypoint check_security_baseline() reads DB_PASSWORD directly, not from DATABASE_URL.
       - DB_PASSWORD=${DB_PASSWORD:-}
       # Multi-user Workspace
-      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
+      - WORKSPACE_ISOLATION_BACKEND=${WORKSPACE_ISOLATION_BACKEND:-shared}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
@@ -107,6 +107,8 @@ services:
       # Auto-detected from hostname -I if not set
       # Override via .env file if needed (e.g., SERVER_IP=192.168.1.169)
       - SERVER_IP=${SERVER_IP:-}
+      # #3237: must match the scheduler service exactly.
+      - OPENACE_AGENT_STATE_ROOT=/var/lib/openace/agent-state
     # Allow container to access host network (Issue #1260)
     # Required for host.docker.internal on Linux Docker 20.10+
     extra_hosts:
@@ -123,6 +125,12 @@ services:
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
+      # #3237: carried CLI transcripts. SHARED with the scheduler service on
+      # purpose — the scheduler writes them, but the stop/delete/override
+      # routes that purge them run here. Two separate volumes meant those
+      # purges deleted an unrelated empty directory while the real transcripts
+      # were retained forever.
+      - agent-state:/var/lib/openace
       # SSH credentials for remote host access (optional, uncomment if needed)
       # SECURITY WARNING: Mounting SSH keys exposes private keys to container processes
       # Recommend using dedicated SSH keys with restricted commands in authorized_keys
@@ -151,7 +159,7 @@ services:
 # Uses leader election to ensure only one active scheduler.
 # For single-instance development, omit this service.
   scheduler:
-    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    image: ${IMAGE_NAME:-ghcr.io/open-ace/open-ace:latest}
     container_name: open-ace-scheduler
     restart: unless-stopped
     profiles:
@@ -169,10 +177,14 @@ services:
       - SCHEDULER_HEARTBEAT_TIMEOUT=${SCHEDULER_HEARTBEAT_TIMEOUT:-60}
       - SCHEDULER_LOCK_TIMEOUT=${SCHEDULER_LOCK_TIMEOUT:-1800}
       - SCHEDULER_METRICS_PORT=9090
+      # #3237: must match the app service exactly.
+      - OPENACE_AGENT_STATE_ROOT=/var/lib/openace/agent-state
     volumes:
       - config-data:/home/open-ace/.open-ace
       - ./logs:/app/logs
       - workspace-data:/workspace
+      # #3237: the same volume the app service mounts, at the same path.
+      - agent-state:/var/lib/openace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
       interval: 30s
@@ -233,6 +245,9 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
+  # #3237: carried CLI transcripts, shared by the app and scheduler services.
+  agent-state:
+    driver: local
   config-data:
     driver: local
   postgres-data:

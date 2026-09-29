@@ -55,6 +55,10 @@ class TestSSORedirectWhitelist:
         mock_get_sso_manager.return_value = mock_sso_manager
 
         mock_repo = MagicMock()
+        # Issue #3379 (PR-A): _finalize_sso_login now refuses deactivated or
+        # soft-deleted users before issuing a session; default the lookup to
+        # an active user.
+        mock_repo.get_user_by_id.return_value = {"id": 1, "is_active": True}
         mock_repo.create_session.return_value = None
         mock_repo.delete_session.return_value = None
         mock_user_repo.return_value = mock_repo
@@ -120,6 +124,10 @@ class TestSSORedirectWhitelist:
         mock_get_sso_manager.return_value = mock_sso_manager
 
         mock_repo = MagicMock()
+        # Issue #3379 (PR-A): _finalize_sso_login now refuses deactivated or
+        # soft-deleted users before issuing a session; default the lookup to
+        # an active user.
+        mock_repo.get_user_by_id.return_value = {"id": 1, "is_active": True}
         mock_repo.create_session.return_value = None
         mock_user_repo.return_value = mock_repo
 
@@ -178,6 +186,10 @@ class TestSSORedirectWhitelist:
         mock_get_sso_manager.return_value = mock_sso_manager
 
         mock_repo = MagicMock()
+        # Issue #3379 (PR-A): _finalize_sso_login now refuses deactivated or
+        # soft-deleted users before issuing a session; default the lookup to
+        # an active user.
+        mock_repo.get_user_by_id.return_value = {"id": 1, "is_active": True}
         mock_repo.create_session.return_value = None
         mock_user_repo.return_value = mock_repo
 
@@ -244,6 +256,10 @@ class TestSSORedirectWhitelist:
         mock_get_sso_manager.return_value = mock_sso_manager
 
         mock_repo = MagicMock()
+        # Issue #3379 (PR-A): _finalize_sso_login now refuses deactivated or
+        # soft-deleted users before issuing a session; default the lookup to
+        # an active user.
+        mock_repo.get_user_by_id.return_value = {"id": 1, "is_active": True}
         mock_repo.create_session.return_value = None
         mock_repo.delete_session.side_effect = Exception("DB error")
         mock_user_repo.return_value = mock_repo
@@ -298,6 +314,10 @@ class TestSSORedirectWhitelist:
         mock_get_sso_manager.return_value = mock_sso_manager
 
         mock_repo = MagicMock()
+        # Issue #3379 (PR-A): _finalize_sso_login now refuses deactivated or
+        # soft-deleted users before issuing a session; default the lookup to
+        # an active user.
+        mock_repo.get_user_by_id.return_value = {"id": 1, "is_active": True}
         mock_repo.create_session.return_value = None
         mock_user_repo.return_value = mock_repo
 

@@ -55,6 +55,8 @@ export interface TenantSettings {
   custom_branding?: boolean;
   branding_name?: string | null;
   branding_logo_url?: string | null;
+  // Issue #3271: Multi-language welcome message for tenant branding
+  branding_welcome_message?: Record<string, string> | null;
   roi_assumptions?: Record<string, unknown> | null;
   block_sensitive_keyword?: boolean;
   sensitive_keyword_match_mode?: 'word_boundary' | 'substring';

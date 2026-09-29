@@ -325,6 +325,12 @@ class TestVSCodeStop(unittest.TestCase):
 
         original_store = vs_mod.vscode_info_store
         mock_store = MagicMock()
+        # Issue #3376 review round 1: a missing store record is fail-closed
+        # (404) — seed an owned session so the gate can pass.
+        mock_store.find_by_vscode_id.return_value = (
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
+            {"status": "running", "tenant_id": None, "owner_user_id": 1},
+        )
         vs_mod.vscode_info_store = mock_store
 
         try:
@@ -553,22 +559,100 @@ class TestVSCodeAttach(unittest.TestCase):
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
         app = _make_app(self, mgr)
-        with app.test_client() as client:
-            resp = _auth_post(
-                client,
-                "/api/remote/vscode/vs-123/attach",
-                "test-token-1-admin",
-                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
-            )
-            self.assertEqual(resp.status_code, 200)
-            data = resp.get_json()
-            self.assertTrue(data["success"])
 
-            mgr.send_command.assert_called_once()
-            call_args = mgr.send_command.call_args
-            cmd = call_args[0][1]
-            self.assertEqual(cmd["command"], "attach_vscode")
-            self.assertEqual(cmd["vscode_id"], "vs-123")
+        import app.modules.workspace.vscode_store as vs_mod
+
+        original_store = vs_mod.vscode_info_store
+        mock_store = MagicMock()
+        # Issue #3376 review round 1: a missing store record is fail-closed
+        # (404) — seed an owned session so the gate can pass.
+        mock_store.find_by_vscode_id.return_value = (
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
+            {"status": "running", "tenant_id": None, "owner_user_id": 1},
+        )
+        vs_mod.vscode_info_store = mock_store
+
+        try:
+            with app.test_client() as client:
+                resp = _auth_post(
+                    client,
+                    "/api/remote/vscode/vs-123/attach",
+                    "test-token-1-admin",
+                    json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
+                )
+        finally:
+            vs_mod.vscode_info_store = original_store
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["success"])
+
+        mgr.send_command.assert_called_once()
+        call_args = mgr.send_command.call_args
+        cmd = call_args[0][1]
+        self.assertEqual(cmd["command"], "attach_vscode")
+        self.assertEqual(cmd["vscode_id"], "vs-123")
+
+    def test_attach_without_store_record_fail_closed(self):
+        """Issue #3376 review round 1: no store record -> 404, no command."""
+        mgr = MagicMock()
+        mgr.check_user_access.return_value = True
+        app = _make_app(self, mgr)
+
+        import app.modules.workspace.vscode_store as vs_mod
+
+        original_store = vs_mod.vscode_info_store
+        mock_store = MagicMock()
+        mock_store.find_by_vscode_id.return_value = None
+        vs_mod.vscode_info_store = mock_store
+
+        try:
+            with app.test_client() as client:
+                resp = _auth_post(
+                    client,
+                    "/api/remote/vscode/vs-404/attach",
+                    "test-token-1-admin",
+                    json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
+                )
+        finally:
+            vs_mod.vscode_info_store = original_store
+
+        self.assertEqual(resp.status_code, 404)
+        data = resp.get_json()
+        self.assertEqual(data["error_code"], "vscode_session_not_found")
+        mgr.send_command.assert_not_called()
+
+    def test_stop_without_store_record_fail_closed(self):
+        """Issue #3376 review round 1: no store record -> 404, no command."""
+        mgr = MagicMock()
+        mgr.check_user_access.return_value = True
+        app = _make_app(self, mgr)
+
+        import app.modules.workspace.vscode_store as vs_mod
+
+        original_store = vs_mod.vscode_info_store
+        mock_store = MagicMock()
+        mock_store.find_by_vscode_id.return_value = None
+        vs_mod.vscode_info_store = mock_store
+
+        try:
+            with app.test_client() as client:
+                resp = _auth_post(
+                    client,
+                    "/api/remote/vscode/stop",
+                    "test-token-1-admin",
+                    json={
+                        "vscode_id": "vs-404",
+                        "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
+                    },
+                )
+        finally:
+            vs_mod.vscode_info_store = original_store
+
+        self.assertEqual(resp.status_code, 404)
+        data = resp.get_json()
+        self.assertEqual(data["error_code"], "vscode_session_not_found")
+        mgr.send_command.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -140,9 +140,9 @@ The stack uses:
 Start with the guide that matches your evaluation path:
 
 - [Deployment Guide](./DEPLOYMENT.md) - local and production setup
-- [Remote Agent Guide](./REMOTE-AGENT.md) - remote execution model, adapters, and machine registration
-- [Remote Workspace](./REMOTE-WORKSPACE.md) - browser workspace and server-side remote-session design
-- [Permission Model](./PERMISSION-MODEL.md) - roles, admin boundaries, and access model
+- [Remote Agent Guide](./REMOTE_AGENT.md) - remote execution model, adapters, and machine registration
+- [Remote Workspace](./REMOTE_WORKSPACE.md) - browser workspace and server-side remote-session design
+- [Permission Model](./PERMISSION_MODEL.md) - roles, admin boundaries, and access model
 - [Architecture](./ARCHITECTURE.md) - backend, frontend, and runtime structure
 
 ## Bottom Line

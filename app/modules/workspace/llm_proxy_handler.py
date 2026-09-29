@@ -368,34 +368,56 @@ def _record_messages(
                 req_data = json.loads(request_body)
                 messages = req_data.get("messages", [])
                 if isinstance(messages, list) and messages:
-                    # Record the last user message (avoid duplicates)
+                    # Issue #3335: Find the last REAL user message, skipping Qwen
+                    # system context. Filter inside the loop so we continue searching
+                    # if the selected message is a system context.
+                    # Issue #28: Qwen CLI sends its system context (Platform
+                    # Tool Limits, startup context, memory instructions) as
+                    # the last role=user message in LLM requests; never
+                    # mirror it as a user chat message.
+                    from scripts.shared.qwen_context import is_qwen_system_context
+
                     user_content = None
                     for msg in reversed(messages):
                         if not isinstance(msg, dict):
                             continue
-                        if msg.get("role") == "user":
-                            content = msg.get("content", "")
-                            if isinstance(content, list):
-                                # Handle multi-part content
-                                text_parts = []
-                                for part in content:
-                                    if isinstance(part, dict) and part.get("type") == "text":
-                                        text_parts.append(part.get("text", ""))
-                                user_content = " ".join(text_parts)
-                            elif isinstance(content, str):
-                                user_content = content
-                            if user_content:
-                                break
+                        if msg.get("role") != "user":
+                            continue
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            # Handle multi-part content
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                            candidate = " ".join(text_parts)
+                        elif isinstance(content, str):
+                            candidate = content
+                        else:
+                            continue
+                        if not candidate:
+                            continue
+                        # Skip Qwen system context and continue searching
+                        if is_qwen_system_context(candidate):
+                            continue
+                        user_content = candidate
+                        break
 
                     if user_content:
-                        stored = sm.append_transcript_message(
-                            session_id=session_id,
-                            role="user",
-                            content=user_content[:10000],  # Truncate to prevent overflow
-                            source="llm_proxy",
-                        )
-                        if getattr(stored, "_was_inserted", False):
-                            message_delta += 1
+                        # Issue #3337: Strip Qwen system-reminder envelopes,
+                        # preserving any real user text that follows.
+                        from scripts.shared.qwen_context import strip_qwen_system_envelopes
+
+                        user_content = strip_qwen_system_envelopes(user_content)
+                        if user_content:
+                            stored = sm.append_transcript_message(
+                                session_id=session_id,
+                                role="user",
+                                content=user_content[:10000],  # Truncate to prevent overflow
+                                source="llm_proxy",
+                            )
+                            if getattr(stored, "_was_inserted", False):
+                                message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -461,6 +483,98 @@ def _record_messages(
     return message_delta
 
 
+def _stream_text_bytes(payload: object) -> int:
+    """Sum the generated-text bytes in one parsed SSE payload, any protocol.
+
+    OpenAI chat (delta content / reasoning_content / tool-call arguments),
+    Anthropic messages (delta text / thinking / partial_json) and the
+    Responses API (output delta) all ride text inside JSON envelopes; the
+    envelope itself is what a raw byte count would charge 20-60x over.
+    """
+
+    def walk(node):
+        if isinstance(node, dict):
+            total = 0
+            delta = node.get("delta")
+            if isinstance(delta, str):
+                # Responses-API events carry the generated text as a plain
+                # string delta (response.output_text.delta, function_call_
+                # arguments.delta, reasoning-summary deltas). The completed/
+                # done events repeat the full text under other keys, which
+                # the walker deliberately never collects.
+                total += len(delta.encode("utf-8"))
+            if isinstance(delta, dict):
+                for field in ("content", "reasoning_content", "text", "thinking", "partial_json"):
+                    value = delta.get(field)
+                    if isinstance(value, str):
+                        total += len(value.encode("utf-8"))
+                for call in delta.get("tool_calls") or []:
+                    if isinstance(call, dict):
+                        function = call.get("function")
+                        if isinstance(function, dict) and isinstance(
+                            function.get("arguments"), str
+                        ):
+                            total += len(function["arguments"].encode("utf-8"))
+            for key, value in node.items():
+                if key != "delta":
+                    total += walk(value)
+            return total
+        if isinstance(node, list):
+            return sum(walk(item) for item in node)
+        return 0
+
+    return int(walk(payload))
+
+
+def _stream_usage_fallback(
+    total_content: bytes, request_body: bytes | None, content_type: str
+) -> int | None:
+    """Estimate the output-token charge for a stream that never carried usage.
+
+    Returns ``None`` for non-streaming responses and for streams where nothing
+    was delivered. The estimate sums the *generated text* across SSE payloads
+    — not the wire bytes, whose JSON envelopes bloat a raw count 20-60x — at
+    three bytes per token (slightly high for English, about right for CJK).
+    Lines that do not parse fall back to payload bytes / 4. The result is
+    capped by the MAXIMUM limit the request declares across ``max_tokens``,
+    ``max_completion_tokens`` and ``max_output_tokens``: providers honor
+    different fields, the body is client-controlled, and capping by "the
+    first field present" would let a 1-token field next to the honored 4096
+    field re-open the read-then-disconnect bypass this estimate exists to
+    close.
+    """
+    if "text/event-stream" not in content_type or not total_content:
+        return None
+    text_bytes = 0
+    for line in total_content.split(b"\n"):
+        if not line.startswith(b"data: "):
+            continue
+        data = line[6:]
+        try:
+            text_bytes += _stream_text_bytes(json.loads(data))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Unparseable payload (non-JSON protocol, split encoding): fall
+            # back to its raw payload bytes at a conservative rate.
+            text_bytes += len(data) // 4
+    estimate = max(1, text_bytes // 3)
+    if request_body:
+        try:
+            limit = json.loads(request_body)
+            if isinstance(limit, dict):
+                declared = [
+                    value
+                    for field in ("max_tokens", "max_completion_tokens", "max_output_tokens")
+                    if isinstance((value := limit.get(field)), int)
+                    and not isinstance(value, bool)
+                    and value > 0
+                ]
+                if declared:
+                    estimate = min(estimate, max(declared))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    return estimate
+
+
 def _record_llm_usage(
     content: bytes,
     session_id: str,
@@ -471,6 +585,8 @@ def _record_llm_usage(
     request_path: str = "",
     request_id: str | None = None,
     model: str | None = None,
+    fallback_output_tokens: int | None = None,
+    stream_completed: bool | None = None,
 ) -> None:
     """Extract and record token usage and messages from LLM responses.
 
@@ -533,8 +649,47 @@ def _record_llm_usage(
             except json.JSONDecodeError:
                 pass
 
-        # Handle missing usage
-        if evidence is None:
+        # Handle missing or unusable streaming usage. Two cases must both
+        # charge the estimate, or a client that reads every content delta and
+        # disconnects before the stream ends gets a full generation for free:
+        # (a) no usage evidence at all — OpenAI streams only carry `usage` on
+        #     the final chunk, and a disconnected stream never reaches it;
+        # (b) evidence from a stream that did NOT complete — OpenAI's
+        #     stream_options.include_usage carries `"usage": null` on every
+        #     non-final chunk (a zero-token evidence), and Anthropic's
+        #     message_start reports input tokens with output ~ 0 long before
+        #     the message_delta totals. A partial event is not a chargeable
+        #     total, so the estimate merges with whatever input was seen.
+        # A stream that completed is trusted as parsed. Non-streaming callers
+        # pass no fallback and keep the old zero-charge behavior (their
+        # content is complete before recording; no bypass window exists).
+        if is_sse and fallback_output_tokens and (evidence is None or stream_completed is False):
+            if evidence is None:
+                log_usage_missing(
+                    session_id=session_id,
+                    provider=provider,
+                    protocol=protocol,
+                    request_id=request_id,
+                    chunks_seen=len(content.split(b"\n")) if is_sse else 1,
+                )
+                increment_metric(
+                    "llm_proxy_usage_parse_errors_total",
+                    {"provider": provider, "reason": "missing_usage"},
+                )
+                evidence = UsageEvidence(
+                    output_tokens=fallback_output_tokens,
+                    provider=provider,
+                    model=model,
+                    raw_usage={"estimated": True, "reason": "missing_usage"},
+                )
+            else:
+                evidence.output_tokens = max(evidence.output_tokens, fallback_output_tokens)
+                evidence.raw_usage = {
+                    **(evidence.raw_usage or {}),
+                    "estimated": True,
+                    "reason": "incomplete_stream_usage",
+                }
+        elif evidence is None:
             log_usage_missing(
                 session_id=session_id,
                 provider=provider,
@@ -803,6 +958,7 @@ def _finalize_upstream_response(
     request_path: str = "",
     requested_model: str | None = None,
     tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
+    echo_guard_secret: bytes | None = None,
 ) -> Response:
     """Stream or return an upstream response, recording LLM usage on completion.
 
@@ -812,9 +968,15 @@ def _finalize_upstream_response(
     the usage is recorded after the stream drains; otherwise immediately.
 
     Issue #2184: Added request_path, requested_model, and request_id extraction
-    for multi-provider usage recording with proper protocol detection.
+        for multi-provider usage recording with proper protocol detection.
     Issue #3080: Added response time tracking.
     Issue #3201: Added tenant_id parameter for performance recording.
+
+    ``echo_guard_secret`` enables the key-echo guard: streamed chunks are held
+    back by a key-sized window and scanned, non-streaming bodies checked whole,
+    so a provider/relay that echoes the resolved API key can never hand it to
+    the caller. On detection the stream aborts without [DONE] (or a
+    sanitized 502 for non-streaming) and the event is audited.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
@@ -859,46 +1021,96 @@ def _finalize_upstream_response(
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
         first_chunk = True
-        for chunk in _resp.iter_content(chunk_size=4096):
-            total_content += chunk
-            # Issue #3080: Record first response on first chunk
-            if first_chunk and recorder:
-                try:
-                    recorder.record_first_response(perf_request_id)
-                except Exception as e:
-                    logger.debug(f"Failed to record first response: {e}")
-                first_chunk = False
-            yield chunk
+        drained = False
+        upstream_iter = _resp.iter_content(chunk_size=4096)
+        if echo_guard_secret:
+            upstream_iter = _key_echo_guard(upstream_iter, echo_guard_secret)
         try:
-            _record_llm_usage(
-                total_content,
-                session_id,
-                user_id,
-                provider,
-                _content_type,
-                request_body=_body,
-                request_path=request_path,
-                request_id=request_id,
-                model=requested_model,
+            for chunk in upstream_iter:
+                total_content += chunk
+                # Issue #3080: Record first response on first chunk
+                if first_chunk and recorder:
+                    try:
+                        recorder.record_first_response(perf_request_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to record first response: {e}")
+                    first_chunk = False
+                yield chunk
+            drained = True
+        except _KeyEchoDetected:
+            # The provider/relay echoed the resolved key. Headers are already
+            # sent, so the stream terminates here without [DONE] — clients
+            # treat that as failure — and the usage-recording finally
+            # below still charges the delivered prefix.
+            logger.error(
+                "LLM proxy: key echo detected in stream (session=%s)",
+                session_id[:8] if session_id else "unknown",
             )
-            # Issue #3080: Record request complete
-            if recorder:
-                try:
-                    recorder.record_request_complete(perf_request_id, status="success")
-                except Exception as e:
-                    logger.debug(f"Failed to record request complete: {e}")
-        except Exception as exc:
-            logger.error("Failed to record LLM usage: %s", exc)
-            # Issue #3080: Record request failure
-            if recorder:
-                try:
-                    recorder.record_request_complete(perf_request_id, status="failed")
-                except Exception as e:
-                    logger.debug(f"Failed to record request failure: {e}")
+            _audit_key_echo_block(session_id, user_id, tenant_id, streaming=True)
+            return
+        finally:
+            # Usage must be recorded even when the stream is cut short. A
+            # client that reads every content delta and then drops the
+            # connection just before the final chunk (which carries `usage`
+            # and [DONE]) receives the full generation while zero usage is
+            # recorded — a client-controllable quota bypass, not an
+            # under-count. When the drained stream never yielded a final
+            # usage event, the fallback estimate (streamed bytes, capped by
+            # the requested max_tokens) is charged instead. The upstream
+            # response is closed BEFORE recording — total_content is already
+            # buffered — so provider-side generation and billing stop
+            # immediately instead of racing the database writes.
+            try:
+                _resp.close()
+            except Exception:
+                logger.debug("Failed to close upstream response", exc_info=True)
+            completion_status = "success" if drained else "cancelled"
+            try:
+                _record_llm_usage(
+                    total_content,
+                    session_id,
+                    user_id,
+                    provider,
+                    _content_type,
+                    request_body=_body,
+                    request_path=request_path,
+                    request_id=request_id,
+                    model=requested_model,
+                    fallback_output_tokens=_stream_usage_fallback(
+                        total_content, _body, _content_type
+                    ),
+                    stream_completed=drained,
+                )
+                # Issue #3080: Record request complete
+                if recorder:
+                    try:
+                        recorder.record_request_complete(perf_request_id, status=completion_status)
+                    except Exception as e:
+                        logger.debug(f"Failed to record request complete: {e}")
+            except Exception as exc:
+                logger.error("Failed to record LLM usage: %s", exc)
+                # Issue #3080: Record request failure
+                if recorder:
+                    try:
+                        recorder.record_request_complete(perf_request_id, status="failed")
+                    except Exception as e:
+                        logger.debug(f"Failed to record request failure: {e}")
 
     response_headers = {}
     for key, value in resp.headers.items():
         if key.lower() in ("content-type", "x-request-id", "openai-organization"):
+            # A hostile relay can echo the resolved key in a response header;
+            # headers are sent before any body byte is scanned, so under the
+            # echo guard a header carrying the secret is dropped outright.
+            if _echo_guard_active(echo_guard_secret) and (echo_guard_secret or b"") in str(
+                value
+            ).encode("utf-8"):
+                logger.error(
+                    "LLM proxy: key echo detected in response header (session=%s)",
+                    session_id[:8] if session_id else "unknown",
+                )
+                _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+                continue
             response_headers[key] = value
 
     if "text/event-stream" in content_type:
@@ -910,6 +1122,27 @@ def _finalize_upstream_response(
         )
 
     content = resp.content
+    if echo_guard_secret and _echo_guard_blocks(
+        content, echo_guard_secret, session_id, user_id, tenant_id
+    ):
+        # The whole body is in hand, so nothing was released: reject it
+        # outright with a sanitized error instead of a mid-stream abort.
+        # _echo_guard_blocks already logged and audited the detection.
+        try:
+            resp.close()
+        except Exception:
+            logger.debug("Failed to close upstream response after key-echo block", exc_info=True)
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "Upstream response rejected by content policy",
+                        "type": "proxy_error",
+                    }
+                }
+            ),
+            502,
+        )
     try:
         _record_llm_usage(
             content,
@@ -969,6 +1202,107 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
             jsonify({"error": {"message": "Upstream gateway error", "type": "proxy_error"}}),
             502,
         )
+
+
+class _KeyEchoDetected(Exception):
+    """A provider/relay response echoed the resolved API key material."""
+
+
+def _audit_key_echo_block(
+    session_id: str | None, user_id: int | None, tenant_id: int | None, streaming: bool
+) -> None:
+    """Audit a key-echo detection without persisting any response content."""
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        AuditLogger().log_action(
+            action=AuditAction.PROXY_KEY_ECHO_BLOCKED,
+            user_id=user_id or 0,
+            resource_type="llm_proxy",
+            severity="critical",
+            details={
+                "session_id": (session_id or "")[:16],
+                "tenant_id": tenant_id or 0,
+                "streaming": bool(streaming),
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to audit key-echo block: %s", e)
+
+
+# Keys shorter than this are not secrets worth guarding (local
+# OpenAI-compatible servers commonly use EMPTY / none / dummy), and a short
+# key is far more likely to appear in ordinary output than to be an echo:
+# "The queue is EMPTY after the job finishes." must not abort a stream.
+ECHO_GUARD_MIN_SECRET_BYTES = 16
+
+
+def _echo_guard_active(secret: bytes | None) -> bool:
+    """Whether the key-echo guard applies to this secret at all."""
+    return secret is not None and len(secret) >= ECHO_GUARD_MIN_SECRET_BYTES
+
+
+def _echo_guard_blocks(
+    content: bytes | None,
+    secret: bytes | None,
+    session_id: str | None,
+    user_id: int | None,
+    tenant_id: int | None,
+) -> bool:
+    """Whole-body verbatim key-echo check for fully buffered response paths.
+
+    Logs and audits a detection; the caller returns a sanitized 502. Used
+    where the entire upstream body is in hand before anything is emitted
+    (the /responses SSE conversion), where a mid-stream hold-back cannot
+    apply because the conversion rebuilds the payload from parsed JSON.
+    """
+    if not _echo_guard_active(secret) or not content or (secret or b"") not in content:
+        return False
+    logger.error(
+        "LLM proxy: key echo detected in buffered response (session=%s)",
+        session_id[:8] if session_id else "unknown",
+    )
+    _audit_key_echo_block(session_id, user_id, tenant_id, streaming=False)
+    return True
+
+
+def _key_echo_guard(chunks: Any, secret: bytes) -> Any:
+    """Yield upstream chunks minus a hold-back window sized to the key.
+
+    Defense-in-depth against ACCIDENTAL verbatim echoes — a provider error
+    body or debugging relay reflecting the Authorization header. A per-chunk
+    substring check alone misses a key split across chunk boundaries, so the
+    whole pending buffer (held tail + new data) is checked before each
+    release and the last ``len(secret) - 1`` bytes stay held back until more
+    data or stream end proves them safe: no byte of a contiguous occurrence
+    is ever released.
+
+    This guard cannot stop an ADVERSARIAL upstream: a relay that streams the
+    key a few characters per delta, or encodes it, never shows a contiguous
+    match on the wire. The control against a hostile upstream is the
+    operator's egress allowlist (OPENACE_LLM_PROXY_ALLOWED_HOSTS); external
+    issuers' upstreams must be allowlisted hosts. Keys shorter than
+    ECHO_GUARD_MIN_SECRET_BYTES skip the guard entirely.
+
+    On detection the stream aborts — headers are already sent, so there is
+    no status code to change — and the event is audited. Clients must treat
+    a stream that ends without [DONE] as failed.
+    """
+    if not _echo_guard_active(secret):
+        yield from chunks
+        return
+    hold = len(secret) - 1
+    pending = b""
+    for chunk in chunks:
+        pending += chunk
+        if secret in pending:
+            raise _KeyEchoDetected() from None
+        yield pending[:-hold]
+        pending = pending[-hold:]
+    if pending:
+        if secret in pending:
+            raise _KeyEchoDetected() from None
+        yield pending
 
 
 def _is_autonomous_request(token_payload: dict | None) -> bool:
@@ -1033,11 +1367,113 @@ def _build_safe_content_details(
     return details
 
 
+# Keys whose string values are structural metadata (model names, roles,
+# identifiers), never caller-authored content: excluded from the external
+# whole-request scan — but only where they really are structural. ``name``
+# IS caller text at the message level (OpenAI permits up to 64 chars of
+# [A-Za-z0-9_-], which fits a 16-digit PAN, and templates render it into the
+# prompt), so it is scanned everywhere except inside the function-call
+# structures where it names the function. ``url``/``data`` carry text just
+# as often as bytes; only binary-looking values (data: URIs, base64) skip.
+# A denylist fails CLOSED — when a provider adds a new content-bearing
+# shape, its strings are scanned unless explicitly excluded here.
+# NOTE: ``name``, ``url`` and ``data`` are also in this set so the walker
+# routes them through their context-sensitive branches below instead of the
+# unconditional collect.
+_EXTERNAL_SCAN_STRUCTURAL_KEYS = frozenset(
+    {
+        "model",
+        "role",
+        "type",
+        "id",
+        "name",
+        "url",
+        "data",
+        "tool_call_id",
+        "tool_use_id",
+        "call_id",
+        "object",
+    }
+)
+# Parents inside which ``name`` is a structural function identifier.
+_EXTERNAL_NAME_STRUCTURAL_PARENTS = ("tool_use", "function_call")
+# Object-valued argument payloads (Anthropic tool_use.input): serialized as
+# text instead of walked, so nested structural keys never mask their values.
+_EXTERNAL_SCAN_SERIALIZED_KEYS = frozenset({"input", "arguments"})
+
+_BASE64_RE = None  # compiled lazily below
+
+
+def _external_binary_value(value: str) -> bool:
+    """Whether a url/data string is a binary payload rather than text."""
+    import re
+
+    global _BASE64_RE
+    if _BASE64_RE is None:
+        # Long runs of base64 alphabet with optional padding; ordinary words
+        # (including URLs with query strings) never reach this length.
+        _BASE64_RE = re.compile(r"[A-Za-z0-9+/]{256,}={0,2}\Z")
+    return value.startswith("data:") or bool(_BASE64_RE.fullmatch(value))
+
+
+def _external_request_texts(body: Any) -> str | None:
+    """Collect every text-bearing leaf an external caller composes.
+
+    An external server writes the WHOLE request, so "scan role:user only"
+    — reasonable for ACE's own chat UIs where that is the untrusted input —
+    is opt-out by construction: tool results (where a diagnosis flow puts
+    its logs), tool-use inputs, system prompts, Responses-API input and
+    legacy prompt fields would all pass unchecked. Every string leaf is
+    collected except the structural denylist above. Returns None when the
+    shape cannot be parsed: the caller rejects the request rather than
+    forwarding it unscanned.
+    """
+    if not isinstance(body, dict):
+        return None
+    texts: list[str] = []
+
+    def walk(node: Any, key: str | None, name_structural: bool = False) -> None:
+        if isinstance(node, dict):
+            if key in _EXTERNAL_SCAN_SERIALIZED_KEYS:
+                texts.append(json.dumps(node, sort_keys=True, separators=(",", ":")))
+                return
+            # A ``name`` inside these shapes is a function identifier, not
+            # caller text: tool_use/tool_result/function_call blocks are
+            # marked by their ``type`` field, tool_calls wrap a ``function``.
+            child_name_structural = (
+                key == "function" or node.get("type") in _EXTERNAL_NAME_STRUCTURAL_PARENTS
+            )
+            for child_key, value in node.items():
+                walk(value, child_key, child_name_structural)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, key, name_structural)
+        elif isinstance(node, str):
+            if key is None or key not in _EXTERNAL_SCAN_STRUCTURAL_KEYS:
+                texts.append(node)
+            elif key == "name":
+                if not name_structural:
+                    texts.append(node)
+            elif key in ("url", "data"):
+                if not _external_binary_value(node):
+                    texts.append(node)
+
+    walk(body, None)
+    if not any(
+        leaf_key in body for leaf_key in ("messages", "system", "input", "instructions", "prompt")
+    ):
+        # A chat request without any conversational field is not a shape we
+        # recognize: reject rather than scan nothing.
+        return None
+    return " ".join(texts)
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
     request_body: bytes | None,
     tenant_id: int | None = None,
+    external_texts: str | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -1059,32 +1495,40 @@ def _check_content_filter(
 
     try:
         req_data = json.loads(request_body)
-        messages = req_data.get("messages", [])
-        if not isinstance(messages, list) or not messages:
-            return None
+        if external_texts is not None:
+            # External callers compose the entire request; the scan covers
+            # every text-bearing field (see _external_request_texts). This
+            # branch runs BEFORE the messages gate below: Responses-API
+            # (input/instructions), legacy prompt and messages-less bodies
+            # carry no `messages` array and must not pass on that account.
+            combined_content = external_texts
+        else:
+            messages = req_data.get("messages", [])
+            if not isinstance(messages, list) or not messages:
+                return None
 
-        # Extract user messages for content filter check
-        user_contents = []
-        for msg in reversed(messages):
-            if not isinstance(msg, dict):
-                continue
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    # Handle multi-part content
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                    user_contents.append(" ".join(text_parts))
-                elif isinstance(content, str):
-                    user_contents.append(content)
+            # Extract user messages for content filter check
+            user_contents = []
+            for msg in reversed(messages):
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Handle multi-part content
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                        user_contents.append(" ".join(text_parts))
+                    elif isinstance(content, str):
+                        user_contents.append(content)
 
-        if not user_contents:
-            return None
+            if not user_contents:
+                return None
 
-        # Join all user messages for filtering check
-        combined_content = " ".join(user_contents)
+            # Join all user messages for filtering check
+            combined_content = " ".join(user_contents)
 
         from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
@@ -1166,6 +1610,7 @@ def _forward_via_gateway(
     provider: str,
     tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
     requested_model: str | None = None,
+    token_payload: dict | None = None,
 ) -> Response | tuple[Response, int]:
     """Execute a single gateway attempt and return the finalized response.
 
@@ -1223,6 +1668,31 @@ def _forward_via_gateway(
         # Mirror the direct path: a converted /responses request gets its
         # chat-completions response re-wrapped into a Responses-API SSE stream.
         if getattr(plan, "is_responses", False) and resp.status_code == 200:
+            _gw_echo_secret = (
+                plan.gateway_key.encode("utf-8")
+                if isinstance(token_payload, dict)
+                and token_payload.get("session_type") == "external"
+                and plan.gateway_key
+                else None
+            )
+            if _gw_echo_secret and _echo_guard_blocks(
+                resp.content, _gw_echo_secret, session_id, user_id, tenant_id
+            ):
+                try:
+                    resp.close()
+                except Exception:
+                    logger.debug("Failed to close upstream after key-echo block", exc_info=True)
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Upstream response rejected by content policy",
+                                "type": "proxy_error",
+                            }
+                        }
+                    ),
+                    502,
+                )
             sse_response = _emit_responses_sse(resp, body)
             if sse_response is not None:
                 return sse_response
@@ -1236,6 +1706,15 @@ def _forward_via_gateway(
             request_path=plan.path,
             requested_model=requested_model,
             tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
+            echo_guard_secret=(
+                # The gateway path resolves its own key; guard external
+                # responses with it exactly like the direct path.
+                plan.gateway_key.encode("utf-8")
+                if isinstance(token_payload, dict)
+                and token_payload.get("session_type") == "external"
+                and plan.gateway_key
+                else None
+            ),
         )
     except Exception as exc:
         logger.error("LLM proxy gateway error: %s", exc)
@@ -1523,20 +2002,94 @@ def handle_llm_proxy_request(
             )
             # username remains None, do not block the request
 
+        _external = (
+            isinstance(token_payload, dict) and token_payload.get("session_type") == "external"
+        )
+        _external_texts = None
+        if _external:
+            # An external server composes the whole request; the scan must
+            # cover every text-bearing field, and a body whose shape cannot
+            # be parsed is rejected rather than forwarded unscanned.
+            try:
+                _external_body = json.loads(request.get_data())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                _external_body = None
+            _external_texts = _external_request_texts(_external_body)
+            if _external_texts is None:
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Request body is not a scannable shape",
+                                "type": "invalid_request",
+                            }
+                        }
+                    ),
+                    400,
+                )
         content_filter_result = _check_content_filter(
             user_id=user_id,
             username=username,
             request_body=request.get_data(),
             tenant_id=tenant_id,
+            external_texts=_external_texts,
         )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
         return content_filter_result
     # Note: redact handling would require modifying request body, which is
     # complex for streaming. For now, we just log and continue for warn/redact.
+    # Deny-on-redact: a redact verdict returns the redacted text here (a str),
+    # but this handler forwards the original body — so for callers that
+    # require raw text never to reach the provider (external issuers carry
+    # redact_policy="deny" in their token), a redact verdict denies the call.
+    if (
+        isinstance(content_filter_result, str)
+        and isinstance(token_payload, dict)
+        and token_payload.get("redact_policy") == "deny"
+    ):
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "Content requires redaction, which this caller's policy denies",
+                        "type": "content_redaction_denied",
+                    }
+                }
+            ),
+            403,
+        )
     # ── end content filter check ─────────────────────────────────────────
 
     requested_model = _extract_requested_model()
+
+    # Model allow-list: external tokens pin the models their issuer may call.
+    # Without this the external caller could reach any model the pooled key
+    # resolves to; fail closed when the claim is absent or the request names
+    # no model at all.
+    if isinstance(token_payload, dict) and token_payload.get("session_type") == "external":
+        allowed_models = token_payload.get("allowed_models")
+        if (
+            not isinstance(allowed_models, list)
+            or not requested_model
+            or requested_model not in allowed_models
+        ):
+            logger.warning(
+                "LLM proxy: external model policy rejected model=%s (user_id=%s)",
+                requested_model or "<none>",
+                user_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": "Model not allowed for this caller",
+                            "type": "model_not_allowed",
+                        }
+                    }
+                ),
+                403,
+            )
 
     # ── Model-gateway seam (single, removable) ───────────────────────────
     # When the LiteLLM-compatible gateway is enabled, route this request through
@@ -1576,6 +2129,7 @@ def handle_llm_proxy_request(
             provider=provider,
             tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
             requested_model=requested_model,
+            token_payload=token_payload if isinstance(token_payload, dict) else None,
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
@@ -1949,6 +2503,31 @@ def handle_llm_proxy_request(
                     continue
 
             if converted_from_responses and resp.status_code == 200:
+                _echo_secret = (
+                    api_key.encode("utf-8")
+                    if isinstance(token_payload, dict)
+                    and token_payload.get("session_type") == "external"
+                    and api_key
+                    else None
+                )
+                if _echo_secret and _echo_guard_blocks(
+                    resp.content, _echo_secret, session_id, user_id, tenant_id
+                ):
+                    try:
+                        resp.close()
+                    except Exception:
+                        logger.debug("Failed to close upstream after key-echo block", exc_info=True)
+                    return (
+                        jsonify(
+                            {
+                                "error": {
+                                    "message": "Upstream response rejected by content policy",
+                                    "type": "proxy_error",
+                                }
+                            }
+                        ),
+                        502,
+                    )
                 sse_response = _emit_responses_sse(resp, body)
                 if sse_response is not None:
                     return sse_response
@@ -1962,6 +2541,16 @@ def handle_llm_proxy_request(
                 request_path=path,
                 requested_model=requested_model,
                 tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
+                echo_guard_secret=(
+                    # External callers receive upstream bytes directly, so a
+                    # relay echoing the Authorization header would hand them
+                    # the pool key; guard the response with the resolved key.
+                    api_key.encode("utf-8")
+                    if isinstance(token_payload, dict)
+                    and token_payload.get("session_type") == "external"
+                    and api_key
+                    else None
+                ),
             )
 
         except Exception as exc:

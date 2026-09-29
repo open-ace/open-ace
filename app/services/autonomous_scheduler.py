@@ -1570,6 +1570,20 @@ def _reconcile_pending_transitions():
                     )
                 except Exception:  # noqa: BLE001
                     logger.error("Could not persist recovery_failed for %s", (wf_id or "")[:8])
+                else:
+                    # #3237: this writes a status WITHOUT going through
+                    # WorkflowOrchestrator._update_workflow, so the purge hooked
+                    # there does not fire, and the sweep has to decide for
+                    # itself.
+                    #
+                    # The status written here is "failed", which is RETRYABLE:
+                    # `POST /workflows/<id>/retry` resumes it on the same
+                    # session lines. So this call deliberately does nothing
+                    # today — the shared rule declines it — and the transcripts
+                    # are reclaimed by the age reaper instead. Kept (rather
+                    # than deleted) so the sweep stays correct if it ever
+                    # writes a genuinely terminal status here.
+                    _purge_agent_state(wf_id, "failed")
 
         logger.info("Reconciled %d interrupted worktree transition(s)", len(pending))
     except Exception as e:  # noqa: BLE001
@@ -1697,6 +1711,67 @@ def _parse_epoch(value: Any) -> float | None:
             return float(value)
         except Exception:
             return None
+
+
+def _purge_agent_state(workflow_id: str, status: str = "failed") -> None:
+    """Drop a terminal workflow's carried CLI transcripts (#3237).
+
+    The orchestrator purges from ``_update_workflow``, but this module writes
+    statuses directly through ``repo.update_workflow`` in the worktree recovery
+    path, bypassing it. Best-effort, like every other cleanup here.
+
+    Takes the status it is actually reacting to rather than hardcoding one, so
+    the shared terminal-status rule decides. That matters now that "failed" is
+    NOT immediately purgeable — a failed workflow is retryable and its
+    transcripts are what the retry resumes from — which makes this a deliberate
+    no-op at the recovery-sweep call site. Hardcoding "failed" here would have
+    hidden that behind a call that looks like cleanup and never is.
+    """
+    try:
+        from app.modules.workspace.autonomous.orchestrator import purge_agent_state_if_terminal
+
+        purge_agent_state_if_terminal(workflow_id, {"status": status})
+    except Exception:  # noqa: BLE001 - cleanup must not break the sweep
+        logger.warning("Could not purge agent state for %s", (workflow_id or "")[:8])
+
+
+def _reap_agent_state() -> int:
+    """Bound orphaned transcripts that no terminal-status write ever claimed.
+
+    The purge above is the primary mechanism; this is the backstop for rows
+    that never reach a terminal status at all (a control plane killed mid-run),
+    mirroring the ``.claude-preserve`` sibling reaper ``openace-run-as.sh``
+    runs on every invocation. Without a caller the reaper is decoration, and
+    the spec promised one.
+    """
+    try:
+        from app.modules.workspace.autonomous.orchestrator import _REAPABLE_WORKFLOW_STATUSES
+        from app.modules.workspace.autonomous.sandbox.agent_state_store import AgentStateStore
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.repositories.database import Database
+
+        # Age is not orphanhood. A paused workflow resumes later and still
+        # needs its history, and a long-running one may not have touched its
+        # review line in weeks — reaping on mtime alone deleted both silently.
+        # Resolved FIRST and deliberately OUTSIDE the reap: if the workflow
+        # rows cannot be read we must reap NOTHING, because an empty keep-set
+        # here would look exactly like "no workflows are live" and delete
+        # every transcript on the box.
+        live = AutonomousWorkflowRepository(Database()).get_live_workflow_ids(
+            sorted(_REAPABLE_WORKFLOW_STATUSES)
+        )
+    except Exception:  # noqa: BLE001 - never reap on an unknown live set
+        logger.warning("Agent-state reap skipped: could not resolve live workflows", exc_info=True)
+        return 0
+
+    try:
+        removed = AgentStateStore().reap(keep_workflow_ids=live)
+        if removed:
+            logger.info("Reaped %d orphaned agent-state transcript(s)", removed)
+        return removed
+    except Exception:  # noqa: BLE001 - a bounded leak beats a broken sweep
+        logger.warning("Agent-state reap failed", exc_info=True)
+        return 0
 
 
 def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> bool:
@@ -1855,6 +1930,12 @@ def init_autonomous_scheduler():
 
     remote_session_manager = RemoteSessionManager()
     _reconcile_orphan_sandboxes(remote_session_manager=remote_session_manager)
+    # #3237: bound transcripts left by workflows that never reached a terminal
+    # status (a control plane killed mid-run), which the purge cannot see.
+    # Startup is the same moment openace-run-as.sh reaps its .claude-preserve
+    # siblings, and the store lives on tmpfs, so a restart is exactly when
+    # stale entries accumulate.
+    _reap_agent_state()
 
     scheduler = AutonomousScheduler.instance()
     scheduler.remote_session_manager = remote_session_manager

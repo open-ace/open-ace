@@ -841,3 +841,87 @@ def get_status_summary():
     }
 
     return jsonify(summary)
+
+
+# =============================================================================
+# Issue #3273: Tool Account Mapping Verification Endpoints
+# =============================================================================
+
+
+@tool_accounts_bp.route("/tool-accounts/<int:id>/verify", methods=["POST"])
+def verify_tool_account_mapping(id: int):
+    """Verify a single tool account mapping.
+
+    Issue #3273: Manual verification endpoint for tool account mappings.
+    Verifies the mapping configuration and updates verification status.
+
+    Request body: {} (empty)
+
+    Response:
+    {
+      "success": true,
+      "verification_status": "verified" | "failed",
+      "verification_result": "验证成功" | "错误原因",
+      "verified_at": "2026-09-06T10:00:00Z",
+      "details": {
+        "tool_type": "qwen",
+        "tool_account": "user-qwen",
+        "checks": {...}
+      }
+    }
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    # Get mapping
+    mapping = tool_account_repo.get_by_id(id)
+    if not mapping:
+        return jsonify({"error": "Mapping not found"}), 404
+
+    # Tenant isolation for tenant_admin
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+        # Get the owner user to check tenant
+        owner_user = user_repo.get_user_by_id(mapping.user_id)
+        if not owner_user or owner_user.get("tenant_id") != user_tenant_id:
+            return jsonify({"error": "Mapping not found"}), 404
+
+    # Get current user for audit logging
+    actor_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+
+    # Prepare verification context
+    context = {
+        "tenant_id": mapping.tenant_id,
+        "actor_user_id": actor_user_id,
+    }
+
+    # Run verification
+    from app.services.tool_account_verification_service import get_tool_account_verification_service
+
+    verification_service = get_tool_account_verification_service()
+    result = verification_service.verify_mapping(id, context)
+
+    # Audit logging
+    try:
+        audit_logger = AuditLogger()
+        audit_logger.log_action(
+            action=AuditAction.TOOL_ACCOUNT_MAPPING_VERIFY,
+            user_id=actor_user_id,
+            severity="info",
+            resource_type="tool_account_mapping",
+            resource_id=str(id),
+            tenant_id=mapping.tenant_id,
+            details={
+                "tool_account": mapping.tool_account,
+                "tool_type": mapping.tool_type,
+                "verification_status": result.get("verification_status"),
+                "verification_result": result.get("verification_result"),
+                "actor_tenant_id": user_tenant_id,
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to log tool account verification audit: %s", e)
+
+    return jsonify(result)

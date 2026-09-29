@@ -856,14 +856,29 @@ export const TenantManagement: React.FC = () => {
                         </Button>
                         {/* Issue #3203: Permission check for quota/settings button */}
                         {canManageTenant(user, tenant.id) && (
-                          <Button
-                            variant="outline-secondary"
-                            size="sm"
-                            onClick={() => handleOpenQuota(tenant)}
-                            title={t('tenantSettingsModal', language) ?? 'Tenant Settings'}
-                          >
-                            <i className="bi bi-sliders" />
-                          </Button>
+                          <>
+                            <Button
+                              variant="outline-secondary"
+                              size="sm"
+                              onClick={() => handleOpenQuota(tenant)}
+                              title={t('tenantSettingsModal', language) ?? 'Tenant Settings'}
+                            >
+                              <i className="bi bi-sliders" />
+                            </Button>
+                            {/* Issue #3274: Security Settings shortcut */}
+                            <Button
+                              variant="outline-primary"
+                              size="sm"
+                              onClick={() =>
+                                navigate(
+                                  `/manage/security?tenant_id=${tenant.id}&tab=sensitive-keywords`
+                                )
+                              }
+                              title={t('tenantSettings', language) ?? 'Security Settings'}
+                            >
+                              <i className="bi bi-shield" />
+                            </Button>
+                          </>
                         )}
                         <Button
                           variant="outline-info"

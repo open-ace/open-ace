@@ -44,9 +44,9 @@ open-ace/
 │
 ├── app/                # Flask application
 │   ├── __init__.py     # create_app() factory
-│   ├── routes/         # 24 Blueprint route modules
-│   ├── services/       # 13 business logic services
-│   ├── repositories/   # 11 data access repositories
+│   ├── routes/         # 39 Blueprint route modules
+│   ├── services/       # 41 business logic services
+│   ├── repositories/   # 26 data access repositories
 │   ├── modules/        # Domain logic packages
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
 │   │   ├── compliance/ # Audit analysis, reports, retention
@@ -82,11 +82,10 @@ open-ace/
 ├── k8s/                # Kubernetes manifests
 ├── schema/             # Database schema files
 ├── static/             # Built frontend assets
-├── templates/          # HTML templates
 ├── tests/              # Test files
 │   ├── unit/           # Unit tests
-│   ├── e2e/            # End-to-end tests
-│   └── issues/         # Issue-specific tests
+│   ├── integration/    # Integration tests
+│   └── e2e/            # End-to-end tests
 └── docs/               # Documentation (en/ + cn/)
 ```
 
@@ -133,7 +132,7 @@ python scripts/run_extended_tests.py --category e2e --isolated-home
 python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
-See [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md) for the complete frontend reference.
+See [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) for the complete frontend reference.
 
 ## Code Style
 
@@ -387,14 +386,27 @@ SELECT * FROM daily_usage LIMIT 10;
 
 ## Release Process
 
-1. Update `VERSION` file
-2. Update `CHANGELOG.md`
-3. Create git tag
-4. Build release package
+Direct commits to `main` are blocked by the `no-commit-to-branch` hook, so
+releases go through a `release/vX.Y.Z` branch that is merged back by PR.
+
+1. Curate the `[Unreleased]` section of `CHANGELOG.md` (it becomes the release notes)
+2. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
+3. Build the deployment tarball:
+   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`
+4. Bump the version, move `[Unreleased]` to `[vX.Y.Z]`, commit, tag and push the tag:
+   `./scripts/release.sh --version X.Y.Z` (bumps `pyproject.toml`)
+5. Publish the GitHub Release with `dist/open-ace-X.Y.Z.tar.gz` attached;
+   `.github/workflows/release.yml` then builds the sdist/wheel, attaches them, and
+   publishes to PyPI as `open-ace-server` via Trusted Publishing (enabled by the `PYPI_PUBLISH=true`
+   repository variable; no API token). `docker-publish.yml` pushes the GHCR image
+6. Open a PR from `release/vX.Y.Z` to `main`
+7. Refresh the docs site (`open-ace/open-ace-docs`): update the release
+   summary in `src/pages/project/releases.js`, then redeploy so it re-syncs
+   `docs/en` and `docs/cn` from `main`
 
 ```bash
-# Build release
-./scripts/release.sh --version 1.1.0
+# Preview what the release script would change
+./scripts/release.sh --version X.Y.Z --dry-run
 ```
 
 ## Getting Help

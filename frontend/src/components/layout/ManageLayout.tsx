@@ -195,6 +195,13 @@ const navSections: NavSection[] = [
     title: 'settings',
     items: [
       {
+        id: 'branding',
+        label: 'brandingSettings',
+        icon: 'bi-palette',
+        path: '/manage/settings/branding',
+        adminOnly: true,
+      },
+      {
         id: 'sso',
         label: 'ssoSettings',
         icon: 'bi-key',
@@ -206,6 +213,13 @@ const navSections: NavSection[] = [
         label: 'apiKeys',
         icon: 'bi-key-fill',
         path: '/manage/settings/api-keys',
+        adminOnly: true,
+      },
+      {
+        id: 'encryption-keys',
+        label: 'encryptionKeys',
+        icon: 'bi-shield-key',
+        path: '/manage/settings/encryption-keys',
         adminOnly: true,
       },
       {

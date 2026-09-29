@@ -60,6 +60,26 @@ def measured_delta(start: str | None, end: str | None, field: str) -> dict[str, 
     }
 
 
+def measured_workflow_queue(start: str | None, end: str | None) -> dict[str, Any]:
+    """Keep inconsistent API queue timestamps observable, never invent a zero.
+
+    GitHub retry metadata can put run_started_at before attempt.created_at
+    (#3358). This makes only the queue sample unavailable, not the run's
+    conclusion or execution timings. Malformed/missing timestamps still fail.
+    """
+    raw = (
+        parse_time(end, "workflow.queue.end") - parse_time(start, "workflow.queue.start")
+    ).total_seconds()
+    return {
+        "seconds": raw if raw >= 0 else None,
+        "raw_seconds": raw,
+        "timestamp_skew_clamped": False,
+        "created_at": start,
+        "run_started_at": end,
+        "unavailable_reason": "negative_timestamp_delta" if raw < 0 else None,
+    }
+
+
 def validate_conclusion(value: Any, field: str) -> str:
     if value not in CONCLUSION_KEYS:
         raise MetricsError(f"invalid completed conclusion {field}: {value!r}")
@@ -683,8 +703,8 @@ def collect_attempts(
             {
                 "attempt": number,
                 "conclusion": attempt_conclusion,
-                "queue": measured_delta(
-                    meta.get("created_at"), meta.get("run_started_at"), "workflow.queue"
+                "queue": measured_workflow_queue(
+                    meta.get("created_at"), meta.get("run_started_at")
                 ),
                 "wall": measured_delta(
                     meta.get("run_started_at"), meta.get("updated_at"), "attempt.wall"
@@ -738,14 +758,29 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
     first_walls = [run["first_attempt_wall"]["seconds"] for run in runs]
     eventual_latencies = [run["eventual_resolution"]["seconds"] for run in runs]
     workflow_queue: list[float] = []
+    workflow_queue_eligible_runs = 0
+    workflow_queue_anomalies = []
     job_queue: list[float] = []
     job_execution: list[float] = []
     slow_jobs = []
     inherited_job_count = 0
     skipped_job_count = 0
     for run in runs:
+        has_valid_workflow_queue = False
         for attempt in run["attempts"]:
-            workflow_queue.append(attempt["queue"]["seconds"])
+            queue = attempt["queue"]
+            if queue["seconds"] is None:
+                workflow_queue_anomalies.append(
+                    {
+                        "run_id": run["run_id"],
+                        "attempt": attempt["attempt"],
+                        "url": run.get("url"),
+                        **queue,
+                    }
+                )
+            else:
+                workflow_queue.append(queue["seconds"])
+                has_valid_workflow_queue = True
             for job in attempt["jobs"]:
                 if job["timing_state"] == "inherited_snapshot":
                     inherited_job_count += 1
@@ -764,6 +799,7 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
                         "seconds": job["execution"]["seconds"],
                     }
                 )
+        workflow_queue_eligible_runs += int(has_valid_workflow_queue)
     sample_count = len(runs)
     first_conclusions = {key: first.get(key, 0) for key in CONCLUSION_KEYS}
     eventual_conclusions = {key: eventual.get(key, 0) for key in CONCLUSION_KEYS}
@@ -789,9 +825,14 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
         "eventual_resolution": summarize_values(
             eventual_latencies, min_samples, cohort_samples=sample_count
         ),
-        "workflow_queue": summarize_values(
-            workflow_queue, min_samples, cohort_samples=sample_count
-        ),
+        "workflow_queue": {
+            **summarize_values(
+                workflow_queue, min_samples, cohort_samples=workflow_queue_eligible_runs
+            ),
+            "eligible_run_count": workflow_queue_eligible_runs,
+            "excluded_count": len(workflow_queue_anomalies),
+        },
+        "workflow_queue_anomalies": workflow_queue_anomalies,
         "job_queue": summarize_values(job_queue, min_samples, cohort_samples=sample_count),
         "job_execution": summarize_values(job_execution, min_samples, cohort_samples=sample_count),
         "slow_jobs": sorted(slow_jobs, key=lambda item: item["seconds"], reverse=True)[:10],
@@ -842,8 +883,18 @@ def render_markdown(report: dict[str, Any]) -> str:
                     f"- retry recoveries: {contract['retry_recovery_count']}",
                     f"- inherited job snapshots: {contract['inherited_job_snapshot_count']}",
                     f"- skipped jobs (never executed): {contract['skipped_job_no_execution_count']}",
+                    f"- unavailable workflow queue samples: {contract['workflow_queue']['excluded_count']} "
+                    f"(valid runs: {contract['workflow_queue']['eligible_run_count']}; "
+                    f"p95: {contract['workflow_queue']['p95_status']})",
                 ]
             )
+            for anomaly in contract["workflow_queue_anomalies"]:
+                lines.append(
+                    f"- workflow queue unavailable: run {anomaly['run_id']} / "
+                    f"attempt {anomaly['attempt']}; {anomaly['unavailable_reason']}; "
+                    f"raw={anomaly['raw_seconds']}s; created_at={anomaly['created_at']}; "
+                    f"run_started_at={anomaly['run_started_at']}"
+                )
     lines.extend(
         [
             "",
@@ -1023,7 +1074,7 @@ def collect(
         )
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "report_contract": hashlib.sha256(
             json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),

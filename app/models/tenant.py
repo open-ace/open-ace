@@ -88,6 +88,8 @@ class TenantSettings:
     custom_branding: bool = False
     branding_name: str | None = None
     branding_logo_url: str | None = None
+    # Issue #3271: Multi-language welcome message for tenant branding
+    branding_welcome_message: dict[str, str] | None = None
     # P1: Tenant-level ROI assumptions configuration
     roi_assumptions: dict[str, Any] | None = None
     # Issue #1904: Sensitive keyword filtering configuration
@@ -108,6 +110,7 @@ class TenantSettings:
             "custom_branding": self.custom_branding,
             "branding_name": self.branding_name,
             "branding_logo_url": self.branding_logo_url,
+            "branding_welcome_message": self.branding_welcome_message,
             "roi_assumptions": self.roi_assumptions,
             "block_sensitive_keyword": self.block_sensitive_keyword,
             "sensitive_keyword_match_mode": self.sensitive_keyword_match_mode,
@@ -116,6 +119,18 @@ class TenantSettings:
     @classmethod
     def from_dict(cls, data: dict) -> "TenantSettings":
         """Create from dictionary with validation."""
+        # Validate branding_welcome_message
+        branding_welcome_message_raw = data.get("branding_welcome_message")
+        branding_welcome_message = None
+        if branding_welcome_message_raw is not None:
+            if not isinstance(branding_welcome_message_raw, dict):
+                logger.warning(
+                    "Invalid branding_welcome_message format: expected dict, got %s",
+                    type(branding_welcome_message_raw).__name__,
+                )
+            else:
+                branding_welcome_message = branding_welcome_message_raw
+
         # Validate roi_assumptions field
         roi_assumptions_raw = data.get("roi_assumptions")
         roi_assumptions = None
@@ -151,6 +166,7 @@ class TenantSettings:
             custom_branding=data.get("custom_branding", False),
             branding_name=data.get("branding_name"),
             branding_logo_url=data.get("branding_logo_url"),
+            branding_welcome_message=branding_welcome_message,
             roi_assumptions=roi_assumptions,
             block_sensitive_keyword=data.get("block_sensitive_keyword", False),
             sensitive_keyword_match_mode=match_mode,

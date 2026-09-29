@@ -6,11 +6,19 @@ Repository for usage data access operations.
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, cast
 
-from app.repositories.database import Database, escape_like, is_postgresql
+from app.repositories.database import (
+    Database,
+    distinct_values_for_users_sql,
+    distinct_values_sql,
+    escape_like,
+    is_postgresql,
+)
+from app.utils.helpers import to_iso_date
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
 
@@ -60,10 +68,54 @@ class UsageRepository:
             return None
         return tenant_id if tenant_id > 0 else None
 
+    # A tenant's users; the one parameter is the tenant id.
+    _TENANT_USER_IDS_SQL = "SELECT id FROM users WHERE tenant_id = ?"
+
+    # (db_url, index_name) -> monotonic time it was last confirmed to exist.
+    # Only positive results are cached, so an index built after startup is
+    # picked up on the next call; they expire so a dropped index stops being
+    # used within _INDEX_CACHE_TTL instead of only after a restart.
+    _known_indexes: dict[tuple[str, str], float] = {}
+    _INDEX_CACHE_TTL = 300.0
+
+    def _has_index(self, index_name: str) -> bool:
+        key = (self.db.db_url, index_name)
+        confirmed_at = self._known_indexes.get(key)
+        if confirmed_at is not None and time.monotonic() - confirmed_at < self._INDEX_CACHE_TTL:
+            return True
+        try:
+            found = self.db.index_exists(index_name)
+        except Exception as e:
+            logger.warning("Index probe for %s failed: %s", index_name, e)
+            return False
+        if found:
+            self._known_indexes[key] = time.monotonic()
+        else:
+            self._known_indexes.pop(key, None)
+        return found
+
+    def _tenant_distinct_values_sql(self, column: str, index_name: str) -> str:
+        """Distinct ``column`` values of a tenant's daily_messages rows.
+
+        Issue #3424: with ``index_name`` on (user_id, column) the values are
+        walked per tenant user (a few index probes). Without it that walk would
+        rescan the table once per probe, so fall back to one plain scan until
+        migration 20260926_002 has built the index.
+        """
+        if self._has_index(index_name):
+            return distinct_values_for_users_sql(
+                "daily_messages", column, self._TENANT_USER_IDS_SQL
+            )
+        return f"""
+            SELECT DISTINCT {column}
+            FROM daily_messages
+            WHERE {self._tenant_user_condition("user_id")}
+        """
+
     @staticmethod
     def _tenant_user_condition(column_ref: str) -> str:
         """Return a tenant-scope predicate for a user_id column."""
-        return f"{column_ref} IN (SELECT id FROM users WHERE tenant_id = ?)"
+        return f"{column_ref} IN ({UsageRepository._TENANT_USER_IDS_SQL})"
 
     def save_usage(
         self,
@@ -978,6 +1030,14 @@ class UsageRepository:
 
             results: dict[str, dict] = {}
             for row in rows:
+                # Issue #3424: CAST(... AS DATE) yields datetime.date on
+                # PostgreSQL; the caller merges these with daily_messages'
+                # string dates, and comparing the two raised TypeError.
+                row = {
+                    **row,
+                    "first_date": to_iso_date(row["first_date"]),
+                    "last_date": to_iso_date(row["last_date"]),
+                }
                 tool = normalize_tool_name(row["tool_name"])
                 if tool in results:
                     existing = results[tool]
@@ -1184,18 +1244,13 @@ class UsageRepository:
         """
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
         params: list = []
-        conditions = []
         if normalized_tenant_id is not None:
-            conditions.append(self._tenant_user_condition("user_id"))
+            # Issue #3424: same rows as "user_id IN (tenant users)".
+            query = self._tenant_distinct_values_sql("tool_name", "idx_messages_user_tool")
             params.append(normalized_tenant_id)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"""
-            SELECT DISTINCT tool_name
-            FROM daily_messages
-            {where_clause}
-            ORDER BY tool_name
-        """
+        else:
+            # Issue #3424: unfiltered DISTINCT read all of daily_messages.
+            query = distinct_values_sql("daily_messages", "tool_name")
 
         rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
         return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
@@ -1216,16 +1271,19 @@ class UsageRepository:
         # Get SQL filter clause
         sql_filter = get_hostname_filter_sql()
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
-        tenant_filter = ""
         params: list = []
         if normalized_tenant_id is not None:
-            tenant_filter = f" AND {self._tenant_user_condition('user_id')}"
+            distinct_hosts = self._tenant_distinct_values_sql("host_name", "idx_messages_user_host")
             params.append(normalized_tenant_id)
+        else:
+            distinct_hosts = distinct_values_sql("daily_messages", "host_name")
 
+        # Issue #3424: the hostname filter only reads host_name, so it can run
+        # on the distinct values instead of on every message row.
         query = f"""
-            SELECT DISTINCT host_name
-            FROM daily_messages
-            WHERE {sql_filter}{tenant_filter}
+            SELECT host_name
+            FROM ({distinct_hosts}) hosts
+            WHERE {sql_filter}
             ORDER BY host_name
         """
 
@@ -2101,27 +2159,39 @@ class UsageRepository:
     ) -> tuple[int, int]:
         """Get session token/request usage for a date window.
 
-        Uses user_daily_stats (fast path, same source as quota enforcement) so
-        the Work-page display matches what enforcement sees. Falls back to
-        agent_sessions.total_tokens when user_daily_stats has no data for the
-        period (e.g. the aggregator hasn't run yet for today's sessions).
+        Issue #3307: Now prioritizes session_daily_usage (per-day incremental
+        records) over user_daily_stats and agent_sessions.created_at fallback.
+        This ensures long-running WebUI sessions have their daily usage correctly
+        attributed to the request date, not the session creation date.
+
+        Query priority:
+        1. session_daily_usage — per-day incremental records (most accurate)
+        2. user_daily_stats — pre-aggregated stats (may have stale data)
+        3. agent_sessions.created_at — fallback for historical data (known issue)
 
         Never reads daily_messages (#1125: analysis fact tables must not
         participate in Workspace runtime display).
-
-        Fixes #2705: the previous session_messages SUM under-counted by ~10%
-        because cache and other non-message token costs are not recorded in
-        individual message rows.
-
-        Known trade-off (#1974): both paths attribute session tokens to the
-        session's created_at date, not to individual message timestamps. A
-        session spanning midnight will have all its tokens counted on the
-        creation day in the daily view. This matches enforcement (which has
-        always used created_at attribution) and is the correct behaviour for
-        quota display; per-message timestamp attribution for the trend chart
-        is a separate follow-up concern.
         """
-        # Fast path: user_daily_stats — identical to quota_manager enforcement.
+        # Priority 1: session_daily_usage — per-day incremental records
+        # This is the most accurate source for daily usage attribution.
+        try:
+            row = self.db.fetch_one(
+                """
+                SELECT
+                    COALESCE(SUM(tokens), 0) as tokens,
+                    COALESCE(SUM(requests), 0) as requests
+                FROM session_daily_usage
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                """,
+                (user_id, start_date, end_date),
+            )
+            if row and (int(row["tokens"]) > 0 or int(row["requests"]) > 0):
+                return int(row["tokens"]), int(row["requests"])
+        except Exception:
+            pass  # Table may not exist yet, continue to fallback
+
+        # Priority 2: user_daily_stats — pre-aggregated stats
+        # Same source as quota enforcement, but may be stale.
         try:
             row = self.db.fetch_one(
                 """
@@ -2138,9 +2208,10 @@ class UsageRepository:
         except Exception:
             pass
 
-        # Fallback: agent_sessions.total_tokens with created_at date attribution.
-        # Uses request_count for requests (model turn count, not message rows).
-        # Issue #3267: Use request_count for accurate model turn counting.
+        # Priority 3: Fallback to agent_sessions.total_tokens with created_at attribution.
+        # Known issue #3307: This incorrectly attributes session lifetime totals
+        # to the session creation date, not the actual request date.
+        # Only used when newer tables don't have data yet.
         session_row = self.db.fetch_one(
             """
             SELECT

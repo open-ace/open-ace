@@ -301,13 +301,13 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 if [ -d "$FRONTEND_DIR" ]; then
     # Check if npm is available, install if not
     if ! command -v npm &> /dev/null; then
-        echo -e "${BLUE}npm not found, installing Node.js 20.x via NodeSource...${NC}"
+        echo -e "${BLUE}npm not found, installing Node.js 22.x via NodeSource...${NC}"
         if [ "$EUID" -eq 0 ]; then
             # Running as root, can install
-            # Use NodeSource to get latest Node.js 20.x (not system packages which may be outdated)
+            # Use NodeSource to get latest Node.js 22.x (not system packages which may be outdated)
             if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
                 # Rocky Linux/CentOS/RHEL - use NodeSource RPM repo
-                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
                 if command -v dnf &> /dev/null; then
                     dnf install -y nodejs
                 else
@@ -315,7 +315,7 @@ if [ -d "$FRONTEND_DIR" ]; then
                 fi
             elif command -v apt-get &> /dev/null; then
                 # Debian/Ubuntu - use NodeSource deb repo
-                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
                 apt-get install -y nodejs
             elif [[ "$OSTYPE" == "darwin"* ]]; then
                 echo -e "${YELLOW}On macOS, please install Node.js manually:${NC}"
@@ -328,9 +328,9 @@ if [ -d "$FRONTEND_DIR" ]; then
             fi
         else
             echo -e "${YELLOW}Not running as root, cannot install Node.js automatically${NC}"
-            echo -e "${YELLOW}Please run with sudo or install Node.js 20.x manually:${NC}"
+            echo -e "${YELLOW}Please run with sudo or install Node.js 22.x manually:${NC}"
             echo -e "${YELLOW}Recommended method (NodeSource):${NC}"
-            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -${NC}"
             echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
             exit 1
         fi
@@ -353,7 +353,7 @@ if [ -d "$FRONTEND_DIR" ]; then
             echo ""
             echo -e "${YELLOW}For Rocky Linux/CentOS/RHEL (if yum install fails due to conflicts):${NC}"
             echo -e "${YELLOW}  sudo yum remove -y nodejs npm${NC}"
-            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -${NC}"
             echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
             echo ""
             echo -e "${YELLOW}Or use nvm (recommended for multiple Node.js versions):${NC}"

@@ -10,6 +10,7 @@ Issue: #2746
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -137,6 +138,7 @@ class PermissionTaskService:
         path: str,
         priority: int | None = None,
         depth_limit: int | None = None,
+        tenant_id: int | None = None,
     ) -> tuple[bool, str, dict | None]:
         """Submit a new permission setup task.
 
@@ -147,6 +149,13 @@ class PermissionTaskService:
             path: Project path
             priority: Task priority (lower = higher priority)
             depth_limit: Maximum recursion depth
+            tenant_id: Project's tenant ID (Issue #3396). Persisted in the
+                row's ``checkpoint_data`` JSON payload so the (future)
+                processor chgrps to ``openace-shared-<tenant_id>`` instead of
+                the ``openace-shared-0`` pseudo-tenant. The queue table has no
+                consumer yet and no dedicated column, so the payload slot is
+                used deliberately — a processor writing real checkpoints must
+                preserve the key.
 
         Returns:
             Tuple of (success, error_message, task_info).
@@ -185,15 +194,22 @@ class PermissionTaskService:
                 depth_limit = PERMISSION_MAX_DEPTH
 
             # Insert task into database
+            # Issue #3396: tenant_id rides in checkpoint_data (JSON payload
+            # slot) — see the docstring. None when the caller has no tenant
+            # notion (a future processor then treats the task as tenant-less,
+            # matching the pre-#3396 behavior).
+            checkpoint_payload = (
+                json.dumps({"tenant_id": tenant_id}) if tenant_id is not None else None
+            )
             db.execute(
                 sa.text("""
                     INSERT INTO permission_tasks
                     (task_id, project_id, user_id, path, status, priority,
                      progress, files_processed, total_files, depth_limit,
-                     checksum, created_at)
+                     checksum, checkpoint_data, created_at)
                     VALUES
                     (:task_id, :project_id, :user_id, :path, 'pending', :priority,
-                     0, 0, :total_files, :depth_limit, :checksum, :created_at)
+                     0, 0, :total_files, :depth_limit, :checksum, :checkpoint_data, :created_at)
                 """),
                 {
                     "task_id": task_id,
@@ -204,6 +220,7 @@ class PermissionTaskService:
                     "total_files": file_count,
                     "depth_limit": depth_limit,
                     "checksum": checksum,
+                    "checkpoint_data": checkpoint_payload,
                     "created_at": datetime.now(timezone.utc),
                 },
             )
@@ -226,6 +243,7 @@ class PermissionTaskService:
                 "priority": priority,
                 "estimated_files": file_count,
                 "queue_position": queue_length + 1,
+                "tenant_id": tenant_id,
             }
 
             logger.info(f"Submitted permission task {task_id} for project {project_id}")

@@ -25,6 +25,7 @@ from app.auth.decorators import (
     security_annotated,
 )
 from app.models.user import User
+from app.modules.governance.audit_logger import AuditAction
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 from app.services.permission_task_service import (
@@ -34,11 +35,15 @@ from app.services.permission_task_service import (
     PERMISSION_SYNC_THRESHOLD,
     get_permission_task_service,
 )
+from app.utils.path_guard import shared_namespace_roots, shared_project_path_error
 from app.utils.request_context import get_current_tenant_id
 from app.utils.validators import validate_project_name
 from app.utils.workspace import (
     _is_docker_multi_user_mode,
+    ensure_shared_namespace_root,
     estimate_file_count_fast,
+    get_workspace_base_dirs,
+    revoke_shared_project_access,
     setup_permissions_with_depth_limit,
 )
 
@@ -76,18 +81,18 @@ def _authenticate_user():
 
         manager = get_webui_manager()
         if manager:
-            valid, user_id, error = manager.validate_token(url_token)
-            if valid and user_id:
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    g.user = user  # Store full user object for system_account access
-                    g.user_id = user_id
-                    g.user_role = user.get("role")
-                    g.tenant_id = user.get("tenant_id")
-                    password_change_response = enforce_password_change_requirement(user)
-                    if password_change_response is not None:
-                        return password_change_response
-                    return None
+            # R-12 (#3379 review): the validating lookup returns the user
+            # row — no second get_user_by_id on this path.
+            valid, user_id, error, user = manager.validate_token_with_user(url_token)
+            if valid and user_id and user:
+                g.user = user  # Store full user object for system_account access
+                g.user_id = user.get("id")
+                g.user_role = user.get("role")
+                g.tenant_id = user.get("tenant_id")
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
+                return None
 
     return jsonify({"error": "Authentication required"}), 401
 
@@ -217,6 +222,136 @@ def api_create_project():
     if ".." in path:
         return jsonify({"error": "Path traversal not allowed"}), 400
 
+    # Issue #3376 review round 1: a shared project's path extends every
+    # tenant member's fs browse roots (fs._allowed_roots_for_user). Without
+    # this check any tenant member could register e.g. the workspace base
+    # dir itself — or another user's home — as a "shared project" and make
+    # the whole tenant able to browse other users' files. The same filter
+    # runs read-side in fs.py as defense in depth (covers paths that enter
+    # the projects table by other routes, e.g. a later is_shared flip).
+    #
+    # Review round 2 (#3376, 3994613216): round 1 only rejected homes and
+    # their ANCESTORS — a descendant of another user's home
+    # (<base>/alice/.ssh) still passed, and nothing verified the path
+    # belonged to the creator. Now the shared path must land inside the
+    # creator's own roots: per-base home roots plus shared roots already
+    # open to this tenant (first-level <base>/team-proj registrations are
+    # no longer admissible for regular users).
+    #
+    # Review round 3 (#3376, PR #3380): round 2's creator-roots rule and
+    # the read-side home-subtree filter accepted DISJOINT sets — paths
+    # inside the creator's own home were created but never surfaced to
+    # other tenant members, and a fresh deployment could not bootstrap
+    # its first shared root (anchoring needs one to already exist). New
+    # registrations now have a first-class namespace: <base>/shared/<name>
+    # lies outside every user home, so the read side never filters it and
+    # no anchor is needed. Legacy clean shared rows keep anchoring nested
+    # registrations (see open_shared_roots below).
+    if is_shared:
+        base_dirs = get_workspace_base_dirs()
+        home_dirs: list[str] = []
+        try:
+            rows = user_repo.get_all_users(include_inactive=True) or []
+        except Exception as e:
+            logger.warning("Failed to enumerate user homes for shared path check: %s", e)
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            account = row.get("system_account") or row.get("username")
+            if account:
+                home_dirs.extend(f"{base.rstrip('/')}/{account}" for base in base_dirs)
+
+        # Review round 4: the creator's OWN home roots are deliberately NOT
+        # part of creator_roots for SHARED projects. The read side
+        # (_shared_root_rejection_reason) unconditionally drops every
+        # home-subtree row, so a share inside a home would be created (201,
+        # group-shared directory permissions) yet invisible to every other
+        # tenant member — a silent dead share. Registrable shared paths are
+        # the first-class namespace and clean legacy anchors instead.
+        creator_roots: list[str] = []
+        # First-class tenant shared namespace: <base>/shared/<name> is
+        # always registrable (bootstrap-free). shared_project_path_error
+        # still rejects the namespace root itself and any namespace that
+        # collides with a user home (an account literally named "shared").
+        creator_roots.extend(shared_namespace_roots(base_dirs))
+        try:
+            open_shared_roots = project_repo.get_shared_project_paths(tenant_id) or []
+        except Exception as e:
+            logger.warning("Failed to load open shared roots for creator: %s", e)
+            open_shared_roots = []
+        # Only topology-clean rows may anchor new registrations: a dirty
+        # home-overlapping shared row must not bootstrap further sharing.
+        creator_roots.extend(
+            root
+            for root in open_shared_roots
+            if shared_project_path_error(root, base_dirs, home_dirs) is None
+        )
+        reason = shared_project_path_error(path, base_dirs, home_dirs, creator_roots=creator_roots)
+        if reason is not None:
+            return (
+                jsonify({"error": f"Invalid shared project path: {reason}"}),
+                400,
+            )
+
+    else:
+        # PR #3402 review (#3396 boot-reclaim hardening): PRIVATE
+        # registrations had no path validation at all (everything above
+        # gates on ``if is_shared:``), and the tenant-scoped
+        # get_project_by_path below never 409s across tenants — so any
+        # tenant's user could register another tenant's shared project
+        # directory (or the <base>/shared namespace root, or a base dir)
+        # as a private project. The boot reclaim pass is hardened against
+        # exactly those rows, but the API must not accept them in the
+        # first place. A private path must not BE a workspace base dir or
+        # a shared-namespace root, and must not overlap (be equal to, lie
+        # inside, or contain) an ACTIVE project row of ANOTHER tenant.
+        # Fail-soft on the enumeration like the shared-path check above.
+        base_dirs = get_workspace_base_dirs()
+        resolved = os.path.realpath(path).rstrip(os.sep)
+        if any(resolved == os.path.realpath(b).rstrip(os.sep) for b in base_dirs):
+            return jsonify({"error": "Path must not be a workspace base directory itself"}), 400
+        if any(
+            resolved == ns or resolved.startswith(ns + os.sep)
+            for ns in shared_namespace_roots(base_dirs)
+        ):
+            # The whole namespace subtree, not just the root: <base>/shared
+            # is sticky and group-writable by EVERY tenant's accounts (the
+            # global creation group) with others traversal — a "private"
+            # dir there is not private. Private projects belong in the
+            # creator's own workspace.
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Path is inside the shared namespace (<base>/shared) — "
+                            "register shared projects there and private projects "
+                            "in your own workspace"
+                        )
+                    }
+                ),
+                400,
+            )
+        try:
+            foreign_paths = [
+                os.path.realpath(p.path).rstrip(os.sep)
+                for p in project_repo.get_all_projects()
+                if p.tenant_id != tenant_id and p.path
+            ]
+        except Exception as e:  # noqa: BLE001 - guard is best-effort
+            logger.warning("Failed to enumerate projects for private path check: %s", e)
+            foreign_paths = []
+        for other in foreign_paths:
+            if (
+                resolved == other
+                or resolved.startswith(other + os.sep)
+                or other.startswith(resolved + os.sep)
+            ):
+                return (
+                    jsonify({"error": "Path overlaps a project of another tenant"}),
+                    400,
+                )
+
     # Check if project already exists
     existing = project_repo.get_project_by_path(path, tenant_id=tenant_id)
     if existing:
@@ -225,6 +360,45 @@ def api_create_project():
     # Create directory if requested and doesn't exist
     dir_created = False
     if create_dir:
+        # Issue #3393: on-demand shared-namespace-root provisioning. The
+        # entrypoint (Docker) or install.sh (package) normally provisions
+        # <base>/shared at boot/install time; on a deployment where that
+        # never ran — or the root went missing — the FIRST shared-project
+        # creation ran `mkdir -p <base>/shared/<name>` as the creating user
+        # against a root-owned 0755 parent and EACCESed (403). Provision the
+        # one namespace root this path lives under BEFORE the user-side
+        # mkdir; failures degrade to a clean 5xx, never a crash (the helper
+        # is a no-op outside Docker multi-user mode and leaves an existing
+        # root untouched).
+        if is_shared:
+            resolved_path = os.path.realpath(path)
+            for base in base_dirs:
+                if not base:
+                    continue
+                resolved_base = os.path.realpath(base).rstrip(os.sep)
+                if resolved_path != resolved_base and not resolved_path.startswith(
+                    resolved_base + os.sep
+                ):
+                    continue
+                provisioned, provision_error = ensure_shared_namespace_root(base)
+                if not provisioned:
+                    logger.error(
+                        "Failed to provision shared namespace root under %s: %s (#3393)",
+                        base,
+                        provision_error,
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "error": (
+                                    "Failed to provision the shared namespace root "
+                                    f"({provision_error}); contact an administrator"
+                                )
+                            }
+                        ),
+                        500,
+                    )
+                break
         try:
             effective_system_account = get_effective_system_account(system_account)
             if effective_system_account:
@@ -296,6 +470,7 @@ def api_create_project():
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -323,6 +498,7 @@ def api_create_project():
                     user_id=user_id,
                     path=path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if success and task_info:
@@ -414,6 +590,7 @@ def api_update_project(project_id):
                     timeout=60,
                     user_id=user_id,  # Issue #2745: Pass user_id for audit log
                     project_id=project_id,  # Issue #2745: Pass project_id for audit log
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -432,6 +609,7 @@ def api_update_project(project_id):
                     user_id=user_id,
                     path=project.path,
                     priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                    tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
                 )
 
                 if not success:
@@ -445,11 +623,63 @@ def api_update_project(project_id):
         tenant_id=tenant_id,
     )
 
+    # Issue #3396: revocation (is_shared True -> False) must RECLAIM OS-level
+    # access, not only flip the DB flag — group-member accounts otherwise
+    # keep read/write through their shells/agents (the API layer's browse
+    # 400s never reach the OS channel). The project becomes the creator's
+    # private project: chown -R creator + dirs 0700 / files 0600. Runs after
+    # the DB flip (same ordering as the create path's permission setup) and
+    # is FAIL-SOFT: a reclaim failure is logged and surfaced as a warning in
+    # the response, but the revocation itself stands.
+    revoke_warning = None
+    if success and is_shared is False and project.is_shared:
+        if _is_docker_multi_user_mode():
+            owner_account = None
+            if project.created_by:
+                creator = user_repo.get_user_by_id(project.created_by)
+                if creator:
+                    # system_account ONLY (PR #3402 review): an unmapped
+                    # user's username may equal another user's system_account,
+                    # and the fallback would hand the reclaimed tree to that
+                    # other OS account.
+                    owner_account = creator.get("system_account")
+            if not owner_account:
+                revoke_warning = (
+                    "Revocation recorded, but the OS-level permission reclaim was skipped: "
+                    "cannot determine the creator's system account"
+                )
+                logger.warning(
+                    "Shared-project revocation for %s could not resolve creator "
+                    "(created_by=%s) — OS access not reclaimed (#3396)",
+                    project.path,
+                    project.created_by,
+                )
+            else:
+                reclaim_ok, reclaim_error = revoke_shared_project_access(
+                    project.path,
+                    owner_account,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                if not reclaim_ok:
+                    revoke_warning = (
+                        f"Revocation recorded, but the OS-level permission reclaim failed: "
+                        f"{reclaim_error}"
+                    )
+                    logger.warning(
+                        "OS-level reclaim failed for revoked shared project %s: %s (#3396)",
+                        project.path,
+                        reclaim_error,
+                    )
+
     if success:
         project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
-        return jsonify({"success": True, "project": project.to_dict()})
+        response = {"success": True, "project": project.to_dict()}
+        if revoke_warning:
+            response["permission_warning"] = revoke_warning
+        return jsonify(response)
 
     return jsonify({"error": "Failed to update project"}), 500
 
@@ -562,6 +792,366 @@ def api_get_project_users(project_id):
     )
 
 
+# ============================================================================
+# Project User Management API (Issue #3275)
+# ============================================================================
+
+
+@projects_bp.route("/projects/<int:project_id>/users", methods=["POST"])
+def api_add_project_user(project_id):
+    """Add a user to a shared project.
+
+    Issue #3275: Allows project creator or admin to add a visible user.
+
+    Request body:
+        - user_id: int - User ID to add
+
+    Returns:
+        JSON response with success status or error message.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Parse request
+    data = request.get_json() or {}
+    target_user_id = data.get("user_id")
+
+    if not target_user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    # Get target user
+    target_user = user_repo.get_user_by_id(target_user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Tenant isolation: can only add users from the same tenant
+    target_tenant_id = target_user.get("tenant_id")
+    project_tenant_id = project.tenant_id
+
+    if target_tenant_id != project_tenant_id:
+        return jsonify({"error": "Cannot add user from different tenant"}), 403
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Get target user's system_account
+    target_system_account = target_user.get("system_account")
+    if not target_system_account:
+        return jsonify({"error": "User has no system account, cannot manage file permissions"}), 400
+
+    # Enroll the target user in the shared groups (file system permission).
+    # Issue #3396: enrollment is TENANT-scoped (global openace-shared for
+    # namespace-root creation + openace-shared-<tenant> for content access).
+    from app.utils.workspace import add_user_to_shared_group
+
+    if not add_user_to_shared_group(target_system_account, tenant_id=target_tenant_id):
+        return jsonify({"error": "Failed to add user to shared group"}), 500
+
+    # Add user to project in database
+    project_repo.add_user_project(target_user_id, project_id)
+
+    # Record audit log
+    _log_project_user_audit(
+        action=AuditAction.PROJECT_USER_ADD,
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=target_user_id,
+        tenant_id=tenant_id,
+    )
+
+    logger.info(f"User {target_user_id} added to project {project_id} by {user_id}")
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "User added successfully",
+            "user_id": target_user_id,
+        }
+    )
+
+
+@projects_bp.route("/projects/<int:project_id>/users/<int:target_user_id>", methods=["DELETE"])
+def api_remove_project_user(project_id, target_user_id):
+    """Remove a user from a shared project.
+
+    Issue #3275: Allows project creator or admin to remove a visible user.
+
+    Returns:
+        JSON response with success status or error message.
+        If user has active sessions, includes active_sessions count.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Creator protection: cannot remove project creator
+    if project.created_by == target_user_id:
+        return jsonify({"error": "Cannot remove project creator"}), 403
+
+    # Get target user
+    target_user = user_repo.get_user_by_id(target_user_id)
+    if not target_user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Check for active sessions
+    from app.utils.workspace import get_user_project_active_sessions
+
+    active_sessions = get_user_project_active_sessions(target_user_id, project_id)
+
+    # Remove user from project in database
+    if not project_repo.remove_user_project(target_user_id, project_id, tenant_id=tenant_id):
+        return jsonify({"error": "Failed to remove user from project"}), 500
+
+    # Issue #3396: NO group revocation here. Shared projects are visible to
+    # the whole tenant on the read side (fs._allowed_roots_for_user uses the
+    # tenant's shared paths, not per-project user rows), so removing this
+    # row must not strip the user's tenant-wide OS access — that would
+    # recreate an API-vs-OS divergence in the opposite direction. Tenant
+    # group membership tracks TENANT membership (see the admin tenant-move
+    # and deactivation paths); full OS revocation of a project happens on
+    # the is_shared True->False flip (revoke_shared_project_access).
+
+    # Record audit log
+    _log_project_user_audit(
+        action=AuditAction.PROJECT_USER_REMOVE,
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=target_user_id,
+        tenant_id=tenant_id,
+    )
+
+    logger.info(f"User {target_user_id} removed from project {project_id} by {user_id}")
+
+    response = {
+        "success": True,
+        "message": "User removed successfully",
+        "user_id": target_user_id,
+    }
+
+    # Include active sessions count if > 0
+    if active_sessions > 0:
+        response["active_sessions"] = active_sessions
+        response["warning"] = f"User has {active_sessions} active session(s)"
+
+    return jsonify(response)
+
+
+@projects_bp.route("/projects/<int:project_id>/users", methods=["PUT"])
+def api_batch_update_project_users(project_id):
+    """Batch update visible users for a shared project.
+
+    Issue #3275: Allows project creator or admin to batch update user list.
+    Maximum 50 users per batch.
+
+    Request body:
+        - user_ids: list[int] - List of target user IDs
+
+    Returns:
+        JSON response with added/removed/existing user lists.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Permission check: only creator or admin can manage users
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can manage users"}), 403
+
+    # Parse request
+    data = request.get_json() or {}
+    target_user_ids = data.get("user_ids", [])
+
+    # Validate batch size
+    if len(target_user_ids) > 50:
+        return jsonify({"error": "Maximum 50 users per batch operation"}), 400
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "User management only available in Docker multi-user mode"}), 400
+
+    # Get current users
+    current_users = project_repo.get_project_users(project_id, tenant_id=tenant_id)
+    current_user_ids = {u.user_id for u in current_users}
+    target_user_id_set = set(target_user_ids)
+
+    # Calculate differences
+    to_add = target_user_id_set - current_user_ids
+    to_remove = current_user_ids - target_user_id_set
+
+    # Creator protection: cannot remove project creator
+    if project.created_by in to_remove:
+        to_remove.discard(project.created_by)
+
+    # Phase 1: Validate all users before making any changes
+    from app.utils.workspace import add_user_to_shared_group, remove_user_from_shared_group
+
+    users_to_add = []
+    operation_errors = []
+
+    for target_user_id in to_add:
+        target_user = user_repo.get_user_by_id(target_user_id)
+        if not target_user:
+            operation_errors.append(f"User {target_user_id} not found")
+            continue
+
+        # Tenant isolation
+        target_tenant_id = target_user.get("tenant_id")
+        if target_tenant_id != project.tenant_id:
+            operation_errors.append(f"User {target_user_id} is from different tenant")
+            continue
+
+        # Get system_account
+        target_system_account = target_user.get("system_account")
+        if not target_system_account:
+            operation_errors.append(f"User {target_user_id} has no system account")
+            continue
+
+        users_to_add.append(
+            {
+                "user_id": target_user_id,
+                "system_account": target_system_account,
+                "tenant_id": target_tenant_id,
+            }
+        )
+
+    # If validation errors, return before making any changes
+    if operation_errors:
+        return jsonify({"error": operation_errors[0], "errors": operation_errors}), 400
+
+    # Phase 2: Execute all group operations
+    added_accounts: list[dict] = []
+
+    # Enroll added users in the tenant-scoped shared groups (Issue #3396)
+    for user_info in users_to_add:
+        if not add_user_to_shared_group(
+            user_info["system_account"], tenant_id=user_info["tenant_id"]
+        ):
+            # Rollback previous group additions
+            for account in added_accounts:
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
+            return (
+                jsonify({"error": f"Failed to add user {user_info['user_id']} to shared group"}),
+                500,
+            )
+        added_accounts.append(
+            {"system_account": user_info["system_account"], "tenant_id": user_info["tenant_id"]}
+        )
+
+    # Removed users: Issue #3396 — NO tenant-group revocation here. The
+    # tenant group grants tenant-wide shared access that matches the read
+    # side (per-project user rows do not gate it); stripping it here would
+    # deny OS access the API still grants. Project-level OS revocation is
+    # the is_shared True->False flip's job.
+
+    # Phase 3: Execute database operations in transaction
+    try:
+        result = project_repo.batch_update_project_users(
+            project_id, list(target_user_id_set), tenant_id=tenant_id
+        )
+
+        if "error" in result:
+            # Rollback group operations
+            for account in added_accounts:
+                remove_user_from_shared_group(
+                    account["system_account"], tenant_id=account["tenant_id"]
+                )
+            return jsonify({"error": result["error"]}), 500
+
+    except Exception as e:
+        logger.error(f"Database error during batch update: {e}")
+        # Rollback group operations
+        for account in added_accounts:
+            remove_user_from_shared_group(account["system_account"], tenant_id=account["tenant_id"])
+        return jsonify({"error": "Database operation failed"}), 500
+
+    # Record audit log
+    _log_project_user_audit(
+        action=AuditAction.PROJECT_USER_BATCH_UPDATE,
+        user_id=user_id,
+        project_id=project_id,
+        target_user_id=None,
+        tenant_id=tenant_id,
+        details={
+            "user_ids": target_user_ids,
+            "added": list(to_add),
+            "removed": list(to_remove),
+        },
+    )
+
+    logger.info(
+        f"Batch update for project {project_id}: added {len(to_add)}, removed {len(to_remove)} by {user_id}"
+    )
+
+    response = {
+        "success": True,
+        "message": "Users updated successfully",
+        "added": list(to_add),
+        "removed": list(to_remove),
+        "existing": list(target_user_id_set & current_user_ids),
+    }
+
+    return jsonify(response)
+
+
+def _log_project_user_audit(
+    action: AuditAction,
+    user_id: int,
+    project_id: int,
+    target_user_id: int | None,
+    tenant_id: int | None,
+    details: dict | None = None,
+) -> None:
+    """Record audit log for project user management."""
+    try:
+        from app.modules.governance.audit_logger import AuditLogger
+
+        audit_logger = AuditLogger()
+
+        log_details = details or {}
+        if target_user_id is not None:
+            log_details["target_user_id"] = target_user_id
+
+        audit_logger.log_action(
+            action=action,
+            user_id=user_id,
+            resource_type="project",
+            resource_id=str(project_id),
+            details=log_details,
+            tenant_id=tenant_id,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to record project user audit log: {e}")
+
+
 @projects_bp.route("/projects/<int:project_id>/fix-permissions", methods=["POST"])
 def api_fix_project_permissions(project_id):
     """Fix shared project directory permissions.
@@ -639,6 +1229,7 @@ def api_fix_project_permissions(project_id):
             path=project.path,
             priority=PERMISSION_PRIORITY_MANUAL_FIX,  # Higher priority for manual fix
             depth_limit=depth_limit,
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:
@@ -662,6 +1253,7 @@ def api_fix_project_permissions(project_id):
             timeout=60,
             user_id=user_id,  # Issue #2745: Pass user_id for audit log
             project_id=project_id,  # Issue #2745: Pass project_id for audit log
+            tenant_id=project.tenant_id,  # Issue #3396: tenant-scoped group
         )
 
         if success:

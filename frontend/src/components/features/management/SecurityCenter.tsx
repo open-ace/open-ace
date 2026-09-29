@@ -6,9 +6,11 @@
  * - Filter Rules: Manage content filtering rules
  * - Security Settings: Configure security policies
  * - Audit Thresholds: Configure anomaly detection thresholds
+ * - Tenant selector for platform admins (Issue #3274)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { cn, createMatcherConfig } from '@/utils';
 import {
   useFilterRules,
@@ -26,6 +28,10 @@ import {
   useCreateSensitiveKeyword,
   useUpdateSensitiveKeyword,
   useDeleteSensitiveKeyword,
+  useSsrfStatus,
+  useResetSsrfConfig,
+  useUploadAuthStatus,
+  useUser,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -42,6 +48,7 @@ import {
   PageRefreshControl,
   StatCard,
   Progress,
+  TenantSelector,
 } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
@@ -92,7 +99,73 @@ const MAX_THRESHOLD_VALUE = 10000;
 export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>('filter');
+
+  // Get tenant selection from useAdminTenant
+  const { tenants, selectedTenantId, selectTenant, effectiveTenantId } = useAdminTenant();
+
+  // URL parameter processing (Issue #3274)
+  // Use ref to track if URL parameters have been processed
+  const urlParamsProcessedRef = React.useRef(false);
+
+  useEffect(() => {
+    // Skip if already processed
+    if (urlParamsProcessedRef.current) {
+      return;
+    }
+
+    // Read URL parameters
+    const tabParam = searchParams.get('tab');
+    const tenantIdParam = searchParams.get('tenant_id');
+
+    // Validate and set tab
+    const VALID_TABS: TabType[] = ['filter', 'settings', 'audit', 'stats', 'sensitive-keywords'];
+    if (tabParam && VALID_TABS.includes(tabParam as TabType)) {
+      setActiveTab(tabParam as TabType);
+    }
+
+    // Validate and select tenant
+    if (tenantIdParam) {
+      const tenantId = Number(tenantIdParam);
+      // Validate: must be positive integer
+      if (!isNaN(tenantId) && tenantId > 0 && Number.isInteger(tenantId)) {
+        // Check if tenant exists in the list
+        const tenantExists = tenants?.some((t) => t.id === tenantId);
+        if (tenantExists && selectedTenantId !== tenantId) {
+          selectTenant(tenantId);
+          // Mark as processed only if tenant selection was successful
+          urlParamsProcessedRef.current = true;
+        }
+      }
+    } else {
+      // No tenant ID in URL, mark as processed
+      urlParamsProcessedRef.current = true;
+    }
+  }, [tenants, selectedTenantId, selectTenant, searchParams]);
+
+  // Sync URL parameters when tab or tenant changes
+  const handleTabChange = (newTab: TabType) => {
+    setActiveTab(newTab);
+    if (selectedTenantId) {
+      setSearchParams({ tenant_id: selectedTenantId.toString(), tab: newTab });
+    } else {
+      setSearchParams({ tab: newTab });
+    }
+  };
+
+  const handleTenantChange = (tenantId: number | null) => {
+    if (tenantId && activeTab) {
+      setSearchParams({ tenant_id: tenantId.toString(), tab: activeTab });
+    }
+  };
+
+  // Get current tenant name for display
+  const currentTenantName = useMemo(() => {
+    if (!effectiveTenantId || !tenants) return null;
+    const tenant = tenants.find((t) => t.id === effectiveTenantId);
+    return tenant?.name ?? null;
+  }, [effectiveTenantId, tenants]);
 
   // Generate translated options for Select components
   const getTypeOptions = () => [
@@ -196,7 +269,30 @@ export const SecurityCenter: React.FC = () => {
   const [showAllPatterns, setShowAllPatterns] = useState(false);
 
   // --- Sensitive Keywords State (Issue #3059) ---
-  const { effectiveTenantId } = useAdminTenant();
+  // (effectiveTenantId already obtained from useAdminTenant at component top)
+
+  // --- SSRF Status State (Issue #3328) ---
+  const {
+    data: ssrfStatus,
+    isLoading: ssrfStatusLoading,
+    isError: ssrfStatusError,
+    error: ssrfStatusErrorMsg,
+    refetch: refetchSsrfStatus,
+  } = useSsrfStatus();
+  const resetSsrfConfig = useResetSsrfConfig();
+
+  // --- Upload Auth Status State (Issue #3327) ---
+  const {
+    data: uploadAuthStatus,
+    isLoading: uploadAuthStatusLoading,
+    isError: uploadAuthStatusError,
+    error: uploadAuthStatusErrorMsg,
+    refetch: refetchUploadAuthStatus,
+  } = useUploadAuthStatus();
+
+  // Get current user to check if platform admin
+  const user = useUser();
+  const isPlatformAdmin = user?.role === 'platform_admin';
 
   // TODO: Add filter controls in future iteration
   const [keywordFilters] = useState<SensitiveKeywordsFilters>({
@@ -739,6 +835,12 @@ export const SecurityCenter: React.FC = () => {
 
     return (
       <>
+        {/* Upload Auth Status (Issue #3327) */}
+        {renderUploadAuthStatusCard()}
+
+        {/* SSRF Protection Status (Issue #3328) */}
+        {renderSsrfStatusCard()}
+
         {/* Session Settings */}
         <Card title={t('sessionSettings', language)} className="mb-4">
           <div className="row g-3">
@@ -1204,11 +1306,23 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
-  // --- Render Sensitive Keywords Tab (Issue #3059) ---
+  // --- Render Sensitive Keywords Tab (Issue #3059, Issue #3274) ---
   const renderSensitiveKeywordsTab = () => {
-    // Permission check
+    // Permission check with friendly message
     if (!effectiveTenantId) {
-      return <Error message={t('noPermission', language)} />;
+      return (
+        <EmptyState
+          icon="bi-shield-exclamation"
+          title={
+            t('selectTenantToManageKeywords', language) ||
+            'Please select a tenant to manage sensitive keywords'
+          }
+          description={
+            t('selectTenantToManageKeywordsDesc', language) ||
+            'You need to select a tenant first to view and manage its sensitive keywords'
+          }
+        />
+      );
     }
 
     // Loading state
@@ -1230,60 +1344,75 @@ export const SecurityCenter: React.FC = () => {
 
     return (
       <>
-        {/* Keywords Table */}
-        {!keywords || keywords.length === 0 ? (
-          <EmptyState icon="bi-key" title={t('noKeywords', language)} />
-        ) : (
-          <div className="table-responsive">
-            <table className="table table-hover">
-              <thead>
-                <tr>
-                  <th>{t('keyword', language)}</th>
-                  <th>{t('status', language)}</th>
-                  <th>{t('createdAt', language)}</th>
-                  <th>{t('actions', language)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keywords.map((keyword) => (
-                  <tr key={keyword.id}>
-                    <td>
-                      <code>{keyword.keyword}</code>
-                    </td>
-                    <td>
-                      <div className="form-check form-switch">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          checked={keyword.is_enabled}
-                          onChange={() => handleToggleKeywordEnabled(keyword)}
-                          disabled={updateKeyword.isPending}
-                        />
-                      </div>
-                    </td>
-                    <td>
-                      <small className="text-muted">
-                        {new Date(keyword.created_at).toLocaleString(
-                          language === 'zh' ? 'zh-CN' : 'en-US'
-                        )}
-                      </small>
-                    </td>
-                    <td>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => handleDeleteKeyword(keyword.id)}
-                        disabled={deleteKeyword.isPending}
-                      >
-                        <i className="bi bi-trash" />
-                      </Button>
-                    </td>
+        {/* Keywords List with Tenant Name (Issue #3274) */}
+        <Card
+          title={
+            currentTenantName
+              ? `${currentTenantName} ${t('sensitiveKeywords', language)}`
+              : t('sensitiveKeywords', language)
+          }
+          className="mb-4"
+        >
+          {!keywords || keywords.length === 0 ? (
+            <EmptyState
+              icon="bi-key"
+              title={t('noKeywords', language)}
+              description={
+                t('noKeywordsDesc', language) || 'No sensitive keywords configured for this tenant'
+              }
+            />
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>{t('keyword', language)}</th>
+                    <th>{t('status', language)}</th>
+                    <th>{t('createdAt', language)}</th>
+                    <th>{t('actions', language)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {keywords.map((keyword) => (
+                    <tr key={keyword.id}>
+                      <td>
+                        <code>{keyword.keyword}</code>
+                      </td>
+                      <td>
+                        <div className="form-check form-switch">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            checked={keyword.is_enabled}
+                            onChange={() => handleToggleKeywordEnabled(keyword)}
+                            disabled={updateKeyword.isPending}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <small className="text-muted">
+                          {new Date(keyword.created_at).toLocaleString(
+                            language === 'zh' ? 'zh-CN' : 'en-US'
+                          )}
+                        </small>
+                      </td>
+                      <td>
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          onClick={() => handleDeleteKeyword(keyword.id)}
+                          disabled={deleteKeyword.isPending}
+                        >
+                          <i className="bi bi-trash" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
 
         {/* Create Keyword Modal */}
         <Modal
@@ -1327,6 +1456,378 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
+  // --- Render SSRF Status (Issue #3328) ---
+  const handleResetSsrfConfig = async () => {
+    if (!ssrfStatus) return;
+
+    const itemsToReset: string[] = [];
+    if (ssrfStatus.port_whitelist.is_customized) itemsToReset.push('port_whitelist');
+    if (ssrfStatus.global_allowlist.is_customized) itemsToReset.push('global_allowlist');
+
+    if (itemsToReset.length === 0) {
+      toast.info(t('ssrfNoCustomConfig', language));
+      return;
+    }
+
+    const confirmed = await confirm({
+      message: t('ssrfResetConfigConfirm', language),
+      variant: 'warning',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await resetSsrfConfig.mutateAsync({
+        reset_ports: ssrfStatus.port_whitelist.is_customized,
+        reset_global_allowlist: ssrfStatus.global_allowlist.is_customized,
+        expected_version: ssrfStatus.config_version,
+      });
+      toast.success(t('ssrfResetConfigSuccess', language));
+      refetchSsrfStatus();
+    } catch (err: any) {
+      if (err?.response?.data?.error === 'CONFIG_VERSION_CONFLICT') {
+        toast.error(t('ssrfConfigVersionConflict', language));
+        refetchSsrfStatus();
+      } else {
+        console.error('Failed to reset SSRF config:', err);
+        toast.error(t('error', language));
+      }
+    }
+  };
+
+  // --- Render Upload Auth Status (Issue #3327) ---
+  const renderUploadAuthStatusCard = () => {
+    if (uploadAuthStatusLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (uploadAuthStatusError) {
+      return (
+        <Error
+          message={uploadAuthStatusErrorMsg?.message ?? t('error', language)}
+          onRetry={() => refetchUploadAuthStatus()}
+        />
+      );
+    }
+
+    if (!uploadAuthStatus) {
+      return <EmptyState icon="bi-shield-check" title={t('noData', language)} />;
+    }
+
+    // Determine status badge
+    const statusVariant = uploadAuthStatus.upload_auth_enabled
+      ? uploadAuthStatus.is_valid
+        ? 'success'
+        : 'warning'
+      : 'secondary';
+
+    const statusLabel = uploadAuthStatus.upload_auth_enabled
+      ? uploadAuthStatus.is_valid
+        ? t('uploadAuthEnabled', language)
+        : t('uploadAuthInvalid', language)
+      : t('uploadAuthDisabled', language);
+
+    // Determine document URL based on language
+    const docUrl = language === 'zh' ? '/docs/cn/DEPLOYMENT.md' : '/docs/en/DEPLOYMENT.md';
+
+    return (
+      <Card title={t('uploadAuthStatus', language)} className="mb-4">
+        <div className="row g-4">
+          {/* Status */}
+          <div className="col-12">
+            <div className="d-flex align-items-center gap-3">
+              <span className="fw-semibold">{t('uploadAuthStatus', language)}:</span>
+              <Badge variant={statusVariant}>{statusLabel}</Badge>
+            </div>
+          </div>
+
+          {/* Key Length */}
+          {uploadAuthStatus.key_length !== null && (
+            <div className="col-md-6">
+              <div className="text-muted">{t('uploadAuthKeyLength', language)}</div>
+              <div className="fs-5">
+                {uploadAuthStatus.key_length} {language === 'zh' ? '字符' : 'characters'}
+              </div>
+            </div>
+          )}
+
+          {/* Security Mode */}
+          <div className="col-md-6">
+            <div className="text-muted">{t('securityMode', language)}</div>
+            <div className="fs-5">{uploadAuthStatus.security_mode}</div>
+          </div>
+
+          {/* Checked At */}
+          <div className="col-12">
+            <small className="text-muted">
+              {t('uploadAuthCheckedAt', language)}:{' '}
+              {new Date(uploadAuthStatus.checked_at).toLocaleString(
+                language === 'zh' ? 'zh-CN' : 'en-US'
+              )}
+            </small>
+          </div>
+
+          {/* Error Message */}
+          {!uploadAuthStatus.is_valid && uploadAuthStatus.validation_error && (
+            <div className="col-12">
+              <div className="alert alert-warning mb-0">
+                <i className="bi bi-exclamation-triangle me-2" />
+                <strong>{language === 'zh' ? '配置错误：' : 'Configuration error: '}</strong>
+                {uploadAuthStatus.validation_error}
+                {uploadAuthStatus.fix_suggestion && (
+                  <>
+                    <br />
+                    <strong>{language === 'zh' ? '修复建议：' : 'Fix suggestion: '}</strong>
+                    {uploadAuthStatus.fix_suggestion}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Info for disabled state */}
+          {!uploadAuthStatus.upload_auth_enabled && uploadAuthStatus.is_valid && (
+            <div className="col-12">
+              <div className="alert alert-info mb-0">
+                <i className="bi bi-info-circle me-2" />
+                {uploadAuthStatus.fix_suggestion ?? t('uploadAuthConfigHint', language)}
+                <br />
+                <a href={docUrl} target="_blank" rel="noopener noreferrer">
+                  {t('uploadAuthViewDocs', language)}
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <hr />
+          <div className="d-flex justify-content-between align-items-center">
+            <div className="text-muted small">{t('uploadAuthConfigHint', language)}</div>
+            <div className="d-flex gap-2">
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={() => refetchUploadAuthStatus()}
+              >
+                <i className="bi bi-arrow-clockwise me-1" />
+                {t('refresh', language)}
+              </Button>
+              <a
+                href={docUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-outline-primary btn-sm"
+              >
+                <i className="bi bi-book me-1" />
+                {t('uploadAuthViewDocs', language)}
+              </a>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  const renderSsrfStatusCard = () => {
+    if (ssrfStatusLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (ssrfStatusError) {
+      return (
+        <Error
+          message={ssrfStatusErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchSsrfStatus()}
+        />
+      );
+    }
+
+    if (!ssrfStatus) {
+      return <EmptyState icon="bi-shield-check" title={t('noData', language)} />;
+    }
+
+    return (
+      <>
+        {/* Emergency Mode Warning */}
+        {ssrfStatus.emergency_mode && (
+          <div className="alert alert-danger mb-4" role="alert">
+            <i className="bi bi-exclamation-triangle me-2" />
+            {t('ssrfEmergencyModeWarning', language)}
+          </div>
+        )}
+
+        {/* SSRF Protection Status Card */}
+        <Card title={t('ssrfProtectionTitle', language)} className="mb-4">
+          <div className="row g-4">
+            {/* Protection Status */}
+            <div className="col-12">
+              <div className="d-flex align-items-center gap-3">
+                <span className="fw-semibold">{t('ssrfProtectionStatus', language)}:</span>
+                <Badge variant={ssrfStatus.ssrf_protection_enabled ? 'success' : 'danger'}>
+                  {ssrfStatus.emergency_mode
+                    ? t('ssrfEmergencyMode', language)
+                    : ssrfStatus.ssrf_protection_enabled
+                      ? t('ssrfProtectionEnabled', language)
+                      : t('ssrfProtectionDisabled', language)}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Default Policy */}
+            <div className="col-md-6">
+              <h6 className="text-muted mb-3">{t('ssrfDefaultPolicy', language)}</h6>
+              <div className="mb-3">
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedPrivateNetworks', language)}
+                </small>
+                <div className="d-flex flex-wrap gap-1">
+                  {ssrfStatus.default_policy.blocked_private_networks.map((network) => (
+                    <Badge key={network} variant="secondary">
+                      {network}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <small className="text-muted d-block mb-2">
+                  {t('ssrfBlockedHostnames', language)}
+                </small>
+                <div
+                  className="d-flex flex-wrap gap-1"
+                  style={{ maxHeight: '100px', overflowY: 'auto' }}
+                >
+                  {ssrfStatus.default_policy.blocked_hostnames.slice(0, 10).map((hostname) => (
+                    <Badge key={hostname} variant="secondary">
+                      {hostname}
+                    </Badge>
+                  ))}
+                  {ssrfStatus.default_policy.blocked_hostnames.length > 10 && (
+                    <Badge variant="secondary">
+                      +{ssrfStatus.default_policy.blocked_hostnames.length - 10} more
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Current Configuration */}
+            <div className="col-md-6">
+              <h6 className="text-muted mb-3">{t('ssrfCurrentConfig', language)}</h6>
+              <div className="mb-3">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span className="fw-medium">{t('ssrfPortWhitelist', language)}:</span>
+                  <Badge variant={ssrfStatus.port_whitelist.is_customized ? 'info' : 'secondary'}>
+                    {ssrfStatus.port_whitelist.is_customized
+                      ? t('ssrfIsCustomized', language)
+                      : t('ssrfIsDefault', language)}
+                  </Badge>
+                </div>
+                <div className="d-flex flex-wrap gap-1">
+                  {ssrfStatus.port_whitelist.value.map((port) => (
+                    <Badge key={port} variant="secondary">
+                      {port}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-3">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span className="fw-medium">{t('ssrfGlobalAllowlist', language)}:</span>
+                  <Badge variant={ssrfStatus.global_allowlist.is_customized ? 'info' : 'secondary'}>
+                    {ssrfStatus.global_allowlist.is_customized
+                      ? t('ssrfIsCustomized', language)
+                      : t('ssrfIsDefault', language)}
+                  </Badge>
+                </div>
+                <span>
+                  {ssrfStatus.global_allowlist.count} {t('ssrfDomains', language)}
+                </span>
+              </div>
+              <div>
+                <div className="d-flex align-items-center gap-2">
+                  <span className="fw-medium">{t('ssrfTenantAllowlist', language)}:</span>
+                  <Badge variant={ssrfStatus.tenant_allowlist.enabled ? 'success' : 'secondary'}>
+                    {ssrfStatus.tenant_allowlist.enabled
+                      ? t('ssrfTenantAllowlistCount', language, {
+                          count: ssrfStatus.tenant_allowlist.tenant_count,
+                        })
+                      : t('disabled', language)}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Interception Stats */}
+          <hr />
+          <div className="row g-3">
+            <div className="col-12">
+              <h6 className="text-muted mb-3">{t('ssrfInterceptionStats', language)}</h6>
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast24h', language)}
+                value={ssrfStatus.interception_stats.last_24h}
+                variant="info"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast7d', language)}
+                value={ssrfStatus.interception_stats.last_7d}
+                variant="info"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('ssrfInterceptionLast30d', language)}
+                value={ssrfStatus.interception_stats.last_30d}
+                variant="info"
+              />
+            </div>
+          </div>
+
+          {/* Actions */}
+          <hr />
+          <div className="d-flex justify-content-between align-items-center">
+            <div className="text-muted small">
+              {t('ssrfConfigVersion', language)}: v{ssrfStatus.config_version} |
+              {t('ssrfConfigSource', language)}:{' '}
+              {t(
+                `ssrfConfigSource${ssrfStatus.config_source.charAt(0).toUpperCase()}${ssrfStatus.config_source.slice(1)}`,
+                language
+              )}
+            </div>
+            <div className="d-flex gap-2">
+              <Button variant="outline-secondary" size="sm" onClick={() => refetchSsrfStatus()}>
+                <i className="bi bi-arrow-clockwise me-1" />
+                {t('refresh', language)}
+              </Button>
+              {ssrfStatus.can_reset && isPlatformAdmin && (
+                <Button
+                  variant="outline-warning"
+                  size="sm"
+                  onClick={handleResetSsrfConfig}
+                  loading={resetSsrfConfig.isPending}
+                >
+                  <i className="bi bi-arrow-counterclockwise me-1" />
+                  {t('ssrfResetConfig', language)}
+                </Button>
+              )}
+              <a
+                href="/manage/audit?action=LLM_PROXY_URL_BLOCKED"
+                className="btn btn-outline-primary btn-sm"
+              >
+                <i className="bi bi-journal-text me-1" />
+                {t('ssrfViewAuditLogs', language)}
+              </a>
+            </div>
+          </div>
+        </Card>
+      </>
+    );
+  };
+
   return (
     <div className="security-center">
       {/* Header */}
@@ -1356,12 +1857,20 @@ export const SecurityCenter: React.FC = () => {
         </div>
       </div>
 
+      {/* Tenant Selector (Issue #3274) */}
+      <TenantSelector
+        onTenantChange={handleTenantChange}
+        showClearButton={true}
+        showSearch={true}
+        className="mb-3"
+      />
+
       {/* Tab Navigation */}
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'filter' && 'active')}
-            onClick={() => setActiveTab('filter')}
+            onClick={() => handleTabChange('filter')}
           >
             <i className="bi bi-shield-check me-1" />
             {t('contentFilter', language)}
@@ -1370,7 +1879,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'settings' && 'active')}
-            onClick={() => setActiveTab('settings')}
+            onClick={() => handleTabChange('settings')}
           >
             <i className="bi bi-gear me-1" />
             {t('securitySettings', language)}
@@ -1379,7 +1888,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'audit' && 'active')}
-            onClick={() => setActiveTab('audit')}
+            onClick={() => handleTabChange('audit')}
           >
             <i className="bi bi-sliders me-1" />
             {t('auditThresholds', language)}
@@ -1388,7 +1897,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'stats' && 'active')}
-            onClick={() => setActiveTab('stats')}
+            onClick={() => handleTabChange('stats')}
           >
             <i className="bi bi-bar-chart me-1" />
             {t('filterStats', language)}
@@ -1397,7 +1906,7 @@ export const SecurityCenter: React.FC = () => {
         <li className="nav-item">
           <button
             className={cn('nav-link', activeTab === 'sensitive-keywords' && 'active')}
-            onClick={() => setActiveTab('sensitive-keywords')}
+            onClick={() => handleTabChange('sensitive-keywords')}
           >
             <i className="bi bi-key me-1" />
             {t('sensitiveKeywords', language)}

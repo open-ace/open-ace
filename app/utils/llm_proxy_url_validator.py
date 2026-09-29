@@ -36,6 +36,16 @@ _DNS_CACHE: dict[str, tuple[tuple[IPAddress, ...], float]] = {}
 _DNS_CACHE_TTL = 300.0
 
 
+def invalidate_dns_cache() -> None:
+    """Invalidate DNS cache (called when resetting SSRF config).
+
+    Issue #3328: When admin resets SSRF config to default, we need to
+    clear the DNS cache so the next request uses fresh DNS resolution.
+    """
+    global _DNS_CACHE
+    _DNS_CACHE.clear()
+
+
 @dataclass(frozen=True)
 class LlmProxyValidationResult:
     """Result for LLM proxy URL validation."""

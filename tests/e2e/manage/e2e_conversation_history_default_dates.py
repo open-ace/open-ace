@@ -9,7 +9,8 @@ pre-fills a 30-day default into the filter state on load AND on Reset.
 
 Tests:
 1. First load — the start/end date pickers are pre-filled with the default
-   30-day range (today-30 .. today), NOT empty.
+   30-day range (today-29 .. today, exactly 30 calendar days inclusive),
+   NOT empty.
 2. Reset regression — after manually changing the dates and clicking Reset,
    the pickers return to the default 30-day range (NOT empty).
 3. After Reset the page still renders within the default range (rows or a
@@ -29,12 +30,21 @@ Run:
 import json
 import os
 import subprocess
+import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from tests.e2e.sync_helpers import expected_default_date_range
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1006)]
 
@@ -71,10 +81,9 @@ def check(desc, condition, detail=""):
 
 
 def expected_range(days=30):
-    """Mirror of the frontend getDefaultDateRange(): local today-30 .. today."""
-    today = datetime.now()
-    start = today - timedelta(days=days)
-    return start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
+    """The shared #3276 contract expectation: local today-(days-1) .. today,
+    exactly `days` calendar days inclusive (see sync_helpers)."""
+    return expected_default_date_range(days)
 
 
 def norm_date_text(text):
@@ -163,8 +172,12 @@ def pick_non_default_day(page):
     page.wait_for_selector(".react-datepicker", timeout=5000)
     cells = page.locator(".react-datepicker__day:not(.react-datepicker__day--outside-month)")
     today_d = datetime.now().day
-    start_d = (datetime.now() - timedelta(days=30)).day
-    avoid = {today_d, start_d}
+    # The default start's day-of-month is derived from the SAME shared
+    # expectation the assertions use (today-29 under the #3276 inclusive
+    # contract) — deriving it here from today-30 would let ~30 nights a year
+    # pick a day that equals the new default start and fail the change check.
+    default_start_d = datetime.strptime(expected_default_date_range(30)[0], "%Y-%m-%d").day
+    avoid = {today_d, default_start_d}
     count = cells.count()
     for i in range(count):
         text = cells.nth(i).inner_text().strip()
@@ -249,7 +262,7 @@ def test_default_dates():
             "End date NOT empty on load", end_val not in ("", "Select.date"), f"(value={end_val!r})"
         )
         check(
-            "Start date == today-30 on load",
+            "Start date == today-29 (30 calendar days inclusive) on load",
             start_val == exp_start,
             f"(got {start_val!r}, want {exp_start!r})",
         )

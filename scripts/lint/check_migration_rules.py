@@ -34,7 +34,7 @@ alone (Issue #1704). Two failure modes are codified here:
           ``with`` statement. The kwarg issues ``... CONCURRENTLY`` which is only
           valid outside a transaction.
 
-The correct template (see docs/en/DATABASE-CONVENTIONS.md) is::
+The correct template (see docs/en/DATABASE_CONVENTIONS.md) is::
 
     if _is_postgresql():
         with op.get_context().autocommit_block():
@@ -604,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         print(
-            "See docs/en/DATABASE-CONVENTIONS.md -> Migration Authoring Rules.",
+            "See docs/en/DATABASE_CONVENTIONS.md -> Migration Authoring Rules.",
             file=sys.stderr,
         )
         return 1

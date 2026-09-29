@@ -92,6 +92,16 @@ for _name in dir(_rw):
 _ws._is_wrapper_available = lambda p: False
 _ws.run_as_root_if_needed = lambda cmd: None
 
+# Issue #3376: fs.py imports the shared path validator from
+# app.utils.path_guard; load the real module so validation semantics stay
+# identical to production.
+_pgspec = importlib.util.spec_from_file_location(
+    "_real_path_guard", str(PROJECT_ROOT / "app/utils/path_guard.py")
+)
+_pg = importlib.util.module_from_spec(_pgspec)
+_pgspec.loader.exec_module(_pg)
+sys.modules["app.utils.path_guard"] = _pg
+
 # Now import the real fs module.
 _fspec = importlib.util.spec_from_file_location(
     "fs_e2e_under_test", str(PROJECT_ROOT / "app/routes/fs.py")

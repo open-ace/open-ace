@@ -139,6 +139,16 @@ class BaseCLIAdapter(abc.ABC):
         """Return the executable name (e.g., 'qwen', 'claude')."""
         pass
 
+    def get_install_requirements_hint(self) -> str:
+        """Prerequisite hint surfaced alongside get_install_command().
+
+        Empty by default. Adapters whose install command has hard runtime
+        prerequisites the package manager itself does not enforce override
+        this — e.g. npm only warns EBADENGINE on an engines mismatch and
+        still exits 0, so the Node requirement must be stated explicitly.
+        """
+        return ""
+
     def get_settings_path(self) -> str | None:
         """Return the path to the CLI tool's settings.json, or None if not applicable."""
         return None
@@ -160,7 +170,18 @@ class BaseCLIAdapter(abc.ABC):
         return False
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: str | None = None
+        self,
+        prompt: str,
+        project_path: str,
+        model: str | None = None,
+        resume: bool = False,
+        resume_session_id: str = "",
     ) -> list[str]:
-        """Build args for a single-shot prompt execution (used when stdin is not supported)."""
+        """Build args for a single-shot prompt execution (used when stdin is not supported).
+
+        ``resume`` / ``resume_session_id`` let a tool continue a prior session
+        (#3321). Adapters that cannot resume non-interactively ignore them; the
+        parameters live on the base signature so ``_run_single_shot`` can pass
+        them uniformly without a per-tool ``TypeError``.
+        """
         return [self.get_executable_name(), prompt]

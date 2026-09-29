@@ -212,6 +212,13 @@ if (Test-Path "$InstallDir\requirements.txt") {
     Write-Host "[WARN] requirements.txt not found, skipping" -ForegroundColor Yellow
 }
 
+# Pinned qwen-code CLI version: keep in sync with the control plane's
+# Dockerfile pair (webui 0.2.43 + cli 0.23.3). The Node >= 22 gate and the
+# adapter flags are validated against THIS version; @latest would drift the
+# agent onto unvalidated engines/CLI changes while npm still exits 0 on a
+# mere EBADENGINE warning (PR #3386 review).
+$QwenCliVersion = "0.23.3"
+
 # Step 5: Optionally install CLI tool
 if ($InstallCli) {
     Write-Host "[INFO] Installing CLI tool: $InstallCli..." -ForegroundColor Cyan
@@ -222,11 +229,42 @@ if ($InstallCli) {
 
         switch ($InstallCli) {
             "qwen-code-cli" {
-                npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "[OK] qwen-code-cli installed" -ForegroundColor Green
+                # @qwen-code/qwen-code >= 0.23 requires Node >= 22; npm exits 0
+                # on a mere EBADENGINE warning, so gate on the real version.
+                $nodeMajor = 0
+                try { $nodeMajor = [int]((node --version) -replace '^v','' -split '\.')[0] } catch {}
+                if ($nodeMajor -lt 22) {
+                    Write-Host "[ERROR] Node >= 22 is required by qwen-code-cli (found: $nodeMajor). Refusing to install an unsupported Node/CLI combination. Upgrade Node.js and re-run." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
                 } else {
-                    Write-Host "[WARN] Failed to install qwen-code-cli" -ForegroundColor Yellow
+                npm install -g "@qwen-code/qwen-code@0.23.3" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    # Propagate npm failure (PR #3386 review): the config
+                    # declares cli_tool=qwen-code-cli, so a soft warn would
+                    # register an agent whose default CLI can never start.
+                    Write-Host "[ERROR] Failed to install qwen-code-cli. Fix npm/network/permissions and re-run." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
+                }
+                # $LASTEXITCODE only reflects the LAST native program that
+                # actually RAN: if qwen is not on PATH, the failed invocation
+                # runs no native program and the stale npm exit code (0)
+                # survives — and 2>&1 would bind a truthy ErrorRecord to the
+                # variable. Confirm the command exists first, fail closed.
+                if (-not (Get-Command qwen -ErrorAction SilentlyContinue)) {
+                    Write-Host "[ERROR] qwen-code-cli installed but 'qwen' is not on PATH." -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
+                }
+                $qwenVersion = (& qwen --version 2>$null | Select-Object -First 1)
+                if ($LASTEXITCODE -ne 0 -or -not $qwenVersion -or "$qwenVersion".Trim() -ne $QwenCliVersion) {
+                    # Exact-match verification: 0.23.30 etc. must fail
+                    Write-Host "[ERROR] qwen-code-cli version mismatch: expected $QwenCliVersion, got '$qwenVersion'" -ForegroundColor Red
+                    $ErrorActionPreference = $prevErrorAction
+                    exit 1
+                }
+                Write-Host "[OK] qwen-code-cli installed ($qwenVersion)" -ForegroundColor Green
                 }
             }
             "claude-code" {
@@ -242,6 +280,10 @@ if ($InstallCli) {
         # Restore error handling
         $ErrorActionPreference = $prevErrorAction
     } else {
+        if ($InstallCli -eq "qwen-code-cli") {
+            Write-Host "[ERROR] npm not found and qwen-code-cli cannot be installed. Install Node.js >= 22 (with npm) manually and re-run." -ForegroundColor Red
+            exit 1
+        }
         Write-Host "[WARN] npm not found. Skipping CLI installation." -ForegroundColor Yellow
     }
 }

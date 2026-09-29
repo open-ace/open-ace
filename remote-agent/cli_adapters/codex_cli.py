@@ -136,14 +136,41 @@ class CodexCLIAdapter(BaseCLIAdapter):
         return args
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: str | None = None
+        self,
+        prompt: str,
+        project_path: str,
+        model: str | None = None,
+        resume: bool = False,
+        resume_session_id: str = "",
     ) -> list[str]:
         """
         Build args for a single-shot prompt execution.
 
-        Uses ``codex exec --json`` for machine-parseable output with a
-        read-only sandbox as the default safety boundary.
+        Cold turn: ``codex exec --json --sandbox read-only`` for
+        machine-parseable output with a read-only sandbox as the safety
+        boundary.
+
+        Resume turn (#3321): ``codex exec resume --json <id>``. The ``resume``
+        subcommand rejects ``--sandbox`` and ``--cd``, so the read-only policy
+        is carried by a ``-c sandbox_mode=read-only`` config override (verified
+        against ``--strict-config``) and the working directory comes from the
+        subprocess ``cwd`` the runner already sets. Falls back to the cold form
+        when no id is available so we never emit ``resume`` with an empty id.
         """
+        if resume and resume_session_id:
+            args = [
+                self.EXECUTABLE,
+                "exec",
+                "resume",
+                "--json",
+                "-c",
+                "sandbox_mode=read-only",
+            ]
+            if model:
+                args.extend(["--model", model])
+            args.extend([resume_session_id, prompt])
+            return args
+
         args = [
             self.EXECUTABLE,
             "exec",

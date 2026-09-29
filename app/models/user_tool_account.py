@@ -37,6 +37,17 @@ class MappingStatus(str, Enum):
     CONFLICT_TENANT = "conflict_tenant"  # Tenant conflict
 
 
+class VerificationStatus(str, Enum):
+    """Verification status of the tool account mapping.
+
+    Issue #3273: Added to track verification status independently from mapping_status.
+    """
+
+    UNVERIFIED = "unverified"  # Not verified yet (default for new mappings)
+    VERIFIED = "verified"  # Verification passed
+    FAILED = "failed"  # Verification failed
+
+
 @dataclass
 class UserToolAccount:
     """Mapping between user and their tool account."""
@@ -61,6 +72,11 @@ class UserToolAccount:
     tenant_id: int | None = None  # Tenant ID (denormalized for query performance)
     version: int = 1  # Optimistic lock version number
 
+    # Issue #3273: New fields for verification status
+    verification_status: str | None = None  # unverified, verified, failed
+    verification_result: str | None = None  # Detailed verification result message
+    verified_at: datetime | None = None  # Last verification timestamp
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
@@ -79,6 +95,10 @@ class UserToolAccount:
             "created_by": self.created_by,
             "tenant_id": self.tenant_id,
             "version": self.version,
+            # Issue #3273: Verification fields
+            "verification_status": self.verification_status,
+            "verification_result": self.verification_result,
+            "verified_at": ensure_utc_suffix(self.verified_at),
         }
 
 

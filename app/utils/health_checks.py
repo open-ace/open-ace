@@ -341,3 +341,47 @@ def check_ssh_sync_failure() -> dict[str, Any]:
         error_msg = _sanitize_error_message(e)
         logger.warning(f"SSH sync check failed: {error_msg}")
         return {"status": "error", "error": error_msg}
+
+
+def check_frontend_build() -> dict[str, Any]:
+    """Check frontend build artifacts integrity (Issue #3277).
+
+    Checks that the frontend build output exists and contains required files.
+    This ensures the management platform UI is available.
+
+    Returns:
+        Dict with status and check details.
+    """
+    try:
+        from app.utils.frontend_check import get_frontend_build_status
+
+        result = get_frontend_build_status()
+
+        # Convert to health check format
+        status = "ok" if result.get("status") == "ok" else "missing"
+
+        # Build response
+        response: dict[str, Any] = {
+            "status": status,
+        }
+
+        # Add individual check results
+        checks = result.get("checks", {})
+        for check_name, check_data in checks.items():
+            response[check_name] = check_data.get("status") == "ok"
+
+        # Add errors/warnings if present
+        if result.get("errors"):
+            response["errors"] = result["errors"]
+        if result.get("warnings"):
+            response["warnings"] = result["warnings"]
+
+        return response
+
+    except ImportError:
+        # Frontend check module not available - skip
+        return {"status": "skipped", "reason": "check_module_not_available"}
+    except Exception as e:
+        error_msg = _sanitize_error_message(e)
+        logger.warning(f"Frontend build check failed: {error_msg}")
+        return {"status": "error", "error": error_msg}

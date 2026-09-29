@@ -1,0 +1,269 @@
+"""Control-plane store for CLI session transcripts (#3237).
+
+The OpenSandbox backend gives every turn its own sandbox, so the CLI's
+transcript — which is what ``--resume`` reads — dies with the pod. This holds
+one transcript per session line between turns, the same job
+``scripts/openace-run-as.sh`` does with ``.claude-preserve`` for the isolated
+Legacy path.
+
+Deliberately knows nothing about providers, sandboxes or the CLI: it stores
+bytes under a key. That keeps the fail-closed decisions in one place (the
+runner, which has the context to make them) rather than spread across a
+storage class.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import shutil
+import tempfile
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT
+
+logger = logging.getLogger(__name__)
+
+# An order of magnitude over the largest transcript measured across real
+# autonomous runs (n=31: median 0.1 MB, p90 1.1 MB, max 3.2 MB), matching the
+# shape of ChangesetLimits. Growth becomes a refusal, never a silent hang.
+MAX_AGENT_STATE_BYTES = 16 * 1024 * 1024
+
+# Bounds orphans the way the `.claude-preserve` sibling reaper already does for
+# the Legacy path (#2403).
+DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600
+
+# A workflow id and a session id both reach this from the database, so neither
+# is a trusted path fragment. Anything that is not a plain component is refused
+# rather than sanitised — silently rewriting a key would make two different
+# workflows share one slot.
+#
+# The leading class is NOT the same as the rest: it excludes `.`, which is what
+# makes the dot segments unrepresentable. An earlier version allowed them, and
+# `purge("..")` then resolved to `_root/..` — in production
+# `/run/openace-agent-tasks` — where `shutil.rmtree` would take out every live
+# agent's per-task HOME/TMP/XDG and every `.claude-preserve` directory with it.
+# Verified destructive against a temp tree modelling that layout.
+#
+# `\Z`, not `$`: Python's `$` also matches before a trailing newline, so `$`
+# here would ACCEPT "wf-1\n" — and since the key is used verbatim as a path
+# component, "wf-1\n" and "wf-1" would then be two different slots for one
+# workflow, silently splitting its history. Matching `_SAFE_SESSION_ID` in the
+# OpenSandbox provider, which refuses the same input for the same reason.
+_SAFE_KEY = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\Z")
+
+
+class AgentStateError(Exception):
+    """Base for store failures."""
+
+
+class AgentStateTooLarge(AgentStateError):
+    """The transcript exceeded :data:`MAX_AGENT_STATE_BYTES`."""
+
+
+class CorruptAgentState(AgentStateError):
+    """A slot exists but could not be read.
+
+    Distinct from absent ON PURPOSE. Absent means "first turn, or a reboot
+    cleared tmpfs" and is handled by starting a fresh session. This means we
+    can see state we cannot trust, which is the case ``openace-run-as.sh``
+    aborts on with ``exit 70`` rather than hand the CLI a mis-shaped tree.
+    """
+
+
+class AgentStateStore:
+    """One CLI transcript per (workflow, session line).
+
+    Keyed by the line's TRACKING session id, never by ``cli_session_id``: the
+    tracking id is the stable per-line identity ``SESSION_LINE_FIELDS`` stores
+    on the workflow row and survives a force-fresh, which is exactly when the
+    transcript id changes.
+    """
+
+    def __init__(self, root: str | None = None) -> None:
+        self._root = Path(
+            root
+            or os.environ.get("OPENACE_AGENT_STATE_ROOT")
+            or f"{DEFAULT_TASK_ROOT.rstrip('/')}/agent-state"
+        )
+
+    def path_for(self, workflow_id: str, line_id: str) -> Path:
+        return self._workflow_dir(workflow_id) / f"{self._key(line_id)}.jsonl"
+
+    def put(self, workflow_id: str, line_id: str, blob: bytes) -> None:
+        path = self.path_for(workflow_id, line_id)
+        if len(blob) > MAX_AGENT_STATE_BYTES:
+            raise AgentStateTooLarge(
+                f"agent state is {len(blob)} bytes, over the {MAX_AGENT_STATE_BYTES} "
+                "limit; refusing to store it"
+            )
+        # 0o700 on BOTH levels. The root holds one directory per workflow, so a
+        # mode left to the umask would let any local user enumerate workflow ids.
+        self._root.mkdir(parents=True, exist_ok=True)
+        self._harden(self._root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._harden(path.parent)
+        # Write-then-rename so a crash mid-write cannot leave a slot that is
+        # present but truncated — which get() would have to treat as corrupt,
+        # turning a tidy restart into a refused turn.
+        #
+        # A UNIQUE temp name, not "<key>.jsonl.tmp": two writers on one key
+        # would otherwise interleave on the same file and rename a torn blob
+        # into the slot, which get() cannot detect (only an OSError raises
+        # CorruptAgentState) and which would silently resume half a history.
+        # Created 0600 by mkstemp rather than chmod'ed afterwards, so the
+        # transcript is never briefly world-readable.
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(blob)
+            tmp.replace(path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def get(self, workflow_id: str, line_id: str) -> bytes | None:
+        path = self.path_for(workflow_id, line_id)
+        # ONE syscall, and the error kind IS the answer. An `exists()` probe
+        # ahead of the read put the absent-vs-unreadable decision on a stat
+        # whose failure mode is not stable across the interpreters this repo
+        # tests on:
+        #
+        #   * 3.14 — `Path.exists()` is `os.path.exists()`, which swallows
+        #     EVERY OSError and returns False. A present-but-unreadable slot
+        #     read as ABSENT, so the line silently started fresh: the exact
+        #     fail-OPEN this class exists to prevent, on a CI lane we gate on.
+        #   * 3.12 — `exists()` re-raises a non-ignorable error, so EACCES
+        #     escaped as a raw OSError from outside the try. `_plan_agent_state`
+        #     handles CorruptAgentState and ValueError only, so the turn got no
+        #     structured refusal.
+        #
+        # Both verified against a real chmod'ed directory, not a mock.
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            # Absent: first turn on this line, or a reboot cleared tmpfs.
+            return None
+        except OSError as exc:
+            raise CorruptAgentState(
+                f"agent state for {workflow_id}/{line_id} exists but could not be read "
+                f"({exc}); refusing to guess whether history is present"
+            ) from exc
+
+    def discard(self, workflow_id: str, line_id: str) -> None:
+        try:
+            self.path_for(workflow_id, line_id).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            logger.warning("Failed to discard agent state %s/%s", workflow_id, line_id)
+
+    def purge(self, workflow_id: str) -> None:
+        # NOT ignore_errors=True. That consumes every OSError inside rmtree, so
+        # the handler below could never fire and a terminal workflow could
+        # retain its whole transcript directory while the cleanup path reported
+        # success — sensitive state kept indefinitely with nothing to notice it.
+        # Cleanup still must not raise (a failed tidy-up must not fail a
+        # completed workflow), so the failure is logged instead of swallowed.
+        try:
+            shutil.rmtree(self._workflow_dir(workflow_id))
+        except FileNotFoundError:
+            # Nothing to purge is the ordinary case: a workflow that never
+            # carried state, or a second purge. Not worth a warning, or every
+            # terminal workflow would log one.
+            return
+        except (OSError, ValueError):
+            logger.warning(
+                "Failed to purge agent state for %s; transcripts may be retained",
+                workflow_id,
+                exc_info=True,
+            )
+
+    def reap(
+        self,
+        max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS,
+        *,
+        keep_workflow_ids: Collection[str] = (),
+    ) -> int:
+        """Drop orphaned slots older than the window. Returns how many went.
+
+        ``keep_workflow_ids`` is NOT an optimisation — it is the correctness
+        condition. Age alone does not mean orphaned: a ``paused`` workflow
+        resumes later and still needs its history (which is why "paused" is
+        deliberately absent from ``_TERMINAL_WORKFLOW_STATUSES``), and a
+        long-running workflow may not have touched its review line in weeks.
+        Reaping on mtime alone silently deleted both, and the next turn then
+        started fresh with no sign anything had been lost — the more so
+        because the docs recommend a PERSISTENT root, which is exactly the
+        deployment where a >7-day pause survives to meet this sweep.
+
+        The caller passes every workflow that is not known-terminal, so an
+        unrecognised or brand-new status is KEPT rather than reaped. Retaining
+        a transcript costs disk; deleting a live one costs history.
+        """
+        if not self._root.exists():
+            return 0
+        keep = {str(w) for w in keep_workflow_ids}
+        cutoff = time.time() - max_age_seconds
+        removed = 0
+        for path in self._root.glob("*/*.jsonl"):
+            if path.parent.name in keep:
+                continue
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
+    @staticmethod
+    def _harden(path: Path) -> None:
+        """Tighten a directory to 0700, but only where that is permitted.
+
+        POSIX allows chmod only to the owner or root, and a managed volume root
+        is frequently owned by neither the process nor anyone we can become:
+
+        * **Kubernetes** with ``fsGroup`` makes the volume root writable via the
+          GROUP while leaving it owned by root. An unconditional chmod there
+          raised ``PermissionError: Operation not permitted`` and every single
+          state write failed — on a mount that was otherwise perfectly usable.
+        * **Docker** initialises a fresh named volume as ``root:root`` when the
+          image has no pre-existing directory at the mount point.
+
+        So hardening is best effort ON THE PARTS WE DO NOT OWN, and the layout
+        does the real work instead: the deployments mount the shared volume at
+        the PARENT and let this process create the state root itself, so the
+        root and every workflow directory under it are owned by us and this
+        chmod succeeds normally. This branch is the fallback for a
+        pre-provisioned root, not the design.
+
+        Confidentiality does not rest on it either way. Every transcript is
+        written 0600 by ``mkstemp`` before it is renamed into place, so a
+        directory left group-readable exposes file NAMES (workflow ids) to
+        members of that group, never transcript contents.
+        """
+        try:
+            if path.stat().st_uid == os.geteuid():
+                os.chmod(path, 0o700)
+        except OSError as exc:  # noqa: BLE001 - a usable mount must not be fatal
+            logger.debug("Could not tighten permissions on %s: %s", path, exc)
+
+    def _workflow_dir(self, workflow_id: str) -> Path:
+        return self._root / self._key(workflow_id)
+
+    @staticmethod
+    def _key(value: str) -> str:
+        # No `.strip()`. Stripping is sanitising, and the comment on _SAFE_KEY
+        # says why that is the wrong move here: " wf-1 " and "wf-1" would map
+        # to one slot while remaining two distinct database values. Refuse the
+        # odd one instead, so a caller with a malformed id learns about it.
+        candidate = str(value or "")
+        if not _SAFE_KEY.match(candidate):
+            raise ValueError(f"unsafe agent-state key {value!r}")
+        return candidate
