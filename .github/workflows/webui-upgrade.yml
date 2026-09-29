@@ -8,9 +8,9 @@ name: WebUI Upgrade
 # list the pins contract test enforces
 # (tests/unit/test_ci_docker_job_contract.py::test_qwen_stack_pins_are_consistent_across_all_sites).
 # remote-agent/ pins the CLI in four different variable forms in addition
-# to the literal `npm install -g @qwen-code/qwen-code@X.Y.Z` commands; a
-# bump that misses any site ships mixed versions, which is exactly what
-# the contract test exists to catch.
+# to the literal `@qwen-code/qwen-code@X.Y.Z` install commands; a bump
+# that misses any site ships mixed versions, which is exactly what the
+# contract test exists to catch.
 #
 # The CLI pin follows the webui's own compatibility metadata:
 #   npm view qwen-code-webui@<version> qwenCode.recommendedCli
