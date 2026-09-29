@@ -580,7 +580,9 @@ class UsageAnalytics:
 
         Issue #3243: Query daily_messages (not daily_usage) so the forecast
         series uses the same source and units as the historical data API;
-        requests counts messages, mirroring hourly_stats.message_count.
+        requests mirrors the history API's per-message COUNT(*)
+        (daily_stats.message_count; hourly_stats applies an extra
+        timestamp IS NOT NULL filter the forecast deliberately does not).
         Issue #3244: Ensures the forecast window contains exactly the specified
         number of consecutive calendar days, filling missing days with zeros.
 
