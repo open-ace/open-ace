@@ -8,13 +8,13 @@
 
 This document is a **domain map** of the Open ACE database. For column-level
 reference, the authoritative source is [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql),
-which contains all **103 tables + 1 materialized view**. When this document and
+which contains all **104 tables + 1 materialized view**. When this document and
 that file disagree, the SQL file wins. Open ACE supports both SQLite
 (single-machine) and PostgreSQL (production); schema changes go through the
 Alembic migrations in `migrations/versions/` (see
 [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md)).
 
-## Domain Map — all 103 tables
+## Domain Map — all 104 tables
 
 Every table defined in `schema/schema-postgres.sql`, grouped by domain, one
 line of responsibility each. Column-level details for the 46 most-used tables
@@ -145,6 +145,7 @@ of `request_count`.
 | Table | Responsibility |
 |-------|----------------|
 | `proxy_token_jtis` | JTI registry for proxy tokens: single-use/replay protection (Issue #1758) |
+| `external_identity_nonces` | Replay-protection nonces for the external-identity HMAC probes (issuer + nonce + expiry; Issue #3459) |
 | `encryption_keys` | Encryption key metadata (fingerprint, status, rotation); plaintext lives in env vars, never in the DB |
 | `permission_checkpoints` | Resumable checkpoints for async permission setup scans |
 | `permission_tasks` | Async shared-project permission setup tasks with progress (Issue #2746) |
@@ -219,7 +220,7 @@ Platform settings:
 ## Common tables in detail (46 tables)
 
 The tables below are the ones most referenced in code and docs, with condensed
-column-level detail. All other tables (the remaining 57 of the 103) are
+column-level detail. All other tables (the remaining 58 of the 104) are
 documented only by `schema/schema-postgres.sql` — consult it directly.
 
 ### Users & Authentication
@@ -1053,7 +1054,7 @@ See [DATABASE_CONVENTIONS.md](DATABASE_CONVENTIONS.md) for naming conventions. T
 
 ## Related documentation
 
-- [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql) — authoritative column-level reference (103 tables + 1 materialized view)
+- [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql) — authoritative column-level reference (104 tables + 1 materialized view)
 - [`../contracts/WORKSPACE_SESSION_DATA_CONTRACT.md`](../contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) — data boundary contract for `agent_sessions`, `session_messages`, `daily_messages`
 - [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md) — how schema changes ship
 - [DATABASE_CONVENTIONS.md](DATABASE_CONVENTIONS.md) — field naming and type conventions
@@ -1064,11 +1065,11 @@ See [DATABASE_CONVENTIONS.md](DATABASE_CONVENTIONS.md) for naming conventions. T
 
 本文是 Open ACE 数据库的**领域地图**。逐列参考以
 [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql) 为权威，该文件包含全部
-**103 张表 + 1 个物化视图**；本文与该文件不一致时，以 SQL 文件为准。Open ACE 同时支持
+**104 张表 + 1 个物化视图**；本文与该文件不一致时，以 SQL 文件为准。Open ACE 同时支持
 SQLite（单机）与 PostgreSQL（生产）；模式变更统一通过 `migrations/versions/` 中的
 Alembic 迁移完成（见 [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md)）。
 
-## 领域地图 — 全部 103 张表
+## 领域地图 — 全部 104 张表
 
 `schema/schema-postgres.sql` 中定义的每一张表，按领域分组，每表一行职责。最常用的
 46 张表的逐列细节见下文[常用表详表](#常用表详表)；其余表请直接查阅 SQL 文件。
@@ -1196,6 +1197,7 @@ Alembic 迁移完成（见 [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md
 | 表 | 职责 |
 |----|------|
 | `proxy_token_jtis` | 代理令牌 JTI 注册表：一次性/防重放（Issue #1758） |
+| `external_identity_nonces` | 外部身份 HMAC 探测的防重放 nonce（issuer + nonce + 过期时间；Issue #3459） |
 | `encryption_keys` | 加密密钥元数据（指纹、状态、轮换）；明文只存环境变量，绝不入库 |
 | `permission_checkpoints` | 异步权限设置扫描的可恢复检查点 |
 | `permission_tasks` | 共享项目异步权限设置任务及进度（Issue #2746） |
@@ -1269,7 +1271,7 @@ Alembic 迁移完成（见 [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md
 
 ## 常用表详表
 
-以下表格是代码与文档中最常引用的表，逐列细节做了精简（共 46 张）。其余表（103 张中的另外
+以下表格是代码与文档中最常引用的表，逐列细节做了精简（共 46 张）。其余表（104 张中的另外
 57 张）只由 `schema/schema-postgres.sql` 文档化——请直接查阅该文件。
 
 ### 用户与认证
@@ -2103,7 +2105,7 @@ AI 生成的用量洞察报告。
 
 ## 相关文档
 
-- [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql) — 权威的逐列参考（103 张表 + 1 个物化视图）
+- [`schema/schema-postgres.sql`](../../schema/schema-postgres.sql) — 权威的逐列参考（104 张表 + 1 个物化视图）
 - [`../contracts/WORKSPACE_SESSION_DATA_CONTRACT.md`](../contracts/WORKSPACE_SESSION_DATA_CONTRACT.md) — `agent_sessions`、`session_messages`、`daily_messages` 三表的数据边界契约
 - [SCHEMA_MIGRATION_GUIDE.md](SCHEMA_MIGRATION_GUIDE.md) — 模式变更如何发布
 - [DATABASE_CONVENTIONS.md](DATABASE_CONVENTIONS.md) — 字段命名与类型约定
