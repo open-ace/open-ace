@@ -790,12 +790,36 @@ class OpenSandboxWebuiLauncher:
         except OSError:
             pass
 
-    def _run_background_command(self, api: OpenSandboxApi, sandbox_id: str, command: str) -> bool:
+    def run_command_wait(
+        self, sandbox_id: str, command: str, *, timeout_seconds: float = 10.0
+    ) -> bool:
+        """Run one command in the sandbox and wait (bounded) for exit 0.
+
+        Public request-path entry (Issue #3459: sandbox-side mkdir for project
+        creation). Same wire semantics as ``_run_background_command`` but with
+        a CALLER-bounded poll deadline — the 90s restore budget must never be
+        inherited by an HTTP request whose sandbox may be wedged.
+        """
+        cfg, endpoint = self._resolve_endpoint()
+        api = self._api_for(cfg, endpoint)
+        return self._run_background_command(
+            api, sandbox_id, command, timeout_seconds=timeout_seconds
+        )
+
+    def _run_background_command(
+        self,
+        api: OpenSandboxApi,
+        sandbox_id: str,
+        command: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> bool:
         """Run one ``POST /command background:true`` and confirm exit 0.
 
         Background semantics (policy.py:652-657): execution_complete fires at
         launch and proves nothing about the outcome — the exit code is read
-        from ``/command/status`` polls, bounded by the restore timeout.
+        from ``/command/status`` polls, bounded by the restore timeout unless
+        ``timeout_seconds`` overrides it.
         """
         body: dict[str, Any] = {
             "command": command,
@@ -818,12 +842,20 @@ class OpenSandboxWebuiLauncher:
         if not command_id:
             logger.warning("webui sandbox %s: background command returned no id", sandbox_id)
             return False
-        exit_code = self._poll_command(api, sandbox_id, command_id)
+        exit_code = self._poll_command(api, sandbox_id, command_id, timeout_seconds=timeout_seconds)
         return exit_code == 0
 
-    def _poll_command(self, api: OpenSandboxApi, sandbox_id: str, command_id: str) -> int | None:
+    def _poll_command(
+        self,
+        api: OpenSandboxApi,
+        sandbox_id: str,
+        command_id: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> int | None:
         """Poll /command/status until terminal; None on timeout/unknown."""
-        deadline = time.monotonic() + self._restore_timeout_seconds
+        budget = self._restore_timeout_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + budget
         while time.monotonic() < deadline:
             status = api.command_status(sandbox_id, command_id)
             if status is None:

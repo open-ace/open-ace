@@ -1187,7 +1187,7 @@ def api_browse_directory():
     system_account = user.get("system_account") if user else None
 
     # Issue #3420/#3427: Get isolation level from WebUIInstance
-    from app.utils.isolation_level import get_user_isolation_level
+    from app.utils.isolation_level import get_user_isolation_level, is_sandboxed
 
     isolation_level = get_user_isolation_level(user)
 
@@ -1245,6 +1245,33 @@ def api_browse_directory():
                 jsonify({"error": "Path must be inside your home directory or a shared project"}),
                 400,
             )
+
+    # Issue #3459: the host cannot see inside the sandbox container. Probing
+    # from the host forks doomed sudo subprocesses per request — and on hosts
+    # that DO have a /workspace (e.g. Docker default WORKSPACE_BASE_DIR), it
+    # would list the HOST copy, not the container's. Skip host IO entirely.
+    if is_sandboxed(isolation_level):
+        home = _primary_home_root(user, isolation_level)
+        if home is None:
+            return jsonify({"error": "No home directory available for this user"}), 400
+        sandbox_parent: str | None = str(Path(path).parent)
+        if sandbox_parent == path:
+            sandbox_parent = None
+        return jsonify(
+            {
+                "currentPath": path,
+                "parentPath": sandbox_parent,
+                "directories": [],
+                "files": [],
+                "homePath": home,
+                "canCreate": False,
+                "sandboxed": True,
+                "fallback_note": (
+                    "Directory contents live inside your sandbox container; "
+                    "browse them from the sandbox WebUI."
+                ),
+            }
+        )
 
     # Check if path exists and is readable
     dir_info = get_directory_info(path, system_account)
@@ -1535,21 +1562,18 @@ def api_check_path():
     if not path:
         return jsonify({"error": "Path is required"}), 400
 
-    # Issue #3427: In sandboxed mode, use /workspace instead of host base_dirs
+    # Issue #3459: non-string JSON (list/dict) previously 500'd on the
+    # literal startswith below; reject cleanly up front.
+    if not isinstance(path, str):
+        return jsonify({"valid": False, "error": "Path must be a string"}), 400
+
+    # Issue #3459: is_valid_path already does the boundary-safe prefix check;
+    # the literal startswith("/workspace") pre-gate duplicated it (only the
+    # message differed). /workspace is the sandbox's whole admissible base.
+    # Issue #3427: in sandboxed mode, use /workspace instead of host base_dirs
     from app.services.workspace_isolation_contract import ISOLATION_LEVEL_SANDBOXED
 
     if isolation_level == ISOLATION_LEVEL_SANDBOXED:
-        # In sandboxed mode, the path should be under /workspace
-        if not path.startswith("/workspace"):
-            return (
-                jsonify(
-                    {
-                        "valid": False,
-                        "error": "Path must be under /workspace in sandboxed mode",
-                    }
-                ),
-                400,
-            )
         base_dirs = ["/workspace"]
     else:
         # Validate path format — restrict to workspace base dirs
@@ -1733,6 +1757,10 @@ def api_create_directory():
 
     if not dir_path:
         return jsonify({"success": False, "error": "Path is required"}), 400
+
+    # Issue #3459: non-string JSON previously 500'd on len()/is_valid_path.
+    if not isinstance(dir_path, str):
+        return jsonify({"success": False, "error": "Path must be a string"}), 400
 
     if len(dir_path) > 4096:
         return jsonify({"success": False, "error": "Path too long"}), 400
