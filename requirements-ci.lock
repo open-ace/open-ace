@@ -208,7 +208,7 @@ pygments==2.20.0
     # via
     #   pytest
     #   rich
-pyjwt==2.13.0
+pyjwt==2.15.1
     # via -r requirements.txt
 pyparsing==3.3.2
     # via pip-requirements-parser
@@ -285,6 +285,7 @@ types-requests==2.33.0.20260712
     # via -r requirements-ci.in
 typing-extensions==4.16.0
     # via
+    #   -r requirements.txt
     #   aiohttp
     #   aiosignal
     #   alembic
@@ -301,6 +302,7 @@ typing-extensions==4.16.0
     #   virtualenv
 urllib3==2.7.0
     # via
+    #   -r requirements.txt
     #   requests
     #   types-requests
 virtualenv==21.7.3
