@@ -98,6 +98,7 @@ def test_docker_oci_label_accepts_equivalent_forms(label: str) -> None:
         ('LABEL org.opencontainers.image.version="2.1.0"\n', "OCI version"),
         # Docker does not expand variables inside single quotes.
         ("LABEL org.opencontainers.image.version='${OPENACE_VERSION}'\n", "OCI version"),
+        ("LABEL \"org.opencontainers.image.version\"='${OPENACE_VERSION}'\n", "OCI version"),
         # Legacy static label hidden in a multi-key instruction.
         (
             'LABEL a=b \\\n  version="1.0.0" \\\n'
@@ -127,6 +128,19 @@ def test_docker_oci_label_must_be_in_the_production_stage() -> None:
     )
     errors = check_release_version.dockerfile_errors(dockerfile)
     assert any("production stage" in error for error in errors), errors
+
+
+def test_static_oci_label_in_another_stage_is_named_as_static() -> None:
+    dockerfile = (
+        "FROM node:20-alpine AS frontend-builder\n"
+        'LABEL org.opencontainers.image.version="2.1.0"\n'
+        "FROM python:3.11-slim AS production\n"
+        'LABEL org.opencontainers.image.version="${OPENACE_VERSION}"\n'
+    )
+    errors = check_release_version.dockerfile_errors(dockerfile)
+    assert errors == [
+        "Dockerfile must set its OCI version from OPENACE_VERSION, not a static value"
+    ]
 
 
 def test_malformed_lockfile_is_reported_not_raised(release_tree: Path) -> None:

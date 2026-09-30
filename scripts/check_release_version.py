@@ -69,7 +69,7 @@ def dockerfile_labels(dockerfile: str) -> list[tuple[str | None, dict[str, str]]
             key, _, value = token.partition("=")
             # Docker does not expand variables inside single quotes; keep the
             # quote so such a value never matches an expected ${ARG} form.
-            if re.search(rf"(?:^|\s){re.escape(key)}='", rest):
+            if re.search(rf"""(?:^|\s)["']?{re.escape(key)}["']?='""", rest):
                 value = "'" + value
             pairs[key] = value
         labels.append((stage, pairs))
@@ -84,12 +84,11 @@ def dockerfile_errors(dockerfile: str) -> list[str]:
     oci_versions = [
         (stage, pairs[OCI_VERSION_KEY]) for stage, pairs in labels if OCI_VERSION_KEY in pairs
     ]
-    if not any(stage == PRODUCTION_STAGE for stage, _ in oci_versions) or any(
-        value not in OCI_VERSION_VALUES for _, value in oci_versions
-    ):
+    if not any(stage == PRODUCTION_STAGE for stage, _ in oci_versions):
+        errors.append(f"Dockerfile must set its OCI version label in the {PRODUCTION_STAGE} stage")
+    if any(value not in OCI_VERSION_VALUES for _, value in oci_versions):
         errors.append(
-            f"Dockerfile must set its OCI version from OPENACE_VERSION in the "
-            f"{PRODUCTION_STAGE} stage"
+            "Dockerfile must set its OCI version from OPENACE_VERSION, not a static value"
         )
     return errors
 
