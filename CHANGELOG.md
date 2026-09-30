@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- PyJWT raised to `>=2.14.0` (the lock files pin 2.15.x) for 10 advisories that pip-audit reports against 2.13.0: CVE-2026-101917, CVE-2026-102265 through 102269, and CVE-2026-102271 through 102274 (#3470).
+
+### Fixed
+
+- Release artifacts now report one product version (Issue #3469, #3468). v2.1.0 shipped Python package `2.1.0`, frontend bundle `0.2.0` and a static Docker `LABEL version="1.0.0"`. `pyproject.toml` is now the single source: the frontend package and lockfile follow it, the frontend bundle stamps the version and commit SHA, and the image carries `org.opencontainers.image.version` / `org.opencontainers.image.revision` instead of the static `version` label. `scripts/check_release_version.py` rejects mismatches in CI and before any release is published.
+- Sandboxed workspaces no longer validate `/fs/*` and project-creation paths on the host (Issue #3427, #3428). In sandboxed mode, browse and `/fs/home` make no host probes and report `sandboxed: true`; new project directories are created inside the sandbox through the instance command channel; a non-string JSON `path` returns 400 instead of 500 (Issue #3459, #3460, #3461).
+- `/analytics/report`, `/analytics/efficiency` and `/analytics/export` return 400 for an invalid `days` or date instead of silently clamping it, swapping reversed dates, or failing with 500 (Issue #3253, #3458).
+- Days-only analytics ranges cover exactly N calendar days; `days=30` previously covered 31 (Issue #3254, #3456).
+- The forecast page reads history and forecast from the same source (`daily_messages`), so their token values agree (Issue #3243, #3316).
+- Enterprise Report quick-range buttons (7/30/90 days) are highlighted from the actual date period; manually editing a date no longer leaves "30 days" highlighted (Issue #3255, #3452).
+- Audit Center's fallback action and category lists match the backend `AuditAction` enum again (73 actions, 17 categories), with a test that fails on future drift (Issue #3362, #3454).
+- Docker Compose: the multi-user overlay now really starts the scheduler by default (`profiles: !override`; the previous `profiles: []` never took effect) (Issue #3455, #3457), and the base-compose scheduler defaults `OPENACE_SECURITY_MODE` so it no longer crash-loops when started on its own (Issue #3133, #3453).
+
+### Changed
+
+- qwen-code-webui upgraded from 0.2.43 to 0.3.0; `@qwen-code/qwen-code` stays at 0.23.3 (#3466). A weekly `webui-upgrade.yml` workflow now opens qwen-stack upgrade PRs automatically (#3463).
+- Release process (#3468): `scripts/release.sh` only prepares the version files (`pyproject.toml`, frontend package and lockfile, `CHANGELOG.md`) and no longer commits, tags or pushes. The release change is merged to `main` by PR and the merged commit is tagged; the release workflows verify the tag, the product versions and that the tagged commit is on `main` before publishing. See `docs/dev/REPOSITORY_SETUP.md`.
+
 ### Documentation
 
 - Docs governance restructure (2026-09-29): all curated docs under `docs/` are now single-file bilingual (English + Chinese sections). Language directories `docs/en/` and `docs/cn/` are gone; content is organized as `guide/` (usage & ops), `dev/` (contributors), `contracts/` (versioned contracts), `security/`, plus the `dev-notes/` English-only process archive. `docs/README.md` is the index.
