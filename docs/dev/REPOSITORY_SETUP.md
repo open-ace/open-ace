@@ -27,27 +27,32 @@ Use this checklist for GitHub settings that cannot be fully configured from file
 
 ### Release Process
 
-Use `scripts/release.sh` to prepare and publish a new release:
+Prepare a release on a branch, then merge the reviewed changes before tagging:
 
 ```bash
-# Preview changes (dry-run)
-./scripts/release.sh --version 1.2.0 --dry-run
-
-# Execute release
-./scripts/release.sh --version 1.2.0
+git switch -c release/vX.Y.Z origin/main
+./scripts/release.sh --version X.Y.Z --dry-run
+./scripts/release.sh --version X.Y.Z
+python3 scripts/check_release_version.py --tag vX.Y.Z
+# Commit the prepared files, open a PR, and merge it into main.
 ```
 
-The script automates:
-1. Validate version format (SemVer: X.Y.Z)
-2. Update `pyproject.toml` version
-3. Update `CHANGELOG.md` (move [Unreleased] to new version section)
-4. Create git commit and tag
-5. Push tag to origin
+`pyproject.toml` is the product version source. The script updates it, the
+frontend package and lockfile, and `CHANGELOG.md`. CI rejects mismatches. The
+script does not commit, tag, or push, so the release change can be reviewed.
 
-After tag is pushed, create GitHub Release with CHANGELOG content:
+After the PR is merged, tag the merged main commit and create the GitHub Release:
 ```bash
-gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md --latest
+git switch main
+git pull --ff-only origin main
+python3 scripts/check_release_version.py --tag vX.Y.Z
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "Open ACE vX.Y.Z" --notes-file release_notes.md --latest
 ```
+The release workflows verify the tag, all product versions, and that the
+tagged commit is reachable from main before publishing. Published tags are
+immutable; correct historical metadata in release notes rather than retagging.
 
 ### Release Cadence
 
@@ -65,6 +70,7 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
 ### Release Checklist
 
 - Publish releases from Git tags such as `v1.1.0`.
+- Verify the Python package, frontend build, and image OCI version all report X.Y.Z.
 - The Release workflow runs `scripts/run_extended_tests.py --category critical`
   before building and publishing release artifacts.
 - Use `scripts/generate_changelog.py` to collect commits since last release:
@@ -73,8 +79,8 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
   ```
 - Attach Docker/deployment notes and a short upgrade guide to each release.
 - Keep `CHANGELOG.md` aligned with the latest release.
-- Configure `PYPI_API_TOKEN` only after confirming the intended PyPI project and package ownership.
-- If `PYPI_API_TOKEN` is not configured, the release workflow skips PyPI publishing and still uploads GitHub release assets.
+- Set `PYPI_PUBLISH=true` only after configuring PyPI Trusted Publishing for `open-ace-server`.
+- Without `PYPI_PUBLISH=true`, the workflow still uploads GitHub release assets.
 
 ## Demo
 
@@ -106,27 +112,30 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
 
 ### 发布流程
 
-使用 `scripts/release.sh` 准备并发布新版本：
+在发布分支准备版本变更，审查并合并后再打标签：
 
 ```bash
-# Preview changes (dry-run)
-./scripts/release.sh --version 1.2.0 --dry-run
-
-# Execute release
-./scripts/release.sh --version 1.2.0
+git switch -c release/vX.Y.Z origin/main
+./scripts/release.sh --version X.Y.Z --dry-run
+./scripts/release.sh --version X.Y.Z
+python3 scripts/check_release_version.py --tag vX.Y.Z
+# 提交准备好的文件，创建 PR 并合并到 main。
 ```
 
-该脚本会自动完成：
-1. 校验版本格式（SemVer：X.Y.Z）
-2. 更新 `pyproject.toml` 版本
-3. 更新 `CHANGELOG.md`（把 [Unreleased] 移入新版本小节）
-4. 创建 git 提交和标签
-5. 将标签推送到 origin
+`pyproject.toml` 是产品版本号的唯一来源。脚本同步更新前端 package、锁文件和
+`CHANGELOG.md`；CI 拒绝版本不一致。脚本不再自动提交、打标签或推送，以便通过 PR 审查。
 
-标签推送之后，使用 CHANGELOG 内容创建 GitHub Release：
+PR 合并后，给已合并的 main 提交打标签，再创建 GitHub Release：
 ```bash
-gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md --latest
+git switch main
+git pull --ff-only origin main
+python3 scripts/check_release_version.py --tag vX.Y.Z
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "Open ACE vX.Y.Z" --notes-file release_notes.md --latest
 ```
+发布工作流会检查标签、各产品版本以及对应提交是否属于 main，再发布产物。已发布标签保持不变；
+历史元数据差异通过发布说明勘误，不重写标签。
 
 ### 发布节奏
 
@@ -144,6 +153,7 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
 ### 发布检查清单
 
 - 从 Git 标签（例如 `v1.1.0`）发布版本。
+- 校验 Python 包、前端构建及镜像 OCI 版本均为 X.Y.Z。
 - Release 工作流在构建并发布 release 制品之前，会先运行 `scripts/run_extended_tests.py --category critical`。
 - 使用 `scripts/generate_changelog.py` 收集自上次发布以来的提交：
   ```bash
@@ -151,8 +161,8 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
   ```
 - 为每个版本附上 Docker/部署说明以及简短的升级指南。
 - 保持 `CHANGELOG.md` 与最新 release 一致。
-- 仅在确认目标 PyPI 项目与包所有权之后，才配置 `PYPI_API_TOKEN`。
-- 如果未配置 `PYPI_API_TOKEN`，release 工作流会跳过 PyPI 发布，但仍会上传 GitHub release 资产。
+- 配置 `open-ace-server` 的 PyPI Trusted Publishing 后，再设置 `PYPI_PUBLISH=true`。
+- 未设置 `PYPI_PUBLISH=true` 时，工作流仍会上传 GitHub release 资产。
 
 ## 演示（Demo）
 

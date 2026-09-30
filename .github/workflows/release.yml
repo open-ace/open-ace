@@ -22,12 +22,27 @@ jobs:
   pre-release-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      commit: ${{ steps.version.outputs.commit }}
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
     steps:
     - uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.release.tag_name || inputs.tag }}
+        ref: ${{ env.RELEASE_TAG }}
+        fetch-depth: 0
         submodules: false
+
+    - name: Validate release identity
+      id: version
+      run: |
+        python3 scripts/check_release_version.py --tag "$RELEASE_TAG"
+        git fetch --no-tags origin main
+        git merge-base --is-ancestor HEAD origin/main
+        echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "GIT_COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+        echo "OPENACE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
 
     - name: Setup Node.js
       uses: actions/setup-node@v6
@@ -88,8 +103,13 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        ref: ${{ env.RELEASE_TAG }}
+        ref: ${{ needs.pre-release-tests.outputs.commit }}
         submodules: false
+
+    - name: Verify release tag still points to tested commit
+      run: |
+        git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+        test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$(git rev-parse HEAD)"
 
     - name: Set up Python
       uses: actions/setup-python@v6

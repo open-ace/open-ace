@@ -14,6 +14,8 @@ ARG BASE_REGISTRY=docker.io
 # Frontend Build Stage (Issue #1260)
 # =============================================================================
 FROM ${BASE_REGISTRY}/node:20-alpine AS frontend-builder
+ARG OPENACE_VERSION
+ARG GIT_COMMIT_SHA
 
 WORKDIR /app/frontend
 
@@ -67,11 +69,14 @@ RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/
 # =============================================================================
 ARG BASE_REGISTRY=docker.io
 FROM ${BASE_REGISTRY}/python:3.11-slim AS production
+ARG OPENACE_VERSION=dev
+ARG GIT_COMMIT_SHA=unknown
 
 # Labels for container metadata
 LABEL maintainer="Open ACE Team"
 LABEL description="AI Computing Explorer"
-LABEL version="1.0.0"
+LABEL org.opencontainers.image.version="${OPENACE_VERSION}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT_SHA}"
 
 # Install runtime dependencies + Node.js 20 + qwen-code-webui for multi-user workspace
 RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
