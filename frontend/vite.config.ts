@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { vitePluginPreload } from './vite-plugin-preload';
+import { version as productVersion } from './package.json';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
@@ -13,7 +14,7 @@ export default defineConfig(({ command }) => ({
 
   // 全局常量定义
   define: {
-    __BUILD_VERSION__: JSON.stringify(process.env.npm_package_version || 'unknown'),
+    __BUILD_VERSION__: JSON.stringify(process.env.OPENACE_VERSION || productVersion),
     __COMMIT_SHA__: JSON.stringify(process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA || 'dev'),
   },
 

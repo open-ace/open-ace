@@ -407,18 +407,21 @@ SELECT * FROM daily_usage LIMIT 10;
 Direct commits to `main` are blocked by the `no-commit-to-branch` hook, so
 releases go through a `release/vX.Y.Z` branch that is merged back by PR.
 
-1. Curate the `[Unreleased]` section of `CHANGELOG.md` (it becomes the release notes)
-2. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
-3. Build the deployment tarball:
-   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`
-4. Bump the version, move `[Unreleased]` to `[vX.Y.Z]`, commit, tag and push the tag:
-   `./scripts/release.sh --version X.Y.Z` (bumps `pyproject.toml`)
+1. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
+2. On that branch, curate and commit the `[Unreleased]` section of `CHANGELOG.md`
+   (it becomes the release notes; the release script requires a clean tracked tree)
+3. Run `./scripts/release.sh --version X.Y.Z` to update `pyproject.toml`, the
+   frontend package and lockfile, and `CHANGELOG.md`; run
+   `python3 scripts/check_release_version.py --tag vX.Y.Z`.
+4. Commit the prepared files, open a PR from `release/vX.Y.Z` to `main`, and
+   merge it after CI passes. Tag the merged main commit as `vX.Y.Z` and push
+   that tag. Build the deployment tarball from the tag with
+   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`.
 5. Publish the GitHub Release with `dist/open-ace-X.Y.Z.tar.gz` attached;
    `.github/workflows/release.yml` then builds the sdist/wheel, attaches them, and
    publishes to PyPI as `open-ace-server` via Trusted Publishing (enabled by the `PYPI_PUBLISH=true`
    repository variable; no API token). `docker-publish.yml` pushes the GHCR image
-6. Open a PR from `release/vX.Y.Z` to `main`
-7. Refresh the docs site (`open-ace/open-ace-docs`): update the release
+6. Refresh the docs site (`open-ace/open-ace-docs`): update the release
    summary in `src/pages/project/releases.js`, then redeploy so it re-syncs
    the docs from `main`
 
@@ -840,16 +843,16 @@ SELECT * FROM daily_usage LIMIT 10;
 
 `no-commit-to-branch` hook 禁止直接 commit 到 `main`，因此发版走 `release/vX.Y.Z` 分支，再用 PR 合回 main。
 
-1. 整理 `CHANGELOG.md` 的 `[Unreleased]` 段落（它就是发布说明）
-2. 切分支：`git checkout -b release/vX.Y.Z origin/main`
-3. 构建部署包：
-   `bash scripts/install-central/package-method/package.sh --version X.Y.Z`
-4. 改版本号、把 `[Unreleased]` 移为 `[vX.Y.Z]`、commit、打 tag 并推送 tag：
-   `./scripts/release.sh --version X.Y.Z`（修改 `pyproject.toml`）
+1. 切分支：`git checkout -b release/vX.Y.Z origin/main`
+2. 在该分支上整理并提交 `CHANGELOG.md` 的 `[Unreleased]` 段落（它就是发布说明；发布脚本要求已跟踪文件无未提交更改）
+3. 运行 `./scripts/release.sh --version X.Y.Z`，同步更新 `pyproject.toml`、前端 package、锁文件和
+   `CHANGELOG.md`；运行 `python3 scripts/check_release_version.py --tag vX.Y.Z`。
+4. 提交变更，从 `release/vX.Y.Z` 向 `main` 创建 PR；CI 通过并合并后，给合并后的 main 提交打
+   `vX.Y.Z` 标签并推送。然后从该标签运行
+   `bash scripts/install-central/package-method/package.sh --version X.Y.Z` 构建部署包。
 5. 发布 GitHub Release 并附带 `dist/open-ace-X.Y.Z.tar.gz`；
    `.github/workflows/release.yml` 随后构建 sdist/wheel 并附到 Release，再通过 Trusted Publishing 以 `open-ace-server` 名称发布到 PyPI（由仓库变量 `PYPI_PUBLISH=true` 开启，无需 API token）；`docker-publish.yml` 推送 GHCR 镜像
-6. 从 `release/vX.Y.Z` 向 `main` 开 PR
-7. 刷新文档站（`open-ace/open-ace-docs`）：更新 `src/pages/project/releases.js` 中的版本摘要，然后重新部署，使其从 `main` 重新同步文档
+6. 刷新文档站（`open-ace/open-ace-docs`）：更新 `src/pages/project/releases.js` 中的版本摘要，然后重新部署，使其从 `main` 重新同步文档
 
 ```bash
 # 预览发布脚本将做的改动

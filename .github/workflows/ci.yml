@@ -68,6 +68,9 @@ jobs:
         with:
           submodules: false
 
+      - name: Check product version consistency
+        run: python3 scripts/check_release_version.py
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:

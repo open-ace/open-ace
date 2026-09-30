@@ -397,6 +397,9 @@ if [ -d "$FRONTEND_DIR" ]; then
 
     # Build frontend
     echo -e "${BLUE}Building frontend with Vite...${NC}"
+    # Stamp the packaged commit into the bundle (vite.config.ts __COMMIT_SHA__).
+    GIT_COMMIT_SHA="${GIT_COMMIT_SHA:-$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo dev)}"
+    export GIT_COMMIT_SHA
     npm run build 2>/dev/null || npm run build
 
     if [ -d "$PROJECT_DIR/static/js/dist" ]; then

@@ -29,7 +29,11 @@ RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 # Copy frontend source files
 COPY frontend/ .
 
-# Build frontend (outputs to ../static/js/dist/)
+# Build frontend (outputs to ../static/js/dist/). Declare the build identity
+# here, not at the top of the stage: every RUN after an ARG sees it, so a
+# per-commit value would otherwise bust the cache for `npm ci` as well.
+ARG OPENACE_VERSION
+ARG GIT_COMMIT_SHA
 RUN npm run build
 
 # =============================================================================
@@ -68,10 +72,10 @@ RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/
 ARG BASE_REGISTRY=docker.io
 FROM ${BASE_REGISTRY}/python:3.11-slim AS production
 
-# Labels for container metadata
+# Labels for container metadata (version/revision are set at the end of this
+# stage so their per-commit build args do not invalidate the layers below)
 LABEL maintainer="Open ACE Team"
 LABEL description="AI Computing Explorer"
-LABEL version="1.0.0"
 
 # Install runtime dependencies + Node.js 20 + qwen-code-webui for multi-user workspace
 RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
@@ -313,6 +317,12 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Run the application
 # Use bash to execute the script to ensure proper shell interpretation (Issue #1988)
 ENTRYPOINT ["/bin/bash", "/usr/local/bin/docker-entrypoint.sh"]
+
+# Build identity, declared last so a new commit only changes image metadata.
+ARG OPENACE_VERSION=dev
+ARG GIT_COMMIT_SHA=unknown
+LABEL org.opencontainers.image.version="${OPENACE_VERSION}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT_SHA}"
 
 # =============================================================================
 # Development Stage (optional)
