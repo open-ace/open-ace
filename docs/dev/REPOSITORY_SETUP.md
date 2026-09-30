@@ -56,8 +56,8 @@ tagged commit is reachable from main before publishing. Releases are therefore
 cut from main only: a hotfix for an older line must be merged into main and
 released from there; a tag on a maintenance branch is rejected. Published tags
 are immutable; correct historical metadata in release notes rather than
-retagging. Tags cut before the version check existed (v2.1.0 and earlier) can
-still be republished with `gh workflow run release.yml -f tag=vX.Y.Z` or
+retagging. Tags cut before the version check existed (v2.0.0 through v2.1.0)
+can still be republished with `gh workflow run release.yml -f tag=vX.Y.Z` or
 `gh workflow run docker-publish.yml -f tag=vX.Y.Z`: only their tag must match
 `pyproject.toml`, and the other mismatches are reported as warnings.
 
@@ -130,7 +130,7 @@ python3 scripts/check_release_version.py --tag vX.Y.Z
 # 提交准备好的文件，创建 PR 并合并到 main。
 ```
 
-`pyproject.toml` 是产品版本号的唯一来源。脚本同步更新前端 package、锁文件和
+`pyproject.toml` 是产品版本号的唯一来源。脚本更新它，并同步更新前端 package、锁文件和
 `CHANGELOG.md`；CI 拒绝版本不一致。脚本不再自动提交、打标签或推送，以便通过 PR 审查。
 
 PR 合并后，给已合并的 main 提交打标签，再创建 GitHub Release：
@@ -144,7 +144,7 @@ gh release create vX.Y.Z --title "Open ACE vX.Y.Z" --notes-file release_notes.md
 ```
 发布工作流会检查标签、各产品版本以及对应提交是否属于 main，再发布产物。因此只能从 main 发版：
 旧版本线的热修复须先合入 main 再从 main 发布，维护分支上的标签会被拒绝。已发布标签保持不变；
-历史元数据差异通过发布说明勘误，不重写标签。版本检查引入之前的标签（v2.1.0 及更早）仍可用
+历史元数据差异通过发布说明勘误，不重写标签。版本检查引入之前的标签（v2.0.0 至 v2.1.0）仍可用
 `gh workflow run release.yml -f tag=vX.Y.Z` 或 `gh workflow run docker-publish.yml -f tag=vX.Y.Z`
 重新发布：只要求标签与 `pyproject.toml` 一致，其他不一致仅作为警告输出。
 

@@ -77,11 +77,17 @@ jobs:
       - name: Validate release identity
         id: version
         run: |
-          # Use the checker from this workflow's revision, not from the tag:
-          # tags cut before it existed (<= v2.1.0) must stay backfillable.
-          checker="$RUNNER_TEMP/check_release_version.py"
-          git show "$GITHUB_SHA:scripts/check_release_version.py" > "$checker"
-          python3 "$checker" --root . --tag "$RELEASE_TAG" --allow-legacy
+          # A tag is checked by its own checker, so a later, stricter main cannot
+          # retroactively fail it. Tags cut before the checker existed (v2.0.0 to
+          # v2.1.0) must stay backfillable: borrow this workflow revision's copy
+          # and only require their tag to match pyproject.toml.
+          if [ -f scripts/check_release_version.py ]; then
+            python3 scripts/check_release_version.py --tag "$RELEASE_TAG"
+          else
+            checker="$RUNNER_TEMP/check_release_version.py"
+            git show "$GITHUB_SHA:scripts/check_release_version.py" > "$checker"
+            python3 "$checker" --root . --tag "$RELEASE_TAG" --allow-legacy
+          fi
           # Releases are cut from reviewed main commits only; a hotfix for an
           # older line must be merged into main first (docs/dev/REPOSITORY_SETUP.md).
           git fetch --no-tags origin main

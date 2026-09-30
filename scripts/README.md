@@ -34,7 +34,7 @@ GitHub workflows 和 pre-commit 硬编码引用。**不要随意移动或改名�
 - `start-multi-user.sh`、`bootstrap-compose-env.sh` + `bootstrap_compose_env.py` — Compose 部署
 - `open-ace.service`、`openace-scheduler.service` — systemd 单元
 - sudoers 家族：`generate-sudoers.sh`、`upgrade-sudoers-security.sh`、`openace-{cat,chown,mkdir,rm,restore-sudoers,useradd,write-as,webui-launch}.sh`、`openace-{gh,git}.py`
-- 发布：`release.sh`、`gen_requirements_lock.sh`、`generate_changelog.py`
+- 发布：`release.sh`、`check_release_version.py`（产品版本一致性门禁，被 `ci.yml` lint job、`release.yml`、`docker-publish.yml` 与 `release.sh` 调用）、`gen_requirements_lock.sh`、`generate_changelog.py`
 - 日常运维：`manage.py`、`init_db.py`、`check_min_revision.py`、`verify_schema_integrity.py`、`audit_production_schema.py`、`frontend_asset_retention.py`、`generate_permission_matrix.py`、`check_daily_usage_{conflicts,quality}.py` + `resolve_daily_usage_conflicts.py`、`manual_e2e_quota_enforcement.py`、`export/import_encrypted_data.py`（仅覆盖 3 个旧存储，**不得**用作密钥轮换——轮换走 `rotate_sso_encryption.py` 全存储原子路径）、`migrate_encryption_keys_to_db.py`、`migrate_security_mode.sh`（health payload 元数据与 `.env.example` 文档引用，非直接调用）
 
 ### 4. 应急工具（低频但关键，勿当死代码清理）

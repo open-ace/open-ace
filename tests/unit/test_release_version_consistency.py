@@ -90,19 +90,52 @@ def test_docker_oci_label_accepts_equivalent_forms(label: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "dockerfile",
+    ("dockerfile", "message"),
     [
         # The only mention of the OCI label is a comment: nothing sets it.
-        '# LABEL org.opencontainers.image.version="${OPENACE_VERSION}"\n',
+        ('# LABEL org.opencontainers.image.version="${OPENACE_VERSION}"\n', "OCI version"),
         # Hard-coded instead of derived from the build arg.
-        'LABEL org.opencontainers.image.version="2.1.0"\n',
+        ('LABEL org.opencontainers.image.version="2.1.0"\n', "OCI version"),
+        # Docker does not expand variables inside single quotes.
+        ("LABEL org.opencontainers.image.version='${OPENACE_VERSION}'\n", "OCI version"),
         # Legacy static label hidden in a multi-key instruction.
-        'LABEL a=b \\\n  version="1.0.0" \\\n'
-        '  org.opencontainers.image.version="${OPENACE_VERSION}"\n',
+        (
+            'LABEL a=b \\\n  version="1.0.0" \\\n'
+            '  org.opencontainers.image.version="${OPENACE_VERSION}"\n',
+            "legacy static LABEL",
+        ),
+        # Label keys are matched case-insensitively for the legacy key.
+        (
+            'LABEL Version="1.0.0" org.opencontainers.image.version="${OPENACE_VERSION}"\n',
+            "legacy static LABEL",
+        ),
     ],
 )
-def test_docker_oci_label_rejects_missing_or_static_values(dockerfile: str) -> None:
-    assert check_release_version.dockerfile_errors("FROM scratch\n" + dockerfile) != []
+def test_docker_oci_label_rejects_missing_or_static_values(dockerfile: str, message: str) -> None:
+    errors = check_release_version.dockerfile_errors(
+        "FROM python:3.11-slim AS production\n" + dockerfile
+    )
+    assert any(message in error for error in errors), errors
+
+
+def test_docker_oci_label_must_be_in_the_production_stage() -> None:
+    dockerfile = (
+        "FROM node:20-alpine AS frontend-builder\n"
+        'LABEL org.opencontainers.image.version="${OPENACE_VERSION}"\n'
+        "FROM python:3.11-slim AS production\n"
+        "FROM production AS development\n"
+    )
+    errors = check_release_version.dockerfile_errors(dockerfile)
+    assert any("production stage" in error for error in errors), errors
+
+
+def test_malformed_lockfile_is_reported_not_raised(release_tree: Path) -> None:
+    (release_tree / "frontend/package-lock.json").write_text(
+        json.dumps({"version": "0.0.0", "packages": []}), encoding="utf-8"
+    )
+
+    errors = check_release_version.check(None, False)
+    assert any("packages['']" in error for error in errors), errors
 
 
 def _make_legacy_tree(tmp_path: Path) -> Path:

@@ -14,7 +14,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+OCI_VERSION_KEY = "org.opencontainers.image.version"
 OCI_VERSION_VALUES = {"${OPENACE_VERSION}", "$OPENACE_VERSION"}
+PRODUCTION_STAGE = "production"
 # Tags cut before the version-consistency contract (<= v2.1.0) do not carry
 # this script; release workflows may still republish them.
 CONTRACT_MARKER = "scripts/check_release_version.py"
@@ -35,8 +37,8 @@ def is_legacy_tree() -> bool:
     return not (ROOT / CONTRACT_MARKER).is_file()
 
 
-def dockerfile_labels(dockerfile: str) -> list[dict[str, str]]:
-    """Return the key/value pairs of every LABEL instruction."""
+def dockerfile_labels(dockerfile: str) -> list[tuple[str | None, dict[str, str]]]:
+    """Return (stage name, key/value pairs) for every LABEL instruction."""
     logical: list[str] = []
     current = ""
     for raw in dockerfile.splitlines():
@@ -52,32 +54,53 @@ def dockerfile_labels(dockerfile: str) -> list[dict[str, str]]:
     if current:
         logical.append(current)
 
-    labels = []
+    labels: list[tuple[str | None, dict[str, str]]] = []
+    stage: str | None = None
     for line in logical:
         keyword, _, rest = line.replace("\t", " ").partition(" ")
+        if keyword.upper() == "FROM":
+            match = re.search(r"(?i)\sAS\s+(\S+)\s*$", " " + rest)
+            stage = match.group(1).lower() if match else None
+            continue
         if keyword.upper() != "LABEL":
             continue
         pairs: dict[str, str] = {}
         for token in shlex.split(rest):
             key, _, value = token.partition("=")
+            # Docker does not expand variables inside single quotes; keep the
+            # quote so such a value never matches an expected ${ARG} form.
+            if re.search(rf"(?:^|\s){re.escape(key)}='", rest):
+                value = "'" + value
             pairs[key] = value
-        labels.append(pairs)
+        labels.append((stage, pairs))
     return labels
 
 
 def dockerfile_errors(dockerfile: str) -> list[str]:
     errors = []
     labels = dockerfile_labels(dockerfile)
-    if any("version" in pairs for pairs in labels):
+    if any(key.lower() == "version" for _, pairs in labels for key in pairs):
         errors.append("Dockerfile still has a legacy static LABEL version")
     oci_versions = [
-        pairs["org.opencontainers.image.version"]
-        for pairs in labels
-        if "org.opencontainers.image.version" in pairs
+        (stage, pairs[OCI_VERSION_KEY]) for stage, pairs in labels if OCI_VERSION_KEY in pairs
     ]
-    if not oci_versions or any(value not in OCI_VERSION_VALUES for value in oci_versions):
-        errors.append("Dockerfile must set its OCI version from OPENACE_VERSION")
+    if not any(stage == PRODUCTION_STAGE for stage, _ in oci_versions) or any(
+        value not in OCI_VERSION_VALUES for _, value in oci_versions
+    ):
+        errors.append(
+            f"Dockerfile must set its OCI version from OPENACE_VERSION in the "
+            f"{PRODUCTION_STAGE} stage"
+        )
     return errors
+
+
+def _field(data: object, *keys: str) -> object:
+    """Nested dict lookup that tolerates a malformed JSON shape."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
 
 
 def check(tag: str | None, require_changelog: bool) -> list[str]:
@@ -89,12 +112,9 @@ def check(tag: str | None, require_changelog: bool) -> list[str]:
     package = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "frontend/package-lock.json").read_text(encoding="utf-8"))
     for name, actual in (
-        ("frontend/package.json", package.get("version")),
-        ("frontend/package-lock.json", lock.get("version")),
-        (
-            "frontend/package-lock.json packages['']",
-            lock.get("packages", {}).get("", {}).get("version"),
-        ),
+        ("frontend/package.json", _field(package, "version")),
+        ("frontend/package-lock.json", _field(lock, "version")),
+        ("frontend/package-lock.json packages['']", _field(lock, "packages", "", "version")),
     ):
         if actual != version:
             errors.append(f"{name}: {actual!r} does not match pyproject.toml: {version!r}")
