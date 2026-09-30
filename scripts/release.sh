@@ -103,6 +103,30 @@ if [[ -n "$REMOTE_TAG" ]]; then
     exit 1
 fi
 
+# Check tools before touching any file, so a missing tool cannot leave a
+# half-bumped tree behind.
+for tool in npm python3; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Error: $tool is required to prepare a release"
+        exit 1
+    fi
+done
+
+# The tree was clean above, so on any failure restore the release files to
+# HEAD instead of leaving some of them bumped.
+RELEASE_FILES=(pyproject.toml frontend/package.json frontend/package-lock.json CHANGELOG.md)
+restore_release_files() {
+    local status=$?
+    if [[ $status -ne 0 && "$DRY_RUN" != true ]]; then
+        echo ""
+        echo "Error: release preparation failed; restoring ${RELEASE_FILES[*]}"
+        rm -f "$PROJECT_ROOT/CHANGELOG.md.tmp"
+        git -C "$PROJECT_ROOT" checkout -- "${RELEASE_FILES[@]}"
+    fi
+    exit "$status"
+}
+trap restore_release_files EXIT
+
 # Update pyproject.toml
 echo ""
 echo "Step 1: Updating pyproject.toml..."

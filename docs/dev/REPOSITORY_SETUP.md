@@ -31,6 +31,7 @@ Prepare a release on a branch, then merge the reviewed changes before tagging:
 
 ```bash
 git switch -c release/vX.Y.Z origin/main
+# Curate and commit the [Unreleased] section of CHANGELOG.md first.
 ./scripts/release.sh --version X.Y.Z --dry-run
 ./scripts/release.sh --version X.Y.Z
 python3 scripts/check_release_version.py --tag vX.Y.Z
@@ -51,8 +52,14 @@ git push origin vX.Y.Z
 gh release create vX.Y.Z --title "Open ACE vX.Y.Z" --notes-file release_notes.md --latest
 ```
 The release workflows verify the tag, all product versions, and that the
-tagged commit is reachable from main before publishing. Published tags are
-immutable; correct historical metadata in release notes rather than retagging.
+tagged commit is reachable from main before publishing. Releases are therefore
+cut from main only: a hotfix for an older line must be merged into main and
+released from there; a tag on a maintenance branch is rejected. Published tags
+are immutable; correct historical metadata in release notes rather than
+retagging. Tags cut before the version check existed (v2.1.0 and earlier) can
+still be republished with `gh workflow run release.yml -f tag=vX.Y.Z` or
+`gh workflow run docker-publish.yml -f tag=vX.Y.Z`: only their tag must match
+`pyproject.toml`, and the other mismatches are reported as warnings.
 
 ### Release Cadence
 
@@ -116,6 +123,7 @@ immutable; correct historical metadata in release notes rather than retagging.
 
 ```bash
 git switch -c release/vX.Y.Z origin/main
+# 先整理并提交 CHANGELOG.md 的 [Unreleased] 段落。
 ./scripts/release.sh --version X.Y.Z --dry-run
 ./scripts/release.sh --version X.Y.Z
 python3 scripts/check_release_version.py --tag vX.Y.Z
@@ -134,8 +142,11 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 gh release create vX.Y.Z --title "Open ACE vX.Y.Z" --notes-file release_notes.md --latest
 ```
-发布工作流会检查标签、各产品版本以及对应提交是否属于 main，再发布产物。已发布标签保持不变；
-历史元数据差异通过发布说明勘误，不重写标签。
+发布工作流会检查标签、各产品版本以及对应提交是否属于 main，再发布产物。因此只能从 main 发版：
+旧版本线的热修复须先合入 main 再从 main 发布，维护分支上的标签会被拒绝。已发布标签保持不变；
+历史元数据差异通过发布说明勘误，不重写标签。版本检查引入之前的标签（v2.1.0 及更早）仍可用
+`gh workflow run release.yml -f tag=vX.Y.Z` 或 `gh workflow run docker-publish.yml -f tag=vX.Y.Z`
+重新发布：只要求标签与 `pyproject.toml` 一致，其他不一致仅作为警告输出。
 
 ### 发布节奏
 

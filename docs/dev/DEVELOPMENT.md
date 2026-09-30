@@ -407,8 +407,9 @@ SELECT * FROM daily_usage LIMIT 10;
 Direct commits to `main` are blocked by the `no-commit-to-branch` hook, so
 releases go through a `release/vX.Y.Z` branch that is merged back by PR.
 
-1. Curate and commit the `[Unreleased]` section of `CHANGELOG.md` (it becomes the release notes; the release script requires a clean tracked tree)
-2. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
+1. Cut the branch: `git checkout -b release/vX.Y.Z origin/main`
+2. On that branch, curate and commit the `[Unreleased]` section of `CHANGELOG.md`
+   (it becomes the release notes; the release script requires a clean tracked tree)
 3. Run `./scripts/release.sh --version X.Y.Z` to update `pyproject.toml`, the
    frontend package and lockfile, and `CHANGELOG.md`; run
    `python3 scripts/check_release_version.py --tag vX.Y.Z`.
@@ -842,8 +843,8 @@ SELECT * FROM daily_usage LIMIT 10;
 
 `no-commit-to-branch` hook 禁止直接 commit 到 `main`，因此发版走 `release/vX.Y.Z` 分支，再用 PR 合回 main。
 
-1. 整理并提交 `CHANGELOG.md` 的 `[Unreleased]` 段落（它就是发布说明；发布脚本要求已跟踪文件无未提交更改）
-2. 切分支：`git checkout -b release/vX.Y.Z origin/main`
+1. 切分支：`git checkout -b release/vX.Y.Z origin/main`
+2. 在该分支上整理并提交 `CHANGELOG.md` 的 `[Unreleased]` 段落（它就是发布说明；发布脚本要求已跟踪文件无未提交更改）
 3. 运行 `./scripts/release.sh --version X.Y.Z`，同步更新 `pyproject.toml`、前端 package、锁文件和
    `CHANGELOG.md`；运行 `python3 scripts/check_release_version.py --tag vX.Y.Z`。
 4. 提交变更，从 `release/vX.Y.Z` 向 `main` 创建 PR；CI 通过并合并后，给合并后的 main 提交打

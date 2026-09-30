@@ -77,9 +77,18 @@ jobs:
       - name: Validate release identity
         id: version
         run: |
-          python3 scripts/check_release_version.py --tag "$RELEASE_TAG"
+          # Use the checker from this workflow's revision, not from the tag:
+          # tags cut before it existed (<= v2.1.0) must stay backfillable.
+          checker="$RUNNER_TEMP/check_release_version.py"
+          git show "$GITHUB_SHA:scripts/check_release_version.py" > "$checker"
+          python3 "$checker" --root . --tag "$RELEASE_TAG" --allow-legacy
+          # Releases are cut from reviewed main commits only; a hotfix for an
+          # older line must be merged into main first (docs/dev/REPOSITORY_SETUP.md).
           git fetch --no-tags origin main
-          git merge-base --is-ancestor HEAD origin/main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$RELEASE_TAG ($(git rev-parse HEAD)) is not reachable from main"
+            exit 1
+          fi
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -121,6 +130,13 @@ jobs:
           build-args: |
             OPENACE_VERSION=${{ steps.version.outputs.version }}
             GIT_COMMIT_SHA=${{ steps.version.outputs.commit }}
+          # Explicit labels also cover legacy tags whose Dockerfile does not
+          # derive them from the build args.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.version.outputs.commit }}
+            org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -165,6 +181,8 @@ jobs:
             GIT_COMMIT_SHA=${{ steps.version.outputs.commit }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.version.outputs.commit }}
             org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha
 

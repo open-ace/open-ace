@@ -37,9 +37,18 @@ jobs:
     - name: Validate release identity
       id: version
       run: |
-        python3 scripts/check_release_version.py --tag "$RELEASE_TAG"
+        # Use the checker from this workflow's revision, not from the tag:
+        # tags cut before it existed (<= v2.1.0) must stay republishable.
+        checker="$RUNNER_TEMP/check_release_version.py"
+        git show "$GITHUB_SHA:scripts/check_release_version.py" > "$checker"
+        python3 "$checker" --root . --tag "$RELEASE_TAG" --allow-legacy
+        # Releases are cut from reviewed main commits only; a hotfix for an
+        # older line must be merged into main first (docs/dev/REPOSITORY_SETUP.md).
         git fetch --no-tags origin main
-        git merge-base --is-ancestor HEAD origin/main
+        if ! git merge-base --is-ancestor HEAD origin/main; then
+          echo "::error::$RELEASE_TAG ($(git rev-parse HEAD)) is not reachable from main"
+          exit 1
+        fi
         echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "GIT_COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
         echo "OPENACE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"

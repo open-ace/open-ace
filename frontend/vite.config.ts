@@ -15,7 +15,7 @@ export default defineConfig(({ command }) => ({
   // 全局常量定义
   define: {
     __BUILD_VERSION__: JSON.stringify(process.env.OPENACE_VERSION || productVersion),
-    __COMMIT_SHA__: JSON.stringify(process.env.GIT_COMMIT_SHA || 'dev'),
+    __COMMIT_SHA__: JSON.stringify(process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA || 'dev'),
   },
 
   // React 插件 + Preload 插件
