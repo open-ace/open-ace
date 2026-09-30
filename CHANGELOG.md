@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.1.1] - 2026-09-30
+
 ### Security
 
 - PyJWT raised to `>=2.14.0` (the lock files pin 2.15.x) for 10 advisories that pip-audit reports against 2.13.0: CVE-2026-101917, CVE-2026-102265 through 102269, and CVE-2026-102271 through 102274 (#3470).
@@ -248,5 +250,6 @@ Open ACE 2.0 turns the self-hosted workspace into a multi-user, sandbox-isolated
 [v2.0.0]: https://github.com/open-ace/open-ace/releases/tag/v2.0.0
 [v2.0.1]: https://github.com/open-ace/open-ace/releases/tag/v2.0.1
 [v2.1.0]: https://github.com/open-ace/open-ace/releases/tag/v2.1.0
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v2.1.0...HEAD
+[v2.1.1]: https://github.com/open-ace/open-ace/releases/tag/v2.1.1
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v2.1.1...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
