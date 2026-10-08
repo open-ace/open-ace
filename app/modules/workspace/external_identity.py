@@ -210,6 +210,7 @@ def verify_signed_request(
     path=PATH,
     expected_fields=None,
     optional_fields=None,
+    max_body=None,
 ):
     now = int(time.time()) if now is None else now
     try:
@@ -227,7 +228,7 @@ def verify_signed_request(
             or abs(now - int(stamp)) > 30
             or not re.fullmatch(r"[0-9a-f]{48}", nonce)
             or not re.fullmatch(r"[0-9a-f]{64}", supplied)
-            or len(body) > 4096
+            or len(body) > (max_body if max_body is not None else 4096)
         ):
             raise DelegationDenied()
         secret = issuers.get(issuer, _UNKNOWN_ISSUER_SECRET)

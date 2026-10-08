@@ -902,3 +902,76 @@ class TestDenylistRefinement:
                 external_texts=_external_request_texts(body),
             )
         return result
+
+
+class TestContentClassesSourceGrading:
+    """content_classes: platform telemetry is scanned apart from operator text."""
+
+    def test_classes_validation(self):
+        from app.modules.workspace.llm_proxy_handler import _external_content_classes
+
+        ok = {"messages": [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
+              "content_classes": ["telemetry", "user_text"]}
+        assert _external_content_classes(ok) == ["telemetry", "user_text"]
+        assert _external_content_classes({"messages": ok["messages"]}) is None
+        assert _external_content_classes({"messages": ok["messages"], "content_classes": ["telemetry"]}) is None
+        assert _external_content_classes({"messages": ok["messages"], "content_classes": ["telemetry", "bogus"]}) is None
+        assert _external_content_classes({"messages": ok["messages"], "content_classes": "telemetry"}) is None
+
+    def test_external_texts_split_telemetry_from_full_scan(self):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts_graded
+
+        body = {
+            "model": "glm-5",
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "packet job 48321"},
+                {"role": "user", "content": "question about 48321"},
+            ],
+            "content_classes": ["", "telemetry", "user_text"],
+        }
+        full, telemetry = _external_request_texts_graded(body)
+        assert "packet job 48321" in telemetry
+        assert "packet job 48321" not in full
+        assert "question about 48321" in full
+        assert "sys" in full
+        # role labels and the classes array stay in the full scan
+        assert "telemetry" in full
+
+    def test_invalid_classes_fall_back_to_full_scan(self):
+        from app.modules.workspace.llm_proxy_handler import _external_request_texts_graded
+
+        body = {
+            "messages": [{"role": "user", "content": "packet job 48321"}],
+            "content_classes": ["telemetry", "user_text"],
+        }
+        full, telemetry = _external_request_texts_graded(body)
+        assert telemetry == ""
+        assert "packet job 48321" in full
+
+    def test_telemetry_redact_degrades_but_user_text_still_redacts(self):
+        from app.modules.governance.content_filter import ContentFilter
+        from app.modules.workspace.llm_proxy_handler import _check_content_filter
+
+        cf = ContentFilter(config={"redact_pii": True})
+        with patch(
+            "app.modules.workspace.llm_proxy_handler.get_content_filter",
+            return_value=cf,
+        ), patch(
+            "app.modules.governance.audit_logger.AuditLogger"
+        ), patch(
+            "app.modules.workspace.llm_proxy_handler._get_tenant_sensitive_keyword_config_wrapper",
+            return_value=None,
+        ):
+            # A zip-shaped counter in telemetry: redact verdict degrades to a
+            # logged warning and the request is forwarded.
+            assert (
+                _check_content_filter(
+                    1, None, b"{}", external_texts="question", external_telemetry_texts="count 48321"
+                )
+                is None
+            )
+            # The same number in operator free text still returns the redacted
+            # string, which the deny-on-redact caller turns into a refusal.
+            outcome = _check_content_filter(1, None, b"{}", external_texts="call about 48321")
+            assert isinstance(outcome, str)

@@ -94,6 +94,40 @@ class TestLoadConfig:
 class TestConfigureLocalOpenAIProxy:
     """Tests for local proxy environment wiring in multi-user mode."""
 
+    @pytest.fixture(autouse=True)
+    def actual_tenant(self):
+        with patch("app.repositories.user_repo.UserRepository") as repository:
+            repository.return_value.get_user_by_id.return_value = {
+                "id": 7,
+                "tenant_id": 3,
+                "is_active": True,
+            }
+            yield repository
+
+    def test_missing_tenant_does_not_use_default_pool(self, actual_tenant):
+        actual_tenant.return_value.get_user_by_id.return_value = {"id": 7, "is_active": True}
+        manager = WebUIManager.__new__(WebUIManager)
+        with patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as service:
+            with pytest.raises(ValueError, match="tenant identity"):
+                manager._build_local_session_model_pool(7)
+            service.return_value.get_tool_model_pool.assert_not_called()
+
+    def test_governed_agent_proxy_failure_blocks_launch(self, monkeypatch):
+        monkeypatch.setenv("OPENACE_EXTERNAL_AGENT_ENABLED", "1")
+        manager = WebUIManager.__new__(WebUIManager)
+        with patch.object(
+            manager, "_build_local_session_model_pool", side_effect=RuntimeError("unavailable")
+        ):
+            with pytest.raises(ValueError, match="proxy unavailable"):
+                manager._build_webui_env(7, "alice", "https://ace.example")
+
+    def test_governed_agent_empty_token_blocks_launch(self, monkeypatch):
+        monkeypatch.setenv("OPENACE_EXTERNAL_AGENT_ENABLED", "1")
+        manager = WebUIManager.__new__(WebUIManager)
+        with patch.object(manager, "_build_local_session_model_pool", return_value={"models": []}):
+            with pytest.raises(ValueError, match="proxy unavailable"):
+                manager._build_webui_env(7, "alice", "https://ace.example")
+
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_configure_openai_proxy(self, mock_load):
         """Test that local qwen traffic is routed through Open ACE proxy."""
@@ -128,11 +162,12 @@ class TestConfigureLocalOpenAIProxy:
             )
             assert pool["proxy_token"] == "proxy-token"
             mock_proxy.get_tool_model_pool.assert_called_once_with(
-                tenant_id=1,
+                tenant_id=3,
                 tool_name="qwen-code",
                 scope="local",
                 provider="openai",
             )
+            assert mock_proxy.generate_proxy_token.call_args.kwargs["tenant_id"] == 3
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_configure_no_keys_available(self, mock_load):

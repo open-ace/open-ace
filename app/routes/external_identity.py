@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.modules.workspace.external_identity import (
     DEFAULT_TTL_SECONDS,
     IDENTIFIER,
@@ -21,6 +22,14 @@ from app.modules.workspace.external_identity import (
 )
 
 external_identity_bp = Blueprint("external_identity", __name__)
+
+
+@external_identity_bp.after_request
+def private_response(response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _guarded_body():
@@ -237,4 +246,197 @@ def token():
         return jsonify({"error_code": "not_accessible"}), 403
     except Exception:
         # Do not log signatures, policy contents, or database exception parameters.
+        return jsonify({"error_code": "unavailable"}), 503
+
+
+def _agent_service(owner):
+    """Re-read mappings and active accounts for every external Agent operation."""
+    from app.modules.workspace.api_key_proxy import _param, get_api_key_proxy_service
+    from app.modules.workspace.external_agent import ExternalAgentService, HandoffStore
+    from app.repositories.tenant_repo import TenantRepository
+    from app.repositories.user_repo import UserRepository
+
+    path = os.environ.get("OPENACE_EXTERNAL_IDENTITY_POLICY_FILE")
+    policy = load_policy(path)
+    key = (owner["issuer"], owner["organization"], owner["user"], owner["login"])
+
+    def live():
+        current = load_policy(path)
+        identity = (owner["tenant_id"], owner["user_id"])
+        if (
+            current[1].get(key) != identity
+            or current[0].get(owner["issuer"]) != policy[0][owner["issuer"]]
+            or sum(mapped == identity for mapped in current[1].values()) != 1
+        ):
+            raise DelegationDenied()
+        user = UserRepository().get_user_by_id(owner["user_id"])
+        tenant = TenantRepository().get_by_id(owner["tenant_id"])
+        tenant = tenant.to_dict() if tenant else None
+        if (
+            not user
+            or user.get("id") != owner["user_id"]
+            or user.get("tenant_id") != owner["tenant_id"]
+            or not user.get("is_active")
+            or user.get("deleted_at")
+            or user.get("must_change_password")
+            or not tenant
+            or tenant.get("id") != owner["tenant_id"]
+            or tenant.get("status") != "active"
+        ):
+            raise DelegationDenied()
+        return user
+
+    account = live()
+    api = get_api_key_proxy_service()
+    return ExternalAgentService(
+        owner,
+        account,
+        policy[0][owner["issuer"]],
+        HandoffStore(api._get_connection, _param()),
+        live,
+    )
+
+
+@external_identity_bp.route("/integrations/external/agent", methods=["POST"])
+def external_agent():
+    from app.modules.workspace.external_agent import PATH
+    from app.modules.workspace.external_identity import strict_json
+
+    if os.environ.get("OPENACE_EXTERNAL_AGENT_ENABLED") != "1":
+        return jsonify({"error_code": "not_found"}), 404
+    if request.query_string or any(
+        request.headers.get(name) for name in ("Origin", "Cookie", "Authorization")
+    ):
+        return jsonify({"error_code": "not_accessible"}), 403
+    if request.mimetype != "application/json":
+        return jsonify({"error_code": "invalid_request"}), 400
+    raw = request.stream.read(8193)
+    if len(raw) > 8192:
+        return jsonify({"error_code": "invalid_request"}), 413
+    try:
+        from app.modules.workspace.api_key_proxy import _param, get_api_key_proxy_service
+        from app.repositories.tenant_repo import TenantRepository
+        from app.repositories.user_repo import UserRepository
+
+        policy = load_policy(os.environ.get("OPENACE_EXTERNAL_IDENTITY_POLICY_FILE"))
+
+        def tenant_lookup(tenant_id):
+            value = TenantRepository().get_by_id(tenant_id)
+            return value.to_dict() if value else None
+
+        api = get_api_key_proxy_service()
+        identity = verify_signed_request(
+            policy,
+            request.headers,
+            raw,
+            ReplayStore(api._get_connection, _param()),
+            UserRepository().get_user_by_id,
+            tenant_lookup,
+            path=PATH,
+            expected_fields={"organization", "user", "login", "operation", "parameters"},
+            max_body=98304,
+        )
+        body = strict_json(raw)
+        owner = {
+            **identity["identity"],
+            "issuer": identity["issuer"],
+            **{field: body[field] for field in ("organization", "user", "login")},
+        }
+        result = _agent_service(owner).handle(body["operation"], body["parameters"])
+        return jsonify(
+            {
+                "protocol": "openace-external-v1",
+                "issuer": owner["issuer"],
+                "request_nonce": identity["request_nonce"],
+                "result": result,
+            }
+        )
+    except (DelegationDenied, ValueError, TypeError, KeyError):
+        return jsonify({"error_code": "not_accessible"}), 403
+    except Exception:
+        return jsonify({"error_code": "unavailable"}), 503
+
+
+# A navigation ticket is not a login credential. The handoff consumes native
+# session auth, then requires exact tenant/user equality even for native
+# administrators (see _consume_agent_handoff). A browser following the ticket
+# link without a native session is redirected to the login page instead of
+# reading a raw JSON 401; non-browser callers keep the machine-readable denial.
+@external_identity_bp.route("/integrations/external/agent/handoff", methods=["GET"])
+def external_agent_handoff():
+    if "text/html" in (request.headers.get("Accept") or ""):
+        from app.auth.decorators import _extract_session_token
+
+        if not _extract_session_token():
+            from flask import redirect
+
+            response = redirect("/login", code=303)
+            response.headers["Referrer-Policy"] = "no-referrer"
+            return response
+    return auth_required(_consume_agent_handoff)()
+
+
+def _consume_agent_handoff():
+    import hashlib
+
+    from flask import g, redirect
+
+    from app.modules.workspace.api_key_proxy import _param, get_api_key_proxy_service
+    from app.modules.workspace.external_agent import HandoffStore, owned_session
+
+    if os.environ.get("OPENACE_EXTERNAL_AGENT_ENABLED") != "1":
+        return jsonify({"error_code": "not_found"}), 404
+    if set(request.args) != {"ticket"} or len(request.args.getlist("ticket")) != 1:
+        return jsonify({"error_code": "invalid_request"}), 400
+    try:
+        api = get_api_key_proxy_service()
+        payload, _ = HandoffStore(api._get_connection, _param()).transact(
+            "consume",
+            ticket=request.args["ticket"],
+            native_identity=(g.user.get("tenant_id"), g.user.get("id")),
+        )
+        service = _agent_service(payload["owner"])
+        caps = service.capabilities()
+        if (
+            not caps["available"]
+            or caps["workspace_ref"] != payload["workspace_ref"]
+            or caps["isolation"]["policy_revision"] != payload["policy_revision"]
+            or caps["isolation"]["isolation_level"] != payload["required_isolation"]
+            or hashlib.sha256(service.secret).hexdigest() != payload["signing_binding"]
+        ):
+            raise DelegationDenied()
+        target = "/work/workspace"
+        if payload["session_id"]:
+            from app.modules.workspace.session_manager import get_session_manager
+            from app.routes.workspace import restore_session
+
+            owned_session(get_session_manager(), payload["owner"], payload["session_id"])
+            # Reuse native path validation and history URL construction, after
+            # the stricter integration ownership gate (no admin bypass).
+            result = restore_session(payload["session_id"])
+            response = result[0] if isinstance(result, tuple) else result
+            value = response.get_json()
+            data = value.get("data", {})
+            if (
+                not value.get("success")
+                or data.get("session_id") != payload["session_id"]
+                or not data.get("encoded_project_name")
+                or data.get("tool_name") not in ("qwen", "qwen-code")
+            ):
+                raise DelegationDenied()
+            from urllib.parse import urlencode
+
+            target = "/work/workspace?" + urlencode(
+                {
+                    "sessionId": payload["session_id"],
+                    "encodedProjectName": data["encoded_project_name"],
+                    "toolName": data["tool_name"],
+                }
+            )
+        response = redirect(target, code=303)
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    except (DelegationDenied, ValueError, TypeError, KeyError):
+        return jsonify({"error_code": "not_accessible"}), 403
+    except Exception:
         return jsonify({"error_code": "unavailable"}), 503

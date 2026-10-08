@@ -110,12 +110,16 @@ class ContentFilter:
     # Default PII patterns
     DEFAULT_PII_PATTERNS = {
         "pii_email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-        "pii_phone_us": r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+        # The numeric guards ((?<![0-9.])) keep fractional parts of decimal
+        # measurements (cpu=0.00116 cores, peak=2.097152e+06) from reading as
+        # phone/ZIP numbers; real phone/ZIP tokens are never digit- or
+        # dot-preceded.
+        "pii_phone_us": r"(?<![0-9.])\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
         "pii_phone_intl": r"\b\+?[1-9]\d{1,3}[-.\s]?\d{1,14}\b",
         "pii_ssn": r"\b\d{3}-\d{2}-\d{4}\b",
         "pii_credit_card": r"\b(?:\d{4}[-\s]?){3}\d{4}\b",
         "pii_credit_card_amex": r"\b\d{4}[-\s]?\d{6}[-\s]?\d{5}\b",
-        "pii_zip_us": r"\b\d{5}(-\d{4})?\b",
+        "pii_zip_us": r"(?<![0-9.])\b\d{5}(-\d{4})?\b",
         "pii_ip_v4": r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
         "pii_ip_v6": r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b",
     }
@@ -604,11 +608,32 @@ class ContentFilter:
             return False
         return len(cls._NON_DIGIT.sub("", stripped)) < 7
 
+    @classmethod
+    def _is_decimal_number(cls, value: str) -> bool:
+        """True if *value* is a decimal measurement, not a phone number.
+
+        Machine telemetry renders floats as ``<int>.<fraction>`` with long
+        fractional groups (``cpu_time=103.262411``, ``peak=2.097152``), which
+        the dotted international-phone form matches verbatim. Phone grouping
+        never uses digit groups longer than 4 (``+1.555.123.4567``), so a
+        dotted match without a ``+`` prefix whose final digit group reaches 5
+        digits is a measurement and is dropped; real international numbers
+        are unaffected.
+        """
+        stripped = value.strip()
+        if stripped.startswith("+") or "." not in stripped:
+            return False
+        groups = [g for g in stripped.split(".") if g]
+        if len(groups) < 2:
+            return False
+        return len(cls._NON_DIGIT.sub("", groups[-1])) >= 5
+
     def check_content(
         self,
         content: str,
         context: dict[str, Any] | None = None,
         tenant_config: dict[str, Any] | None = None,
+        exempt_rules: set[str] | None = None,
     ) -> FilterResult:
         """
         Check content for sensitive information.
@@ -711,20 +736,27 @@ class ContentFilter:
 
         # Then check built-in PII patterns
         for pattern_name, compiled_pattern in self.compiled_patterns.items():
+            # Source-graded scanning: exempted rules are skipped for this
+            # call only (platform telemetry vs numeric PII false positives).
+            if exempt_rules and pattern_name in exempt_rules:
+                continue
             matches = compiled_pattern.findall(content)
             # Post-match false-positive suppression (#2499): autonomous prompts
             # legitimately contain 15-digit commit SHAs / timestamp-IDs (matched
-            # as credit cards → critical → block), dates like 2026-08-12 and
-            # bare short numbers like exit codes or ports (matched as
-            # international phones). Drop those before they enter matched_rules
-            # / escalate risk — real cards/phones are unaffected.
+            # as credit cards → critical → block), dates like 2026-08-12, bare
+            # short numbers like exit codes or ports and decimal measurements
+            # like cpu_time=103.262411 (matched as international phones). Drop
+            # those before they enter matched_rules / escalate risk — real
+            # cards/phones are unaffected.
             if matches and pattern_name in ("pii_credit_card", "pii_credit_card_amex"):
                 matches = [m for m in matches if self._luhn_check(m)]
             elif matches and pattern_name == "pii_phone_intl":
                 matches = [
                     m
                     for m in matches
-                    if not self._looks_like_date(m) and not self._is_short_number(m)
+                    if not self._looks_like_date(m)
+                    and not self._is_short_number(m)
+                    and not self._is_decimal_number(m)
                 ]
             if matches:
                 risk = self.risk_mapping.get(pattern_name, "medium")

@@ -229,11 +229,39 @@ class APISecurityScanner:
         url_prefix = self.blueprints.get(bp_var, ("", False))[0] if bp_var else ""
         file_routes: list[RouteInfo] = []
 
+        # Map each same-file helper to whether it (transitively, up to two
+        # levels) performs an authentication call. A route delegating to such
+        # a helper is authenticated, so new routes added to a signed blueprint
+        # keep passing the gate as long as they go through the verifier.
+        helper_auth: dict[str, bool] = {}
+        top_level_funcs = [
+            node
+            for node in ast.iter_child_nodes(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for _ in range(2):
+            changed = False
+            for func in top_level_funcs:
+                direct = self._has_auth_in_body(func)
+                via_helper = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and helper_auth.get(node.func.id)
+                    for node in ast.walk(func)
+                )
+                if (direct or via_helper) and not helper_auth.get(func.name):
+                    helper_auth[func.name] = True
+                    changed = True
+            if not changed:
+                break
+
         # Walk top-level and class-level function defs
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                routes = self._extract_routes(node, rel_path, url_prefix, src, tree)
-                file_routes.extend(routes)
+        for node in top_level_funcs:
+            routes = self._extract_routes(node, rel_path, url_prefix, src, tree)
+            for route in routes:
+                if not route.has_inline_auth and helper_auth.get(node.name):
+                    route.has_inline_auth = True
+            file_routes.extend(routes)
 
         self.routes[rel_path] = file_routes
 

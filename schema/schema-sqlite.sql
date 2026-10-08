@@ -575,6 +575,13 @@ CREATE TABLE encryption_keys (
  last_used_at TIMESTAMP
 );
 
+CREATE TABLE external_agent_handoffs (
+ ticket_hash text NOT NULL,
+ payload text NOT NULL,
+ expires_at INTEGER NOT NULL,
+ consumed integer NOT NULL
+);
+
 CREATE TABLE external_identity_nonces (
  issuer text NOT NULL,
  nonce text NOT NULL,
@@ -1953,7 +1960,11 @@ CREATE INDEX idx_encryption_keys_status ON encryption_keys (status);
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
 
+CREATE INDEX idx_external_agent_handoffs_expires ON external_agent_handoffs (expires_at);
+
 CREATE INDEX idx_external_identity_nonces_expires ON external_identity_nonces (expires_at);
+
+
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
@@ -2336,6 +2347,10 @@ CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status (anomal
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
+
+CREATE UNIQUE INDEX uq_external_agent_handoffs_ticket ON external_agent_handoffs (ticket_hash);
+
+
 
 CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 

@@ -1053,3 +1053,101 @@ class TestNoTenantUserBehavior:
         cf = ContentFilter(config={"redact_pii": True})
         result = cf.check_content("Call 13800138000 now")
         assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    # =========================================================================
+    # Decimal measurements are not international phones (telemetry floats)
+    # =========================================================================
+
+    @pytest.mark.regression
+    def test_phone_intl_cpu_time_decimal_not_flagged(self):
+        """A telemetry float like cpu_time=103.262411 is not a phone number.
+
+        Delegated job-diagnosis prompts carry machine measurements whose
+        dotted form matches the international-phone pattern verbatim; with
+        redact_policy=deny callers that would hard-fail the whole request.
+        """
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("recorded_cpu_time=103.262411 milliseconds")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_memory_decimal_not_flagged(self):
+        """A memory measurement like 2.097152 is not a phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("recorded_peak_memory=2.097152e+06 bytes")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_short_fraction_decimal_not_flagged_elsewhere(self):
+        """A 4-digit final group stays interpreted as a phone number.
+
+        ``138.0013``-shaped values (short dotted groups) keep the previous
+        behaviour: only 5+ digit final groups are treated as measurements.
+        """
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("callback 138.0013 failed")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_five_digit_fraction_decimal_not_flagged(self):
+        """A 5-digit final group already reads as a measurement, not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("speed 100.12345 ms")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_pii_zip_decimal_fraction_not_flagged(self):
+        """A 5-digit fractional group (cpu=0.00116 cores) is not a ZIP code."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("recorded_peak_cpu=0.00116 cores, peak=2.097152e+06 bytes")
+        assert not any(r["type"] == "pii_zip_us" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_pii_phone_us_decimal_fraction_not_flagged(self):
+        """A 10-digit fractional group is not a US phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("ratio=0.0011626947 per core")
+        assert not any(r["type"] == "pii_phone_us" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_pii_zip_real_zip_still_flagged(self):
+        """A standalone 5-digit ZIP is still detected."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Ship to 94107 please")
+        assert any(r["type"] == "pii_zip_us" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_pii_phone_us_real_phone_still_flagged(self):
+        """A parenthesized US phone is still detected."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Call (415) 555-2671 now")
+        assert any(r["type"] == "pii_phone_us" for r in result.matched_rules)
+
+
+class TestExemptRulesSourceGrading:
+    """Source-graded scanning: exempted numeric PII rules skip telemetry only."""
+
+    @pytest.mark.regression
+    def test_exempt_numeric_rules_skip_telemetry_numbers(self):
+        cf = ContentFilter(config={"redact_pii": True})
+        exempt = {"pii_zip_us", "pii_phone_us", "pii_phone_intl"}
+        result = cf.check_content(
+            "job 48321 counters 3/14872 cpu 0.00116 peak 103.262411",
+            exempt_rules=exempt,
+        )
+        assert not any(r["type"] in exempt for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_exempt_numeric_rules_keep_other_rules(self):
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content(
+            "mail ops@example.com about job 48321",
+            exempt_rules={"pii_zip_us", "pii_phone_us", "pii_phone_intl"},
+        )
+        assert any(r["type"] == "pii_email" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_no_exemption_keeps_numeric_rules(self):
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("ship to 94107")
+        assert any(r["type"] == "pii_zip_us" for r in result.matched_rules)

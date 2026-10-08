@@ -1416,7 +1416,42 @@ def _external_binary_value(value: str) -> bool:
     return value.startswith("data:") or bool(_BASE64_RE.fullmatch(value))
 
 
+# Numeric PII patterns that machine telemetry legitimately trips (decimal
+# measurements, 5-digit job ids and counters): platform-generated evidence is
+# exempt from exactly these; every other rule still scans it.
+_TELEMETRY_EXEMPT_NUMERIC_PII = ("pii_zip_us", "pii_phone_us", "pii_phone_intl")
+
+
+def _external_content_classes(body: Any) -> list[str] | None:
+    """Parse the optional parallel content_classes array.
+
+    The signed calling platform (not the end user) composes the request and
+    declares which ``messages[i].content`` are platform telemetry. The array
+    must line up with ``messages`` element-for-element and use only the
+    known classes; anything else makes the declaration void and the whole
+    request falls back to ungraded full-rule scanning.
+    """
+    if not isinstance(body, dict):
+        return None
+    classes = body.get("content_classes")
+    messages = body.get("messages")
+    if not isinstance(classes, list) or not isinstance(messages, list):
+        return None
+    if len(classes) != len(messages):
+        return None
+    for value in classes:
+        if value not in ("", "telemetry", "user_text"):
+            return None
+    return classes
+
+
 def _external_request_texts(body: Any) -> str | None:
+    """Backward-compatible single-text view of the graded scanner."""
+    graded = _external_request_texts_graded(body)
+    return None if graded is None else graded[0]
+
+
+def _external_request_texts_graded(body: Any) -> tuple[str, str] | None:
     """Collect every text-bearing leaf an external caller composes.
 
     An external server writes the WHOLE request, so "scan role:user only"
@@ -1430,6 +1465,24 @@ def _external_request_texts(body: Any) -> str | None:
     """
     if not isinstance(body, dict):
         return None
+    classes = _external_content_classes(body)
+    telemetry: list[str] = []
+    scan_body = body
+    if classes is not None:
+        import copy as _copy
+
+        scan_body = _copy.deepcopy(body)
+        scan_messages = scan_body.get("messages", [])
+        for index, label in enumerate(classes):
+            if label != "telemetry" or index >= len(scan_messages):
+                continue
+            message = scan_messages[index]
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                telemetry.append(message["content"])
+                # The telemetry text is graded separately below; everything
+                # else — including this message's role and every other leaf —
+                # stays in the full-rule scan.
+                message.pop("content", None)
     texts: list[str] = []
 
     def walk(node: Any, key: str | None, name_structural: bool = False) -> None:
@@ -1458,14 +1511,16 @@ def _external_request_texts(body: Any) -> str | None:
                 if not _external_binary_value(node):
                     texts.append(node)
 
-    walk(body, None)
+    walk(scan_body, None)
     if not any(
         leaf_key in body for leaf_key in ("messages", "system", "input", "instructions", "prompt")
     ):
         # A chat request without any conversational field is not a shape we
         # recognize: reject rather than scan nothing.
         return None
-    return " ".join(texts)
+    # Tuple: (full-rule texts, telemetry-classified texts). The second entry
+    # is empty unless the caller declared a valid content_classes array.
+    return " ".join(texts), " ".join(telemetry)
 
 
 def _check_content_filter(
@@ -1474,6 +1529,7 @@ def _check_content_filter(
     request_body: bytes | None,
     tenant_id: int | None = None,
     external_texts: str | None = None,
+    external_telemetry_texts: str | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -1539,6 +1595,54 @@ def _check_content_filter(
         tenant_config = _get_tenant_sensitive_keyword_config_wrapper(tenant_id)
 
         result = content_filter.check_content(combined_content, tenant_config=tenant_config)
+
+        # Source-graded scanning: platform telemetry (declared by the signed
+        # calling platform via content_classes) skips exactly the numeric PII
+        # patterns that false positive on measurements, and a redact verdict
+        # there degrades to a logged warning — deny-on-redact stays bound to
+        # operator free text. A telemetry block verdict still denies.
+        if external_telemetry_texts:
+            telemetry_result = content_filter.check_content(
+                external_telemetry_texts,
+                tenant_config=tenant_config,
+                exempt_rules=set(_TELEMETRY_EXEMPT_NUMERIC_PII),
+            )
+            if telemetry_result.action == "block":
+                audit_logger.log_action(
+                    action=AuditAction.CONTENT_BLOCKED,
+                    user_id=user_id,
+                    username=username,
+                    resource_type="content",
+                    severity="high",
+                    details=_build_safe_content_details(telemetry_result),
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": telemetry_result.message
+                                or "Content blocked by content filter",
+                                "type": "content_blocked",
+                                "matched_rules": _sanitize_matched_rules(
+                                    telemetry_result.matched_rules
+                                ),
+                            }
+                        }
+                    ),
+                    403,
+                )
+            if telemetry_result.action == "redact":
+                # Telemetry redaction never mutates the request on this path;
+                # log it as a warning and forward unmodified instead of
+                # failing the whole call.
+                audit_logger.log_action(
+                    action=AuditAction.CONTENT_WARNED,
+                    user_id=user_id,
+                    username=username,
+                    resource_type="content",
+                    severity="medium",
+                    details=_build_safe_content_details(telemetry_result),
+                )
 
         if result.action == "block":
             # Log the block action — never persist raw content or samples (Issue #2747)
@@ -2006,6 +2110,7 @@ def handle_llm_proxy_request(
             isinstance(token_payload, dict) and token_payload.get("session_type") == "external"
         )
         _external_texts = None
+        _external_telemetry_texts = None
         if _external:
             # An external server composes the whole request; the scan must
             # cover every text-bearing field, and a body whose shape cannot
@@ -2014,7 +2119,9 @@ def handle_llm_proxy_request(
                 _external_body = json.loads(request.get_data())
             except (json.JSONDecodeError, UnicodeDecodeError):
                 _external_body = None
-            _external_texts = _external_request_texts(_external_body)
+            _external_texts, _external_telemetry_texts = _external_request_texts_graded(
+                _external_body
+            )
             if _external_texts is None:
                 return (
                     jsonify(
@@ -2033,6 +2140,7 @@ def handle_llm_proxy_request(
             request_body=request.get_data(),
             tenant_id=tenant_id,
             external_texts=_external_texts,
+            external_telemetry_texts=_external_telemetry_texts,
         )
     if isinstance(content_filter_result, tuple):
         # Block: return error response

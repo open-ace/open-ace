@@ -2031,7 +2031,20 @@ class WebUIManager:
         from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 
         api_proxy = get_api_key_proxy_service()
-        tenant_id = 1
+        from app.repositories.user_repo import UserRepository
+
+        account = UserRepository().get_user_by_id(user_id)
+        if (
+            not account
+            or account.get("id") != user_id
+            or not account.get("is_active")
+            or account.get("deleted_at")
+            or not isinstance(account.get("tenant_id"), int)
+            or isinstance(account.get("tenant_id"), bool)
+            or account["tenant_id"] <= 0
+        ):
+            raise ValueError("Active workspace tenant identity required")
+        tenant_id = account["tenant_id"]
         pool = api_proxy.get_tool_model_pool(
             tenant_id=tenant_id,
             tool_name="qwen-code",
@@ -2069,6 +2082,8 @@ class WebUIManager:
         try:
             pool = self._build_local_session_model_pool(user_id)
             proxy_token = str(pool.get("proxy_token", ""))
+            if os.environ.get("OPENACE_EXTERNAL_AGENT_ENABLED") == "1" and not proxy_token:
+                raise ValueError("Governed workspace proxy token unavailable")
             env["OPENAI_API_KEY"] = proxy_token
             env["OPENAI_BASE_URL"] = f"{openace_api_url.rstrip('/')}/api/workspace/llm-proxy/v1"
             env["OPENACE_PROXY_TOKEN"] = proxy_token
@@ -2082,6 +2097,8 @@ class WebUIManager:
             return pool
         except Exception as e:
             logger.warning("Failed to configure local OpenAI proxy from database: %s", e)
+            if os.environ.get("OPENACE_EXTERNAL_AGENT_ENABLED") == "1":
+                raise ValueError("Governed workspace model proxy unavailable") from None
             return {
                 "provider": "openai",
                 "tool_name": "qwen-code",
