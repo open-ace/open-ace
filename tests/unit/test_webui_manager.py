@@ -103,37 +103,42 @@ class TestConfigureLocalOpenAIProxy:
 
         manager = WebUIManager()
 
-        with patch(
-            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
-        ) as mock_get_proxy:
-            mock_proxy = MagicMock()
-            mock_proxy.get_tool_model_pool.return_value = {
-                "models": [{"id": "gpt-4.1", "name": "GPT-4.1"}],
-                "candidate_keys": [{"key_id": 42, "priority": 100, "weight": 100}],
-                "model_key_ids": {"gpt-4.1": [42]},
-                "settings": {"modelProviders": {"openai": [{"id": "gpt-4.1", "name": "GPT-4.1"}]}},
-                "empty_reason": None,
-            }
-            mock_proxy.generate_proxy_token.return_value = "proxy-token"
-            mock_get_proxy.return_value = mock_proxy
+        with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = {"id": 7, "tenant_id": 1}
+            mock_user_repo_cls.return_value = mock_user_repo
 
-            env = {}
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
+            with patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+            ) as mock_get_proxy:
+                mock_proxy = MagicMock()
+                mock_proxy.get_tool_model_pool.return_value = {
+                    "models": [{"id": "gpt-4.1", "name": "GPT-4.1"}],
+                    "candidate_keys": [{"key_id": 42, "priority": 100, "weight": 100}],
+                    "model_key_ids": {"gpt-4.1": [42]},
+                    "settings": {"modelProviders": {"openai": [{"id": "gpt-4.1", "name": "GPT-4.1"}]}},
+                    "empty_reason": None,
+                }
+                mock_proxy.generate_proxy_token.return_value = "proxy-token"
+                mock_get_proxy.return_value = mock_proxy
 
-            assert env["OPENAI_API_KEY"] == "proxy-token"
-            assert (
-                env["OPENAI_BASE_URL"] == "http://openace.example:19888/api/workspace/llm-proxy/v1"
-            )
-            assert (
-                env["OPENACE_PROXY_URL"] == "http://openace.example:19888/api/workspace/llm-proxy"
-            )
-            assert pool["proxy_token"] == "proxy-token"
-            mock_proxy.get_tool_model_pool.assert_called_once_with(
-                tenant_id=1,
-                tool_name="qwen-code",
-                scope="local",
-                provider="openai",
-            )
+                env = {}
+                pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
+
+                assert env["OPENAI_API_KEY"] == "proxy-token"
+                assert (
+                    env["OPENAI_BASE_URL"] == "http://openace.example:19888/api/workspace/llm-proxy/v1"
+                )
+                assert (
+                    env["OPENACE_PROXY_URL"] == "http://openace.example:19888/api/workspace/llm-proxy"
+                )
+                assert pool["proxy_token"] == "proxy-token"
+                mock_proxy.get_tool_model_pool.assert_called_once_with(
+                    tenant_id=1,
+                    tool_name="qwen-code",
+                    scope="local",
+                    provider="openai",
+                )
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_configure_no_keys_available(self, mock_load):
@@ -143,26 +148,31 @@ class TestConfigureLocalOpenAIProxy:
 
         manager = WebUIManager()
 
-        with patch(
-            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
-        ) as mock_get_proxy:
-            mock_proxy = MagicMock()
-            mock_proxy.get_tool_model_pool.return_value = {
-                "models": [],
-                "candidate_keys": [],
-                "model_key_ids": {},
-                "settings": {},
-                "empty_reason": "No models",
-            }
-            mock_proxy.generate_proxy_token.return_value = "proxy-token"
-            mock_get_proxy.return_value = mock_proxy
+        with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = {"id": 7, "tenant_id": 1}
+            mock_user_repo_cls.return_value = mock_user_repo
 
-            env = {}
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
+            with patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+            ) as mock_get_proxy:
+                mock_proxy = MagicMock()
+                mock_proxy.get_tool_model_pool.return_value = {
+                    "models": [],
+                    "candidate_keys": [],
+                    "model_key_ids": {},
+                    "settings": {},
+                    "empty_reason": "No models",
+                }
+                mock_proxy.generate_proxy_token.return_value = "proxy-token"
+                mock_get_proxy.return_value = mock_proxy
 
-            assert env["OPENAI_API_KEY"] == "proxy-token"
-            assert pool["models"] == []
-            assert pool["empty_reason"] == "No models"
+                env = {}
+                pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
+
+                assert env["OPENAI_API_KEY"] == "proxy-token"
+                assert pool["models"] == []
+                assert pool["empty_reason"] == "No models"
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_configure_handles_exception(self, mock_load):
@@ -172,16 +182,21 @@ class TestConfigureLocalOpenAIProxy:
 
         manager = WebUIManager()
 
-        with patch(
-            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
-            side_effect=Exception("DB error"),
-        ):
-            env = {}
-            # Should not raise
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
-            assert "OPENAI_API_KEY" not in env
-            assert pool["models"] == []
-            assert pool["proxy_token"] == ""
+        with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = {"id": 7, "tenant_id": 1}
+            mock_user_repo_cls.return_value = mock_user_repo
+
+            with patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+                side_effect=Exception("DB error"),
+            ):
+                env = {}
+                # Should not raise
+                pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
+                assert "OPENAI_API_KEY" not in env
+                assert pool["models"] == []
+                assert pool["proxy_token"] == ""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_launch_process_calls_inject(self, mock_load):
