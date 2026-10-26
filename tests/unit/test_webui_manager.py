@@ -116,7 +116,9 @@ class TestConfigureLocalOpenAIProxy:
                     "models": [{"id": "gpt-4.1", "name": "GPT-4.1"}],
                     "candidate_keys": [{"key_id": 42, "priority": 100, "weight": 100}],
                     "model_key_ids": {"gpt-4.1": [42]},
-                    "settings": {"modelProviders": {"openai": [{"id": "gpt-4.1", "name": "GPT-4.1"}]}},
+                    "settings": {
+                        "modelProviders": {"openai": [{"id": "gpt-4.1", "name": "GPT-4.1"}]}
+                    },
                     "empty_reason": None,
                 }
                 mock_proxy.generate_proxy_token.return_value = "proxy-token"
@@ -127,10 +129,12 @@ class TestConfigureLocalOpenAIProxy:
 
                 assert env["OPENAI_API_KEY"] == "proxy-token"
                 assert (
-                    env["OPENAI_BASE_URL"] == "http://openace.example:19888/api/workspace/llm-proxy/v1"
+                    env["OPENAI_BASE_URL"]
+                    == "http://openace.example:19888/api/workspace/llm-proxy/v1"
                 )
                 assert (
-                    env["OPENACE_PROXY_URL"] == "http://openace.example:19888/api/workspace/llm-proxy"
+                    env["OPENACE_PROXY_URL"]
+                    == "http://openace.example:19888/api/workspace/llm-proxy"
                 )
                 assert pool["proxy_token"] == "proxy-token"
                 mock_proxy.get_tool_model_pool.assert_called_once_with(
