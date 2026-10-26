@@ -36,6 +36,21 @@ def _reset_contract_memo():
     wic._reset_sandbox_runtime_verification()
 
 
+# Issue #3475: Mock UserRepository for all tests that call launcher.launch
+@pytest.fixture(autouse=True)
+def _mock_user_repo_for_tenant_id():
+    from unittest.mock import patch
+
+    with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+        mock_user_repo = mock_user_repo_cls.return_value
+        # Return a user with tenant_id=1 by default
+        mock_user_repo.get_user_by_id.side_effect = lambda user_id: {
+            "id": user_id,
+            "tenant_id": 1,
+        }
+        yield
+
+
 _AGENT_IMAGE = "ghcr.io/open-ace/agent@sha256:" + "a" * 64
 _WEBUI_IMAGE = "ghcr.io/open-ace/webui@sha256:" + "b" * 64
 _INSTALLATION = "openace-test"
@@ -875,8 +890,6 @@ class _NoopProxyService:
 
 
 def test_snapshot_round_trip_via_independent_root(tmp_path):
-    from unittest.mock import patch
-
     fake = FakeOpenSandboxApi(runtime_kernel="Linux version 5.15.0 #1 SMP")
     launcher = _launcher_with_pod(fake, tmp_path)
     launcher._proxy_service_factory = lambda: _NoopProxyService()
@@ -884,36 +897,31 @@ def test_snapshot_round_trip_via_independent_root(tmp_path):
     stored = _tar_bytes("chats/history.jsonl", b"[1,2]")
     (tmp_path / "webui-9.tar").write_bytes(stored)
 
-    # Issue #3475: Mock UserRepository to provide tenant_id for proxy token
-    with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
-        mock_user_repo = mock_user_repo_cls.return_value
-        mock_user_repo.get_user_by_id.return_value = {"id": 9, "tenant_id": 1}
+    result = launcher.launch(
+        user_id=9,
+        callback_url="http://openace.open-ace.svc.cluster.local:8080",
+        snapshot=launcher.load_snapshot(9),
+    )
+    assert launcher.load_snapshot(9) == stored
+    assert fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] == stored
 
-        result = launcher.launch(
-            user_id=9,
-            callback_url="http://openace.open-ace.svc.cluster.local:8080",
-            snapshot=launcher.load_snapshot(9),
-        )
-        assert launcher.load_snapshot(9) == stored
-        assert fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] == stored
+    # Export: the pod's tar is downloaded and persisted under webui-<user>.tar.
+    fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes(
+        "chats/new.jsonl", b"[3]"
+    )
+    blob = launcher.export_snapshot(result.sandbox_id, restore_confirmed=True)
+    assert blob == _tar_bytes("chats/new.jsonl", b"[3]")
+    path = launcher.persist_snapshot(9, blob)
+    assert path == tmp_path / "webui-9.tar"
+    assert launcher.load_snapshot(9) == blob
 
-        # Export: the pod's tar is downloaded and persisted under webui-<user>.tar.
-        fake.uploaded[result.sandbox_id][wso.WEBUI_STATE_TAR_PATH] = _tar_bytes(
-            "chats/new.jsonl", b"[3]"
-        )
-        blob = launcher.export_snapshot(result.sandbox_id, restore_confirmed=True)
-        assert blob == _tar_bytes("chats/new.jsonl", b"[3]")
-        path = launcher.persist_snapshot(9, blob)
-        assert path == tmp_path / "webui-9.tar"
-        assert launcher.load_snapshot(9) == blob
+    # Independent root (D6): not under the reaper-scanned task roots, and
+    # the production default lives under the persistent config directory.
+    from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT
+    from app.repositories.database import CONFIG_DIR
 
-        # Independent root (D6): not under the reaper-scanned task roots, and
-        # the production default lives under the persistent config directory.
-        from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT
-        from app.repositories.database import CONFIG_DIR
-
-        assert DEFAULT_TASK_ROOT not in str(path)
-        assert str(ws.state_root()) == str(CONFIG_DIR) + "/webui-agent-state"
+    assert DEFAULT_TASK_ROOT not in str(path)
+    assert str(ws.state_root()) == str(CONFIG_DIR) + "/webui-agent-state"
 
 
 def test_over_ceiling_export_skipped_and_old_snapshot_kept(tmp_path, caplog):
