@@ -101,6 +101,21 @@ def _reset_contract_memo():
     wic._reset_sandbox_runtime_verification()
 
 
+# Issue #3475: Mock UserRepository for all tests that call launcher.launch
+@pytest.fixture(autouse=True)
+def _mock_user_repo_for_tenant_id():
+    from unittest.mock import patch
+
+    with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+        mock_user_repo = mock_user_repo_cls.return_value
+        # Return a user with tenant_id=1 by default
+        mock_user_repo.get_user_by_id.side_effect = lambda user_id: {
+            "id": user_id,
+            "tenant_id": 1,
+        }
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolated_state_root(tmp_path, monkeypatch):
     """T-E: launch/restore now persists control-plane records under the

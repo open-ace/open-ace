@@ -455,12 +455,22 @@ class OpenSandboxWebuiLauncher:
         (T-F's fail-closed 'now' would create a zero-lifetime pod) — surface
         it instead of silently clamping.
         """
+        from app.repositories.user_repo import UserRepository
+
+        # Issue #3475: Use user's actual tenant_id instead of hardcoded 1
+        user_repo = UserRepository()
+        user = user_repo.get_user_by_id(user_id)
+        tenant_id = user.get("tenant_id") if user else None
+        if tenant_id is None:
+            logger.warning("No tenant_id for user %s, using default tenant 1", user_id)
+            tenant_id = 1
+
         service = self._proxy_service()
         ttl_minutes = service.effective_proxy_token_ttl_minutes("webui")
         token = service.generate_proxy_token(
             user_id=user_id,
             session_id=f"webui:{user_id}",
-            tenant_id=1,
+            tenant_id=tenant_id,
             provider="openai",
             session_type="webui",
             extra_payload={"scope": "local", "tool_name": "qwen-code"},
@@ -519,9 +529,19 @@ class OpenSandboxWebuiLauncher:
         else:
             env["ALLOWED_WORKSPACE_ROOTS"] = user_home
 
+        # Issue #3475: Use user's actual tenant_id instead of hardcoded 1
+        from app.repositories.user_repo import UserRepository
+
+        user_repo = UserRepository()
+        user = user_repo.get_user_by_id(user_id)
+        tenant_id = user.get("tenant_id") if user else None
+        if tenant_id is None:
+            logger.warning("No tenant_id for user %s, using default tenant 1", user_id)
+            tenant_id = 1
+
         try:
             pool = self._proxy_service().get_tool_model_pool(
-                tenant_id=1,
+                tenant_id=tenant_id,
                 tool_name="qwen-code",
                 scope="local",
                 provider="openai",

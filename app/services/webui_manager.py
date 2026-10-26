@@ -2064,9 +2064,16 @@ class WebUIManager:
     def _build_local_session_model_pool(self, user_id: int) -> dict[str, Any]:
         """Build the local qwen-code HA model pool snapshot for a webui instance."""
         from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+        from app.repositories.user_repo import UserRepository
 
         api_proxy = get_api_key_proxy_service()
-        tenant_id = 1
+        # Issue #3475: Use user's actual tenant_id instead of hardcoded 1
+        user_repo = UserRepository()
+        user = user_repo.get_user_by_id(user_id)
+        tenant_id = user.get("tenant_id") if user else None
+        if tenant_id is None:
+            logger.warning("No tenant_id for user %s, using default tenant 1", user_id)
+            tenant_id = 1
         pool = api_proxy.get_tool_model_pool(
             tenant_id=tenant_id,
             tool_name="qwen-code",
