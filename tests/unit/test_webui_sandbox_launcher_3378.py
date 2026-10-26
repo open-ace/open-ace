@@ -166,11 +166,18 @@ def _launcher(
 
 
 def _launch(launcher, user_id=7, snapshot=None):
-    return launcher.launch(
-        user_id=user_id,
-        callback_url="http://openace.open-ace.svc.cluster.local:8080",
-        snapshot=snapshot,
-    )
+    # Issue #3475: Mock UserRepository to provide tenant_id for proxy token
+    from unittest.mock import patch
+
+    with patch("app.repositories.user_repo.UserRepository") as mock_user_repo_cls:
+        mock_user_repo = mock_user_repo_cls.return_value
+        mock_user_repo.get_user_by_id.return_value = {"id": user_id, "tenant_id": 1}
+
+        return launcher.launch(
+            user_id=user_id,
+            callback_url="http://openace.open-ace.svc.cluster.local:8080",
+            snapshot=snapshot,
+        )
 
 
 # ── create body ───────────────────────────────────────────────────────
