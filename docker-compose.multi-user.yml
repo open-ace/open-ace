@@ -88,6 +88,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:?Run ./scripts/bootstrap-compose-env.sh first}
       - SECRET_KEY=${SECRET_KEY:?Run ./scripts/bootstrap-compose-env.sh first}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:?Run ./scripts/bootstrap-compose-env.sh first}
+      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:?Run ./scripts/bootstrap-compose-env.sh first}
     volumes:
       - home-data:/home
 

@@ -177,6 +177,7 @@ services:
       - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-development}
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
+      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-}
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
       # Issue #3095: Pass DB_PASSWORD as standalone env var for security baseline check.
       - DB_PASSWORD=${DB_PASSWORD:-}
