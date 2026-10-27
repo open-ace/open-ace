@@ -836,11 +836,17 @@ generate_default_config() {
     # Create config directory
     mkdir -p "$CONFIG_DIR"
 
+    # Save original SERVER_IP value to distinguish auto-detected vs user-set (Issue #3109)
+    SERVER_IP_ORIGINAL="${SERVER_IP:-}"
+
     # Auto-detect SERVER_IP if not configured (Issue #1306)
     # Resolve host.docker.internal to get host gateway IP (via extra_hosts)
     if [ -z "$SERVER_IP" ]; then
         # Method 1: getent hosts (resolves host.docker.internal to host gateway IP)
         SERVER_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}')
+        if [ -z "$SERVER_IP" ]; then
+            echo "INFO: host.docker.internal resolution failed (Docker < 20.10 or missing extra_hosts)"
+        fi
 
         # Method 2: hostname -I (fallback, filter localhost and link-local)
         if [ -z "$SERVER_IP" ]; then
@@ -868,6 +874,29 @@ generate_default_config() {
             esac
             echo "Auto-detected SERVER_IP: $SERVER_IP"
         fi
+    fi
+
+    # Docker bridge network address detection (Issue #3109)
+    # 172.16.0.0/12 addresses are unreachable from browsers in production deployments.
+    # Fail-fast for auto-detected addresses, warn-only for user-explicitly-set.
+    # CI environments (Docker-in-Docker) may legitimately use these addresses.
+    if [ "${OPENACE_ALLOW_DOCKER_BRIDGE_IP:-}" != "1" ] && [ "${CI:-}" != "true" ]; then
+        case "$SERVER_IP" in
+            172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+                if [ -z "$SERVER_IP_ORIGINAL" ]; then
+                    echo "ERROR: Auto-detected SERVER_IP $SERVER_IP is a Docker bridge network address."
+                    echo "       Browsers cannot reach this address. Please set SERVER_IP explicitly."
+                    echo ""
+                    echo "Solutions:"
+                    echo "  1. Set SERVER_IP in .env: SERVER_IP=<your-server-ip>"
+                    echo "  2. Ensure Docker >= 20.10 for host.docker.internal support"
+                    echo "  3. Check if extra_hosts is configured in docker-compose.yml"
+                    exit 1
+                else
+                    echo "WARNING: SERVER_IP $SERVER_IP is a Docker bridge address but was explicitly set by user."
+                fi
+                ;;
+        esac
     fi
     PORT="${PORT:-19888}"
     # Issue #3446: workspace.isolation {level, backend}; the level is also

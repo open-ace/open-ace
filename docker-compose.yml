@@ -107,6 +107,8 @@ services:
       # Auto-detected from hostname -I if not set
       # Override via .env file if needed (e.g., SERVER_IP=192.168.1.169)
       - SERVER_IP=${SERVER_IP:-}
+      # Pass CI environment variable for entrypoint CI detection (Issue #3109)
+      - CI=${CI:-}
       # #3237: must match the scheduler service exactly.
       - OPENACE_AGENT_STATE_ROOT=/var/lib/openace/agent-state
     # Allow container to access host network (Issue #1260)
