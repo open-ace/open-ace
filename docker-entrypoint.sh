@@ -877,24 +877,27 @@ generate_default_config() {
     fi
 
     # Docker bridge network address detection (Issue #3109)
-    # 172.16.0.0/12 addresses are unreachable from browsers.
+    # 172.16.0.0/12 addresses are unreachable from browsers in production deployments.
     # Fail-fast for auto-detected addresses, warn-only for user-explicitly-set.
-    case "$SERVER_IP" in
-        172.1[6-9].*|172.2[0-9].*|172.3[01].*)
-            if [ -z "$SERVER_IP_ORIGINAL" ]; then
-                echo "ERROR: Auto-detected SERVER_IP $SERVER_IP is a Docker bridge network address."
-                echo "       Browsers cannot reach this address. Please set SERVER_IP explicitly."
-                echo ""
-                echo "Solutions:"
-                echo "  1. Set SERVER_IP in .env: SERVER_IP=<your-server-ip>"
-                echo "  2. Ensure Docker >= 20.10 for host.docker.internal support"
-                echo "  3. Check if extra_hosts is configured in docker-compose.yml"
-                exit 1
-            else
-                echo "WARNING: SERVER_IP $SERVER_IP is a Docker bridge address but was explicitly set by user."
-            fi
-            ;;
-    esac
+    # CI environments (Docker-in-Docker) may legitimately use these addresses.
+    if [ "${OPENACE_ALLOW_DOCKER_BRIDGE_IP:-}" != "1" ] && [ "${CI:-}" != "true" ]; then
+        case "$SERVER_IP" in
+            172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+                if [ -z "$SERVER_IP_ORIGINAL" ]; then
+                    echo "ERROR: Auto-detected SERVER_IP $SERVER_IP is a Docker bridge network address."
+                    echo "       Browsers cannot reach this address. Please set SERVER_IP explicitly."
+                    echo ""
+                    echo "Solutions:"
+                    echo "  1. Set SERVER_IP in .env: SERVER_IP=<your-server-ip>"
+                    echo "  2. Ensure Docker >= 20.10 for host.docker.internal support"
+                    echo "  3. Check if extra_hosts is configured in docker-compose.yml"
+                    exit 1
+                else
+                    echo "WARNING: SERVER_IP $SERVER_IP is a Docker bridge address but was explicitly set by user."
+                fi
+                ;;
+        esac
+    fi
     PORT="${PORT:-19888}"
     # Issue #3446: workspace.isolation {level, backend}; the level is also
     # the floor, so a later launch-path degradation refuses launches instead
