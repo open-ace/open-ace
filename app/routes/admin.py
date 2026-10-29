@@ -539,22 +539,27 @@ def api_update_user(user_id):
 
                 migration_service = TenantMigrationService()
                 try:
-                    migration_result = migration_service.migrate_user_tenant(
-                        user_id=user_id,
-                        new_tenant_id=new_tenant_id,
-                        migrated_by=g.user.get("id"),  # Current admin
-                    )
-                    if not migration_result.success:
-                        logger.error(
-                            f"Failed to migrate projects for user {user_id}: "
-                            f"{migration_result.error}"
-                        )
+                    # Ensure migrated_by is a valid int (g.user.get may return None)
+                    admin_id = g.user.get("id")
+                    if admin_id is None:
+                        logger.error("Cannot migrate projects: no admin user ID in context")
                     else:
-                        logger.info(
-                            f"Migrated user {user_id} from tenant {current_tenant_id} "
-                            f"to {new_tenant_id}: {migration_result.affected_projects} projects, "
-                            f"{migration_result.affected_sessions} sessions"
+                        migration_result = migration_service.migrate_user_tenant(
+                            user_id=user_id,
+                            new_tenant_id=new_tenant_id,
+                            migrated_by=admin_id,
                         )
+                        if not migration_result.success:
+                            logger.error(
+                                f"Failed to migrate projects for user {user_id}: "
+                                f"{migration_result.error}"
+                            )
+                        else:
+                            logger.info(
+                                f"Migrated user {user_id} from tenant {current_tenant_id} "
+                                f"to {new_tenant_id}: {migration_result.affected_projects} projects, "
+                                f"{migration_result.affected_sessions} sessions"
+                            )
                 except Exception as e:
                     logger.error(f"TenantMigrationService error for user {user_id}: {e}")
 
