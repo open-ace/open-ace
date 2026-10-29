@@ -446,11 +446,13 @@ def api_create_project():
                 or other_path.startswith(resolved + os.sep)
             ):
                 return (
-                    jsonify({
-                        "error": "Path overlaps a project of another tenant",
-                        "conflicting_project_id": other_project.id,
-                        "conflicting_project_path": other_project.path
-                    }),
+                    jsonify(
+                        {
+                            "error": "Path overlaps a project of another tenant",
+                            "conflicting_project_id": other_project.id,
+                            "conflicting_project_path": other_project.path,
+                        }
+                    ),
                     400,
                 )
 
