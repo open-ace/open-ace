@@ -534,6 +534,30 @@ def api_update_user(user_id):
                             f"{current_tenant_id} shared group"
                         )
 
+                # Issue #3480: Integrate TenantMigrationService to migrate user projects
+                from app.services.tenant_migration import TenantMigrationService
+
+                migration_service = TenantMigrationService()
+                try:
+                    migration_result = migration_service.migrate_user_tenant(
+                        user_id=user_id,
+                        new_tenant_id=new_tenant_id,
+                        migrated_by=g.user.get("id"),  # Current admin
+                    )
+                    if not migration_result.success:
+                        logger.error(
+                            f"Failed to migrate projects for user {user_id}: "
+                            f"{migration_result.error}"
+                        )
+                    else:
+                        logger.info(
+                            f"Migrated user {user_id} from tenant {current_tenant_id} "
+                            f"to {new_tenant_id}: {migration_result.affected_projects} projects, "
+                            f"{migration_result.affected_sessions} sessions"
+                        )
+                except Exception as e:
+                    logger.error(f"TenantMigrationService error for user {user_id}: {e}")
+
     # requested_is_active is a real boolean (or None) — parsed at the top of
     # the handler (R-3); it flows to the DB write and to the side-effect
     # decisions below unchanged.
