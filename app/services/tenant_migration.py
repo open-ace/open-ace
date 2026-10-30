@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class TenantMigrationService:
                 if db_type == "postgresql":
                     try:
                         cursor.execute(
-                            self.db._adapt_sql("SELECT pg_advisory_xact_lock(1000000 + ?)"),
+                            adapt_sql("SELECT pg_advisory_xact_lock(1000000 + ?)"),
                             (user_id,),
                         )
                     except Exception as e:
@@ -135,7 +135,7 @@ class TenantMigrationService:
 
                 # Update sessions
                 cursor.execute(
-                    self.db._adapt_sql("""UPDATE agent_sessions
+                    adapt_sql("""UPDATE agent_sessions
                        SET tenant_id = ?, tenant_version = tenant_version + 1
                        WHERE user_id = ?"""),
                     (new_tenant_id, user_id),
@@ -143,7 +143,7 @@ class TenantMigrationService:
 
                 # Query affected sessions count (more reliable than rowcount)
                 cursor.execute(
-                    self.db._adapt_sql(
+                    adapt_sql(
                         "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?"
                     ),
                     (user_id, new_tenant_id),
@@ -153,7 +153,7 @@ class TenantMigrationService:
 
                 # Update projects
                 cursor.execute(
-                    self.db._adapt_sql("""UPDATE projects
+                    adapt_sql("""UPDATE projects
                        SET tenant_id = ?
                        WHERE created_by = ? AND tenant_id = ?"""),
                     (new_tenant_id, user_id, old_tenant_id),
@@ -161,7 +161,7 @@ class TenantMigrationService:
 
                 # Query affected projects count
                 cursor.execute(
-                    self.db._adapt_sql(
+                    adapt_sql(
                         "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?"
                     ),
                     (user_id, new_tenant_id),
@@ -171,7 +171,7 @@ class TenantMigrationService:
 
                 # Update user tenant_id and version
                 cursor.execute(
-                    self.db._adapt_sql("""UPDATE users
+                    adapt_sql("""UPDATE users
                        SET tenant_id = ?, tenant_version = tenant_version + 1
                        WHERE id = ?"""),
                     (new_tenant_id, user_id),
@@ -179,7 +179,7 @@ class TenantMigrationService:
 
                 # Log migration
                 cursor.execute(
-                    self.db._adapt_sql("""INSERT INTO tenant_migrations
+                    adapt_sql("""INSERT INTO tenant_migrations
                        (user_id, old_tenant_id, new_tenant_id, migrated_by, migrated_at,
                         affected_sessions, affected_projects, status)
                        VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')"""),

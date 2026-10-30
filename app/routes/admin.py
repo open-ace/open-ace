@@ -538,11 +538,13 @@ def api_update_user(user_id):
                 from app.services.tenant_migration import TenantMigrationService
 
                 migration_service = TenantMigrationService()
+                migration_failed = False
                 try:
                     # Ensure migrated_by is a valid int (g.user.get may return None)
                     admin_id = g.user.get("id")
                     if admin_id is None:
                         logger.error("Cannot migrate projects: no admin user ID in context")
+                        migration_failed = True
                     else:
                         migration_result = migration_service.migrate_user_tenant(
                             user_id=user_id,
@@ -554,6 +556,7 @@ def api_update_user(user_id):
                                 f"Failed to migrate projects for user {user_id}: "
                                 f"{migration_result.error}"
                             )
+                            migration_failed = True
                         else:
                             logger.info(
                                 f"Migrated user {user_id} from tenant {current_tenant_id} "
@@ -562,6 +565,16 @@ def api_update_user(user_id):
                             )
                 except Exception as e:
                     logger.error(f"TenantMigrationService error for user {user_id}: {e}")
+                    migration_failed = True
+
+                # Rollback tenant count changes if migration failed
+                if migration_failed:
+                    tenant_service.increment_user_count(current_tenant_id)
+                    tenant_service.decrement_user_count(new_tenant_id)
+                    return (
+                        jsonify({"error": "Failed to migrate user projects, tenant change aborted"}),
+                        500,
+                    )
 
     # requested_is_active is a real boolean (or None) — parsed at the top of
     # the handler (R-3); it flows to the DB write and to the side-effect
