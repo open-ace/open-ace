@@ -577,7 +577,9 @@ def api_update_user(user_id):
                     tenant_service.increment_user_count(current_tenant_id)
                     tenant_service.decrement_user_count(new_tenant_id)
                     return (
-                        jsonify({"error": "Failed to migrate user projects, tenant change aborted"}),
+                        jsonify(
+                            {"error": "Failed to migrate user projects, tenant change aborted"}
+                        ),
                         500,
                     )
 
