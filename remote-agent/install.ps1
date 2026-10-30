@@ -532,7 +532,20 @@ function Invoke-NpmInstall {
         [int]$TimeoutSeconds = 300
     )
 
-    $npmPath = (Get-Command npm).Source
+    # Fix for Issue #3481: Get-Command npm returns npm.ps1 on Windows
+    # We need npm.cmd (Application) not npm.ps1 (ExternalScript) for Process.Start
+    $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
+        $npmCmd = Get-Command npm -All -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandType -eq 'Application' } |
+            Select-Object -First 1
+    }
+    if (-not $npmCmd) {
+        throw "npm executable not found (Get-Command npm returned no Application entry)"
+    }
+    $npmPath = $npmCmd.Source
+    Write-Host "[DEBUG] npm executable path: $npmPath" -ForegroundColor Gray
+
     $stdoutFile = "$env:TEMP\npm_install_stdout_$([System.Guid]::NewGuid()).log"
     $stderrFile = "$env:TEMP\npm_install_stderr_$([System.Guid]::NewGuid()).log"
 
@@ -778,11 +791,21 @@ if ($SkipCodeServer) {
                     $prevErrorAction = $ErrorActionPreference
                     $ErrorActionPreference = "Continue"
 
-                    $installResult = Invoke-NpmInstall -Package "code-server" -TimeoutSeconds 300
+                    # Fix for Issue #3481: Wrap npm install in try-catch to prevent script abort
+                    # code-server is an optional component, failure should not block Agent registration
+                    try {
+                        $installResult = Invoke-NpmInstall -Package "code-server" -TimeoutSeconds 300
+                    } catch {
+                        Write-Host "[WARN] npm install command failed: $_" -ForegroundColor Yellow
+                        Write-Host "[WARN] code-server installation failed; continuing without remote VS Code." -ForegroundColor Yellow
+                        Write-Host "       Agent registration will continue; use -SkipCodeServer to suppress this step." -ForegroundColor Yellow
+                        $codeServerAvailable = $false
+                        $installResult = $null
+                    }
 
                     $ErrorActionPreference = $prevErrorAction
 
-                    if ($installResult.Success) {
+                    if ($installResult -and $installResult.Success) {
                         # Step 7: Verify installation
                         Write-Host "[INFO] Verifying code-server installation..." -ForegroundColor Cyan
                         $execTest = Test-CodeServerExecution
@@ -797,7 +820,7 @@ if ($SkipCodeServer) {
                             Write-Host "       code-server will be marked as unavailable." -ForegroundColor Yellow
                             Write-Host "       You may need to upgrade Node.js or reinstall code-server manually." -ForegroundColor Yellow
                         }
-                    } else {
+                    } elseif ($installResult) {
                         # Step 8: Show diagnosis
                         Show-InstallationFailureDiagnosis `
                             -ExitCode $installResult.ExitCode `
@@ -811,8 +834,8 @@ if ($SkipCodeServer) {
                     }
 
                     # Clean up temp files
-                    if ($installResult.StdoutFile) { Remove-Item $installResult.StdoutFile -ErrorAction SilentlyContinue }
-                    if ($installResult.StderrFile) { Remove-Item $installResult.StderrFile -ErrorAction SilentlyContinue }
+                    if ($installResult -and $installResult.StdoutFile) { Remove-Item $installResult.StdoutFile -ErrorAction SilentlyContinue }
+                    if ($installResult -and $installResult.StderrFile) { Remove-Item $installResult.StderrFile -ErrorAction SilentlyContinue }
                 }
             }
         }
