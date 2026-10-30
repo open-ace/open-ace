@@ -408,7 +408,10 @@ class TestPrivateRegistrationPathGuard:
 
     @classmethod
     def _foreign_rows(cls, paths, tenant_id=2):
-        return [cls._ns(tenant_id=tenant_id, path=p, is_shared=True) for p in paths]
+        return [
+            cls._ns(id=i, tenant_id=tenant_id, path=p, is_shared=True)
+            for i, p in enumerate(paths, start=1)
+        ]
 
     def test_private_path_of_foreign_tenant_project_rejected(self, projects_app, workspace):
         """Paths OUTSIDE the namespace isolate the overlap rule itself (an

@@ -45,37 +45,11 @@ class TenantMigrationService:
         Returns:
             'postgresql', 'sqlite', or 'unknown'
         """
-        try:
-            # Try to detect database type from connection
-            if hasattr(self.db, "_connection"):
-                conn = self.db._connection
-                if hasattr(conn, "dialect"):
-                    return str(conn.dialect.name)
-                # Try detecting from connection string
-                if hasattr(conn, "url"):
-                    url = str(conn.url)
-                    if "postgresql" in url:
-                        return "postgresql"
-                    elif "sqlite" in url:
-                        return "sqlite"
-
-            # Try executing PostgreSQL-specific query
-            try:
-                self.db.fetch_one("SELECT version()")
-                return "postgresql"
-            except Exception:
-                pass
-
-            # Try SQLite-specific query
-            try:
-                self.db.fetch_one("SELECT sqlite_version()")
-                return "sqlite"
-            except Exception:
-                pass
-
-            return "unknown"
-        except Exception:
-            return "unknown"
+        # Use the is_postgresql property for type detection
+        if self.db.is_postgresql:
+            return "postgresql"
+        else:
+            return "sqlite"
 
     def migrate_user_tenant(
         self,
