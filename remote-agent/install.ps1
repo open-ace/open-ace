@@ -261,7 +261,7 @@ if ($InstallCli) {
                 $qwenVersion = (& qwen --version 2>$null | Select-Object -First 1)
                 if (-not $qwenVersion -or "$qwenVersion".Trim() -ne $QwenCliVersion) {
                     # Exact-match verification: 0.23.30 etc. must fail
-                    Write-Host "[ERROR] qwen-code-cli version mismatch: expected=[$QwenCliVersion] actual=[$qwenVersion]" -ForegroundColor Red
+                    Write-Host "[ERROR] qwen-code-cli version mismatch: expected=[$QwenCliVersion] actual=[$qwenVersion] last=$LASTEXITCODE" -ForegroundColor Red
                     $ErrorActionPreference = $prevErrorAction
                     exit 1
                 }
