@@ -425,23 +425,34 @@ def api_create_project():
                 ),
                 400,
             )
+        # Issue #3480: Exclude base-dir projects and optimize error response
+        base_dirs_real = [os.path.realpath(b).rstrip(os.sep) for b in base_dirs]
         try:
-            foreign_paths = [
-                os.path.realpath(p.path).rstrip(os.sep)
-                for p in project_repo.get_all_projects()
-                if p.tenant_id != tenant_id and p.path
-            ]
+            # Build path -> project mapping for optimized error response
+            path_project_map = {}
+            for p in project_repo.get_all_projects():
+                if p.tenant_id != tenant_id and p.path:
+                    path_real = os.path.realpath(p.path).rstrip(os.sep)
+                    # Exclude base-dir projects from overlap check
+                    if path_real not in base_dirs_real:
+                        path_project_map[path_real] = p
         except Exception as e:  # noqa: BLE001 - guard is best-effort
             logger.warning("Failed to enumerate projects for private path check: %s", e)
-            foreign_paths = []
-        for other in foreign_paths:
+            path_project_map = {}
+        for other_path, other_project in path_project_map.items():
             if (
-                resolved == other
-                or resolved.startswith(other + os.sep)
-                or other.startswith(resolved + os.sep)
+                resolved == other_path
+                or resolved.startswith(other_path + os.sep)
+                or other_path.startswith(resolved + os.sep)
             ):
                 return (
-                    jsonify({"error": "Path overlaps a project of another tenant"}),
+                    jsonify(
+                        {
+                            "error": "Path overlaps a project of another tenant",
+                            "conflicting_project_id": other_project.id,
+                            "conflicting_project_path": other_project.path,
+                        }
+                    ),
                     400,
                 )
 

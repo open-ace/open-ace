@@ -208,6 +208,19 @@ def _request(actor, method, path, *, json_body=None, repo=None, query_string=Non
     usage_repo = MagicMock()
     usage_repo.get_combined_usage.return_value = {"tokens": 0, "requests": 0}
 
+    # Mock TenantMigrationService for tests that move users between tenants
+    from app.services.tenant_migration import MigrationResult
+
+    migration_service = MagicMock()
+    migration_service.migrate_user_tenant.return_value = MigrationResult(
+        success=True,
+        user_id=0,  # Will be overridden by actual user_id
+        old_tenant_id=0,
+        new_tenant_id=0,
+        affected_sessions=0,
+        affected_projects=0,
+    )
+
     with (
         patch("app.auth.decorators._load_user_from_token", return_value=actor),
         # same_tenant_user_required resolves the target through _load_target_user,
@@ -218,6 +231,9 @@ def _request(actor, method, path, *, json_body=None, repo=None, query_string=Non
         patch("app.routes.admin.get_security_settings_cached", return_value=None),
         patch("app.services.tenant_service.TenantService", return_value=tenant_service),
         patch("app.routes.admin.usage_repo", usage_repo),
+        patch(
+            "app.services.tenant_migration.TenantMigrationService", return_value=migration_service
+        ),
     ):
         client = app.test_client()
         response = client.open(

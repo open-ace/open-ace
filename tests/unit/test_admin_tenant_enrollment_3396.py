@@ -23,6 +23,7 @@ import pytest
 from flask import Flask
 
 from app.routes.admin import admin_bp
+from app.services.tenant_migration import MigrationResult
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(3396)]
 
@@ -61,6 +62,22 @@ def _tenant_scope_stub():
     return patch(
         "app.routes.admin.enforce_requested_tenant_scope",
         side_effect=lambda tid: (tid, None),
+    )
+
+
+def _migration_service_stub():
+    """Mock TenantMigrationService for tenant move operations."""
+    migration_service = MagicMock()
+    migration_service.migrate_user_tenant.return_value = MigrationResult(
+        success=True,
+        user_id=0,
+        old_tenant_id=0,
+        new_tenant_id=0,
+        affected_sessions=0,
+        affected_projects=0,
+    )
+    return patch(
+        "app.services.tenant_migration.TenantMigrationService", return_value=migration_service
     )
 
 
@@ -188,6 +205,7 @@ class TestAdminTenantMoveGroupDrop:
                 patch("app.routes.admin.ensure_system_user") as mock_ensure,
                 patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
                 patch("app.routes.admin.audit_logger"),
+                _migration_service_stub(),
             ):
                 resp = admin_app.test_client().put(
                     "/api/admin/users/9",
@@ -223,6 +241,7 @@ class TestAdminTenantMoveGroupDrop:
                 patch("app.routes.admin.ensure_system_user") as mock_ensure,
                 patch("app.utils.workspace.remove_user_from_shared_group"),
                 patch("app.routes.admin.audit_logger"),
+                _migration_service_stub(),
             ):
                 resp = admin_app.test_client().put(
                     "/api/admin/users/9",
@@ -255,6 +274,7 @@ class TestAdminTenantMoveGroupDrop:
                 patch("app.routes.admin.ensure_system_user") as mock_ensure,
                 patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
                 patch("app.routes.admin.audit_logger"),
+                _migration_service_stub(),
             ):
                 resp = admin_app.test_client().put(
                     "/api/admin/users/9",
@@ -424,6 +444,7 @@ class TestDeactivatedUserNoReenroll:
                 patch("app.routes.admin.ensure_system_user") as mock_ensure,
                 patch("app.utils.workspace.remove_user_from_shared_group") as mock_remove,
                 patch("app.routes.admin.audit_logger"),
+                _migration_service_stub(),
             ):
                 resp = admin_app.test_client().put(
                     "/api/admin/users/11",

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -45,37 +45,11 @@ class TenantMigrationService:
         Returns:
             'postgresql', 'sqlite', or 'unknown'
         """
-        try:
-            # Try to detect database type from connection
-            if hasattr(self.db, "_connection"):
-                conn = self.db._connection
-                if hasattr(conn, "dialect"):
-                    return str(conn.dialect.name)
-                # Try detecting from connection string
-                if hasattr(conn, "url"):
-                    url = str(conn.url)
-                    if "postgresql" in url:
-                        return "postgresql"
-                    elif "sqlite" in url:
-                        return "sqlite"
-
-            # Try executing PostgreSQL-specific query
-            try:
-                self.db.fetch_one("SELECT version()")
-                return "postgresql"
-            except Exception:
-                pass
-
-            # Try SQLite-specific query
-            try:
-                self.db.fetch_one("SELECT sqlite_version()")
-                return "sqlite"
-            except Exception:
-                pass
-
-            return "unknown"
-        except Exception:
-            return "unknown"
+        # Use the is_postgresql property for type detection
+        if self.db.is_postgresql:
+            return "postgresql"
+        else:
+            return "sqlite"
 
     def migrate_user_tenant(
         self,
@@ -143,61 +117,72 @@ class TenantMigrationService:
             affected_sessions = 0
             affected_projects = 0
 
-            with self.db.transaction():
+            with self.db.connection() as conn:
                 # Get advisory lock for this user (PostgreSQL only)
                 # For SQLite/other databases, rely on transaction isolation
                 db_type = self._get_database_type()
+                cursor = conn.cursor()
+
                 if db_type == "postgresql":
                     try:
-                        self.db.execute("SELECT pg_advisory_xact_lock(1000000 + ?)", (user_id,))
+                        cursor.execute(
+                            adapt_sql("SELECT pg_advisory_xact_lock(1000000 + ?)"),
+                            (user_id,),
+                        )
                     except Exception as e:
                         # Advisory lock not available, continue with transaction isolation
                         logger.warning(f"Advisory lock not available: {e}")
 
                 # Update sessions
-                self.db.execute(
-                    """UPDATE agent_sessions
+                cursor.execute(
+                    adapt_sql("""UPDATE agent_sessions
                        SET tenant_id = ?, tenant_version = tenant_version + 1
-                       WHERE user_id = ?""",
+                       WHERE user_id = ?"""),
                     (new_tenant_id, user_id),
                 )
 
                 # Query affected sessions count (more reliable than rowcount)
-                sessions_result = self.db.fetch_one(
-                    "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?",
+                cursor.execute(
+                    adapt_sql(
+                        "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?"
+                    ),
                     (user_id, new_tenant_id),
                 )
-                affected_sessions = sessions_result.get("count", 0) if sessions_result else 0
+                sessions_result = cursor.fetchone()
+                affected_sessions = sessions_result["count"] if sessions_result else 0
 
                 # Update projects
-                self.db.execute(
-                    """UPDATE projects
+                cursor.execute(
+                    adapt_sql("""UPDATE projects
                        SET tenant_id = ?
-                       WHERE created_by = ? AND tenant_id = ?""",
+                       WHERE created_by = ? AND tenant_id = ?"""),
                     (new_tenant_id, user_id, old_tenant_id),
                 )
 
                 # Query affected projects count
-                projects_result = self.db.fetch_one(
-                    "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?",
+                cursor.execute(
+                    adapt_sql(
+                        "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?"
+                    ),
                     (user_id, new_tenant_id),
                 )
-                affected_projects = projects_result.get("count", 0) if projects_result else 0
+                projects_result = cursor.fetchone()
+                affected_projects = projects_result["count"] if projects_result else 0
 
                 # Update user tenant_id and version
-                self.db.execute(
-                    """UPDATE users
+                cursor.execute(
+                    adapt_sql("""UPDATE users
                        SET tenant_id = ?, tenant_version = tenant_version + 1
-                       WHERE id = ?""",
+                       WHERE id = ?"""),
                     (new_tenant_id, user_id),
                 )
 
                 # Log migration
-                self.db.execute(
-                    """INSERT INTO tenant_migrations
+                cursor.execute(
+                    adapt_sql("""INSERT INTO tenant_migrations
                        (user_id, old_tenant_id, new_tenant_id, migrated_by, migrated_at,
                         affected_sessions, affected_projects, status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')"""),
                     (
                         user_id,
                         old_tenant_id,
@@ -208,6 +193,8 @@ class TenantMigrationService:
                         affected_projects,
                     ),
                 )
+
+                conn.commit()
 
             logger.info(
                 f"Tenant migration completed: user={user_id}, "
@@ -355,12 +342,21 @@ class TenantMigrationService:
 
             user_id = migration.get("user_id")
             old_tenant_id = migration.get("old_tenant_id")
+            migrated_by = migration.get("migrated_by")
+
+            # Validate required fields
+            if user_id is None or old_tenant_id is None or migrated_by is None:
+                logger.error(
+                    f"Migration {migration_id} missing required fields: "
+                    f"user_id={user_id}, old_tenant_id={old_tenant_id}, migrated_by={migrated_by}"
+                )
+                return False
 
             # Reverse the migration
             result = self.migrate_user_tenant(
-                user_id=user_id,
-                new_tenant_id=old_tenant_id,
-                migrated_by=migration.get("migrated_by"),
+                user_id=int(user_id),
+                new_tenant_id=int(old_tenant_id),
+                migrated_by=int(migrated_by),
             )
 
             if result.success:

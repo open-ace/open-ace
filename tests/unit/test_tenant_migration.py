@@ -19,9 +19,10 @@ class TestTenantMigrationService:
     def mock_db(self):
         """Create mock database."""
         db = Mock()
-        db.transaction = MagicMock()
+        db.connection = MagicMock()
         db.execute = Mock()
         db.fetch_one = Mock()
+        db.is_postgresql = False
         return db
 
     @pytest.fixture
@@ -77,22 +78,23 @@ class TestTenantMigrationService:
         # Mock database type detection
         service._get_database_type = Mock(return_value="sqlite")
 
-        # Mock transaction context
-        mock_transaction = MagicMock()
-        mock_transaction.__enter__ = Mock()
-        mock_transaction.__exit__ = Mock()
-        mock_db.transaction.return_value = mock_transaction
-
-        # Mock execute
-        mock_db.execute.return_value = None
+        # Mock connection context manager
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = {"count": 0}
+        mock_conn.commit = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=False)
+        mock_db.connection.return_value = mock_conn
 
         result = service.migrate_user_tenant(user_id=1, new_tenant_id=2, migrated_by=2)
 
         assert result.success
         assert result.old_tenant_id == 1
         assert result.new_tenant_id == 2
-        # Verify transaction was used
-        assert mock_db.transaction.called
+        # Verify connection was used
+        assert mock_db.connection.called
 
     def test_migrate_users_batch_success(self, service, mock_db):
         """Test batch migration."""
@@ -102,13 +104,15 @@ class TestTenantMigrationService:
         # Mock database type detection
         service._get_database_type = Mock(return_value="sqlite")
 
-        # Mock transaction
-        mock_transaction = MagicMock()
-        mock_transaction.__enter__ = Mock()
-        mock_transaction.__exit__ = Mock()
-        mock_db.transaction.return_value = mock_transaction
-
-        mock_db.execute.return_value = None
+        # Mock connection context manager
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = {"count": 0}
+        mock_conn.commit = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=False)
+        mock_db.connection.return_value = mock_conn
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
@@ -128,13 +132,15 @@ class TestTenantMigrationService:
             None,  # user not found - failure
         ]
 
-        # Mock transaction
-        mock_transaction = MagicMock()
-        mock_transaction.__enter__ = Mock()
-        mock_transaction.__exit__ = Mock()
-        mock_db.transaction.return_value = mock_transaction
-
-        mock_db.execute.return_value = None
+        # Mock connection context manager
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = {"count": 0}
+        mock_conn.commit = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=False)
+        mock_db.connection.return_value = mock_conn
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
@@ -246,13 +252,15 @@ class TestTenantMigrationService:
         # Mock database type detection
         service._get_database_type = Mock(return_value="sqlite")
 
-        # Mock transaction
-        mock_transaction = MagicMock()
-        mock_transaction.__enter__ = Mock()
-        mock_transaction.__exit__ = Mock()
-        mock_db.transaction.return_value = mock_transaction
-
-        mock_db.execute.return_value = None
+        # Mock connection context manager
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = {"count": 0}
+        mock_conn.commit = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=False)
+        mock_db.connection.return_value = mock_conn
 
         result = service.rollback_migration(1)
 

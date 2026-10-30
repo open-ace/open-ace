@@ -492,6 +492,9 @@ def api_update_user(user_id):
     if enroll_account is None and current_user:
         enroll_account = current_user.get("system_account")
 
+    # Track if tenant_id was already updated by migration (Issue #3480 P1 fix)
+    tenant_id_updated_by_migration = False
+
     # Handle tenant_id change
     if new_tenant_id is not None:
         from app.services.tenant_service import TenantService
@@ -534,10 +537,59 @@ def api_update_user(user_id):
                             f"{current_tenant_id} shared group"
                         )
 
+                # Issue #3480: Integrate TenantMigrationService to migrate user projects
+                from app.services.tenant_migration import TenantMigrationService
+
+                migration_service = TenantMigrationService()
+                migration_failed = False
+                try:
+                    # Ensure migrated_by is a valid int (g.user.get may return None)
+                    admin_id = g.user.get("id")
+                    if admin_id is None:
+                        logger.error("Cannot migrate projects: no admin user ID in context")
+                        migration_failed = True
+                    else:
+                        migration_result = migration_service.migrate_user_tenant(
+                            user_id=user_id,
+                            new_tenant_id=new_tenant_id,
+                            migrated_by=admin_id,
+                        )
+                        if not migration_result.success:
+                            logger.error(
+                                f"Failed to migrate projects for user {user_id}: "
+                                f"{migration_result.error}"
+                            )
+                            migration_failed = True
+                        else:
+                            # Migration already updated user's tenant_id in its transaction
+                            tenant_id_updated_by_migration = True
+                            logger.info(
+                                f"Migrated user {user_id} from tenant {current_tenant_id} "
+                                f"to {new_tenant_id}: {migration_result.affected_projects} projects, "
+                                f"{migration_result.affected_sessions} sessions"
+                            )
+                except Exception as e:
+                    logger.error(f"TenantMigrationService error for user {user_id}: {e}")
+                    migration_failed = True
+
+                # Rollback tenant count changes if migration failed
+                if migration_failed:
+                    tenant_service.increment_user_count(current_tenant_id)
+                    tenant_service.decrement_user_count(new_tenant_id)
+                    return (
+                        jsonify(
+                            {"error": "Failed to migrate user projects, tenant change aborted"}
+                        ),
+                        500,
+                    )
+
     # requested_is_active is a real boolean (or None) — parsed at the top of
     # the handler (R-3); it flows to the DB write and to the side-effect
     # decisions below unchanged.
 
+    # If migration already updated tenant_id, skip the redundant update in update_user
+    # to avoid potential version conflicts and ensure data consistency
+    effective_tenant_id = None if tenant_id_updated_by_migration else new_tenant_id
     success = user_repo.update_user(
         user_id=user_id,
         username=data.get("username"),
@@ -545,7 +597,7 @@ def api_update_user(user_id):
         role=data.get("role"),
         is_active=requested_is_active,
         system_account=system_account,
-        tenant_id=new_tenant_id,
+        tenant_id=effective_tenant_id,
     )
 
     if success:
