@@ -122,11 +122,12 @@ class TenantMigrationService:
                 # For SQLite/other databases, rely on transaction isolation
                 db_type = self._get_database_type()
                 cursor = conn.cursor()
-                
+
                 if db_type == "postgresql":
                     try:
                         cursor.execute(
-                            self.db._adapt_sql("SELECT pg_advisory_xact_lock(1000000 + ?)"), (user_id,)
+                            self.db._adapt_sql("SELECT pg_advisory_xact_lock(1000000 + ?)"),
+                            (user_id,),
                         )
                     except Exception as e:
                         # Advisory lock not available, continue with transaction isolation
@@ -142,7 +143,9 @@ class TenantMigrationService:
 
                 # Query affected sessions count (more reliable than rowcount)
                 cursor.execute(
-                    self.db._adapt_sql("SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?"),
+                    self.db._adapt_sql(
+                        "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?"
+                    ),
                     (user_id, new_tenant_id),
                 )
                 sessions_result = cursor.fetchone()
@@ -158,7 +161,9 @@ class TenantMigrationService:
 
                 # Query affected projects count
                 cursor.execute(
-                    self.db._adapt_sql("SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?"),
+                    self.db._adapt_sql(
+                        "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?"
+                    ),
                     (user_id, new_tenant_id),
                 )
                 projects_result = cursor.fetchone()
