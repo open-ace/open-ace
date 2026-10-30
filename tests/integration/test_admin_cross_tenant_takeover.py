@@ -231,7 +231,9 @@ def _request(actor, method, path, *, json_body=None, repo=None, query_string=Non
         patch("app.routes.admin.get_security_settings_cached", return_value=None),
         patch("app.services.tenant_service.TenantService", return_value=tenant_service),
         patch("app.routes.admin.usage_repo", usage_repo),
-        patch("app.services.tenant_migration.TenantMigrationService", return_value=migration_service),
+        patch(
+            "app.services.tenant_migration.TenantMigrationService", return_value=migration_service
+        ),
     ):
         client = app.test_client()
         response = client.open(

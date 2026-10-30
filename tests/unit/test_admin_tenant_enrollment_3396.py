@@ -76,7 +76,9 @@ def _migration_service_stub():
         affected_sessions=0,
         affected_projects=0,
     )
-    return patch("app.services.tenant_migration.TenantMigrationService", return_value=migration_service)
+    return patch(
+        "app.services.tenant_migration.TenantMigrationService", return_value=migration_service
+    )
 
 
 class TestAdminCreateUserTenantEnrollment:
