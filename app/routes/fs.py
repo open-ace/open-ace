@@ -2890,7 +2890,9 @@ def api_chat_upload():
     declared = request.content_length or 0
     if declared > max_bytes:
         return (
-            jsonify({"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}),
+            jsonify(
+                {"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}
+            ),
             413,
         )
 
@@ -2904,7 +2906,9 @@ def api_chat_upload():
 
     if size > max_bytes:
         return (
-            jsonify({"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}),
+            jsonify(
+                {"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}
+            ),
             413,
         )
 

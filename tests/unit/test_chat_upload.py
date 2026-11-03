@@ -297,10 +297,7 @@ class TestChatUploadCleanup:
 
     def test_cleanup_old_files(self, tmp_path):
         """Test cleanup of old upload files."""
-        from app.services.chat_upload_cleanup import (
-            CHAT_UPLOADS_DIR,
-            cleanup_chat_uploads_once,
-        )
+        from app.services.chat_upload_cleanup import CHAT_UPLOADS_DIR, cleanup_chat_uploads_once
 
         # Create test directory structure
         user_home = tmp_path / "testuser"
@@ -331,10 +328,7 @@ class TestChatUploadCleanup:
 
     def test_cleanup_keeps_recent_files(self, tmp_path):
         """Test that cleanup keeps recent files."""
-        from app.services.chat_upload_cleanup import (
-            CHAT_UPLOADS_DIR,
-            cleanup_chat_uploads_once,
-        )
+        from app.services.chat_upload_cleanup import CHAT_UPLOADS_DIR, cleanup_chat_uploads_once
 
         # Create test directory structure
         user_home = tmp_path / "testuser"

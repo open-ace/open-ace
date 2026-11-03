@@ -12,7 +12,6 @@ import logging
 import os
 import shutil
 import time
-from pathlib import Path
 
 from app.services.distributed_scheduler import DistributedScheduler
 
@@ -104,9 +103,7 @@ class ChatUploadCleanupScheduler(DistributedScheduler):
 
         return deleted_count, error_count
 
-    def _cleanup_session_dirs(
-        self, chat_uploads_dir: str, cutoff_time: float
-    ) -> tuple[int, int]:
+    def _cleanup_session_dirs(self, chat_uploads_dir: str, cutoff_time: float) -> tuple[int, int]:
         """Clean up old session directories within a user's chat uploads folder.
 
         Args:
