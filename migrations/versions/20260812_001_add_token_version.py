@@ -90,13 +90,11 @@ def upgrade() -> None:
             $$ LANGUAGE plpgsql;
         """)
 
-        # Use EXECUTE PROCEDURE for PostgreSQL 10 compatibility
-        # (EXECUTE FUNCTION was introduced in PostgreSQL 11)
         op.execute("""
             CREATE TRIGGER trigger_set_token_version
             BEFORE INSERT ON agent_tokens
             FOR EACH ROW
-            EXECUTE PROCEDURE set_token_version_trigger();
+            EXECUTE FUNCTION set_token_version_trigger();
         """)
 
 

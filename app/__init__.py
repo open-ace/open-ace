@@ -1152,4 +1152,12 @@ def start_background_services():
     except Exception as e:
         logger.warning(f"Failed to start deregister compensation worker: {e}")
 
+    # Issue #127: Start chat upload cleanup scheduler
+    try:
+        from app.services.chat_upload_cleanup import start_chat_upload_cleanup
+
+        start_chat_upload_cleanup()
+    except Exception as e:
+        logger.warning(f"Failed to start chat upload cleanup scheduler: {e}")
+
     logger.info("Background services started")

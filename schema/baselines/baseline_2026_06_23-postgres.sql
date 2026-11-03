@@ -15,7 +15,7 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 SET default_tablespace = '';
--- SET default_table_access_method = heap;  -- PostgreSQL 12+ only, commented for compatibility with PostgreSQL 10
+SET default_table_access_method = heap;
 CREATE TABLE agent_sessions (
     id integer NOT NULL,
     session_id text NOT NULL,

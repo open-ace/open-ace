@@ -201,3 +201,20 @@ def cleanup_chat_uploads_once() -> tuple[int, int]:
 
     logger.info("Manual cleanup completed: deleted=%d, errors=%d", deleted_count, error_count)
     return deleted_count, error_count
+
+
+def start_chat_upload_cleanup() -> None:
+    """Start the chat upload cleanup scheduler.
+
+    Issue #127: Registers and starts the periodic cleanup of old chat uploads
+    to prevent unbounded disk usage.
+    """
+    try:
+        from app.repositories.database import Database
+
+        db = Database()
+        scheduler = ChatUploadCleanupScheduler(db)
+        scheduler.start()
+        logger.info("Chat upload cleanup scheduler started")
+    except Exception as e:
+        logger.warning("Failed to start chat upload cleanup scheduler: %s", e)
