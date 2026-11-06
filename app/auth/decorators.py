@@ -788,7 +788,9 @@ def admin_required(f=None):
                         g.user_role = user_role
                         g.tenant_id = user_from_token.get("tenant_id")
 
-                        password_change_response = enforce_password_change_requirement(user_from_token)
+                        password_change_response = enforce_password_change_requirement(
+                            user_from_token
+                        )
                         if password_change_response is not None:
                             return password_change_response
                         return func(*args, **kwargs)
