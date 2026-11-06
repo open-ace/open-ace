@@ -743,9 +743,9 @@ def admin_required(f=None):
                     # R-12 (#3379 review): the validating lookup returns the
                     # user row — no second get_user_by_id on this path.
                     valid, user_id, error, user = manager.validate_token_with_user(url_token)
-                    # Type annotation for mypy: user may be None from validate_token_with_user
-                    user: dict | None = user
                     if valid and user_id and user:
+                        # Type guard: mypy knows user is dict here due to the condition
+                        assert user is not None  # type: ignore[assertion]
                         # Log URL token usage
                         is_legacy = not url_token.startswith("v2:")
                         _log_url_token_usage(
