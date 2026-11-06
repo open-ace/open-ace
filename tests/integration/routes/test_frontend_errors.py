@@ -83,15 +83,32 @@ class TestFrontendErrorReport:
             "buildVersion": "test",
         }
 
+        # 使用固定 IP 地址测试限流功能
+        test_ip = "10.0.0.100"
+
         # 发送超过限制的请求（RATE_LIMIT = 10）
         for i in range(11):
             resp = client.post(
                 "/api/frontend-errors",
-                json={**payload, "errorId": f"test-error-id-{i}"},
-                headers={"Content-Type": "application/json"},
+                json={**payload, "errorId": f"rate-limit-test-{i}"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": test_ip,  # 使用固定 IP
+                },
             )
 
             if i < 10:
-                assert resp.status_code == 200
+                assert resp.status_code == 200, f"Request {i+1} should succeed"
             else:
-                assert resp.status_code == 429
+                assert resp.status_code == 429, f"Request {i+1} should be rate limited"
+
+        # 使用新 IP 发送请求应该成功
+        resp = client.post(
+            "/api/frontend-errors",
+            json={**payload, "errorId": "new-ip-test"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Forwarded-For": "10.0.0.2",  # 新 IP
+            },
+        )
+        assert resp.status_code == 200
