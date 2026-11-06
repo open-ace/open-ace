@@ -317,3 +317,36 @@ class TestDatabaseConnectionEdgeCases:
             assert len(results) == 2
             assert results[0][0] == 1
             assert results[1][0] == 2
+
+
+class TestPoolConfiguration:
+    """Test connection pool configuration from environment variables."""
+
+    def test_pool_config_from_env(self, monkeypatch):
+        """Test pool configuration is read from environment variables."""
+        import importlib
+
+        monkeypatch.setenv("OPENACE_DB_POOL_MIN", "5")
+        monkeypatch.setenv("OPENACE_DB_POOL_MAX", "30")
+
+        # Reload the module to pick up environment variable changes
+        from app.repositories import database
+
+        importlib.reload(database)
+
+        assert database.POOL_MIN_CONN == 5
+        assert database.POOL_MAX_CONN == 30
+
+    def test_pool_config_invalid_value_fallback(self, monkeypatch, caplog):
+        """Test invalid pool config value falls back to default."""
+        import importlib
+
+        monkeypatch.setenv("OPENACE_DB_POOL_MAX", "invalid")
+
+        # Reload the module to pick up environment variable changes
+        from app.repositories import database
+
+        importlib.reload(database)
+
+        assert database.POOL_MAX_CONN == 20  # Default value
+        assert "Invalid OPENACE_DB_POOL_MAX" in caplog.text

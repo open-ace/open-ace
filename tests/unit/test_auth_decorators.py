@@ -870,3 +870,67 @@ class TestPlatformAdminRequired:
         with app.test_client() as client:
             response = client.get("/api/platform-admin-only")
             assert response.status_code == 401
+
+
+class TestPoolErrorHandling:
+    """Test PoolError exception handling in authentication decorators."""
+
+    def test_pool_error_returns_503(self):
+        """Test PoolError returns 503 Service Unavailable with Retry-After header."""
+        from flask import Flask, jsonify
+
+        from app.auth.decorators import auth_required
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["SECRET_KEY"] = "test-secret-key"
+
+        @app.route("/api/test")
+        @auth_required
+        def protected_route():
+            return jsonify({"message": "success"})
+
+        with patch("app.auth.decorators._authenticate") as mock_auth:
+            # Import PoolError
+            try:
+                from psycopg2.pool import PoolError
+
+                mock_auth.side_effect = PoolError("connection pool exhausted")
+            except ImportError:
+                # Skip test if psycopg2 is not available
+                pytest.skip("psycopg2 not installed")
+
+            with app.test_client() as client:
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                ):
+                    response = client.get("/api/test", headers={"Cookie": "session_token=test"})
+                    assert response.status_code == 503
+                    assert response.headers.get("Retry-After") == "5"
+                    assert "temporarily unavailable" in response.json["error"].lower()
+
+    def test_other_db_error_returns_401(self):
+        """Test non-PoolError database errors still return 401."""
+        from flask import Flask, jsonify
+
+        from app.auth.decorators import auth_required
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["SECRET_KEY"] = "test-secret-key"
+
+        @app.route("/api/test")
+        @auth_required
+        def protected_route():
+            return jsonify({"message": "success"})
+
+        with patch("app.auth.decorators._authenticate") as mock_auth:
+            mock_auth.side_effect = Exception("database error")
+
+            with app.test_client() as client:
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                ):
+                    response = client.get("/api/test", headers={"Cookie": "session_token=test"})
+                    assert response.status_code == 401
+                    assert "Invalid or expired session" in response.json["error"]
