@@ -742,16 +742,20 @@ def admin_required(f=None):
                     # Validate token (supports v1 and v2 formats).
                     # R-12 (#3379 review): the validating lookup returns the
                     # user row — no second get_user_by_id on this path.
-                    valid, user_id, error, user = manager.validate_token_with_user(url_token)
-                    if valid and user_id and user:
-                        # Type guard: mypy knows user is dict here due to the condition
-                        assert user is not None  # type: ignore[assertion]
+                    result = manager.validate_token_with_user(url_token)
+                    valid: bool = result[0]
+                    user_id_from_token: int | None = result[1]
+                    error_from_token: str | None = result[2]
+                    user_from_token: dict | None = result[3]
+                    if valid and user_id_from_token and user_from_token:
+                        # Type guard: mypy knows user_from_token is dict here due to the condition
+                        assert user_from_token is not None  # type: ignore[assertion]
                         # Log URL token usage
                         is_legacy = not url_token.startswith("v2:")
                         _log_url_token_usage(
                             "webui_v2" if not is_legacy else "webui_v1",
                             request.path,
-                            user_id=user_id,
+                            user_id=user_id_from_token,
                             is_legacy=is_legacy,
                         )
 
@@ -766,25 +770,25 @@ def admin_required(f=None):
                         # we keep doing that but log so the silent bypass is
                         # observable. This finding does NOT fix the
                         # semantics — it only makes the weakening visible.
-                        if "must_change_password" not in user:
+                        if "must_change_password" not in user_from_token:
                             logger.warning(
                                 "WebUI-token admin path: user dict lacks "
                                 "'must_change_password' key (user_id=%s); "
                                 "forced password change cannot be enforced "
                                 "— latent auth weakening, see Issue #1832 F1",
-                                user_id,
+                                user_id_from_token,
                             )
                         # Issue #2179: Accept all admin variants
-                        user_role = user.get("role")
+                        user_role = user_from_token.get("role")
                         if user_role not in ("admin", "platform_admin", "tenant_admin"):
                             return jsonify({"error": "Admin access required"}), 403
 
-                        g.user = user
-                        g.user_id = user_id
+                        g.user = user_from_token
+                        g.user_id = user_id_from_token
                         g.user_role = user_role
-                        g.tenant_id = user.get("tenant_id")
+                        g.tenant_id = user_from_token.get("tenant_id")
 
-                        password_change_response = enforce_password_change_requirement(user)
+                        password_change_response = enforce_password_change_requirement(user_from_token)
                         if password_change_response is not None:
                             return password_change_response
                         return func(*args, **kwargs)
