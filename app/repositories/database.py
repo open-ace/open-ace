@@ -44,9 +44,19 @@ class PgConnectionWrapper:
             self._conn.close()
 
 
-# Connection pool configuration
-POOL_MIN_CONN = 1
-POOL_MAX_CONN = 10
+def _get_pool_config(name: str, default: int) -> int:
+    """Parse pool configuration from environment variable with fallback to default."""
+    value = os.environ.get(name, str(default))
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning(f"Invalid {name} value '{value}', using default {default}")
+        return default
+
+
+# Connection pool configuration (configurable via environment variables)
+POOL_MIN_CONN = _get_pool_config("OPENACE_DB_POOL_MIN", 1)
+POOL_MAX_CONN = _get_pool_config("OPENACE_DB_POOL_MAX", 20)  # Default raised from 10 to 20
 
 # Global connection pool for PostgreSQL
 _pg_pool: Any | None = None

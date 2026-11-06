@@ -34,6 +34,11 @@ from flask import Response, g, jsonify, request
 
 from app.models.user import User
 
+try:
+    from psycopg2.pool import PoolError
+except ImportError:
+    PoolError = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -474,8 +479,8 @@ def _authenticate(token: str) -> tuple[bool, dict | None]:
     return result
 
 
-def _load_user_from_token(token: str) -> dict | None:
-    """Validate token and set g.user. Returns user dict or None."""
+def _load_user_from_token(token: str) -> dict | tuple | None:
+    """Validate token and set g.user. Returns user dict, error tuple, or None."""
     try:
         valid, result = _authenticate(token)
         if not valid or result is None:
@@ -489,6 +494,10 @@ def _load_user_from_token(token: str) -> dict | None:
             "must_change_password": bool(result.get("must_change_password")),
         }
     except Exception as e:
+        # Distinguish PoolError from other database errors
+        if PoolError and isinstance(e, PoolError):
+            logger.error(f"Connection pool exhausted during authentication: {e}")
+            return (503, "Service temporarily unavailable, please retry")
         logger.error(f"Database error during authentication: {e}")
         return None
 
@@ -560,11 +569,16 @@ def enforce_password_change_requirement(user: dict | None) -> tuple[Response, in
 # ── Public API for cross-module use ──────────────────────────────────
 
 
-def validate_session_token(token: str) -> dict | None:
-    """Validate a session token and return the user dict, or None if invalid.
+def validate_session_token(token: str) -> dict | tuple | None:
+    """Validate a session token and return the user dict, error tuple, or None if invalid.
 
     Public wrapper for _load_user_from_token — use this instead of
     importing the private function directly.
+
+    Returns:
+        dict: User data if token is valid
+        tuple: (status_code, error_message) if service unavailable (503)
+        None: If token is invalid
     """
     return _load_user_from_token(token)
 
@@ -602,9 +616,13 @@ def auth_required(f=None, *, ownership=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             g.user = user
             g.user_id = user.get("id")
@@ -686,8 +704,12 @@ def admin_required(f=None):
             # First try session token from cookie/header only
             token = _extract_session_token()
             if token:
-                user = _load_user_from_token(token)
-                if user:
+                user_or_error = _load_user_from_token(token)
+                if isinstance(user_or_error, tuple):
+                    status, message = user_or_error
+                    return jsonify({"error": message}), status, {"Retry-After": "5"}
+                if user_or_error:
+                    user = user_or_error
                     # Issue #2179: Accept all admin variants
                     user_role = user.get("role")
                     if user_role not in ("admin", "platform_admin", "tenant_admin"):
@@ -720,14 +742,20 @@ def admin_required(f=None):
                     # Validate token (supports v1 and v2 formats).
                     # R-12 (#3379 review): the validating lookup returns the
                     # user row — no second get_user_by_id on this path.
-                    valid, user_id, error, user = manager.validate_token_with_user(url_token)
-                    if valid and user_id and user:
+                    result = manager.validate_token_with_user(url_token)
+                    valid: bool = result[0]
+                    user_id_from_token: int | None = result[1]
+                    _ = result[2]  # error message, not used
+                    user_from_token: dict | None = result[3]
+                    if valid and user_id_from_token and user_from_token:
+                        # Type guard: mypy knows user_from_token is dict here due to the condition
+                        assert user_from_token is not None  # type: ignore[assertion]
                         # Log URL token usage
                         is_legacy = not url_token.startswith("v2:")
                         _log_url_token_usage(
                             "webui_v2" if not is_legacy else "webui_v1",
                             request.path,
-                            user_id=user_id,
+                            user_id=user_id_from_token,
                             is_legacy=is_legacy,
                         )
 
@@ -742,25 +770,27 @@ def admin_required(f=None):
                         # we keep doing that but log so the silent bypass is
                         # observable. This finding does NOT fix the
                         # semantics — it only makes the weakening visible.
-                        if "must_change_password" not in user:
+                        if "must_change_password" not in user_from_token:
                             logger.warning(
                                 "WebUI-token admin path: user dict lacks "
                                 "'must_change_password' key (user_id=%s); "
                                 "forced password change cannot be enforced "
                                 "— latent auth weakening, see Issue #1832 F1",
-                                user_id,
+                                user_id_from_token,
                             )
                         # Issue #2179: Accept all admin variants
-                        user_role = user.get("role")
+                        user_role = user_from_token.get("role")
                         if user_role not in ("admin", "platform_admin", "tenant_admin"):
                             return jsonify({"error": "Admin access required"}), 403
 
-                        g.user = user
-                        g.user_id = user_id
+                        g.user = user_from_token
+                        g.user_id = user_id_from_token
                         g.user_role = user_role
-                        g.tenant_id = user.get("tenant_id")
+                        g.tenant_id = user_from_token.get("tenant_id")
 
-                        password_change_response = enforce_password_change_requirement(user)
+                        password_change_response = enforce_password_change_requirement(
+                            user_from_token
+                        )
                         if password_change_response is not None:
                             return password_change_response
                         return func(*args, **kwargs)
@@ -986,9 +1016,13 @@ def platform_admin_required(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             # Authorization check with strict mode support
             from app.auth.permissions import get_cached_strict_mode, is_platform_admin_role
@@ -1057,9 +1091,13 @@ def tenant_admin_required(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             # Check tenant admin role
             if user.get("role") != "tenant_admin":
@@ -1127,9 +1165,13 @@ def same_tenant_or_platform_admin(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             user_role = user.get("role")
             user_tenant_id = user.get("tenant_id")
@@ -1232,9 +1274,13 @@ def any_admin_required(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             # Check for any admin role
             from app.auth.permissions import is_any_admin_role
@@ -1292,9 +1338,13 @@ def tenant_member_required(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             user_role = user.get("role")
 
@@ -2008,9 +2058,13 @@ def api_key_admin_required(f=None):
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = _load_user_from_token(token)
-            if not user:
+            user_or_error = _load_user_from_token(token)
+            if isinstance(user_or_error, tuple):
+                status, message = user_or_error
+                return jsonify({"error": message}), status, {"Retry-After": "5"}
+            if not user_or_error:
                 return jsonify({"error": "Invalid or expired session"}), 401
+            user = user_or_error
 
             user_role = user.get("role")
             if user_role not in ("admin", "platform_admin", "tenant_admin"):

@@ -39,6 +39,8 @@ Rotation impact describes what happens when you change the value on an existing 
 | `DB_USER` | `ace` | PostgreSQL user (also `POSTGRES_USER`) | Changing it requires re-provisioning the database user; not a routine rotation | `.env.example`, `docker-compose.yml` |
 | `DB_PASSWORD` | empty (Compose falls back to `dev-password-change-in-production`) | PostgreSQL password; passed both inside `DATABASE_URL` and standalone for the security baseline check (Issue #3095). Strong value (>= 9 chars) required in production (Issue #1893) | Must be changed in `.env` AND in PostgreSQL (`ALTER USER ... WITH PASSWORD`), then the stack restarted; mismatch = connection failures | `.env.example`, `docker-compose.yml` |
 | `DB_NAME` | `ace` | PostgreSQL database name (also `POSTGRES_DB`) | Renaming requires migrating the database; not a routine rotation | `.env.example`, `docker-compose.yml` |
+| `OPENACE_DB_POOL_MIN` | `1` | PostgreSQL connection pool minimum connections (Issue #3490) | Increasing requires restart; no data impact | `.env.example`, `app/repositories/database.py` |
+| `OPENACE_DB_POOL_MAX` | `20` | PostgreSQL connection pool maximum connections (Issue #3490). Default raised from 10 to 20 for multi-user scenarios. Adjust based on concurrent users × requests per user | Increasing requires restart; too low causes `PoolError: connection pool exhausted` | `.env.example`, `app/repositories/database.py` |
 
 ## Networking (.env.example)
 
