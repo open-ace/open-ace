@@ -745,7 +745,7 @@ def admin_required(f=None):
                     result = manager.validate_token_with_user(url_token)
                     valid: bool = result[0]
                     user_id_from_token: int | None = result[1]
-                    error_from_token: str | None = result[2]
+                    _ = result[2]  # error message, not used
                     user_from_token: dict | None = result[3]
                     if valid and user_id_from_token and user_from_token:
                         # Type guard: mypy knows user_from_token is dict here due to the condition
