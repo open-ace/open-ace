@@ -46,7 +46,7 @@ class TestFrontendErrorReport:
         }
 
         resp = client.post(
-            "/frontend-errors",
+            "/api/frontend-errors",
             json=payload,
             headers={"Content-Type": "application/json"},
         )
@@ -65,7 +65,7 @@ class TestFrontendErrorReport:
         }
 
         resp = client.post(
-            "/frontend-errors",
+            "/api/frontend-errors",
             json=payload,
             headers={"Content-Type": "application/json"},
         )
@@ -86,7 +86,7 @@ class TestFrontendErrorReport:
         # 发送超过限制的请求（RATE_LIMIT = 10）
         for i in range(11):
             resp = client.post(
-                "/frontend-errors",
+                "/api/frontend-errors",
                 json={**payload, "errorId": f"test-error-id-{i}"},
                 headers={"Content-Type": "application/json"},
             )
