@@ -66,9 +66,12 @@ def _authenticate_user():
 
     token = _extract_token()
     if token:
-        user_data = _load_user_from_token(token)
-        if user_data:
-            user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
+        user_or_error = _load_user_from_token(token)
+        if isinstance(user_or_error, tuple):
+            status, message = user_or_error
+            return jsonify({"error": message}), status, {"Retry-After": "5"}
+        if user_or_error:
+            user = user_repo.get_user_by_id(int(user_or_error.get("id", 0)))
             if user:
                 g.user = user
                 g.user_id = user.get("id")
@@ -136,10 +139,13 @@ def get_current_user():
 
     from app.auth.decorators import _load_user_from_token
 
-    user_data = _load_user_from_token(token)
-    if not user_data:
+    user_or_error = _load_user_from_token(token)
+    if isinstance(user_or_error, tuple):
+        status, message = user_or_error
+        return None, {"error": message}, status
+    if not user_or_error:
         return None, {"error": "Unauthorized"}, 401
-    user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
+    user = user_repo.get_user_by_id(int(user_or_error.get("id", 0)))
     return user, None, 200
 
 

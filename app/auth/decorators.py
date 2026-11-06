@@ -569,11 +569,16 @@ def enforce_password_change_requirement(user: dict | None) -> tuple[Response, in
 # ── Public API for cross-module use ──────────────────────────────────
 
 
-def validate_session_token(token: str) -> dict | None:
-    """Validate a session token and return the user dict, or None if invalid.
+def validate_session_token(token: str) -> dict | tuple | None:
+    """Validate a session token and return the user dict, error tuple, or None if invalid.
 
     Public wrapper for _load_user_from_token — use this instead of
     importing the private function directly.
+
+    Returns:
+        dict: User data if token is valid
+        tuple: (status_code, error_message) if service unavailable (503)
+        None: If token is invalid
     """
     return _load_user_from_token(token)
 
