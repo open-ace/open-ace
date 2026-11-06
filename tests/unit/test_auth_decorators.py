@@ -901,9 +901,7 @@ class TestPoolErrorHandling:
                 pytest.skip("psycopg2 not installed")
 
             with app.test_client() as client:
-                with patch(
-                    "app.auth.decorators._extract_session_token", return_value="test-token"
-                ):
+                with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                     response = client.get("/api/test", headers={"Cookie": "session_token=test"})
                     assert response.status_code == 503
                     assert response.headers.get("Retry-After") == "5"
@@ -928,9 +926,7 @@ class TestPoolErrorHandling:
             mock_auth.side_effect = Exception("database error")
 
             with app.test_client() as client:
-                with patch(
-                    "app.auth.decorators._extract_session_token", return_value="test-token"
-                ):
+                with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                     response = client.get("/api/test", headers={"Cookie": "session_token=test"})
                     assert response.status_code == 401
                     assert "Invalid or expired session" in response.json["error"]
