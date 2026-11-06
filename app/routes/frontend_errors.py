@@ -81,19 +81,23 @@ def report_frontend_error():
             return jsonify({"error": f"Missing required field: {field}"}), 400
 
     # Log the error
-    logger.error(
-        "Frontend error reported",
-        extra={
-            "category": data.get("category", "unknown"),
-            "error_id": data.get("errorId", "unknown"),
-            "name": data.get("name", "unknown"),
-            "message": str(data.get("message", ""))[:500],  # Limit length
-            "pathname": data.get("pathname", "unknown"),
-            "build_version": data.get("buildVersion", "unknown"),
-            "commit_sha": data.get("commitSha", "unknown"),
-            "user_agent": data.get("userAgent", "unknown"),
-            "client_ip": client_ip,
-        },
-    )
+    try:
+        logger.error(
+            "Frontend error reported",
+            extra={
+                "category": data.get("category", "unknown"),
+                "error_id": data.get("errorId", "unknown"),
+                "error_name": data.get("name", "unknown"),
+                "error_message": str(data.get("message", ""))[:500],  # Limit length
+                "pathname": data.get("pathname", "unknown"),
+                "build_version": data.get("buildVersion", "unknown"),
+                "commit_sha": data.get("commitSha", "unknown"),
+                "user_agent": data.get("userAgent", "unknown"),
+                "client_ip": client_ip,
+            },
+        )
+    except Exception:
+        # Log记录失败不应影响接口响应
+        logger.exception("Failed to log frontend error report")
 
     return jsonify({"status": "ok"}), 200
