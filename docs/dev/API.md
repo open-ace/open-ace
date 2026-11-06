@@ -99,6 +99,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 | Quota | `/api/quota` | 9 |
 | Mapping rules | `/api/mapping-rules` | 8 |
 | Local file system | `/api/fs` | 8 |
+| Chat uploads | `/api/chat/upload` | 1 |
 | Encryption keys | `/api/api/encryption-keys` | 8 |
 | Return on investment | `/api/roi` | 7 |
 | Request statistics | `/api/request` | 6 |
@@ -106,7 +107,7 @@ decorators verbatim from the source; `-` means no permission decorator:
 | External identity integration | `/api/integrations/external` | 2 |
 | Other endpoints | — | 87 |
 | Operational endpoints | — | 10 |
-| **Total** | | **426** |
+| **Total** | | **427** |
 
 ### Remote machines and sessions (`/api/remote`)
 
@@ -513,6 +514,14 @@ Bounded file access inside the user's home subtree: browse, search, upload, down
 | GET | `/api/fs/search` | - | Recursively search directory/file names under a home-subtree path. |
 | POST | `/api/fs/upload` | - | Upload a file into the user's home subtree (personal files page). |
 
+### Chat uploads (`/api/chat/upload`)
+
+Upload file attachments for chat conversations. Files are stored in `.qwen/chat-uploads/<session_id>/` and auto-cleaned after a configurable retention period.
+
+| Method | Path | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/chat/upload` | - | Upload a file attachment for a chat session (multipart/form-data, max 20MB). |
+
 ### Encryption keys (`/api/api/encryption-keys`)
 
 Database encryption key management: rotation, validation, re-encryption, multi-replica sync status and the audit log.
@@ -795,6 +804,7 @@ SPA 路由位于应用根路径。
 | 配额 | `/api/quota` | 9 |
 | 映射规则 | `/api/mapping-rules` | 8 |
 | 本地文件系统 | `/api/fs` | 8 |
+| 聊天附件上传 | `/api/chat/upload` | 1 |
 | 加密密钥 | `/api/api/encryption-keys` | 8 |
 | 投入产出 | `/api/roi` | 7 |
 | 请求统计 | `/api/request` | 6 |
@@ -802,7 +812,7 @@ SPA 路由位于应用根路径。
 | 外部身份集成 | `/api/integrations/external` | 2 |
 | 其他端点 | — | 87 |
 | 运维端点 | — | 10 |
-| **合计** | | **426** |
+| **合计** | | **427** |
 
 ### 远程机器与会话（`/api/remote`）
 
@@ -1208,6 +1218,14 @@ SSO 提供商注册（OAuth2/OIDC/SAML）、登录流程、SAML 元数据/ACS/SL
 | GET | `/api/fs/home` | - | 获取用户主目录。 |
 | GET | `/api/fs/search` | - | 在主目录子树内递归搜索目录/文件名。 |
 | POST | `/api/fs/upload` | - | 上传文件到用户主目录子树（个人文件页）。 |
+
+### 聊天附件上传（`/api/chat/upload`）
+
+上传聊天会话的文件附件。文件存储在 `.qwen/chat-uploads/<session_id>/` 目录下，超过保留期后自动清理。
+
+| Method | Path | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/chat/upload` | - | 上传聊天会话的文件附件（multipart/form-data，最大 20MB）。 |
 
 ### 加密密钥（`/api/api/encryption-keys`）
 

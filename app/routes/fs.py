@@ -2845,3 +2845,143 @@ def api_search_files():
             "truncated": truncated,
         }
     )
+
+
+# ============================================================
+# Chat file upload endpoint (Issue #127)
+# ============================================================
+
+# Chat upload size cap (MB). Separate from MAX_UPLOAD_SIZE_MB to allow
+# independent tuning for chat attachments.
+CHAT_UPLOAD_MAX_SIZE_MB = int(os.environ.get("OPENACE_CHAT_UPLOAD_MAX_SIZE_MB", "20"))
+
+# Chat uploads directory (relative to .qwen config dir)
+CHAT_UPLOADS_DIR = ".qwen/chat-uploads"
+
+
+@fs_bp.route("/chat/upload", methods=["POST"])
+def api_chat_upload():
+    """Upload a file for chat attachments.
+
+    Files are stored in .qwen/chat-uploads/<session_id>/ directory.
+    Authentication: session token or WebUI token (query param).
+
+    Form fields: ``file`` (multipart).
+    Query params: ``session_id`` (required).
+
+    Returns JSON with success status, path, size, and filename.
+    """
+    user = g.user
+
+    # Get session_id from query params
+    session_id = request.args.get("session_id", "").strip()
+    if not session_id:
+        return jsonify({"success": False, "error": "session_id is required"}), 400
+
+    # Sanitize session_id to prevent path traversal
+    safe_session_id = _sanitize_filename(session_id)
+    if not safe_session_id:
+        return jsonify({"success": False, "error": "Invalid session_id"}), 400
+
+    # Check file in request
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "No file provided"}), 400
+
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"success": False, "error": "No file selected"}), 400
+
+    # Size check (Content-Length pre-filter)
+    max_bytes = CHAT_UPLOAD_MAX_SIZE_MB * 1024 * 1024
+    declared = request.content_length or 0
+    if declared > max_bytes:
+        return (
+            jsonify(
+                {"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}
+            ),
+            413,
+        )
+
+    # Authoritative size check
+    try:
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(0)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Cannot read upload: {e}"}), 400
+
+    if size > max_bytes:
+        return (
+            jsonify(
+                {"success": False, "error": f"File too large (max {CHAT_UPLOAD_MAX_SIZE_MB}MB)"}
+            ),
+            413,
+        )
+
+    # Sanitize filename
+    safe_name = _sanitize_filename(file.filename)
+    if not safe_name:
+        return jsonify({"success": False, "error": "Invalid filename"}), 400
+
+    # Build upload directory path
+    # Use user's home directory for storing chat uploads
+    try:
+        home_dir = get_home_directory(user)
+    except Exception as e:
+        logger.error("Failed to get home directory for chat upload: %s", e)
+        return jsonify({"success": False, "error": "Cannot determine upload directory"}), 500
+
+    upload_dir = os.path.join(home_dir, CHAT_UPLOADS_DIR, safe_session_id)
+
+    # Create directory if it doesn't exist
+    try:
+        os.makedirs(upload_dir, mode=0o700, exist_ok=True)
+    except OSError as e:
+        logger.error("Failed to create chat upload directory %s: %s", upload_dir, e)
+        return jsonify({"success": False, "error": "Cannot create upload directory"}), 500
+
+    # Build final path
+    target_path = os.path.join(upload_dir, safe_name)
+
+    # Security check: ensure resolved path is still under upload_dir
+    resolved_upload_dir = os.path.realpath(upload_dir)
+    resolved_target = os.path.realpath(target_path)
+    if not resolved_target.startswith(resolved_upload_dir + os.sep):
+        return jsonify({"success": False, "error": "Invalid file path"}), 403
+
+    # Check if file already exists - add suffix if needed
+    if os.path.exists(target_path):
+        base, ext = os.path.splitext(safe_name)
+        counter = 1
+        while os.path.exists(target_path):
+            safe_name = f"{base}_{counter}{ext}"
+            target_path = os.path.join(upload_dir, safe_name)
+            counter += 1
+            if counter > 1000:
+                return jsonify({"success": False, "error": "Cannot generate unique filename"}), 500
+
+    # Write file
+    try:
+        file.save(target_path)
+        # Set restrictive permissions
+        os.chmod(target_path, 0o600)
+    except Exception as e:
+        logger.error("Failed to save chat upload to %s: %s", target_path, e)
+        return jsonify({"success": False, "error": "Failed to save file"}), 500
+
+    logger.info(
+        "Chat upload saved: user=%s, session=%s, file=%s, size=%d",
+        user.get("username") or user.get("id"),
+        safe_session_id,
+        safe_name,
+        size,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "path": target_path,
+            "size": size,
+            "filename": safe_name,
+        }
+    )
